@@ -1,0 +1,4 @@
+build/
+.jit_cache/
+*.swp
+*.swo
