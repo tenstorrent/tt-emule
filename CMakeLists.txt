@@ -24,19 +24,6 @@ target_include_directories(tt_emule_lib PUBLIC
 
 target_link_libraries(tt_emule_lib PUBLIC Threads::Threads)
 
-# ---- Eltwise-add kernel library ----
-add_library(eltwise_add_kernels STATIC
-    kernels/eltwise_add/reader.cpp
-    kernels/eltwise_add/writer.cpp
-    kernels/eltwise_add/compute.cpp
-)
-
-target_include_directories(eltwise_add_kernels PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-target_link_libraries(eltwise_add_kernels PRIVATE tt_emule_lib)
-
 # ---- Tests ----
 enable_testing()
 add_subdirectory(tests)
