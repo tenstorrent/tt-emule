@@ -86,6 +86,13 @@ inline void SetRuntimeArgs(Program& program, KernelHandle kernel_id, CoreCoord c
     tt_emule::SetRuntimeArgs(program, kernel_id, core, std::move(args));
 }
 
+// SetRuntimeArgs — initializer_list overload (avoids ADL ambiguity with brace-init)
+inline void SetRuntimeArgs(Program& program, KernelHandle kernel_id, CoreCoord core,
+                            std::initializer_list<uint32_t> args) {
+    tt_emule::SetRuntimeArgs(program, kernel_id, core,
+        std::vector<uint32_t>(args));
+}
+
 // SetRuntimeArgs — template for std::array and other contiguous containers
 template<typename Container>
 inline void SetRuntimeArgs(Program& program, KernelHandle kernel_id, CoreCoord core,

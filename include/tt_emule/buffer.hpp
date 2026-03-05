@@ -17,6 +17,7 @@ public:
     size_t   size() const { return size_bytes_; }
     uint32_t page_size() const { return page_size_bytes_; }
     uint64_t dram_offset() const { return dram_offset_; }
+    uint32_t address() const { return static_cast<uint32_t>(dram_offset_); }
     Device*  device() const { return device_; }
 
 private:
