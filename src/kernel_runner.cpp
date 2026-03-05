@@ -11,6 +11,15 @@ thread_local std::vector<uint32_t> __rt_args;
 thread_local tt_emule::Core*       __core   = nullptr;
 thread_local tt_emule::Device*     __device = nullptr;
 
+// C-linkage helper exported for JIT kernels.  JIT kernels are compiled without
+// TT_EMULE_USE_XY_PAIR, so they cannot inline Device::dram_ptr() correctly
+// (Device gains a vtable pointer when TT_EMULE_USE_XY_PAIR is active, shifting
+// member offsets).  By calling through this C-linkage function the JIT kernel
+// never touches Device's layout — the call resolves at dlopen time via -rdynamic.
+extern "C" uint8_t* __emule_dram_ptr(uint64_t offset) {
+    return __device->dram_ptr(offset);
+}
+
 namespace tt_emule {
 
 void EnqueueProgram(Device& device, Program& program, bool /*blocking*/) {

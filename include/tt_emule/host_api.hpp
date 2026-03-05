@@ -3,6 +3,7 @@
 #include "buffer.hpp"
 #include "program.hpp"
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -39,7 +40,8 @@ CBHandle CreateCircularBuffer(Program& program, CoreCoord core,
 
 // ---- Buffer operations (Device overloads) ----
 std::shared_ptr<Buffer> CreateBuffer(Device& device, size_t size_bytes,
-                                     uint32_t page_size_bytes);
+                                     uint32_t page_size_bytes,
+                                     BufferType type = BufferType::DRAM);
 
 void EnqueueWriteBuffer(Device& device, Buffer& buf, const void* src,
                         bool blocking = true);
@@ -70,6 +72,35 @@ void LaunchProgram(Device* device, Program& program,
 bool ReadFromDeviceL1(Device* device, const CoreCoord& core,
                       uint32_t address, uint32_t size,
                       std::vector<uint32_t>& result);
+
+// Write uint32_t vector to L1 at given core + offset.
+void WriteToDeviceL1(Device* device, const CoreCoord& core,
+                     uint32_t address, const std::vector<uint32_t>& data);
+
+// Write byte span to L1 at given core + offset.
+void WriteToDeviceL1(Device* device, const CoreCoord& core,
+                     uint32_t address, std::span<const uint8_t> data);
+
+// Read byte span from L1 at given core + offset.
+void ReadFromDeviceL1(Device* device, const CoreCoord& core,
+                      uint32_t address, std::span<uint8_t> data);
+
+// Write uint32_t vector to DRAM channel at offset.
+void WriteToDeviceDRAMChannel(Device* device, uint32_t channel,
+                              uint32_t address, const std::vector<uint32_t>& data);
+
+// Write byte span to DRAM channel at offset.
+void WriteToDeviceDRAMChannel(Device* device, uint32_t channel,
+                              uint32_t address, std::span<const uint8_t> data);
+
+// Read uint32_t vector from DRAM channel at offset.
+void ReadFromDeviceDRAMChannel(Device* device, uint32_t channel,
+                               uint32_t address, uint32_t byte_size,
+                               std::vector<uint32_t>& result);
+
+// Read byte span from DRAM channel at offset.
+void ReadFromDeviceDRAMChannel(Device* device, uint32_t channel,
+                               uint32_t address, std::span<uint8_t> data);
 
 template<typename T>
 inline void WriteToBuffer(const std::shared_ptr<Buffer>& buf,
