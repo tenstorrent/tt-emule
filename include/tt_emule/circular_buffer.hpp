@@ -60,6 +60,14 @@ public:
         return storage_[read_idx_].bytes();
     }
 
+    // Indexed pointer access (offset within reserved/waited window)
+    uint8_t* get_write_ptr_at(size_t tile_offset) {
+        return storage_[(write_idx_ + tile_offset) % capacity_].bytes();
+    }
+    const uint8_t* get_read_ptr_at(size_t tile_offset) const {
+        return storage_[(read_idx_ + tile_offset) % capacity_].bytes();
+    }
+
     Tile& write_tile() { return storage_[write_idx_]; }
     const Tile& read_tile() const { return storage_[read_idx_]; }
 

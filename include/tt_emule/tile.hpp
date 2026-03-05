@@ -30,6 +30,12 @@ public:
         return result;
     }
 
+    Tile& operator+=(const Tile& other) {
+        for (size_t i = 0; i < NUM_ELEMENTS; ++i)
+            data_[i] += other.data_[i];
+        return *this;
+    }
+
     static constexpr size_t size_bytes() { return SIZE_BYTES; }
 
     uint8_t* bytes() { return reinterpret_cast<uint8_t*>(data_.data()); }

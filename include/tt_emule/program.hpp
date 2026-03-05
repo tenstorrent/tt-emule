@@ -2,6 +2,7 @@
 #include "circular_buffer.hpp"
 #include "device.hpp"
 #include <functional>
+#include <string>
 #include <vector>
 #include <memory>
 #include <unordered_map>
@@ -17,8 +18,18 @@ enum class KernelType {
     Compute,
 };
 
+// tt-metal compatibility enums
+enum class DataMovementProcessor { RISCV_0, RISCV_1 };
+enum class NOC { RISCV_0_default, RISCV_1_default };
+
 struct DataMovementConfig {
-    KernelType type; // DataMovement0 or DataMovement1
+    // type is derived from processor; defaults to DataMovement0
+    KernelType             type      = KernelType::DataMovement0;
+    DataMovementProcessor  processor = DataMovementProcessor::RISCV_0;
+    NOC                    noc       = NOC::RISCV_0_default;
+    std::vector<uint32_t>  compile_args;
+    // JIT path: non-empty means this is a source-file kernel
+    std::string            kernel_src_path;
 };
 
 struct ComputeConfig {
