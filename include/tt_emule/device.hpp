@@ -1,4 +1,5 @@
 #pragma once
+#include "cb_sync_state.hpp"
 #include "circular_buffer.hpp"
 #include "dst_register_file.hpp"
 #include <array>
@@ -25,6 +26,9 @@ namespace tt_emule {
 
 enum class HalMemType : uint8_t { L1 = 0, DRAM = 1, HOST = 2, COUNT = 3 };
 
+// Role of a Core — determines how its mmap'd region is used.
+enum class CoreRole { WORKER, DRAM };
+
 #ifdef TT_EMULE_USE_XY_PAIR
 using CoreCoord = tt_xy_pair;
 #else
@@ -43,15 +47,15 @@ public:
     static constexpr size_t L1_SIZE = 1024 * 1024; // 1 MB
     static constexpr size_t MAX_CBS = 32;
 
+    // Default constructor: WORKER role, 1 MB L1 mmap'd below 4 GB.
     explicit Core(CoreCoord coord) : coord_(coord) {
-        void* hint = reinterpret_cast<void*>(uintptr_t(0x40000000));
-        void* p = mmap(hint, L1_SIZE, PROT_READ | PROT_WRITE,
-                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (p == MAP_FAILED)
-            throw std::runtime_error("mmap for Core L1 failed");
-        l1_ = static_cast<uint8_t*>(p);
-        l1_base_ = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(l1_));
-        std::memset(l1_, 0, L1_SIZE);
+        mmap_region(L1_SIZE);
+    }
+
+    // Role-aware constructor: mmap mem_size bytes.
+    Core(CoreCoord coord, CoreRole role, size_t mem_size)
+        : coord_(coord), role_(role), l1_size_(mem_size) {
+        mmap_region(mem_size);
     }
 
     // Construct with external memory (no mmap, no munmap).
@@ -70,6 +74,7 @@ public:
     Core& operator=(const Core&) = delete;
 
     CoreCoord coord() const { return coord_; }
+    CoreRole  role()  const { return role_; }
 
     std::shared_ptr<CircularBuffer>& cb(size_t idx) {
         if (idx >= MAX_CBS) throw std::out_of_range("CB index out of range");
@@ -79,6 +84,12 @@ public:
     DstRegisterFile& dst() { return dst_; }
 
     uint8_t* l1_ptr(uint32_t offset) { return l1_ + offset; }
+
+    // Raw pointer to start of memory region (L1 or DRAM backing).
+    uint8_t* l1_data() { return l1_; }
+
+    // Size of the memory region (regardless of role).
+    size_t l1_size() const { return l1_size_; }
 
     // 32-bit absolute address of the L1 base (valid if mmap succeeded below 4 GB).
     uint32_t l1_base_addr() const { return l1_base_; }
@@ -92,8 +103,46 @@ public:
         return addr;
     }
 
+    // ---- CB sync state array (for JIT kernel threads) ----
+
+    CBSyncState* cb_sync_array() { return cb_sync_states_; }
+
+    void init_cb_sync(uint32_t idx, uint8_t* base, uint32_t page_size, uint32_t num_pages) {
+        if (idx >= MAX_CBS) return;
+        auto& s = cb_sync_states_[idx];
+        s.base      = base;
+        s.page_size = page_size;
+        s.num_pages = num_pages;
+        s.write_idx = 0;
+        s.read_idx  = 0;
+        s.occupied  = 0;
+    }
+
+    void reset_cb_sync() {
+        for (auto& s : cb_sync_states_) {
+            s.base      = nullptr;
+            s.page_size = 0;
+            s.num_pages = 0;
+            s.write_idx = 0;
+            s.read_idx  = 0;
+            s.occupied  = 0;
+        }
+    }
+
 private:
+    void mmap_region(size_t size) {
+        l1_size_ = size;
+        void* p = mmap(nullptr, size, PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+        if (p == MAP_FAILED)
+            throw std::runtime_error("mmap for Core memory failed");
+        l1_ = static_cast<uint8_t*>(p);
+        l1_base_ = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(l1_));
+        std::memset(l1_, 0, size);
+    }
+
     CoreCoord coord_;
+    CoreRole  role_    = CoreRole::WORKER;
     bool      owns_l1_ = true;  // false when using external memory
     size_t    l1_size_ = L1_SIZE;
     uint8_t*  l1_      = nullptr;
@@ -101,6 +150,7 @@ private:
     size_t    l1_bump_ = 0;  // current L1 bump allocator offset
     std::array<std::shared_ptr<CircularBuffer>, MAX_CBS> cbs_;
     DstRegisterFile dst_;
+    CBSyncState cb_sync_states_[MAX_CBS] = {};
 };
 
 enum class BufferType { DRAM, L1, SYSTEM_MEMORY, L1_SMALL, TRACE };
