@@ -54,8 +54,16 @@ public:
         std::memset(l1_, 0, L1_SIZE);
     }
 
+    // Construct with external memory (no mmap, no munmap).
+    // Used by the memory bridge to wrap EmulatedChip's backing store.
+    Core(CoreCoord coord, uint8_t* external_l1, size_t l1_size)
+        : coord_(coord), owns_l1_(false), l1_size_(l1_size) {
+        l1_ = external_l1;
+        l1_base_ = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(l1_));
+    }
+
     ~Core() {
-        if (l1_) munmap(l1_, L1_SIZE);
+        if (owns_l1_ && l1_) munmap(l1_, l1_size_);
     }
 
     Core(const Core&) = delete;
@@ -77,7 +85,7 @@ public:
 
     // Bump allocate `bytes` from L1; returns absolute host address.
     uint32_t l1_alloc(size_t bytes) {
-        if (l1_bump_ + bytes > L1_SIZE)
+        if (l1_bump_ + bytes > l1_size_)
             throw std::runtime_error("L1 OOM");
         uint32_t addr = l1_base_ + static_cast<uint32_t>(l1_bump_);
         l1_bump_ += bytes;
@@ -86,6 +94,8 @@ public:
 
 private:
     CoreCoord coord_;
+    bool      owns_l1_ = true;  // false when using external memory
+    size_t    l1_size_ = L1_SIZE;
     uint8_t*  l1_      = nullptr;
     uint32_t  l1_base_ = 0;
     size_t    l1_bump_ = 0;  // current L1 bump allocator offset
@@ -395,19 +405,30 @@ public:
     Device() : dram_(DRAM_SIZE, 0), dram_bump_(0),
                core_({0, 0}), alloc_(core_.l1_base_addr()) {}
 
+    // Construct with external memory (no ownership). Used by the memory bridge.
+    Device(uint8_t* external_dram, size_t dram_size,
+           uint8_t* external_l1, size_t l1_size)
+        : ext_dram_(external_dram), ext_dram_size_(dram_size),
+          dram_bump_(0),
+          core_({0, 0}, external_l1, l1_size),
+          alloc_(core_.l1_base_addr(), l1_size) {}
+
     // Bump allocator for L1 — returns absolute host address
     uint32_t l1_alloc(size_t bytes) { return core_.l1_alloc(bytes); }
 
     // Bump allocator for DRAM
     uint64_t dram_alloc(size_t bytes) {
-        if (dram_bump_ + bytes > DRAM_SIZE)
+        size_t cap = ext_dram_ ? ext_dram_size_ : dram_.size();
+        if (dram_bump_ + bytes > cap)
             throw std::runtime_error("DRAM OOM");
         uint64_t offset = dram_bump_;
         dram_bump_ += bytes;
         return offset;
     }
 
-    uint8_t* dram_ptr(uint64_t offset) { return dram_.data() + offset; }
+    uint8_t* dram_ptr(uint64_t offset) {
+        return ext_dram_ ? (ext_dram_ + offset) : (dram_.data() + offset);
+    }
 
     // Map (x, y, addr) to raw pointer.
     uint8_t* noc_resolve(uint32_t x, uint32_t y, uint64_t addr) {
@@ -424,7 +445,7 @@ public:
     MockAllocator* allocator_impl() { return &alloc_; }
 
     // Total DRAM per channel (prototype has 1 channel).
-    size_t dram_size_per_channel() const { return DRAM_SIZE; }
+    size_t dram_size_per_channel() const { return ext_dram_ ? ext_dram_size_ : DRAM_SIZE; }
 
     // Total L1 per core.
     size_t l1_size_per_core() const { return Core::L1_SIZE; }
@@ -434,6 +455,8 @@ public:
 
 private:
     std::vector<uint8_t> dram_;
+    uint8_t*             ext_dram_ = nullptr;      // external DRAM (no ownership)
+    size_t               ext_dram_size_ = 0;
     uint64_t             dram_bump_;
     Core                 core_;
     MockAllocator        alloc_;

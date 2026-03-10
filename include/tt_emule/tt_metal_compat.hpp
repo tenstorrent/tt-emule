@@ -11,6 +11,12 @@
 // Resolves to fake_headers/tt-metalium/tt_backend_api_types.hpp in tt-metal builds.
 #include <tt-metalium/tt_backend_api_types.hpp>
 
+// Buffer and Program are now real classes in tt::tt_metal namespace defined in
+// fake_headers/tt-metalium/buffer.hpp and program.hpp. Include them here so
+// the compat bridge can use them.
+#include <tt-metalium/buffer.hpp>
+#include <tt-metalium/program.hpp>
+
 namespace tt {
 namespace tt_metal {
 
@@ -24,8 +30,10 @@ using IDevice              = tt::tt_metal::IDevice;
 #else
 using IDevice              = tt_emule::Device;
 #endif
-using Program              = tt_emule::Program;
-using Buffer               = tt_emule::Buffer;
+
+// Buffer and Program are now real classes (not aliases).
+// tt::tt_metal::Buffer and tt::tt_metal::Program are defined in buffer.hpp/program.hpp.
+
 using CBHandle             = tt_emule::CBHandle;
 using KernelHandle         = tt_emule::KernelHandle;
 using CommandQueue         = tt_emule::CommandQueue;
@@ -56,6 +64,11 @@ struct CircularBufferConfig : tt_emule::CircularBufferConfig {
         tt_emule::CircularBufferConfig::set_page_size(idx, psize);
         return *this;
     }
+
+    // Stub for globally allocated CBs (used in sharded ops)
+    CircularBufferConfig& set_globally_allocated_address(const tt::tt_metal::Buffer& /*buf*/) {
+        return *this;
+    }
 };
 using KernelFn             = tt_emule::KernelFn;
 
@@ -67,29 +80,43 @@ using NOC_MODE              = tt_emule::NOC_MODE;
 using MathFidelity          = tt_emule::MathFidelity;
 using UnpackToDestMode      = tt_emule::UnpackToDestMode;
 
-// ---- BufferType + InterleavedBufferConfig ----
-using BufferType = tt_emule::BufferType;
+// ---- BufferType: real tt::tt_metal::BufferType (from buffer_types.hpp) ----
+// BufferType is now the real enum from buffer_types.hpp, not an alias to tt_emule.
+// tt_emule::BufferType has the same numeric values, so static_cast works.
 
-struct InterleavedBufferConfig {
-    IDevice*   device;
-    size_t     size;
-    size_t     page_size;
-    BufferType buffer_type = BufferType::DRAM;
-};
+// ---- InterleavedBufferConfig ----
+// InterleavedBufferConfig is now defined in buffer.hpp as BufferConfig alias.
 
+// ---- CreateBuffer ----
+// Create an emule buffer and wrap it in tt::tt_metal::Buffer.
 inline std::shared_ptr<Buffer> CreateBuffer(const InterleavedBufferConfig& cfg) {
-    // InterleavedBufferConfig always uses DRAM in the emulator.
 #ifdef TT_EMULE_USE_XY_PAIR
-    return tt_emule::CreateBuffer(*static_cast<tt_emule::Device*>(cfg.device),
-                                  cfg.size,
-                                  static_cast<uint32_t>(cfg.page_size),
-                                  BufferType::DRAM);
+    auto emule_buf = tt_emule::CreateBuffer(
+        *static_cast<tt_emule::Device*>(cfg.device),
+        cfg.size,
+        static_cast<uint32_t>(cfg.page_size),
+        tt_emule::BufferType::DRAM);
 #else
-    return tt_emule::CreateBuffer(*cfg.device,
-                                  cfg.size,
-                                  static_cast<uint32_t>(cfg.page_size),
-                                  BufferType::DRAM);
+    auto emule_buf = tt_emule::CreateBuffer(
+        *cfg.device, cfg.size,
+        static_cast<uint32_t>(cfg.page_size),
+        tt_emule::BufferType::DRAM);
 #endif
+    return std::make_shared<Buffer>(
+        Buffer::Private_{}, std::move(emule_buf), cfg.device);
+}
+
+inline std::shared_ptr<Buffer> CreateBuffer(IDevice& device, size_t size_bytes,
+                                             uint32_t page_size_bytes,
+                                             BufferType type = BufferType::DRAM) {
+    auto etype = static_cast<tt_emule::BufferType>(static_cast<int>(type));
+#ifdef TT_EMULE_USE_XY_PAIR
+    auto emule_buf = tt_emule::CreateBuffer(
+        static_cast<tt_emule::Device&>(device), size_bytes, page_size_bytes, etype);
+#else
+    auto emule_buf = tt_emule::CreateBuffer(device, size_bytes, page_size_bytes, etype);
+#endif
+    return std::make_shared<Buffer>(Buffer::Private_{}, std::move(emule_buf), &device);
 }
 
 // ---- Device lifecycle ----
@@ -112,39 +139,41 @@ inline CommandQueue CreateCommandQueue(IDevice& device) {
 }
 
 // ---- Program construction ----
+// CreateProgram returns a tt::tt_metal::Program wrapping a tt_emule::Program.
 inline Program CreateProgram() {
-    return tt_emule::CreateProgram();
+    Program p;
+    p.set_emule(std::make_shared<tt_emule::Program>(tt_emule::CreateProgram()));
+    return p;
 }
 
 // Function-pointer kernel
 inline KernelHandle CreateKernel(Program& program, KernelFn fn, CoreCoord core,
                                   DataMovementConfig config) {
-    return tt_emule::CreateKernel(program, std::move(fn), core, config);
+    return tt_emule::CreateKernel(program.emule_program(), std::move(fn), core, config);
 }
 inline KernelHandle CreateKernel(Program& program, KernelFn fn, CoreCoord core,
                                   ComputeConfig config) {
-    return tt_emule::CreateKernel(program, std::move(fn), core, config);
+    return tt_emule::CreateKernel(program.emule_program(), std::move(fn), core, config);
 }
 
 // JIT kernel (source file path).
-// Deliberately calls tt_emule_internal:: (not tt_emule::) to avoid ADL finding
-// tt_emule::CreateKernel when test code has `using namespace tt::tt_metal`.
 inline KernelHandle CreateKernel(Program& program,
                                   const std::string& kernel_src_path,
                                   CoreCoord core, DataMovementConfig config) {
-    return tt_emule_internal::create_jit_kernel(program, kernel_src_path, core, config);
+    return tt_emule_internal::create_jit_kernel(
+        program.emule_program(), kernel_src_path, core, config);
 }
 
 // SetRuntimeArgs — vector overload
 inline void SetRuntimeArgs(Program& program, KernelHandle kernel_id, CoreCoord core,
                             std::vector<uint32_t> args) {
-    tt_emule::SetRuntimeArgs(program, kernel_id, core, std::move(args));
+    tt_emule::SetRuntimeArgs(program.emule_program(), kernel_id, core, std::move(args));
 }
 
-// SetRuntimeArgs — initializer_list overload (avoids ADL ambiguity with brace-init)
+// SetRuntimeArgs — initializer_list overload
 inline void SetRuntimeArgs(Program& program, KernelHandle kernel_id, CoreCoord core,
                             std::initializer_list<uint32_t> args) {
-    tt_emule::SetRuntimeArgs(program, kernel_id, core,
+    tt_emule::SetRuntimeArgs(program.emule_program(), kernel_id, core,
         std::vector<uint32_t>(args));
 }
 
@@ -152,58 +181,42 @@ inline void SetRuntimeArgs(Program& program, KernelHandle kernel_id, CoreCoord c
 template<typename Container>
 inline void SetRuntimeArgs(Program& program, KernelHandle kernel_id, CoreCoord core,
                             const Container& args) {
-    tt_emule::SetRuntimeArgs(program, kernel_id, core,
+    tt_emule::SetRuntimeArgs(program.emule_program(), kernel_id, core,
         std::vector<uint32_t>(std::begin(args), std::end(args)));
 }
 
 inline CBHandle CreateCircularBuffer(Program& program, CoreCoord core,
                                       CircularBufferConfig config) {
-    return tt_emule::CreateCircularBuffer(program, core, config);
+    return tt_emule::CreateCircularBuffer(program.emule_program(), core, config);
 }
 
 // ---- Buffer operations ----
-inline std::shared_ptr<Buffer> CreateBuffer(IDevice& device, size_t size_bytes,
-                                             uint32_t page_size_bytes,
-                                             BufferType type = BufferType::DRAM) {
-#ifdef TT_EMULE_USE_XY_PAIR
-    return tt_emule::CreateBuffer(static_cast<tt_emule::Device&>(device),
-                                  size_bytes, page_size_bytes, type);
-#else
-    return tt_emule::CreateBuffer(device, size_bytes, page_size_bytes, type);
-#endif
-}
 inline void EnqueueWriteBuffer(CommandQueue& cq, Buffer& buf, const void* src,
                                 bool blocking = true) {
-    tt_emule::EnqueueWriteBuffer(cq, buf, src, blocking);
+    tt_emule::EnqueueWriteBuffer(cq, buf.emule_buffer(), src, blocking);
 }
 inline void EnqueueReadBuffer(CommandQueue& cq, Buffer& buf, void* dst,
                                bool blocking = true) {
-    tt_emule::EnqueueReadBuffer(cq, buf, dst, blocking);
+    tt_emule::EnqueueReadBuffer(cq, buf.emule_buffer(), dst, blocking);
 }
 
 // ---- Program execution ----
 inline void EnqueueProgram(CommandQueue& cq, Program& program, bool blocking = true) {
-    tt_emule::EnqueueProgram(cq, program, blocking);
+    tt_emule::EnqueueProgram(cq, program.emule_program(), blocking);
 }
 inline void Finish(CommandQueue& cq) {
     tt_emule::Finish(cq);
 }
 
-// ---- BufferType for allocator queries ----
-// (defined here so MockAllocator can reference it)
-// Note: tt_emule::BufferType forward-declared in device.hpp; defined here.
-
 // ---- detail:: namespace ----
-// Under TT_EMULE_USE_XY_PAIR, functions that take Device* need a downcast
-// from IDevice*. We expose explicit inline wrappers instead of a namespace alias.
 #ifdef TT_EMULE_USE_XY_PAIR
 
 namespace detail {
 
-inline void LaunchProgram(IDevice* device, tt_emule::Program& program,
+inline void LaunchProgram(IDevice* device, Program& program,
                           bool wait = true, bool /*force_slow*/ = false) {
     tt_emule::detail::LaunchProgram(
-        static_cast<tt_emule::Device*>(device), program, wait);
+        static_cast<tt_emule::Device*>(device), program.emule_program(), wait);
 }
 
 inline bool ReadFromDeviceL1(IDevice* device, const tt_emule::CoreCoord& core,
@@ -259,22 +272,34 @@ inline void ReadFromDeviceDRAMChannel(IDevice* device, uint32_t channel,
 }
 
 template<typename T>
-inline void WriteToBuffer(const std::shared_ptr<tt_emule::Buffer>& buf,
+inline void WriteToBuffer(const std::shared_ptr<Buffer>& buf,
                           const std::vector<T>& data) {
-    tt_emule::detail::WriteToBuffer(buf, data);
+    tt_emule::detail::WriteToBuffer(buf->emule_buffer_ptr(), data);
 }
 
 template<typename T>
-inline void ReadFromBuffer(const std::shared_ptr<tt_emule::Buffer>& buf,
+inline void ReadFromBuffer(const std::shared_ptr<Buffer>& buf,
                            std::vector<T>& data) {
-    tt_emule::detail::ReadFromBuffer(buf, data);
+    tt_emule::detail::ReadFromBuffer(buf->emule_buffer_ptr(), data);
 }
 
 }  // namespace detail
 
 #else  // !TT_EMULE_USE_XY_PAIR
 
-namespace detail = tt_emule::detail;
+// In standalone builds, provide similar wrappers
+namespace detail {
+template<typename T>
+inline void WriteToBuffer(const std::shared_ptr<Buffer>& buf,
+                          const std::vector<T>& data) {
+    tt_emule::detail::WriteToBuffer(buf->emule_buffer_ptr(), data);
+}
+template<typename T>
+inline void ReadFromBuffer(const std::shared_ptr<Buffer>& buf,
+                           std::vector<T>& data) {
+    tt_emule::detail::ReadFromBuffer(buf->emule_buffer_ptr(), data);
+}
+}  // namespace detail
 
 #endif  // TT_EMULE_USE_XY_PAIR
 
