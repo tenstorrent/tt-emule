@@ -8,38 +8,45 @@
 // NOC address type (prototype: just a raw pointer)
 using NocAddr = uint8_t*;
 
-// ---- Circular Buffer operations ----
+// ---- Circular Buffer operations (delegate to shared CBSyncState logic) ----
 
 inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
-    __core->cb(cb_id)->reserve_back(n);
+    tt_emule::cb_sync_reserve(__core->cb(cb_id)->sync_state(), n);
 }
 
 inline void cb_push_back(uint32_t cb_id, uint32_t n) {
-    __core->cb(cb_id)->push_back(n);
+    tt_emule::cb_sync_push(__core->cb(cb_id)->sync_state(), n);
 }
 
 inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
-    __core->cb(cb_id)->wait_front(n);
+    tt_emule::cb_sync_wait(__core->cb(cb_id)->sync_state(), n);
 }
 
 inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
-    __core->cb(cb_id)->pop_front(n);
+    tt_emule::cb_sync_pop(__core->cb(cb_id)->sync_state(), n);
 }
 
 inline uint8_t* get_write_ptr(uint32_t cb_id) {
-    return __core->cb(cb_id)->get_write_ptr();
+    return tt_emule::cb_sync_write_ptr(__core->cb(cb_id)->sync_state());
 }
 
 inline const uint8_t* get_read_ptr(uint32_t cb_id) {
-    return __core->cb(cb_id)->get_read_ptr();
+    return tt_emule::cb_sync_read_ptr_at(__core->cb(cb_id)->sync_state(), 0);
 }
 
 // ---- NOC operations ----
 
 // Resolve a (x, y, addr) tuple into a raw pointer.
+#ifdef __EMULE_JIT_MODE
+// In JIT mode, use extern "C" bridge to avoid Device ABI mismatch.
+inline NocAddr get_noc_addr(uint32_t x, uint32_t y, uint64_t addr) {
+    return __emule_noc_resolve(x, y, addr);
+}
+#else
 inline NocAddr get_noc_addr(uint32_t x, uint32_t y, uint64_t addr) {
     return __device->noc_resolve(x, y, addr);
 }
+#endif
 
 // Synchronous memcpy in prototype (emulates async DMA read: src DRAM -> dst L1)
 inline void noc_async_read(NocAddr src, uint8_t* dst_l1, size_t size) {

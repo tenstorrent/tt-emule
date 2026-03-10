@@ -7,60 +7,10 @@
 // functions with signatures matching the real device API.
 
 #include "jit_hw/jit_kernel_stubs.hpp"
+#include "jit_hw/api/cb_api.h"
 #include "jit_hw/api/tensor/tensor_accessor.h"
 #include <cstring>
 #include <cstdint>
-
-// ---- Circular Buffer operations ----
-// CB state is in __emule_cbs (set per-thread, shared between threads on same core).
-
-inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
-    auto& cb = __emule_cbs[cb_id];
-    std::unique_lock<std::mutex> lk(cb.mu);
-    cb.space_cv.wait(lk, [&]{ return (cb.num_pages - cb.occupied) >= n; });
-}
-
-inline void cb_push_back(uint32_t cb_id, uint32_t n) {
-    auto& cb = __emule_cbs[cb_id];
-    std::unique_lock<std::mutex> lk(cb.mu);
-    cb.write_idx = (cb.write_idx + n) % cb.num_pages;
-    cb.occupied += n;
-    cb.data_cv.notify_all();
-}
-
-inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
-    auto& cb = __emule_cbs[cb_id];
-    std::unique_lock<std::mutex> lk(cb.mu);
-    cb.data_cv.wait(lk, [&]{ return cb.occupied >= n; });
-}
-
-inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
-    auto& cb = __emule_cbs[cb_id];
-    std::unique_lock<std::mutex> lk(cb.mu);
-    cb.read_idx = (cb.read_idx + n) % cb.num_pages;
-    cb.occupied -= n;
-    cb.space_cv.notify_all();
-}
-
-// get_write_ptr / get_read_ptr — return uint32_t (truncated host pointer).
-// The CB memory is mmap'd below 4 GB so truncation to 32 bits is lossless.
-// Kernels cast this to volatile pointers for direct memory access.
-inline uint32_t get_write_ptr(uint32_t cb_id) {
-    auto& cb = __emule_cbs[cb_id];
-    uint8_t* ptr = cb.base + (cb.write_idx % cb.num_pages) * cb.page_size;
-    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr));
-}
-
-inline uint32_t get_read_ptr(uint32_t cb_id) {
-    auto& cb = __emule_cbs[cb_id];
-    uint8_t* ptr = cb.base + (cb.read_idx % cb.num_pages) * cb.page_size;
-    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr));
-}
-
-// get_tile_size — return page size (bytes) for a CB.
-inline uint32_t get_tile_size(uint32_t cb_id) {
-    return __emule_cbs[cb_id].page_size;
-}
 
 // ---- NOC operations ----
 

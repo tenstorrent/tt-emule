@@ -4,10 +4,12 @@
 // pack/copy tile functions, CB forwarding, and no-op reconfig stubs.
 //
 // On the real device these map to LLK/ckernel calls on TRISC cores.
-// In emulation, DST is a thread-local float32 array and compute ops
-// read bfloat16 from CBs, operate in float32, and pack back to bfloat16.
+// In emulation, DST is a thread-local array (4 bytes per element) and compute
+// ops handle both bfloat16 and INT32 tile formats via page_size dispatch.
 
 #include "jit_hw/jit_kernel_stubs.hpp"
+#include "jit_hw/api/cb_api.h"
+#include "jit_hw/api/compute/common_globals.h"
 #include <cstring>
 #include <cstdint>
 #include <cmath>
@@ -36,32 +38,26 @@ enum class ReluType { NO_RELU, ZERO_RELU, MIN_THRESHOLD_RELU, MAX_THRESHOLD_RELU
 enum class DST_ACCUM_MODE { None, Half, Full };
 
 // ---- bfloat16 conversion helpers ----
-
-namespace __emule_bf16 {
-
-inline float to_f32(uint16_t bf16) {
-    uint32_t f32 = static_cast<uint32_t>(bf16) << 16;
-    float val;
-    std::memcpy(&val, &f32, sizeof(float));
-    return val;
-}
-
-inline uint16_t from_f32(float val) {
-    uint32_t f32;
-    std::memcpy(&f32, &val, sizeof(float));
-    // Round to nearest even (add 0x7FFF + bit 16 for tie-breaking)
-    f32 += 0x7FFF + ((f32 >> 16) & 1);
-    return static_cast<uint16_t>(f32 >> 16);
-}
-
-} // namespace __emule_bf16
+#include "jit_hw/api/bfloat16.h"
 
 // ---- Thread-local DST register file ----
-// 8 tile slots, each 1024 float32 values (32x32).
+// 8 tile slots, each 1024 elements × 4 bytes = 4096 bytes.
+// Stores float32 for bfloat16 ops or raw int32 bit patterns for INT32 ops.
 
 static constexpr uint32_t __EMULE_DST_TILES = 8;
 static constexpr uint32_t __EMULE_TILE_ELEMS = 1024;
+static constexpr uint32_t __EMULE_DST_BYTES = __EMULE_TILE_ELEMS * sizeof(float);
 static thread_local float __emule_dst[__EMULE_DST_TILES][__EMULE_TILE_ELEMS];
+
+// Helper: access DST slot as int32_t* (type-pun via memcpy in SFPU ops).
+inline int32_t __emule_dst_load_i32(uint32_t slot, uint32_t idx) {
+    int32_t v;
+    std::memcpy(&v, &__emule_dst[slot][idx], sizeof(int32_t));
+    return v;
+}
+inline void __emule_dst_store_i32(uint32_t slot, uint32_t idx, int32_t v) {
+    std::memcpy(&__emule_dst[slot][idx], &v, sizeof(int32_t));
+}
 
 // ---- DST state machine (no-ops in single-thread-per-compute emulation) ----
 
@@ -74,22 +70,32 @@ ALWI void tile_regs_commit()  {}
 ALWI void tile_regs_wait()    {}
 ALWI void tile_regs_release() {}
 
-// ---- CB helpers (read/write via __emule_cbs) ----
+// ---- CB helpers (read/write via shared CBSyncState) ----
 
 namespace __emule_compute {
 
 inline uint8_t* cb_read_ptr_at(uint32_t cb_id, uint32_t tile_offset) {
-    auto& cb = __emule_cbs[cb_id];
-    return cb.base + ((cb.read_idx + tile_offset) % cb.num_pages) * cb.page_size;
+    return const_cast<uint8_t*>(
+        tt_emule::cb_sync_read_ptr_at(__emule_cbs[cb_id], tile_offset));
 }
 
 inline uint8_t* cb_write_ptr(uint32_t cb_id) {
-    auto& cb = __emule_cbs[cb_id];
-    return cb.base + (cb.write_idx % cb.num_pages) * cb.page_size;
+    return tt_emule::cb_sync_write_ptr(__emule_cbs[cb_id]);
 }
 
+inline uint32_t cb_page_size(uint32_t cb_id) {
+    return __emule_cbs[cb_id].page_size;
+}
+
+// Number of bfloat16 elements in a page (only valid for bf16 format).
 inline uint32_t cb_tile_elems(uint32_t cb_id) {
     return __emule_cbs[cb_id].page_size / sizeof(uint16_t);
+}
+
+// Is this CB using a 32-bit data format (INT32, Float32)?
+// Heuristic: bf16 tiles = 2048 bytes (1024 × 2), 32-bit tiles > 2048.
+inline bool cb_is_32bit_format(uint32_t cb_id) {
+    return __emule_cbs[cb_id].page_size > 2048;
 }
 
 } // namespace __emule_compute
@@ -106,7 +112,7 @@ ALWI void binary_op_init_common(uint32_t, uint32_t, uint32_t, uint32_t) {}
 template<bool FullInit = true, EltwiseBinaryType BinaryType = EltwiseBinaryType::ELWADD>
 ALWI void binary_tiles_init(uint32_t, uint32_t, bool = false) {}
 
-// add_tiles: DST[idst] = CB[icb0][itile0] + CB[icb1][itile1]
+// add_tiles: DST[idst] = CB[icb0][itile0] + CB[icb1][itile1] (bfloat16)
 ALWI void add_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
     uint16_t* buf0 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
@@ -116,7 +122,7 @@ ALWI void add_tiles(uint32_t icb0, uint32_t icb1,
         __emule_dst[idst][i] = __emule_bf16::to_f32(buf0[i]) + __emule_bf16::to_f32(buf1[i]);
 }
 
-// sub_tiles: DST[idst] = CB[icb0][itile0] - CB[icb1][itile1]
+// sub_tiles: DST[idst] = CB[icb0][itile0] - CB[icb1][itile1] (bfloat16)
 ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
     uint16_t* buf0 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
@@ -126,7 +132,7 @@ ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
         __emule_dst[idst][i] = __emule_bf16::to_f32(buf0[i]) - __emule_bf16::to_f32(buf1[i]);
 }
 
-// mul_tiles: DST[idst] = CB[icb0][itile0] * CB[icb1][itile1]
+// mul_tiles: DST[idst] = CB[icb0][itile0] * CB[icb1][itile1] (bfloat16)
 ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
     uint16_t* buf0 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
@@ -136,25 +142,48 @@ ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
         __emule_dst[idst][i] = __emule_bf16::to_f32(buf0[i]) * __emule_bf16::to_f32(buf1[i]);
 }
 
-// pack_tile: write DST[idst] → CB[ocb] write slot as bfloat16
+// pack_tile: write DST[idst] → CB[ocb] write slot.
+// Format-aware: bf16 (page_size ≤ 2048) or raw 32-bit (page_size > 2048).
 ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
-    uint16_t* buf = reinterpret_cast<uint16_t*>(__emule_compute::cb_write_ptr(ocb));
-    uint32_t n = __emule_compute::cb_tile_elems(ocb);
-    for (uint32_t i = 0; i < n; i++)
-        buf[i] = __emule_bf16::from_f32(__emule_dst[idst][i]);
+    uint8_t* buf = __emule_compute::cb_write_ptr(ocb);
+    if (__emule_compute::cb_is_32bit_format(ocb)) {
+        // 32-bit format (INT32/Float32): raw memcpy from DST
+        uint32_t sz = __emule_compute::cb_page_size(ocb);
+        if (sz > __EMULE_DST_BYTES) sz = __EMULE_DST_BYTES;
+        std::memcpy(buf, __emule_dst[idst], sz);
+    } else {
+        // bfloat16: convert float32 → bf16
+        uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
+        uint32_t n = __emule_compute::cb_tile_elems(ocb);
+        for (uint32_t i = 0; i < n; i++)
+            bf[i] = __emule_bf16::from_f32(__emule_dst[idst][i]);
+    }
 }
 
-// copy_tile: DST[idst] = CB[icb][itile]
+// copy_tile: CB[icb][itile] → DST[idst].
+// Format-aware: bf16 (page_size ≤ 2048) or raw 32-bit (page_size > 2048).
 ALWI void copy_tile(uint32_t icb, uint32_t itile, uint32_t idst) {
-    uint16_t* buf = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb, itile));
-    uint32_t n = __emule_compute::cb_tile_elems(icb);
-    for (uint32_t i = 0; i < n; i++)
-        __emule_dst[idst][i] = __emule_bf16::to_f32(buf[i]);
+    uint8_t* buf = __emule_compute::cb_read_ptr_at(icb, itile);
+    if (__emule_compute::cb_is_32bit_format(icb)) {
+        // 32-bit format: raw memcpy into DST
+        uint32_t sz = __emule_compute::cb_page_size(icb);
+        if (sz > __EMULE_DST_BYTES) sz = __EMULE_DST_BYTES;
+        std::memcpy(__emule_dst[idst], buf, sz);
+    } else {
+        // bfloat16: convert bf16 → float32
+        uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
+        uint32_t n = __emule_compute::cb_tile_elems(icb);
+        for (uint32_t i = 0; i < n; i++)
+            __emule_dst[idst][i] = __emule_bf16::to_f32(bf[i]);
+    }
 }
 
-// copy_tile_to_dst_init_short — no-op
+// copy_tile_to_dst_init_short — no-op (hardware reconfiguration)
 ALWI void copy_tile_to_dst_init_short(uint32_t) {}
 ALWI void copy_tile_to_dst_init_short(uint32_t, uint32_t) {}
+
+// copy_tile_to_dst_init_short_with_dt — no-op (hardware SrcA reconfig)
+ALWI void copy_tile_to_dst_init_short_with_dt(uint32_t, uint32_t, uint32_t = 0) {}
 
 // ---- Reconfig operations (no-ops) ----
 ALWI void reconfig_data_format(uint32_t, uint32_t) {}
@@ -188,32 +217,4 @@ ALWI void state_configure(uint32_t = 0) {}
 
 } // namespace ckernel
 
-// CB operations forwarded (already defined in dataflow_api.h but compute
-// kernels include common.h, not dataflow_api.h — duplicate inline is OK).
-inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
-    auto& cb = __emule_cbs[cb_id];
-    std::unique_lock<std::mutex> lk(cb.mu);
-    cb.space_cv.wait(lk, [&]{ return (cb.num_pages - cb.occupied) >= n; });
-}
-
-inline void cb_push_back(uint32_t cb_id, uint32_t n) {
-    auto& cb = __emule_cbs[cb_id];
-    std::unique_lock<std::mutex> lk(cb.mu);
-    cb.write_idx = (cb.write_idx + n) % cb.num_pages;
-    cb.occupied += n;
-    cb.data_cv.notify_all();
-}
-
-inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
-    auto& cb = __emule_cbs[cb_id];
-    std::unique_lock<std::mutex> lk(cb.mu);
-    cb.data_cv.wait(lk, [&]{ return cb.occupied >= n; });
-}
-
-inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
-    auto& cb = __emule_cbs[cb_id];
-    std::unique_lock<std::mutex> lk(cb.mu);
-    cb.read_idx = (cb.read_idx + n) % cb.num_pages;
-    cb.occupied -= n;
-    cb.space_cv.notify_all();
-}
+// CB operations provided by jit_hw/api/cb_api.h (included above).

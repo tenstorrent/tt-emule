@@ -27,7 +27,7 @@ void EnqueueProgram(Device& device, Program& program, bool /*blocking*/) {
     Core& core = device.core();
     for (auto& cfg : program.cb_configs()) {
         core.cb(cfg.cb_index) =
-            std::make_shared<CircularBuffer>(cfg.num_pages);
+            std::make_shared<CircularBuffer>(cfg.num_pages, cfg.page_size);
     }
 
     // 2. Launch one thread per kernel descriptor

@@ -1,86 +1,49 @@
 #pragma once
-#include "tile.hpp"
+#include "cb_sync_state.hpp"
 #include <vector>
-#include <mutex>
-#include <condition_variable>
 #include <cstdint>
+#include <cstring>
 
 namespace tt_emule {
 
-// Thread-safe bounded FIFO of Tile slots.
-// Two condition variables: space_avail_ (signaled on pop_front) and data_avail_ (signaled on push_back).
+// Thread-safe bounded FIFO backed by raw memory.
+// Owns storage and exposes a CBSyncState for shared sync operations.
 class CircularBuffer {
 public:
-    explicit CircularBuffer(size_t capacity)
-        : capacity_(capacity), occupied_(0), write_idx_(0), read_idx_(0),
-          storage_(capacity) {}
+    static constexpr uint32_t DEFAULT_PAGE_SIZE = 32 * 32 * sizeof(float); // 4096
 
-    size_t capacity() const { return capacity_; }
-
-    // Producer: wait until capacity - occupied >= n, then advance write_idx
-    void reserve_back(size_t n) {
-        std::unique_lock<std::mutex> lk(mu_);
-        space_avail_.wait(lk, [&]{ return (capacity_ - occupied_) >= n; });
+    explicit CircularBuffer(size_t capacity, uint32_t page_size = DEFAULT_PAGE_SIZE)
+        : storage_(capacity * page_size, 0) {
+        state_.base      = storage_.data();
+        state_.page_size = page_size;
+        state_.num_pages = static_cast<uint32_t>(capacity);
     }
 
-    // Producer: push n tiles (writer already wrote into storage via get_write_ptr)
-    void push_back(size_t n) {
-        std::unique_lock<std::mutex> lk(mu_);
-        write_idx_ = (write_idx_ + n) % capacity_;
-        occupied_ += n;
-        data_avail_.notify_all();
-    }
+    size_t   capacity()  const { return state_.num_pages; }
+    uint32_t page_size() const { return state_.page_size; }
 
-    // Consumer: wait until occupied >= n
-    void wait_front(size_t n) {
-        std::unique_lock<std::mutex> lk(mu_);
-        data_avail_.wait(lk, [&]{ return occupied_ >= n; });
-    }
+    // Access underlying sync state (for shared CB operations).
+    CBSyncState&       sync_state()       { return state_; }
+    const CBSyncState& sync_state() const { return state_; }
 
-    // Consumer: pop n tiles (reader already consumed via get_read_ptr)
-    void pop_front(size_t n) {
-        std::unique_lock<std::mutex> lk(mu_);
-        read_idx_ = (read_idx_ + n) % capacity_;
-        occupied_ -= n;
-        space_avail_.notify_all();
-    }
+    // ---- Sync operations (delegate to shared logic) ----
 
-    // Raw pointer into write slot (call after reserve_back)
-    uint8_t* get_write_ptr() {
-        return storage_[write_idx_].bytes();
-    }
+    void reserve_back(size_t n) { cb_sync_reserve(state_, static_cast<uint32_t>(n)); }
+    void push_back(size_t n)    { cb_sync_push(state_, static_cast<uint32_t>(n)); }
+    void wait_front(size_t n)   { cb_sync_wait(state_, static_cast<uint32_t>(n)); }
+    void pop_front(size_t n)    { cb_sync_pop(state_, static_cast<uint32_t>(n)); }
 
-    // Raw pointer into read slot (call after wait_front)
-    const uint8_t* get_read_ptr() const {
-        return storage_[read_idx_].bytes();
-    }
+    // ---- Pointer accessors (delegate to shared logic) ----
 
-    // Non-const version for compute thread DST write-back
-    uint8_t* get_read_ptr_mut() {
-        return storage_[read_idx_].bytes();
-    }
-
-    // Indexed pointer access (offset within reserved/waited window)
-    uint8_t* get_write_ptr_at(size_t tile_offset) {
-        return storage_[(write_idx_ + tile_offset) % capacity_].bytes();
-    }
-    const uint8_t* get_read_ptr_at(size_t tile_offset) const {
-        return storage_[(read_idx_ + tile_offset) % capacity_].bytes();
-    }
-
-    Tile& write_tile() { return storage_[write_idx_]; }
-    const Tile& read_tile() const { return storage_[read_idx_]; }
+    uint8_t*       get_write_ptr()                    { return cb_sync_write_ptr(state_); }
+    const uint8_t* get_read_ptr() const               { return cb_sync_read_ptr(const_cast<CBSyncState&>(state_)); }
+    uint8_t*       get_read_ptr_mut()                  { return cb_sync_read_ptr(state_); }
+    uint8_t*       get_write_ptr_at(size_t offset)     { return cb_sync_write_ptr_at(state_, static_cast<uint32_t>(offset)); }
+    const uint8_t* get_read_ptr_at(size_t offset) const { return cb_sync_read_ptr_at(state_, static_cast<uint32_t>(offset)); }
 
 private:
-    size_t capacity_;
-    size_t occupied_;
-    size_t write_idx_;
-    size_t read_idx_;
-    std::vector<Tile> storage_;
-
-    mutable std::mutex mu_;
-    std::condition_variable space_avail_; // signaled when a slot is freed
-    std::condition_variable data_avail_;  // signaled when a tile is pushed
+    CBSyncState state_;
+    std::vector<uint8_t> storage_;  // Owns the memory that state_.base points to
 };
 
 } // namespace tt_emule
