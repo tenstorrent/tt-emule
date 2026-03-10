@@ -132,8 +132,12 @@ public:
 private:
     void mmap_region(size_t size) {
         l1_size_ = size;
-        void* p = mmap(nullptr, size, PROT_READ | PROT_WRITE,
-                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+        // Worker cores need MAP_32BIT so CB pointers fit in uint32_t.
+        // DRAM cores are accessed via bridge functions (full 64-bit pointers),
+        // so they use regular mmap to avoid exhausting the low 2 GB space.
+        int flags = MAP_PRIVATE | MAP_ANONYMOUS;
+        if (role_ == CoreRole::WORKER) flags |= MAP_32BIT;
+        void* p = mmap(nullptr, size, PROT_READ | PROT_WRITE, flags, -1, 0);
         if (p == MAP_FAILED)
             throw std::runtime_error("mmap for Core memory failed");
         l1_ = static_cast<uint8_t*>(p);

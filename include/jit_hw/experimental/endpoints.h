@@ -1,22 +1,19 @@
 #pragma once
-// Emulation stubs for experimental::Noc, AllocatorBank, ReadSpec, WriteSpec.
-// async_read/write delegate to memcpy via __device->dram_ptr().
+// Emulation stubs for experimental AllocatorBank endpoints + noc_traits_t.
+// Bridge functions resolve L1/DRAM offsets to host pointers directly.
 
 #include <cstdint>
-#include <cstring>
+#include "jit_hw/experimental/noc.h"
 
-// C-linkage accessor: defined in kernel_runner.cpp (compiled with the correct
-// Device layout, including vtable when TT_EMULE_USE_XY_PAIR is active).
-// The JIT kernel must NOT inline Device::dram_ptr() itself because the JIT
-// compile does not define TT_EMULE_USE_XY_PAIR, so the inlined method would
-// use the wrong struct layout (missing vtable pointer offset).
+// C-linkage bridge functions (resolved at dlopen time from emulated_program_runner).
 extern "C" uint8_t* __emule_dram_ptr(uint64_t offset);
+extern "C" uint8_t* __emule_local_l1_ptr(uint32_t offset);
 
 namespace experimental {
 
-enum class AllocatorBankType { DRAM, L1 };
+enum AllocatorBankType { L1, DRAM };
 
-template<AllocatorBankType>
+template <AllocatorBankType>
 struct AllocatorBank {};
 
 struct ReadSpec {
@@ -29,26 +26,40 @@ struct WriteSpec {
     uint32_t addr = 0;
 };
 
-class Noc {
-public:
-    // async_read: DRAM → L1
-    template<AllocatorBankType BT, typename L1Mem>
-    void async_read(AllocatorBank<BT>&, L1Mem& dst, uint32_t size,
-                    ReadSpec src_spec, WriteSpec /*dst_spec*/) {
-        std::memcpy(static_cast<uint8_t*>(dst),
-                    __emule_dram_ptr(src_spec.addr), size);
+// --- noc_traits_t<AllocatorBank<L1>> ---
+// L1 bank: resolve via __emule_local_l1_ptr (current core's mmap'd L1).
+template <>
+struct noc_traits_t<AllocatorBank<L1>> {
+    using src_args_type = ReadSpec;
+    using dst_args_type = WriteSpec;
+
+    template <Noc::AddressType AT>
+    static uintptr_t src_addr(const AllocatorBank<L1>&, const Noc&, const ReadSpec& args) {
+        return reinterpret_cast<uintptr_t>(__emule_local_l1_ptr(args.addr));
     }
 
-    // async_write: L1 → DRAM
-    template<typename L1Mem, AllocatorBankType BT>
-    void async_write(L1Mem& src, AllocatorBank<BT>&, uint32_t size,
-                     ReadSpec /*src_spec*/, WriteSpec dst_spec) {
-        std::memcpy(__emule_dram_ptr(dst_spec.addr),
-                    static_cast<uint8_t*>(src), size);
+    template <Noc::AddressType AT>
+    static uintptr_t dst_addr(const AllocatorBank<L1>&, const Noc&, const WriteSpec& args) {
+        return reinterpret_cast<uintptr_t>(__emule_local_l1_ptr(args.addr));
     }
-
-    void async_read_barrier() {}
-    void async_write_barrier() {}
 };
 
-} // namespace experimental
+// --- noc_traits_t<AllocatorBank<DRAM>> ---
+// DRAM bank: resolve via __emule_dram_ptr.
+template <>
+struct noc_traits_t<AllocatorBank<DRAM>> {
+    using src_args_type = ReadSpec;
+    using dst_args_type = WriteSpec;
+
+    template <Noc::AddressType AT>
+    static uintptr_t src_addr(const AllocatorBank<DRAM>&, const Noc&, const ReadSpec& args) {
+        return reinterpret_cast<uintptr_t>(__emule_dram_ptr(args.addr));
+    }
+
+    template <Noc::AddressType AT>
+    static uintptr_t dst_addr(const AllocatorBank<DRAM>&, const Noc&, const WriteSpec& args) {
+        return reinterpret_cast<uintptr_t>(__emule_dram_ptr(args.addr));
+    }
+};
+
+}  // namespace experimental
