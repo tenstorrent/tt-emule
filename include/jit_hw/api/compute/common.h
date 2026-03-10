@@ -217,4 +217,15 @@ ALWI void state_configure(uint32_t = 0) {}
 
 } // namespace ckernel
 
+// ---- Deprecated DST lock wrappers (used by bmm.cpp) ----
+// These are global-scope functions matching the real device API (reg_api.h).
+ALWI void acquire_dst() {
+    tile_regs_acquire();
+    tile_regs_wait();
+}
+ALWI void release_dst() {
+    tile_regs_commit();
+    tile_regs_release();
+}
+
 // CB operations provided by jit_hw/api/cb_api.h (included above).

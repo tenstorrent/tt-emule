@@ -1,5 +1,7 @@
 #pragma once
 #include <cstdint>
+#include <string_view>
+#include <utility>
 
 // Compile-time kernel arguments.  The JIT compiler passes
 //   -DKERNEL_COMPILE_TIME_ARGS=val0,val1,...
@@ -17,3 +19,21 @@ constexpr uint32_t get_ct_arg() { return kernel_compile_time_args_arr[N]; }
 } // anonymous namespace
 
 #define get_compile_time_arg_val(N) get_ct_arg<N>()
+
+// Named compile-time args.  The JIT compiler passes
+//   -DKERNEL_COMPILE_TIME_ARG_MAP={"name1",val1},{"name2",val2},...
+// on the command line.  get_named_compile_time_arg_val("name") does a
+// constexpr linear search through the map.
+
+#ifdef KERNEL_COMPILE_TIME_ARG_MAP
+namespace {
+constexpr std::pair<std::string_view, uint32_t> __emule_named_ct_args[] = {KERNEL_COMPILE_TIME_ARG_MAP};
+} // anonymous namespace
+
+constexpr uint32_t get_named_compile_time_arg_val(std::string_view name) {
+    for (const auto& [arg_name, arg_value] : __emule_named_ct_args) {
+        if (name == arg_name) return arg_value;
+    }
+    return 0; // unreachable for valid args
+}
+#endif
