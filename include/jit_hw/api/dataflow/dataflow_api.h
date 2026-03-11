@@ -83,6 +83,15 @@ FORCE_INLINE void noc_async_read_tile(
     noc_async_read_page(id, addrgen, dst_local_l1_addr, offset, noc);
 }
 
+// noc_async_write_tile — deprecated alias for noc_async_write_page.
+template<typename AddrGen>
+FORCE_INLINE void noc_async_write_tile(
+        uint32_t id, const AddrGen& addrgen,
+        uint32_t src_local_l1_addr,
+        uint32_t size = 0, uint32_t offset = 0, uint8_t noc = 0) {
+    noc_async_write_page(id, addrgen, src_local_l1_addr, size, offset, noc);
+}
+
 // ---- Raw NOC read/write ----
 
 inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,

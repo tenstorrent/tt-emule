@@ -53,9 +53,22 @@ ALWI void mm_block_init_short_with_dt(uint32_t in0_cb = 0, uint32_t in1_cb = 1,
                                       uint32_t old_in1_cb = 0, uint32_t transpose = 0,
                                       uint32_t ct_dim = 1, uint32_t rt_dim = 1,
                                       uint32_t kt_dim = 1) {}
+// matmul_block: compute rt_dim × ct_dim block of output tiles.
+// For each output tile (r, c): DST[idst + r*ct_dim + c] += A[in0_tile + r*kt_dim] * B[in1_tile + c]
 ALWI void matmul_block(uint32_t in0_cb, uint32_t in1_cb,
                        uint32_t in0_tile, uint32_t in1_tile, uint32_t idst,
                        uint32_t transpose = 0, uint32_t ct_dim = 1,
-                       uint32_t rt_dim = 1, uint32_t kt_dim = 1) {}
+                       uint32_t rt_dim = 1, uint32_t kt_dim = 1) {
+    uint32_t dst = idst;
+    for (uint32_t r = 0; r < rt_dim; r++) {
+        for (uint32_t c = 0; c < ct_dim; c++) {
+            matmul_tiles(in0_cb, in1_cb,
+                         in0_tile + r * kt_dim,
+                         in1_tile + c,
+                         dst);
+            dst++;
+        }
+    }
+}
 
 } // namespace ckernel

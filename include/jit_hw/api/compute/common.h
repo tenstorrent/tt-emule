@@ -83,6 +83,10 @@ inline uint8_t* cb_write_ptr(uint32_t cb_id) {
     return tt_emule::cb_sync_write_ptr(__emule_cbs[cb_id]);
 }
 
+inline uint8_t* cb_write_ptr_at(uint32_t cb_id, uint32_t tile_offset) {
+    return tt_emule::cb_sync_write_ptr_at(__emule_cbs[cb_id], tile_offset);
+}
+
 inline uint32_t cb_page_size(uint32_t cb_id) {
     return __emule_cbs[cb_id].page_size;
 }
@@ -160,6 +164,23 @@ ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
     }
 }
 
+// pack_tile_block: write DST[ifrom_dst .. ifrom_dst+ntiles-1] → CB[ocb] consecutive write slots.
+ALWI void pack_tile_block(uint32_t ifrom_dst, uint32_t ocb, uint32_t ntiles) {
+    for (uint32_t i = 0; i < ntiles; i++) {
+        uint8_t* buf = __emule_compute::cb_write_ptr_at(ocb, i);
+        if (__emule_compute::cb_is_32bit_format(ocb)) {
+            uint32_t sz = __emule_compute::cb_page_size(ocb);
+            if (sz > __EMULE_DST_BYTES) sz = __EMULE_DST_BYTES;
+            std::memcpy(buf, __emule_dst[ifrom_dst + i], sz);
+        } else {
+            uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
+            uint32_t n = __emule_compute::cb_tile_elems(ocb);
+            for (uint32_t j = 0; j < n; j++)
+                bf[j] = __emule_bf16::from_f32(__emule_dst[ifrom_dst + i][j]);
+        }
+    }
+}
+
 // copy_tile: CB[icb][itile] → DST[idst].
 // Format-aware: bf16 (page_size ≤ 2048) or raw 32-bit (page_size > 2048).
 ALWI void copy_tile(uint32_t icb, uint32_t itile, uint32_t idst) {
@@ -175,6 +196,15 @@ ALWI void copy_tile(uint32_t icb, uint32_t itile, uint32_t idst) {
         uint32_t n = __emule_compute::cb_tile_elems(icb);
         for (uint32_t i = 0; i < n; i++)
             __emule_dst[idst][i] = __emule_bf16::to_f32(bf[i]);
+    }
+}
+
+// copy_block_matmul_partials: reload a block of tiles from CB into DST.
+ALWI void copy_block_matmul_partials(
+    uint32_t in_cb_id, uint32_t start_in_tile_index,
+    uint32_t start_dst_tile_index, uint32_t ntiles) {
+    for (uint32_t i = 0; i < ntiles; i++) {
+        copy_tile(in_cb_id, start_in_tile_index + i, start_dst_tile_index + i);
     }
 }
 
@@ -215,6 +245,9 @@ ALWI void binary_dest_reuse_tiles(uint32_t icb0, uint32_t icb1,
 // state_configure — no-op
 ALWI void state_configure(uint32_t = 0) {}
 
+// llk_pack_reconfig_l1_acc — no-op (L1 accumulation toggle, only used when PACKER_L1_ACC defined)
+ALWI void llk_pack_reconfig_l1_acc(uint32_t /*enable*/) {}
+
 } // namespace ckernel
 
 // ---- Deprecated DST lock wrappers (used by bmm.cpp) ----
@@ -229,3 +262,7 @@ ALWI void release_dst() {
 }
 
 // CB operations provided by jit_hw/api/cb_api.h (included above).
+
+// Bring ckernel functions into the global namespace (matches real device behavior,
+// where "using namespace ckernel" is pulled in via ckernel.h / risc_common.h).
+using namespace ckernel;

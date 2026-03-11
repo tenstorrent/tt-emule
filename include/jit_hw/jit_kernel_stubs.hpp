@@ -103,3 +103,15 @@ struct CBIndex {
 
 // No-op assertion macro used in some kernel headers.
 #define ASSERT(...) ((void)0)
+
+// ---- ThreadId enum + mailbox stubs (used by both compute and dataflow kernels) ----
+namespace ckernel {
+enum ThreadId {
+    BriscThreadId  = 0,
+    UnpackThreadId = 1,
+    MathThreadId   = 2,
+    PackThreadId   = 3
+};
+inline uint32_t mailbox_read(uint8_t /*thread*/) { return 1; }
+inline void mailbox_write(uint8_t /*thread*/, uint32_t /*data*/) {}
+} // namespace ckernel
