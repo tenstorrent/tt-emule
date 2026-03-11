@@ -38,6 +38,23 @@ inline uint32_t __emule_addr_to_offset(uint32_t addr) {
 #endif
 }
 
+// ---- Coordinate translation stubs ----
+// On real hardware, these are L1-resident lookup tables populated by firmware.
+// In emulation, we use identity mapping (logical == virtual).
+inline uint32_t worker_logical_col_to_virtual_col[64] = {
+    0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,
+    32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63
+};
+inline uint32_t worker_logical_row_to_virtual_row[64] = {
+    0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,
+    32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63
+};
+
+// Return the absolute logical x coordinate of the current core.
+// In emulation, this is the NOC x coordinate stored in my_x[0].
+inline uint32_t get_absolute_logical_x() { return my_x[0]; }
+inline uint32_t get_absolute_logical_y() { return my_y[0]; }
+
 // ---- NOC address encoding (matches real firmware) ----
 // Unicast: y in bits [47:42], x in bits [41:36], addr in bits [35:0]
 // NOC_XY_ADDR(x, y, addr) = (y << 42) | (x << 36) | addr

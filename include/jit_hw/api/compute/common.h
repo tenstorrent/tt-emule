@@ -33,9 +33,19 @@ enum class EltwiseBinaryReuseDestType { NONE, DEST_TO_SRCA, DEST_TO_SRCB };
 
 } // namespace ckernel
 
+// Note: MathFidelity may also be defined in llk_defs.h — guard against redefinition.
+#ifndef __EMULE_MATH_FIDELITY_DEFINED
+#define __EMULE_MATH_FIDELITY_DEFINED
 enum class MathFidelity { LoFi, HiFi2, HiFi3, HiFi4 };
+#endif
+
 enum class ReluType { NO_RELU, ZERO_RELU, MIN_THRESHOLD_RELU, MAX_THRESHOLD_RELU };
-enum class DST_ACCUM_MODE { None, Half, Full };
+
+// DST_ACCUM_MODE: On real device, this is a compile-time integer define.
+// In emulation, provide it as a constexpr if not already defined as a macro.
+#ifndef DST_ACCUM_MODE
+#define DST_ACCUM_MODE 0
+#endif
 
 // ---- bfloat16 conversion helpers ----
 #include "jit_hw/api/bfloat16.h"
@@ -161,6 +171,28 @@ ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
         uint32_t n = __emule_compute::cb_tile_elems(ocb);
         for (uint32_t i = 0; i < n; i++)
             bf[i] = __emule_bf16::from_f32(__emule_dst[idst][i]);
+    }
+}
+
+// pack_tile (templated): used by D2M-generated code.
+// Template param <true> means "use output_offset as the write slot index".
+template <bool UseOutputOffset>
+ALWI void pack_tile(uint32_t idst, uint32_t ocb, uint32_t output_offset = 0) {
+    if constexpr (UseOutputOffset) {
+        // Write to specific slot at output_offset
+        uint8_t* buf = __emule_compute::cb_write_ptr_at(ocb, output_offset);
+        if (__emule_compute::cb_is_32bit_format(ocb)) {
+            uint32_t sz = __emule_compute::cb_page_size(ocb);
+            if (sz > __EMULE_DST_BYTES) sz = __EMULE_DST_BYTES;
+            std::memcpy(buf, __emule_dst[idst], sz);
+        } else {
+            uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
+            uint32_t n = __emule_compute::cb_tile_elems(ocb);
+            for (uint32_t i = 0; i < n; i++)
+                bf[i] = __emule_bf16::from_f32(__emule_dst[idst][i]);
+        }
+    } else {
+        pack_tile(idst, ocb);
     }
 }
 
