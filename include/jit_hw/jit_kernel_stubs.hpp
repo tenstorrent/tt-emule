@@ -35,6 +35,20 @@ extern "C" uint8_t* __emule_noc_resolve(uint32_t x, uint32_t y, uint64_t addr);
 // from mmap'd-below-4GB L1) and real host pointers.
 extern thread_local uint8_t* __emule_bridge_l1;
 
+// Bank mapping arrays — populated by emulated_program_runner, resolved at dlopen.
+// Match firmware declarations from dataflow_api_common.h / firmware_common.h.
+extern uint16_t dram_bank_to_noc_xy[2][32];
+extern int32_t bank_to_dram_offset[32];
+extern uint16_t l1_bank_to_noc_xy[2][32];
+extern int32_t bank_to_l1_offset[32];
+
+// Per-core NOC coordinates (set per kernel thread by program runner).
+extern uint8_t my_x[2];
+extern uint8_t my_y[2];
+
+// NOC index — always 0 for emulation (real firmware sets this per core).
+constexpr uint8_t noc_index = 0;
+
 // get_arg_addr(idx) — mirrors tt-metal's rta_l1_base-based implementation.
 // Returns a pointer to the idx-th runtime arg (held in __rt_args).
 inline void* get_arg_addr(uint32_t idx) {
