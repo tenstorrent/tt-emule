@@ -104,6 +104,20 @@ inline uint64_t get_noc_addr_helper(uint32_t noc_xy, uint32_t addr) {
     return (static_cast<uint64_t>(noc_xy) << NOC_ADDR_COORD_SHIFT) | addr;
 }
 
+// get_noc_addr_from_bank_id — used directly by D2M-generated dataflow kernels.
+// Matches firmware: resolves bank_id → (noc_xy, addr_with_bank_offset).
+template <bool DRAM>
+inline uint64_t get_noc_addr_from_bank_id(uint32_t bank_id, uint32_t bank_address_offset, uint8_t noc = noc_index) {
+    uint64_t noc_addr = 0;
+    if constexpr (DRAM) {
+        noc_addr = dram_bank_to_noc_xy[noc][bank_id];
+        bank_address_offset += bank_to_dram_offset[bank_id];
+    } else {
+        noc_addr = l1_bank_to_noc_xy[noc][bank_id];
+    }
+    return (noc_addr << NOC_ADDR_COORD_SHIFT) | (bank_address_offset);
+}
+
 // InterleavedAddrGen — matches real firmware interface.
 template <bool DRAM>
 struct InterleavedAddrGen {

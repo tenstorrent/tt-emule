@@ -46,6 +46,10 @@ extern int32_t bank_to_l1_offset[32];
 extern uint8_t my_x[2];
 extern uint8_t my_y[2];
 
+// Per-core logical coordinates (for D2M get_absolute_logical_x/y).
+extern uint32_t __emule_logical_x;
+extern uint32_t __emule_logical_y;
+
 // NOC index — always 0 for emulation (real firmware sets this per core).
 constexpr uint8_t noc_index = 0;
 

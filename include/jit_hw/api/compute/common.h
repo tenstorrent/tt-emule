@@ -244,6 +244,9 @@ ALWI void copy_block_matmul_partials(
 ALWI void copy_tile_to_dst_init_short(uint32_t) {}
 ALWI void copy_tile_to_dst_init_short(uint32_t, uint32_t) {}
 
+// copy_tile_init — alias used by D2M-generated code
+ALWI void copy_tile_init(uint32_t = 0) {}
+
 // copy_tile_to_dst_init_short_with_dt — no-op (hardware SrcA reconfig)
 ALWI void copy_tile_to_dst_init_short_with_dt(uint32_t, uint32_t, uint32_t = 0) {}
 

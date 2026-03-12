@@ -38,22 +38,32 @@ inline uint32_t __emule_addr_to_offset(uint32_t addr) {
 #endif
 }
 
-// ---- Coordinate translation stubs ----
+// ---- Coordinate translation tables ----
 // On real hardware, these are L1-resident lookup tables populated by firmware.
-// In emulation, we use identity mapping (logical == virtual).
+// In emulation, EMULE_WORKER_COL_MAP / EMULE_WORKER_ROW_MAP provide the
+// logical → virtual/physical coordinate mapping, generated from the device's
+// virtual_core_from_logical_core() in the program runner.
+#ifdef EMULE_WORKER_COL_MAP
+inline uint32_t worker_logical_col_to_virtual_col[64] = {EMULE_WORKER_COL_MAP};
+#else
 inline uint32_t worker_logical_col_to_virtual_col[64] = {
     0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,
     32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63
 };
+#endif
+#ifdef EMULE_WORKER_ROW_MAP
+inline uint32_t worker_logical_row_to_virtual_row[64] = {EMULE_WORKER_ROW_MAP};
+#else
 inline uint32_t worker_logical_row_to_virtual_row[64] = {
     0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,
     32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63
 };
+#endif
 
-// Return the absolute logical x coordinate of the current core.
-// In emulation, this is the NOC x coordinate stored in my_x[0].
-inline uint32_t get_absolute_logical_x() { return my_x[0]; }
-inline uint32_t get_absolute_logical_y() { return my_y[0]; }
+// Return the absolute logical x/y coordinate of the current core.
+// D2M kernels use these to index into the translation tables above.
+inline uint32_t get_absolute_logical_x() { return __emule_logical_x; }
+inline uint32_t get_absolute_logical_y() { return __emule_logical_y; }
 
 // ---- NOC address encoding (matches real firmware) ----
 // Unicast: y in bits [47:42], x in bits [41:36], addr in bits [35:0]
