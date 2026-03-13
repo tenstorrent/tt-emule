@@ -15,6 +15,8 @@
 #include "jit_hw/api/cb_api.h"
 #include "jit_hw/internal/dataflow/dataflow_api_addrgen.h"
 #include "jit_hw/api/tensor/tensor_accessor.h"
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cstdint>
 #include <thread>
@@ -239,26 +241,51 @@ inline void noc_semaphore_set(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t va
     *sem_addr = val;
 }
 
-// Wait for semaphore to reach expected value (blocking spin-wait).
+// Wait for semaphore to reach expected value (blocking spin-wait with hang detection).
 inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t val) {
+    uint64_t spins = 0;
     while (*sem_addr != val) {
         std::this_thread::yield();
+        if (++spins > 100'000'000ULL) {
+            fprintf(stderr, "EMULE HANG: noc_semaphore_wait(%p, %u) stuck at %u after %llu spins "
+                    "[phys (%u,%u) logical (%u,%u)]\n",
+                    (void*)sem_addr, val, *sem_addr, (unsigned long long)spins,
+                    my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+            std::abort();
+        }
     }
 }
 
-// Wait for semaphore to reach at least min_val (blocking spin-wait).
+// Wait for semaphore to reach at least min_val (blocking spin-wait with hang detection).
 inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t min_val) {
+    uint64_t spins = 0;
     while (*sem_addr < min_val) {
         std::this_thread::yield();
+        if (++spins > 100'000'000ULL) {
+            fprintf(stderr, "EMULE HANG: noc_semaphore_wait_min(%p, %u) stuck at %u after %llu spins "
+                    "[phys (%u,%u) logical (%u,%u)]\n",
+                    (void*)sem_addr, min_val, *sem_addr, (unsigned long long)spins,
+                    my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+            std::abort();
+        }
     }
 }
 
 // Atomically increment a remote semaphore.
 // noc_addr is a 64-bit encoded NOC address pointing to the semaphore.
 inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc = 0) {
-    uint8_t* ptr = __emule_resolve_noc_addr(__emule_fixup_noc_addr(noc_addr));
+    uint64_t fixed = __emule_fixup_noc_addr(noc_addr);
+    uint8_t* ptr = __emule_resolve_noc_addr(fixed);
     if (ptr) {
         __atomic_fetch_add(reinterpret_cast<uint32_t*>(ptr), incr, __ATOMIC_SEQ_CST);
+    } else {
+        uint32_t noc_x = (fixed >> 36) & 0x3F;
+        uint32_t noc_y = (fixed >> 42) & 0x3F;
+        uint32_t offset = static_cast<uint32_t>(fixed & ((1ULL << 36) - 1));
+        fprintf(stderr, "EMULE WARN: noc_semaphore_inc failed to resolve addr 0x%llx "
+                "(target core (%u,%u) offset 0x%x) [from phys (%u,%u) logical (%u,%u)]\n",
+                (unsigned long long)fixed, noc_x, noc_y, offset,
+                my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
     }
 }
 
@@ -312,3 +339,24 @@ inline uint64_t get_l1_noc_addr(
     uint32_t noc_xy = interleaved_addr_gen::get_noc_xy<false>(bank_index, noc);
     return get_noc_addr_helper(noc_xy, addr);
 }
+
+// ---- Preempt tt-mlir verbatim injection of experimental_dataflow_api ----
+// D2M code generation injects experimental_dataflow_api.h as verbatim C++
+// containing firmware macros (NOC_MULTICAST_ADDR etc.) that don't exist in
+// the emulation environment. By defining the header guard here and providing
+// our own implementation, the verbatim injection is skipped.
+#define TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_DATAFLOW_API_H
+
+namespace experimental {
+inline std::uint64_t get_noc_multicast_addr(
+    std::uint32_t noc_x_start, std::uint32_t noc_y_start,
+    std::uint32_t noc_x_end, std::uint32_t noc_y_end,
+    std::uint32_t addr, uint8_t noc = noc_index) {
+    // noc 0: start=start, end=end; noc 1: start=end, end=start (matches firmware)
+    if (noc) {
+        return ::get_noc_multicast_addr(noc_x_end, noc_y_end, noc_x_start, noc_y_start, addr, noc);
+    } else {
+        return ::get_noc_multicast_addr(noc_x_start, noc_y_start, noc_x_end, noc_y_end, addr, noc);
+    }
+}
+} // namespace experimental

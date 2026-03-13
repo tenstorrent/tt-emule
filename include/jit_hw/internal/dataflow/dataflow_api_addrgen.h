@@ -13,8 +13,8 @@ extern uint16_t l1_bank_to_noc_xy[2][32];
 extern int32_t bank_to_l1_offset[32];
 
 // Core coordinates (set per kernel thread by program runner).
-extern uint8_t my_x[2];
-extern uint8_t my_y[2];
+extern thread_local uint8_t my_x[2];
+extern thread_local uint8_t my_y[2];
 
 // NOC encoding constants (matching firmware for Blackhole/Wormhole).
 // NOC_XY_ADDR(x, y, addr) = (y << 42) | (x << 36) | addr

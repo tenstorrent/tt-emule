@@ -21,22 +21,39 @@ ALWI void mm_init_short_with_dt(uint32_t in0_cb, uint32_t in1_cb,
 // DST stores float32 — acquire zeroes it, then matmul_tiles accumulates.
 ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
                        uint32_t in0_tile, uint32_t in1_tile, uint32_t idst) {
-    const uint16_t* a_ptr = reinterpret_cast<const uint16_t*>(
-        __emule_compute::cb_read_ptr_at(in0_cb, in0_tile));
-    const uint16_t* b_ptr = reinterpret_cast<const uint16_t*>(
-        __emule_compute::cb_read_ptr_at(in1_cb, in1_tile));
-
     // Standard 32x32 × 32x32 matrix multiply, accumulating into DST[idst].
     // Layout: row-major, 32 rows × 32 cols = 1024 elements per tile.
     constexpr uint32_t DIM = 32;
-    for (uint32_t r = 0; r < DIM; r++) {
-        for (uint32_t c = 0; c < DIM; c++) {
-            float acc = __emule_dst[idst][r * DIM + c];
-            for (uint32_t k = 0; k < DIM; k++) {
-                acc += __emule_bf16::to_f32(a_ptr[r * DIM + k]) *
-                       __emule_bf16::to_f32(b_ptr[k * DIM + c]);
+    if (__emule_compute::cb_is_32bit_format(in0_cb)) {
+        // Float32 path: read tiles as float* directly.
+        const float* a_ptr = reinterpret_cast<const float*>(
+            __emule_compute::cb_read_ptr_at(in0_cb, in0_tile));
+        const float* b_ptr = reinterpret_cast<const float*>(
+            __emule_compute::cb_read_ptr_at(in1_cb, in1_tile));
+        for (uint32_t r = 0; r < DIM; r++) {
+            for (uint32_t c = 0; c < DIM; c++) {
+                float acc = __emule_dst[idst][r * DIM + c];
+                for (uint32_t k = 0; k < DIM; k++) {
+                    acc += a_ptr[r * DIM + k] * b_ptr[k * DIM + c];
+                }
+                __emule_dst[idst][r * DIM + c] = acc;
             }
-            __emule_dst[idst][r * DIM + c] = acc;
+        }
+    } else {
+        // bfloat16 path: convert bf16 → f32 before multiply.
+        const uint16_t* a_ptr = reinterpret_cast<const uint16_t*>(
+            __emule_compute::cb_read_ptr_at(in0_cb, in0_tile));
+        const uint16_t* b_ptr = reinterpret_cast<const uint16_t*>(
+            __emule_compute::cb_read_ptr_at(in1_cb, in1_tile));
+        for (uint32_t r = 0; r < DIM; r++) {
+            for (uint32_t c = 0; c < DIM; c++) {
+                float acc = __emule_dst[idst][r * DIM + c];
+                for (uint32_t k = 0; k < DIM; k++) {
+                    acc += __emule_bf16::to_f32(a_ptr[r * DIM + k]) *
+                           __emule_bf16::to_f32(b_ptr[k * DIM + c]);
+                }
+                __emule_dst[idst][r * DIM + c] = acc;
+            }
         }
     }
 }
@@ -72,3 +89,20 @@ ALWI void matmul_block(uint32_t in0_cb, uint32_t in1_cb,
 }
 
 } // namespace ckernel
+
+// ---- Preempt tt-mlir verbatim injection of experimental_matmul_llks ----
+#define TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_MATMUL_LLKS_H
+
+namespace experimental {
+ALWI void matmul_block(uint32_t in0_cb_id, uint32_t in1_cb_id,
+                       uint32_t in0_tile_index, uint32_t in1_tile_index,
+                       uint32_t idst, const uint32_t transpose, uint32_t ct_dim,
+                       uint32_t rt_dim, uint32_t kt_dim, uint32_t nt_dim) {
+    for (uint32_t i = 0; i < kt_dim; i++) {
+        ckernel::matmul_block(in0_cb_id, in1_cb_id, in0_tile_index, in1_tile_index,
+                              idst, transpose, ct_dim, rt_dim, kt_dim);
+        in0_tile_index++;
+        in1_tile_index += nt_dim;
+    }
+}
+} // namespace experimental
