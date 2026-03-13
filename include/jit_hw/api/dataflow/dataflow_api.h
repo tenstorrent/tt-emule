@@ -131,7 +131,14 @@ FORCE_INLINE void noc_async_read_page(
     uint64_t noc_addr = addrgen.get_noc_addr(id, offset, noc);
     uint8_t* dst = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(dst_local_l1_addr));
     uint8_t* src = __emule_resolve_noc_addr(noc_addr);
-    if (src) std::memcpy(dst, src, page_size);
+    if (src) {
+        std::memcpy(dst, src, page_size);
+    } else {
+        fprintf(stderr, "EMULE WARN: noc_async_read_page failed to resolve addr 0x%llx "
+                "[from phys (%u,%u) logical (%u,%u)]\n",
+                (unsigned long long)noc_addr, my_x[0], my_y[0],
+                __emule_logical_x, __emule_logical_y);
+    }
 }
 
 template<typename AddrGen>
@@ -149,7 +156,14 @@ FORCE_INLINE void noc_async_write_page(
     uint64_t noc_addr = addrgen.get_noc_addr(id, offset, noc);
     uint8_t* src = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(src_local_l1_addr));
     uint8_t* dst = __emule_resolve_noc_addr(noc_addr);
-    if (dst) std::memcpy(dst, src, sz);
+    if (dst) {
+        std::memcpy(dst, src, sz);
+    } else {
+        fprintf(stderr, "EMULE WARN: noc_async_write_page failed to resolve addr 0x%llx "
+                "[from phys (%u,%u) logical (%u,%u)]\n",
+                (unsigned long long)noc_addr, my_x[0], my_y[0],
+                __emule_logical_x, __emule_logical_y);
+    }
 }
 
 // noc_async_read_tile — deprecated alias for noc_async_read_page.
@@ -188,14 +202,28 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
                            uint32_t size, uint8_t noc = 0) {
     uint8_t* dst = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(dst_local_l1_addr));
     uint8_t* src = __emule_resolve_noc_addr(__emule_fixup_noc_addr(src_noc_addr));
-    if (src) std::memcpy(dst, src, size);
+    if (src) {
+        std::memcpy(dst, src, size);
+    } else {
+        fprintf(stderr, "EMULE WARN: noc_async_read failed to resolve addr 0x%llx "
+                "[from phys (%u,%u) logical (%u,%u)]\n",
+                (unsigned long long)src_noc_addr, my_x[0], my_y[0],
+                __emule_logical_x, __emule_logical_y);
+    }
 }
 
 inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
                             uint32_t size, uint8_t noc = 0) {
     uint8_t* src = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(src_local_l1_addr));
     uint8_t* dst = __emule_resolve_noc_addr(__emule_fixup_noc_addr(dst_noc_addr));
-    if (dst) std::memcpy(dst, src, size);
+    if (dst) {
+        std::memcpy(dst, src, size);
+    } else {
+        fprintf(stderr, "EMULE WARN: noc_async_write failed to resolve addr 0x%llx "
+                "[from phys (%u,%u) logical (%u,%u)]\n",
+                (unsigned long long)dst_noc_addr, my_x[0], my_y[0],
+                __emule_logical_x, __emule_logical_y);
+    }
 }
 
 // ---- Multicast write ----
@@ -246,7 +274,7 @@ inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t v
     uint64_t spins = 0;
     while (*sem_addr != val) {
         std::this_thread::yield();
-        if (++spins > 100'000'000ULL) {
+        if (++spins > 10'000'000ULL) {
             fprintf(stderr, "EMULE HANG: noc_semaphore_wait(%p, %u) stuck at %u after %llu spins "
                     "[phys (%u,%u) logical (%u,%u)]\n",
                     (void*)sem_addr, val, *sem_addr, (unsigned long long)spins,
@@ -261,7 +289,7 @@ inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32
     uint64_t spins = 0;
     while (*sem_addr < min_val) {
         std::this_thread::yield();
-        if (++spins > 100'000'000ULL) {
+        if (++spins > 10'000'000ULL) {
             fprintf(stderr, "EMULE HANG: noc_semaphore_wait_min(%p, %u) stuck at %u after %llu spins "
                     "[phys (%u,%u) logical (%u,%u)]\n",
                     (void*)sem_addr, min_val, *sem_addr, (unsigned long long)spins,

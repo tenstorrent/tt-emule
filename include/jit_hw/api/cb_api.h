@@ -4,7 +4,16 @@
 
 #include "jit_hw/emule_cb_state.h"
 #include "jit_hw/api/compute/common_globals.h"
+#include <chrono>
 #include <cstdint>
+#include <cstdio>
+#include <mutex>
+
+// Forward declarations for hang diagnostics (defined in jit_kernel_stubs.hpp).
+extern thread_local uint8_t my_x[2];
+extern thread_local uint8_t my_y[2];
+extern thread_local uint32_t __emule_logical_x;
+extern thread_local uint32_t __emule_logical_y;
 
 // ---- Constexpr tile metadata arrays (populated by JIT defines) ----
 // EMULE_TILE_SIZES is defined by the JIT compiler as a comma-separated list of
@@ -35,7 +44,17 @@ constexpr uint8_t unpack_num_faces_c_dim[32] = {
 // ---- Circular Buffer sync operations ----
 
 inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
-    tt_emule::cb_sync_reserve(__emule_cbs[cb_id], n);
+    auto& cb = __emule_cbs[cb_id];
+    std::unique_lock<std::mutex> lk(cb.mu);
+    if (!cb.space_cv.wait_for(lk, std::chrono::seconds(5),
+            [&]{ return (cb.num_pages - cb.occupied) >= n; })) {
+        fprintf(stderr, "EMULE HANG: cb_reserve_back(cb_id=%u, n=%u) stuck "
+                "(occupied=%u, num_pages=%u, page_size=%u) "
+                "[phys (%u,%u) logical (%u,%u)]\n",
+                cb_id, n, cb.occupied, cb.num_pages, cb.page_size,
+                my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+        std::abort();
+    }
 }
 
 inline void cb_push_back(uint32_t cb_id, uint32_t n) {
@@ -43,7 +62,17 @@ inline void cb_push_back(uint32_t cb_id, uint32_t n) {
 }
 
 inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
-    tt_emule::cb_sync_wait(__emule_cbs[cb_id], n);
+    auto& cb = __emule_cbs[cb_id];
+    std::unique_lock<std::mutex> lk(cb.mu);
+    if (!cb.data_cv.wait_for(lk, std::chrono::seconds(5),
+            [&]{ return cb.occupied >= n; })) {
+        fprintf(stderr, "EMULE HANG: cb_wait_front(cb_id=%u, n=%u) stuck "
+                "(occupied=%u, num_pages=%u, page_size=%u) "
+                "[phys (%u,%u) logical (%u,%u)]\n",
+                cb_id, n, cb.occupied, cb.num_pages, cb.page_size,
+                my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+        std::abort();
+    }
 }
 
 inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
