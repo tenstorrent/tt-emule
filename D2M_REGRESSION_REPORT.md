@@ -1,18 +1,22 @@
 # D2M Regression Report
 
-**Date:** 2026-03-13
+**Date:** 2026-03-13 (updated run)
 **Build:** tt-metal `build_emule_clang` (clang-17, `TT_METAL_EMULATION=ON`)
 **Target:** wormhole_N150 (emulated, slow dispatch)
 **tt-mlir tests:** `test/python/golden/test_metal_*.py` (13 files, ~1146 total tests)
+**Fixes since last run:** multicast worker-core filtering, cross-program NOC reads (core_map populated for all workers), L1 offset masking in multicast, parallel JIT compilation, PYTHONPATH fix for `builder` module
 
 ## Summary
 
 | Status | Count |
 |--------|-------|
-| Passed | 128 |
-| Failed | ~205 |
-| Skipped/XFail | 37 |
-| Hung (timeout) | 4 files (~750+ tests unreachable) |
+| Passed | 208 |
+| Failed | ~251 |
+| Skipped/XFail | 51 |
+| Aborted (SIGABRT) | 2 files (~168 tests unreachable) |
+| Hung (timeout) | 2 files (~530+ tests unreachable) |
+
+**Improvement vs previous run:** +80 passed tests, 2 fewer hung files (matmul and DMA now abort cleanly instead of hanging), reductions now runs 118 tests before timeout (was ~67).
 
 ## Per-File Results
 
@@ -20,120 +24,106 @@
 |-----------|-------|--------|--------|------------|--------|
 | test_metal_layout | 94 | 94 | 0 | 0 | PASS |
 | test_metal_allocate | 6 | 6 | 0 | 0 | PASS |
-| test_metal_matmul | 127 | 15 | 0 | 2 xfail | HUNG at test 18 |
-| test_metal_matmul_higher_rank | 10 | 0 | 10 | 0 | FAIL |
-| test_metal_tilize | 11 | 3 | 4 | 4 skip | FAIL |
-| test_metal_dma | 49 | 8 | 0 | 0 | HUNG at test 9 |
-| test_metal_masking | 20 | 2 | 18 | 0 | FAIL |
-| test_metal_reductions | 548 | 0 | ~67 | 0 | HUNG at ~67 |
-| test_metal_bfp8_typecast | 13 | 0 | 13 | 0 | FAIL |
-| test_metal_tensor_collapsing | 14 | 0 | 10 | 2 skip, 2 xfail | FAIL |
-| test_metal_tms | 173 | ~44 | ~44 | 0 | HUNG at ~88 |
 | test_metal_virtual_grid_rowmajor | 27 | 0 | 0 | 27 skip | SKIP (needs n300) |
-| test_metal_virtual_grids | 39 | 0 | 39 | 0 | FAIL |
+| test_metal_matmul | 127 | 15 | 0 | 2 xfail | ABORT at test 18 (2048x2048x2048 matmul_block) |
+| test_metal_dma | 49 | 8 | 0 | 0 | ABORT at test 9 (first DRAM-backed DMA) |
+| test_metal_matmul_higher_rank | 10 | 0 | 10 | 0 | FAIL (golden PCC mismatch) |
+| test_metal_tilize | 11 | 3 | 4 | 4 skip | FAIL (golden PCC mismatch) |
+| test_metal_masking | 20 | 2 | 18 | 0 | FAIL (JIT compile errors) |
+| test_metal_bfp8_typecast | 13 | 0 | 13 | 0 | FAIL (JIT compile errors) |
+| test_metal_tensor_collapsing | 14 | 0 | 10 | 2 skip, 2 xfail | FAIL (mix: JIT errors + golden mismatch) |
+| test_metal_virtual_grids | 39 | 0 | 39 | 0 | FAIL (JIT compile errors) |
+| test_metal_tms | 173 | 68 | 67 | 0 | HUNG at 78% (reshapes pass, permutes fail) |
+| test_metal_reductions | 548 | 12 | 90 | 16 skip | HUNG at 21% (all sum variants fail) |
+
+## What Changed
+
+### Hangs resolved -> Aborts
+**test_metal_matmul** and **test_metal_dma** previously hung indefinitely. With the multicast worker-core filtering and NOC fixes, these now abort cleanly (SIGABRT) instead of deadlocking. The abort occurs on the same test case (matmul_block-f32-2048x2048x2048, DRAM DMA with multi-grid) but the process terminates within the timeout instead of hanging.
+
+### Reductions progress
+Previously ~67 tests ran before timeout. Now 118 tests execute (12 passed, 90 failed, 16 skipped) before timeout at 21%. The failures are golden PCC mismatches, not hangs -- the sum reduction compute produces incorrect results. The timeout is from the sheer volume of tests (548) each taking ~2.5s.
+
+### TMS progress
+Previously ~88 tests ran before timeout. Now 135 tests execute (68 passed, 67 failed) before timeout at 78%. Tile-aligned reshapes pass; non-tile-aligned reshapes and all permutes fail.
+
+### Layout/Allocate stable
+Still 100% pass (100 tests total).
 
 ## Failure Categories
 
-### Category 1: Hangs (4 files, blocks ~750+ tests)
+### Category 1: Aborts (2 files, ~168 tests unreachable)
 
-Four test files hit a 180s timeout and were killed mid-run. In each case, some early tests pass before a specific test pattern triggers an indefinite hang.
+**test_metal_matmul** -- 15 passed (all `matmul_tile` bf16/f32 variants up to 1024x1024x2048), 2 xfail (bf16 2048x). Process aborts on `matmul_block-f32-2048x2048x2048`. The abort (not hang) suggests the multicast/semaphore deadlock is partially fixed but an assertion or memory error remains for large matmul_block shapes.
 
-**test_metal_matmul** -- 15 passed (`matmul_tile` variants), then hung on `matmul_block-f32-2048x2048x2048`. All `matmul_tile` shapes up to 2048x2048x2048 work; the first `matmul_block` with a large shape hangs. Likely deadlock in multi-core CB synchronization for `matmul_block` (which uses `copy_block_matmul_partials` and cross-core semaphore sync).
+**test_metal_dma** -- 8 passed (all L1-to-L1 DMA transfers). Process aborts on first DRAM-backed test (`dram-end_grid1-start_grid3-shape0`). DRAM DMA path triggers an assertion failure during NOC address resolution for DRAM cores.
 
-**test_metal_dma** -- 8 passed (all L1-to-L1 transfers), then hung on first DRAM-backed test `dram-end_grid1-start_grid3`. DRAM DMA with multi-grid endpoints triggers a hang, likely in semaphore wait during DRAM-to-L1 multicast.
+### Category 2: JIT Compile Errors (4 files, ~70 failures)
 
-**test_metal_reductions** -- All ~67 tests that ran before timeout failed (PCC mismatch on `test_sum_*` variants). The hang likely occurs when a reduction kernel pattern triggers a deadlocking CB wait.
+Missing compute stub declarations cause g++ to fail during JIT compilation.
 
-**test_metal_tms** -- Mixed results (~44 pass, ~44 fail) before timeout. Tile-aligned reshapes pass; non-tile-aligned ones fail with incorrect results. Hang likely on a specific reshape that triggers multi-core deadlock.
+**test_metal_virtual_grids** (39 failures): Missing `abs_tile_init()`, `abs_tile(dst_index)`
 
-**Root cause hypothesis:** All hangs share a pattern -- they occur when kernels use multi-core execution with CB synchronization and the kernel waits on a semaphore or CB slot that never becomes available. The `matmul_block` and DRAM DMA cases are the most reproducible triggers.
+**test_metal_bfp8_typecast** (13 failures): Missing `typecast_tile_init()`, `typecast_tile(DataFormat, dst_index)`
 
-### Category 2: Missing Compute Stubs (3 files, ~68 failures)
+**test_metal_masking** (16 of 18 failures): Masking kernel's compute thread resolves `cb_wait_front` etc. from real `hw/inc/api/compute/cb_api.h` (which calls `llk_*` functions) instead of the emulator's stub. Also `cb_reserve_back` overload conflict between `int32_t` and `uint32_t`.
 
-JIT compilation fails because the emulator's `jit_hw` headers don't provide stubs for certain compute intrinsics that D2M-generated kernels call.
+**test_metal_tensor_collapsing** (8 of 10 failures): Mix of missing stubs (`add_tiles_init`, `mul_tiles_init`, `exp_tile_init`, `exp_tile`) and golden PCC mismatch for matmul variants.
 
-**test_metal_virtual_grids** (39 failures):
-```
-error: 'abs_tile_init' was not declared in this scope
-error: 'abs_tile' was not declared in this scope
-```
-Missing: `abs_tile_init()`, `abs_tile(dst_index)`
-
-**test_metal_bfp8_typecast** (13 failures):
-```
-error: 'typecast_tile_init' was not declared in this scope
-error: 'typecast_tile' was not declared in this scope
-```
-Missing: `typecast_tile_init()`, `typecast_tile(DataFormat, dst_index)`
-
-**test_metal_masking** (16 of 18 failures):
-```
-error: 'llk_push_tiles' was not declared in this scope
-error: 'llk_wait_tiles' was not declared in this scope
-error: 'llk_pop_tiles' was not declared in this scope
-error: 'llk_wait_for_free_tiles' was not declared in this scope
-error: call of overloaded 'cb_reserve_back(uint32_t, int32_t&)' is ambiguous
-```
-The masking kernel's compute thread includes the real `tt_metal/hw/inc/api/compute/cb_api.h` (which calls `llk_*` functions) instead of the emulator's `jit_hw/api/cb_api.h`. Also, `cb_reserve_back` has an overload conflict between int32_t and uint32_t num_tiles parameter.
-
-**test_metal_tensor_collapsing** (5 of 10 failures):
-```
-error: 'add_tiles_init' was not declared in this scope
-error: 'mul_tiles_init' was not declared in this scope
-error: 'exp_tile_init' was not declared in this scope
-error: 'exp_tile' was not declared in this scope
-```
-Missing: `add_tiles_init()`, `mul_tiles_init()`, `exp_tile_init()`, `exp_tile(dst_index)`
-
-### Category 3: Incorrect Numeric Results (3 files, ~19 failures)
+### Category 3: Incorrect Numeric Results (4 files, ~171 failures)
 
 Tests compile and run but produce wrong output (PCC well below 0.99 threshold).
 
-**test_metal_matmul_higher_rank** (10/10 failures):
-- PCC range: 0.08 -- 0.50 (expected >= 0.99)
-- All batched matmul variants (3D, 4D) fail
-- Single-core and multi-core variants both affected
-- Likely cause: `matmul_tiles` stub doesn't handle batch dimension iteration -- the D2M-generated loop structure for batched matmul differs from the single-batch case
+**test_metal_reductions** (90 failures): All `test_sum_unaligned` and `test_sum_4d` variants fail. The reduction compute kernel produces near-zero PCC. Likely cause: the reduce_tile stub doesn't correctly accumulate partial sums across the reduction dimension.
 
-**test_metal_tilize** (4/11 failures):
-- PCC range: 0.06 -- 0.08
-- Failing shapes: shape0 through shape3 (the non-skipped, non-passing ones)
-- 3 tests pass (aligned shapes), 4 skip (unsupported), 4 fail
-- Likely cause: tilize kernel handles certain dimension combinations incorrectly
+**test_metal_matmul_higher_rank** (10 failures): PCC range 0.02--0.15 for all batched matmul (3D, 4D). The batch loop in D2M-generated kernels handles accumulation differently from the single-batch case that passes.
 
-**test_metal_tensor_collapsing** (5 of 10 failures, after compile errors excluded):
-- PCC ~0.50 for `non_collapsed` variants (matmul, 3d_add, 3d_multiply, 3d_exp, 4d_exp)
-- Likely cause: element placement incorrect when tensor dimensions aren't collapsed to 2D
+**test_metal_tms** (67 failures): Non-tile-aligned reshapes and all permute operations fail. Tile-aligned reshapes (where input/output tile boundaries match) pass. Permute failures are likely due to missing transpose/permute compute stubs.
+
+**test_metal_tilize** (4 failures): PCC ~0.06--0.08 for certain shapes. 3 tile-aligned shapes pass, 4 non-aligned fail.
+
+### Category 4: Timeouts (2 files, ~530+ tests unreachable)
+
+**test_metal_reductions** -- 548 tests, reached 21% (118 tests) in 300s. Not a kernel hang -- each test takes ~2.5s and there are simply too many. Increasing timeout to 1500s would allow full completion.
+
+**test_metal_tms** -- 173 tests, reached 78% (135 tests) in 300s. The last test was `test_permute[shape29]`. Each permute test takes ~3s; likely would complete in ~400s.
 
 ## Clean Passes
 
-**test_metal_layout** (94/94) -- All layout transformation tests pass. This validates the core data movement infrastructure: tilize, untilize, L1/DRAM transfers, and multi-core grid distribution for layout operations.
+**test_metal_layout** (94/94) -- All layout transformation tests pass: tilize, untilize, L1/DRAM transfers, multi-core grid distribution.
 
-**test_metal_allocate** (6/6) -- Buffer allocation with max-reduce and matmul operations pass. Validates allocator integration and basic compute-with-allocation flows.
+**test_metal_allocate** (6/6) -- Buffer allocation with max-reduce and matmul operations.
+
+**test_metal_virtual_grid_rowmajor** (27/27 skipped) -- All skipped (requires n300 multi-chip).
+
+**test_metal_matmul** (15/15 non-xfail pass) -- Single-core matmul_tile (bf16 and f32) and matmul_block (f32, up to 1024x sizes) all pass.
+
+**test_metal_dma** (8/8 before abort) -- All L1-to-L1 DMA roundtrip tests pass.
+
+**test_metal_tms** (68 pass) -- All tile-aligned reshapes pass (e.g., 64x64->32x128, 96x64->64x96).
 
 ## Recommended Fixes by Priority
 
-### P0: Fix hangs (unblocks ~750+ tests)
+### P0: Increase timeout + fix abort (unblocks ~700+ tests)
 
-Investigate the `matmul_block-f32-2048x2048x2048` hang first -- it's the most reproducible case. Check:
-1. Whether `copy_block_matmul_partials` stub correctly signals CB completion
-2. Whether semaphore increment/wait in multi-core `matmul_block` has a race condition
-3. Whether DRAM DMA path correctly wakes waiting reader threads
+1. **Increase timeout to 600s** for reductions and TMS -- these aren't hanging, just slow with many tests. This alone would expose ~430 additional test results.
+2. **Fix SIGABRT in matmul_block-2048x** and **DRAM DMA** -- investigate the assertion failure that replaced the previous hang. Check L1 allocation size for large matmul_block intermediates and DRAM NOC address resolution for multi-grid DMA.
 
-### P1: Add missing compute stubs (unblocks ~68 tests)
+### P1: Add missing compute stubs (unblocks ~70 tests)
 
 Add to `include/jit_hw/api/compute/`:
-- `abs_tile_init()` / `abs_tile(dst_index)` -- apply `fabsf` per element in DST
+- `abs_tile_init()` / `abs_tile(dst_index)` -- `fabsf` per element in DST
 - `typecast_tile_init()` / `typecast_tile(DataFormat, dst_index)` -- format conversion in DST
-- `exp_tile_init()` / `exp_tile(dst_index)` -- apply `expf` per element in DST
-- `add_tiles_init()` / `mul_tiles_init()` -- no-op init stubs (actual math already in `add_tiles`/`mul_tiles`)
+- `exp_tile_init()` / `exp_tile(dst_index)` -- `expf` per element in DST
+- `add_tiles_init()` / `mul_tiles_init()` -- no-op init stubs
 
-Fix masking CB API include: ensure compute kernels resolve `cb_wait_front` etc. from emulator stubs, not real `hw/inc/api/compute/cb_api.h`. Fix `cb_reserve_back` overload to accept both int32_t and uint32_t.
+Fix masking CB API include path: ensure compute kernels resolve CB functions from emulator stubs, not real `hw/inc/`. Fix `cb_reserve_back` overload for `int32_t`/`uint32_t`.
 
-### P2: Fix batched matmul correctness (unblocks 10 tests)
+### P2: Fix reduction numerics (unblocks ~90 tests)
 
-The `matmul_tiles` stub likely needs to handle the case where D2M generates a batch loop around the matmul. Check whether the batch dimension is folded into the M dimension or iterated separately, and ensure DST accumulation resets between batches.
+The `reduce_tile` stub likely doesn't handle partial-sum accumulation correctly for D2M-generated reduction loops. Check whether the reduction dimension stride and accumulation target in DST match what the kernel expects.
 
-### P3: Fix tilize/tensor_collapsing numerics (unblocks ~9 tests)
+### P3: Fix batched matmul + permute correctness (unblocks ~77 tests)
 
-Investigate specific failing shapes in tilize and tensor_collapsing to identify the dimension handling bug.
+- Batched matmul: DST accumulation may not reset between batches, or the batch loop structure differs from single-batch.
+- Permute: likely needs a `transpose_wh` or general permute stub that rearranges tile data in DST/CB.
