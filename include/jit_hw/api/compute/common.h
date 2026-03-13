@@ -61,6 +61,7 @@ static constexpr uint32_t __EMULE_DST_TILES_FP32 = 4; // f32 half-dest (2x eleme
 static constexpr uint32_t __EMULE_TILE_ELEMS = 1024;
 static constexpr uint32_t __EMULE_DST_BYTES = __EMULE_TILE_ELEMS * sizeof(float);
 static thread_local float __emule_dst[__EMULE_DST_TILES][__EMULE_TILE_ELEMS];
+static thread_local bool __emule_l1_acc_enabled = false;
 
 // Assert FULL DEST is not used
 #ifdef FULL_DEST
@@ -129,6 +130,33 @@ inline uint32_t cb_tile_elems(uint32_t cb_id) {
 // Heuristic: bf16 tiles = 2048 bytes (1024 × 2), 32-bit tiles > 2048.
 inline bool cb_is_32bit_format(uint32_t cb_id) {
     return __emule_cbs[cb_id].page_size > 2048;
+}
+
+// pack_dst_to_buf: format-aware pack with L1 accumulation support.
+// When __emule_l1_acc_enabled, adds DST to existing CB contents instead of overwriting.
+inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
+    if (cb_is_32bit_format(ocb)) {
+        uint32_t n = cb_page_size(ocb) / sizeof(float);
+        if (n > __EMULE_TILE_ELEMS) n = __EMULE_TILE_ELEMS;
+        float* out = reinterpret_cast<float*>(buf);
+        if (__emule_l1_acc_enabled) {
+            for (uint32_t i = 0; i < n; i++)
+                out[i] += __emule_dst[dst_slot][i];
+        } else {
+            std::memcpy(buf, __emule_dst[dst_slot], n * sizeof(float));
+        }
+    } else {
+        uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
+        uint32_t n = cb_tile_elems(ocb);
+        if (__emule_l1_acc_enabled) {
+            for (uint32_t i = 0; i < n; i++)
+                bf[i] = __emule_bf16::from_f32(
+                    __emule_bf16::to_f32(bf[i]) + __emule_dst[dst_slot][i]);
+        } else {
+            for (uint32_t i = 0; i < n; i++)
+                bf[i] = __emule_bf16::from_f32(__emule_dst[dst_slot][i]);
+        }
+    }
 }
 
 } // namespace __emule_compute
@@ -204,21 +232,10 @@ ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
 
 // pack_tile: write DST[idst] → CB[ocb] write slot.
 // Format-aware: bf16 (page_size ≤ 2048) or raw 32-bit (page_size > 2048).
+// When L1 acc enabled, accumulates into existing CB data instead of overwriting.
 ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
     __emule_dst_check(idst, "pack_tile");
-    uint8_t* buf = __emule_compute::cb_write_ptr(ocb);
-    if (__emule_compute::cb_is_32bit_format(ocb)) {
-        // 32-bit format (INT32/Float32): raw memcpy from DST
-        uint32_t sz = __emule_compute::cb_page_size(ocb);
-        if (sz > __EMULE_DST_BYTES) sz = __EMULE_DST_BYTES;
-        std::memcpy(buf, __emule_dst[idst], sz);
-    } else {
-        // bfloat16: convert float32 → bf16
-        uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
-        uint32_t n = __emule_compute::cb_tile_elems(ocb);
-        for (uint32_t i = 0; i < n; i++)
-            bf[i] = __emule_bf16::from_f32(__emule_dst[idst][i]);
-    }
+    __emule_compute::pack_dst_to_buf(__emule_compute::cb_write_ptr(ocb), idst, ocb);
 }
 
 // pack_tile (templated): used by D2M-generated code.
@@ -227,18 +244,7 @@ template <bool UseOutputOffset>
 ALWI void pack_tile(uint32_t idst, uint32_t ocb, uint32_t output_offset = 0) {
     __emule_dst_check(idst, "pack_tile<templated>");
     if constexpr (UseOutputOffset) {
-        // Write to specific slot at output_offset
-        uint8_t* buf = __emule_compute::cb_write_ptr_at(ocb, output_offset);
-        if (__emule_compute::cb_is_32bit_format(ocb)) {
-            uint32_t sz = __emule_compute::cb_page_size(ocb);
-            if (sz > __EMULE_DST_BYTES) sz = __EMULE_DST_BYTES;
-            std::memcpy(buf, __emule_dst[idst], sz);
-        } else {
-            uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
-            uint32_t n = __emule_compute::cb_tile_elems(ocb);
-            for (uint32_t i = 0; i < n; i++)
-                bf[i] = __emule_bf16::from_f32(__emule_dst[idst][i]);
-        }
+        __emule_compute::pack_dst_to_buf(__emule_compute::cb_write_ptr_at(ocb, output_offset), idst, ocb);
     } else {
         pack_tile(idst, ocb);
     }
@@ -249,17 +255,7 @@ ALWI void pack_tile_block(uint32_t ifrom_dst, uint32_t ocb, uint32_t ntiles) {
     if (ntiles > 0)
         __emule_dst_check(ifrom_dst + ntiles - 1, "pack_tile_block");
     for (uint32_t i = 0; i < ntiles; i++) {
-        uint8_t* buf = __emule_compute::cb_write_ptr_at(ocb, i);
-        if (__emule_compute::cb_is_32bit_format(ocb)) {
-            uint32_t sz = __emule_compute::cb_page_size(ocb);
-            if (sz > __EMULE_DST_BYTES) sz = __EMULE_DST_BYTES;
-            std::memcpy(buf, __emule_dst[ifrom_dst + i], sz);
-        } else {
-            uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
-            uint32_t n = __emule_compute::cb_tile_elems(ocb);
-            for (uint32_t j = 0; j < n; j++)
-                bf[j] = __emule_bf16::from_f32(__emule_dst[ifrom_dst + i][j]);
-        }
+        __emule_compute::pack_dst_to_buf(__emule_compute::cb_write_ptr_at(ocb, i), ifrom_dst + i, ocb);
     }
 }
 
@@ -333,8 +329,11 @@ ALWI void binary_dest_reuse_tiles(uint32_t icb0, uint32_t icb1,
 // state_configure — no-op
 ALWI void state_configure(uint32_t = 0) {}
 
-// llk_pack_reconfig_l1_acc — no-op (L1 accumulation toggle, only used when PACKER_L1_ACC defined)
-ALWI void llk_pack_reconfig_l1_acc(uint32_t /*enable*/) {}
+// llk_pack_reconfig_l1_acc — L1 accumulation toggle for pack operations.
+// enable=1: pack_tile adds DST to existing CB data; enable=0: pack_tile overwrites.
+ALWI void llk_pack_reconfig_l1_acc(uint32_t enable) {
+    __emule_l1_acc_enabled = (enable != 0);
+}
 
 } // namespace ckernel
 
