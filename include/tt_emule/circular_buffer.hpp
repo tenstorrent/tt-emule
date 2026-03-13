@@ -17,6 +17,8 @@ public:
         state_.base      = storage_.data();
         state_.page_size = page_size;
         state_.num_pages = static_cast<uint32_t>(capacity);
+        state_.page_mask = (capacity > 0 && (capacity & (capacity - 1)) == 0)
+                           ? static_cast<uint32_t>(capacity) - 1 : 0;
     }
 
     size_t   capacity()  const { return state_.num_pages; }

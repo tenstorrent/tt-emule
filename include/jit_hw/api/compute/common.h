@@ -12,6 +12,8 @@
 #include "jit_hw/api/compute/common_globals.h"
 #include <cstring>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cmath>
 
 // ---- TRISC execution macros ----
@@ -54,18 +56,35 @@ enum class ReluType { NO_RELU, ZERO_RELU, MIN_THRESHOLD_RELU, MAX_THRESHOLD_RELU
 // 8 tile slots, each 1024 elements × 4 bytes = 4096 bytes.
 // Stores float32 for bfloat16 ops or raw int32 bit patterns for INT32 ops.
 
-static constexpr uint32_t __EMULE_DST_TILES = 8;
+static constexpr uint32_t __EMULE_DST_TILES = 8;      // bf16 half-dest
+static constexpr uint32_t __EMULE_DST_TILES_FP32 = 4; // f32 half-dest (2x element size)
 static constexpr uint32_t __EMULE_TILE_ELEMS = 1024;
 static constexpr uint32_t __EMULE_DST_BYTES = __EMULE_TILE_ELEMS * sizeof(float);
 static thread_local float __emule_dst[__EMULE_DST_TILES][__EMULE_TILE_ELEMS];
 
+// Assert FULL DEST is not used
+#ifdef FULL_DEST
+#error "FULL DEST mode is not supported in emulation"
+#endif
+
+// DST bounds guard — call before any DST[slot] access
+inline void __emule_dst_check(uint32_t slot, const char* caller) {
+    if (slot >= __EMULE_DST_TILES) {
+        fprintf(stderr, "[EMULE] DST out-of-bounds: %s accessed slot %u (max %u)\n",
+                caller, slot, __EMULE_DST_TILES);
+        std::abort();
+    }
+}
+
 // Helper: access DST slot as int32_t* (type-pun via memcpy in SFPU ops).
 inline int32_t __emule_dst_load_i32(uint32_t slot, uint32_t idx) {
+    __emule_dst_check(slot, "__emule_dst_load_i32");
     int32_t v;
     std::memcpy(&v, &__emule_dst[slot][idx], sizeof(int32_t));
     return v;
 }
 inline void __emule_dst_store_i32(uint32_t slot, uint32_t idx, int32_t v) {
+    __emule_dst_check(slot, "__emule_dst_store_i32");
     std::memcpy(&__emule_dst[slot][idx], &v, sizeof(int32_t));
 }
 
@@ -129,6 +148,7 @@ ALWI void binary_tiles_init(uint32_t, uint32_t, bool = false) {}
 // add_tiles: DST[idst] = CB[icb0][itile0] + CB[icb1][itile1]
 ALWI void add_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
+    __emule_dst_check(idst, "add_tiles");
     if (__emule_compute::cb_is_32bit_format(icb0)) {
         const float* buf0 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
         const float* buf1 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
@@ -147,6 +167,7 @@ ALWI void add_tiles(uint32_t icb0, uint32_t icb1,
 // sub_tiles: DST[idst] = CB[icb0][itile0] - CB[icb1][itile1]
 ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
+    __emule_dst_check(idst, "sub_tiles");
     if (__emule_compute::cb_is_32bit_format(icb0)) {
         const float* buf0 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
         const float* buf1 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
@@ -165,6 +186,7 @@ ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
 // mul_tiles: DST[idst] = CB[icb0][itile0] * CB[icb1][itile1]
 ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
+    __emule_dst_check(idst, "mul_tiles");
     if (__emule_compute::cb_is_32bit_format(icb0)) {
         const float* buf0 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
         const float* buf1 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
@@ -183,6 +205,7 @@ ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
 // pack_tile: write DST[idst] → CB[ocb] write slot.
 // Format-aware: bf16 (page_size ≤ 2048) or raw 32-bit (page_size > 2048).
 ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
+    __emule_dst_check(idst, "pack_tile");
     uint8_t* buf = __emule_compute::cb_write_ptr(ocb);
     if (__emule_compute::cb_is_32bit_format(ocb)) {
         // 32-bit format (INT32/Float32): raw memcpy from DST
@@ -202,6 +225,7 @@ ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
 // Template param <true> means "use output_offset as the write slot index".
 template <bool UseOutputOffset>
 ALWI void pack_tile(uint32_t idst, uint32_t ocb, uint32_t output_offset = 0) {
+    __emule_dst_check(idst, "pack_tile<templated>");
     if constexpr (UseOutputOffset) {
         // Write to specific slot at output_offset
         uint8_t* buf = __emule_compute::cb_write_ptr_at(ocb, output_offset);
@@ -222,6 +246,8 @@ ALWI void pack_tile(uint32_t idst, uint32_t ocb, uint32_t output_offset = 0) {
 
 // pack_tile_block: write DST[ifrom_dst .. ifrom_dst+ntiles-1] → CB[ocb] consecutive write slots.
 ALWI void pack_tile_block(uint32_t ifrom_dst, uint32_t ocb, uint32_t ntiles) {
+    if (ntiles > 0)
+        __emule_dst_check(ifrom_dst + ntiles - 1, "pack_tile_block");
     for (uint32_t i = 0; i < ntiles; i++) {
         uint8_t* buf = __emule_compute::cb_write_ptr_at(ocb, i);
         if (__emule_compute::cb_is_32bit_format(ocb)) {
@@ -240,6 +266,7 @@ ALWI void pack_tile_block(uint32_t ifrom_dst, uint32_t ocb, uint32_t ntiles) {
 // copy_tile: CB[icb][itile] → DST[idst].
 // Format-aware: bf16 (page_size ≤ 2048) or raw 32-bit (page_size > 2048).
 ALWI void copy_tile(uint32_t icb, uint32_t itile, uint32_t idst) {
+    __emule_dst_check(idst, "copy_tile");
     uint8_t* buf = __emule_compute::cb_read_ptr_at(icb, itile);
     if (__emule_compute::cb_is_32bit_format(icb)) {
         // 32-bit format: raw memcpy into DST
@@ -259,6 +286,8 @@ ALWI void copy_tile(uint32_t icb, uint32_t itile, uint32_t idst) {
 ALWI void copy_block_matmul_partials(
     uint32_t in_cb_id, uint32_t start_in_tile_index,
     uint32_t start_dst_tile_index, uint32_t ntiles) {
+    if (ntiles > 0)
+        __emule_dst_check(start_dst_tile_index + ntiles - 1, "copy_block_matmul_partials");
     for (uint32_t i = 0; i < ntiles; i++) {
         copy_tile(in_cb_id, start_in_tile_index + i, start_dst_tile_index + i);
     }

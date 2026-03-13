@@ -21,6 +21,7 @@ ALWI void mm_init_short_with_dt(uint32_t in0_cb, uint32_t in1_cb,
 // DST stores float32 — acquire zeroes it, then matmul_tiles accumulates.
 ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
                        uint32_t in0_tile, uint32_t in1_tile, uint32_t idst) {
+    __emule_dst_check(idst, "matmul_tiles");
     // Standard 32x32 × 32x32 matrix multiply, accumulating into DST[idst].
     // Layout: row-major, 32 rows × 32 cols = 1024 elements per tile.
     constexpr uint32_t DIM = 32;
@@ -30,29 +31,32 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
             __emule_compute::cb_read_ptr_at(in0_cb, in0_tile));
         const float* b_ptr = reinterpret_cast<const float*>(
             __emule_compute::cb_read_ptr_at(in1_cb, in1_tile));
+        // Loop order r,k,c for sequential B access (cache-friendly).
         for (uint32_t r = 0; r < DIM; r++) {
-            for (uint32_t c = 0; c < DIM; c++) {
-                float acc = __emule_dst[idst][r * DIM + c];
-                for (uint32_t k = 0; k < DIM; k++) {
-                    acc += a_ptr[r * DIM + k] * b_ptr[k * DIM + c];
+            for (uint32_t k = 0; k < DIM; k++) {
+                float a_val = a_ptr[r * DIM + k];
+                for (uint32_t c = 0; c < DIM; c++) {
+                    __emule_dst[idst][r * DIM + c] += a_val * b_ptr[k * DIM + c];
                 }
-                __emule_dst[idst][r * DIM + c] = acc;
             }
         }
     } else {
-        // bfloat16 path: convert bf16 → f32 before multiply.
+        // bfloat16 path: pre-convert B tile to f32 for cache-friendly access.
         const uint16_t* a_ptr = reinterpret_cast<const uint16_t*>(
             __emule_compute::cb_read_ptr_at(in0_cb, in0_tile));
         const uint16_t* b_ptr = reinterpret_cast<const uint16_t*>(
             __emule_compute::cb_read_ptr_at(in1_cb, in1_tile));
+        float b_f32[DIM * DIM];
+        for (uint32_t i = 0; i < DIM * DIM; i++) {
+            b_f32[i] = __emule_bf16::to_f32(b_ptr[i]);
+        }
+        // Loop order r,k,c for sequential B access.
         for (uint32_t r = 0; r < DIM; r++) {
-            for (uint32_t c = 0; c < DIM; c++) {
-                float acc = __emule_dst[idst][r * DIM + c];
-                for (uint32_t k = 0; k < DIM; k++) {
-                    acc += __emule_bf16::to_f32(a_ptr[r * DIM + k]) *
-                           __emule_bf16::to_f32(b_ptr[k * DIM + c]);
+            for (uint32_t k = 0; k < DIM; k++) {
+                float a_val = __emule_bf16::to_f32(a_ptr[r * DIM + k]);
+                for (uint32_t c = 0; c < DIM; c++) {
+                    __emule_dst[idst][r * DIM + c] += a_val * b_f32[k * DIM + c];
                 }
-                __emule_dst[idst][r * DIM + c] = acc;
             }
         }
     }
@@ -76,6 +80,8 @@ ALWI void matmul_block(uint32_t in0_cb, uint32_t in1_cb,
                        uint32_t in0_tile, uint32_t in1_tile, uint32_t idst,
                        uint32_t transpose = 0, uint32_t ct_dim = 1,
                        uint32_t rt_dim = 1, uint32_t kt_dim = 1) {
+    if (rt_dim * ct_dim > 0)
+        __emule_dst_check(idst + rt_dim * ct_dim - 1, "matmul_block");
     uint32_t dst = idst;
     for (uint32_t r = 0; r < rt_dim; r++) {
         for (uint32_t c = 0; c < ct_dim; c++) {
@@ -98,6 +104,8 @@ ALWI void matmul_block(uint32_t in0_cb_id, uint32_t in1_cb_id,
                        uint32_t in0_tile_index, uint32_t in1_tile_index,
                        uint32_t idst, const uint32_t transpose, uint32_t ct_dim,
                        uint32_t rt_dim, uint32_t kt_dim, uint32_t nt_dim) {
+    if (rt_dim * ct_dim > 0)
+        __emule_dst_check(idst + rt_dim * ct_dim - 1, "experimental::matmul_block");
     for (uint32_t i = 0; i < kt_dim; i++) {
         ckernel::matmul_block(in0_cb_id, in1_cb_id, in0_tile_index, in1_tile_index,
                               idst, transpose, ct_dim, rt_dim, kt_dim);

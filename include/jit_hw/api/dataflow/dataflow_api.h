@@ -15,6 +15,7 @@
 #include "jit_hw/api/cb_api.h"
 #include "jit_hw/internal/dataflow/dataflow_api_addrgen.h"
 #include "jit_hw/api/tensor/tensor_accessor.h"
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -269,11 +270,17 @@ inline void noc_semaphore_set(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t va
     *sem_addr = val;
 }
 
-// Wait for semaphore to reach expected value (blocking spin-wait with hang detection).
+// Wait for semaphore to reach expected value (spin with exponential backoff + hang detection).
 inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t val) {
     uint64_t spins = 0;
     while (*sem_addr != val) {
-        std::this_thread::yield();
+        if (spins < 64) {
+            // Busy-spin for fast wakeup
+        } else if (spins < 1024) {
+            std::this_thread::yield();
+        } else {
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
+        }
         if (++spins > 10'000'000ULL) {
             fprintf(stderr, "EMULE HANG: noc_semaphore_wait(%p, %u) stuck at %u after %llu spins "
                     "[phys (%u,%u) logical (%u,%u)]\n",
@@ -284,11 +291,17 @@ inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t v
     }
 }
 
-// Wait for semaphore to reach at least min_val (blocking spin-wait with hang detection).
+// Wait for semaphore to reach at least min_val (spin with exponential backoff + hang detection).
 inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t min_val) {
     uint64_t spins = 0;
     while (*sem_addr < min_val) {
-        std::this_thread::yield();
+        if (spins < 64) {
+            // Busy-spin for fast wakeup
+        } else if (spins < 1024) {
+            std::this_thread::yield();
+        } else {
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
+        }
         if (++spins > 10'000'000ULL) {
             fprintf(stderr, "EMULE HANG: noc_semaphore_wait_min(%p, %u) stuck at %u after %llu spins "
                     "[phys (%u,%u) logical (%u,%u)]\n",

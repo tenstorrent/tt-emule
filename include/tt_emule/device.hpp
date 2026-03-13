@@ -113,6 +113,7 @@ public:
         s.base      = base;
         s.page_size = page_size;
         s.num_pages = num_pages;
+        s.page_mask = (num_pages > 0 && (num_pages & (num_pages - 1)) == 0) ? num_pages - 1 : 0;
         s.write_idx = 0;
         s.read_idx  = 0;
         s.occupied  = 0;
@@ -123,6 +124,7 @@ public:
             s.base      = nullptr;
             s.page_size = 0;
             s.num_pages = 0;
+            s.page_mask = 0;
             s.write_idx = 0;
             s.read_idx  = 0;
             s.occupied  = 0;
