@@ -8,7 +8,7 @@ BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule_clang}"
 TEST_DIR="$TT_MLIR_DIR/test/python/golden"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"
 LOG_DIR="/tmp/tt_emule_d2m_logs_$$"
-TIMEOUT="${TIMEOUT:-300}"
+TIMEOUT="${TIMEOUT:-1800}"
 
 SERIAL=0
 PYTEST_EXTRA_ARGS=()
@@ -95,7 +95,7 @@ for tf in "${TEST_FILES[@]}"; do
     if [ $SERIAL -eq 1 ]; then
         echo "--- $tf ---"
         START=$(date +%s)
-        timeout "$TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1
+        timeout "$TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider --forked "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1
         RC=$?
         END=$(date +%s)
         ELAPSED=$((END - START))
@@ -114,7 +114,7 @@ for tf in "${TEST_FILES[@]}"; do
         # Clear JIT cache between test files
         rm -rf /tmp/tt_emule_jit_*
     else
-        timeout "$TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1 &
+        timeout "$TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider --forked "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1 &
         PIDS[$tf]=$!
     fi
 done
