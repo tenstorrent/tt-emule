@@ -6,7 +6,6 @@
 #include <memory>
 #include <vector>
 #include <cstdint>
-#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <sys/mman.h>
@@ -144,7 +143,8 @@ private:
             throw std::runtime_error("mmap for Core memory failed");
         l1_ = static_cast<uint8_t*>(p);
         l1_base_ = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(l1_));
-        std::memset(l1_, 0, size);
+        // MAP_ANONYMOUS guarantees zero-filled pages; no memset needed.
+        // Skipping memset allows lazy page allocation (pages faulted on demand).
     }
 
     CoreCoord coord_;
