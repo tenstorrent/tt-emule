@@ -5,8 +5,11 @@
 //
 // Address translation model:
 //   Encode: __emule_addr_to_offset(addr) — bitmask extracts L1 offset from host ptr
-//   Fixup:  __emule_fixup_noc_addr(noc) — fixes OR-constructed NOC addrs (host ptr in lower bits)
 //   Decode: __emule_resolve_noc_addr(noc_addr) — core_map lookup → host pointer
+//
+// NOC addresses from get_noc_addr() have L1 offsets already converted by
+// __emule_addr_to_offset.  Addresses from get_noc_addr_from_bank_id() contain
+// firmware-style DRAM offsets (possibly > 2MB) and must NOT be masked.
 //
 // Does NOT include kernel_api/dataflow_api.hpp — this file provides all needed
 // functions with signatures matching the real device API.
@@ -37,6 +40,11 @@ inline bool __emule_debug_multicast() {
 // L1Pool allocates worker slots at 2 MB alignment, so addr & 0x1FFFFF
 // gives the offset within the slot — one AND instruction, no TLS lookup.
 // Standalone builds (without L1Pool) fall back to TLS subtraction.
+//
+// IMPORTANT: This must only be called at NOC address construction time
+// (get_noc_addr, get_noc_multicast_addr) where the input is a host L1
+// pointer.  It must NOT be applied to firmware-style offsets like DRAM
+// bank addresses from get_noc_addr_from_bank_id (which can exceed 2MB).
 inline uint32_t __emule_addr_to_offset(uint32_t addr) {
 #ifdef TT_EMULE_USE_L1_POOL
     return addr & 0x1FFFFF;  // SLOT_MASK = 2 MB - 1
@@ -207,13 +215,15 @@ inline uint64_t __emule_fixup_noc_addr(uint64_t noc_addr) {
 
 inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
                            uint32_t size, uint8_t noc = 0) {
-    uint64_t fixed = __emule_fixup_noc_addr(src_noc_addr);
+    // NOC addresses are already properly constructed by get_noc_addr() or
+    // get_noc_addr_from_bank_id() — no fixup needed here.  Applying
+    // __emule_fixup_noc_addr would destroy DRAM bank offsets (> 2MB).
     uint8_t* dst = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(dst_local_l1_addr));
-    uint8_t* src = __emule_resolve_noc_addr(fixed);
+    uint8_t* src = __emule_resolve_noc_addr(src_noc_addr);
     if (__emule_debug_multicast()) {
-        uint32_t nx = (fixed >> 36) & 0x3F;
-        uint32_t ny = (fixed >> 42) & 0x3F;
-        uint32_t off = static_cast<uint32_t>(fixed & ((1ULL << 36) - 1));
+        uint32_t nx = (src_noc_addr >> 36) & 0x3F;
+        uint32_t ny = (src_noc_addr >> 42) & 0x3F;
+        uint32_t off = static_cast<uint32_t>(src_noc_addr & ((1ULL << 36) - 1));
         fprintf(stderr, "EMULE DBG: noc_async_read src_core=(%u,%u) offset=0x%x size=%u resolved=%p "
                 "[from logical (%u,%u)]\n",
                 nx, ny, off, size, (void*)src,
@@ -232,7 +242,7 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
 inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
                             uint32_t size, uint8_t noc = 0) {
     uint8_t* src = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(src_local_l1_addr));
-    uint8_t* dst = __emule_resolve_noc_addr(__emule_fixup_noc_addr(dst_noc_addr));
+    uint8_t* dst = __emule_resolve_noc_addr(dst_noc_addr);
     if (dst) {
         std::memcpy(dst, src, size);
     } else {
@@ -248,20 +258,19 @@ inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
 inline void noc_async_write_multicast(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
     uint32_t size, uint32_t num_dests, bool linked = false, uint8_t noc = 0) {
-    uint64_t fixed = __emule_fixup_noc_addr(dst_mcast_noc_addr);
     if (__emule_debug_multicast()) {
-        uint32_t x_end   = (fixed >> 36) & 0x3F;
-        uint32_t y_end   = (fixed >> 42) & 0x3F;
-        uint32_t x_start = (fixed >> 48) & 0x3F;
-        uint32_t y_start = (fixed >> 54) & 0x3F;
-        uint32_t off     = static_cast<uint32_t>(fixed & ((1ULL << 36) - 1));
+        uint32_t x_end   = (dst_mcast_noc_addr >> 36) & 0x3F;
+        uint32_t y_end   = (dst_mcast_noc_addr >> 42) & 0x3F;
+        uint32_t x_start = (dst_mcast_noc_addr >> 48) & 0x3F;
+        uint32_t y_start = (dst_mcast_noc_addr >> 54) & 0x3F;
+        uint32_t off     = static_cast<uint32_t>(dst_mcast_noc_addr & ((1ULL << 36) - 1));
         fprintf(stderr, "EMULE DBG: noc_async_write_multicast (%u,%u)->(%u,%u) offset=0x%x size=%u num_dests=%u "
                 "[from logical (%u,%u)]\n",
                 x_start, y_start, x_end, y_end, off, size, num_dests,
                 __emule_logical_x, __emule_logical_y);
     }
     uint8_t* src = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(src_local_l1_addr));
-    __emule_multicast_write(fixed, src, size);
+    __emule_multicast_write(dst_mcast_noc_addr, src, size);
 }
 
 inline void noc_async_write_multicast_loopback_src(
@@ -355,11 +364,10 @@ inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32
 // Atomically increment a remote semaphore.
 // noc_addr is a 64-bit encoded NOC address pointing to the semaphore.
 inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc = 0) {
-    uint64_t fixed = __emule_fixup_noc_addr(noc_addr);
-    uint32_t noc_x = (fixed >> 36) & 0x3F;
-    uint32_t noc_y = (fixed >> 42) & 0x3F;
-    uint32_t offset = static_cast<uint32_t>(fixed & ((1ULL << 36) - 1));
-    uint8_t* ptr = __emule_resolve_noc_addr(fixed);
+    uint32_t noc_x = (noc_addr >> 36) & 0x3F;
+    uint32_t noc_y = (noc_addr >> 42) & 0x3F;
+    uint32_t offset = static_cast<uint32_t>(noc_addr & ((1ULL << 36) - 1));
+    uint8_t* ptr = __emule_resolve_noc_addr(noc_addr);
     if (__emule_debug_multicast()) {
         fprintf(stderr, "EMULE DBG: noc_semaphore_inc target_core=(%u,%u) offset=0x%x incr=%u resolved=%p "
                 "[from logical (%u,%u)]\n",
@@ -371,7 +379,7 @@ inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc = 0)
     } else {
         fprintf(stderr, "EMULE WARN: noc_semaphore_inc failed to resolve addr 0x%llx "
                 "(target core (%u,%u) offset 0x%x) [from phys (%u,%u) logical (%u,%u)]\n",
-                (unsigned long long)fixed, noc_x, noc_y, offset,
+                (unsigned long long)noc_addr, noc_x, noc_y, offset,
                 my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
     }
 }
@@ -380,13 +388,12 @@ inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc = 0)
 inline void noc_semaphore_set_multicast(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
     uint32_t num_dests, bool linked = false, uint8_t noc = 0) {
-    uint64_t fixed = __emule_fixup_noc_addr(dst_mcast_noc_addr);
     if (__emule_debug_multicast()) {
-        uint32_t x_end   = (fixed >> 36) & 0x3F;
-        uint32_t y_end   = (fixed >> 42) & 0x3F;
-        uint32_t x_start = (fixed >> 48) & 0x3F;
-        uint32_t y_start = (fixed >> 54) & 0x3F;
-        uint32_t off     = static_cast<uint32_t>(fixed & ((1ULL << 36) - 1));
+        uint32_t x_end   = (dst_mcast_noc_addr >> 36) & 0x3F;
+        uint32_t y_end   = (dst_mcast_noc_addr >> 42) & 0x3F;
+        uint32_t x_start = (dst_mcast_noc_addr >> 48) & 0x3F;
+        uint32_t y_start = (dst_mcast_noc_addr >> 54) & 0x3F;
+        uint32_t off     = static_cast<uint32_t>(dst_mcast_noc_addr & ((1ULL << 36) - 1));
         uint32_t sem_val = *reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(src_local_l1_addr));
         fprintf(stderr, "EMULE DBG: noc_semaphore_set_multicast (%u,%u)->(%u,%u) offset=0x%x val=%u num_dests=%u "
                 "[from logical (%u,%u)]\n",
@@ -394,7 +401,7 @@ inline void noc_semaphore_set_multicast(
                 __emule_logical_x, __emule_logical_y);
     }
     uint8_t* src = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(src_local_l1_addr));
-    __emule_multicast_write(fixed, src, sizeof(uint32_t));
+    __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t));
 }
 
 inline void noc_semaphore_set_multicast_loopback_src(
