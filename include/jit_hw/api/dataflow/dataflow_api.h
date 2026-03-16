@@ -26,6 +26,12 @@
 extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
 extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src, uint32_t size);
 
+// ---- Debug logging (enabled by TT_EMULE_DEBUG_MULTICAST=1 env var) ----
+inline bool __emule_debug_multicast() {
+    static bool val = std::getenv("TT_EMULE_DEBUG_MULTICAST") != nullptr;
+    return val;
+}
+
 // ---- L1 address conversion helper ----
 // Extract L1 offset from a host address using bitmask.
 // L1Pool allocates worker slots at 2 MB alignment, so addr & 0x1FFFFF
@@ -201,8 +207,18 @@ inline uint64_t __emule_fixup_noc_addr(uint64_t noc_addr) {
 
 inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
                            uint32_t size, uint8_t noc = 0) {
+    uint64_t fixed = __emule_fixup_noc_addr(src_noc_addr);
     uint8_t* dst = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(dst_local_l1_addr));
-    uint8_t* src = __emule_resolve_noc_addr(__emule_fixup_noc_addr(src_noc_addr));
+    uint8_t* src = __emule_resolve_noc_addr(fixed);
+    if (__emule_debug_multicast()) {
+        uint32_t nx = (fixed >> 36) & 0x3F;
+        uint32_t ny = (fixed >> 42) & 0x3F;
+        uint32_t off = static_cast<uint32_t>(fixed & ((1ULL << 36) - 1));
+        fprintf(stderr, "EMULE DBG: noc_async_read src_core=(%u,%u) offset=0x%x size=%u resolved=%p "
+                "[from logical (%u,%u)]\n",
+                nx, ny, off, size, (void*)src,
+                __emule_logical_x, __emule_logical_y);
+    }
     if (src) {
         std::memcpy(dst, src, size);
     } else {
@@ -232,8 +248,20 @@ inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
 inline void noc_async_write_multicast(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
     uint32_t size, uint32_t num_dests, bool linked = false, uint8_t noc = 0) {
+    uint64_t fixed = __emule_fixup_noc_addr(dst_mcast_noc_addr);
+    if (__emule_debug_multicast()) {
+        uint32_t x_end   = (fixed >> 36) & 0x3F;
+        uint32_t y_end   = (fixed >> 42) & 0x3F;
+        uint32_t x_start = (fixed >> 48) & 0x3F;
+        uint32_t y_start = (fixed >> 54) & 0x3F;
+        uint32_t off     = static_cast<uint32_t>(fixed & ((1ULL << 36) - 1));
+        fprintf(stderr, "EMULE DBG: noc_async_write_multicast (%u,%u)->(%u,%u) offset=0x%x size=%u num_dests=%u "
+                "[from logical (%u,%u)]\n",
+                x_start, y_start, x_end, y_end, off, size, num_dests,
+                __emule_logical_x, __emule_logical_y);
+    }
     uint8_t* src = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(src_local_l1_addr));
-    __emule_multicast_write(__emule_fixup_noc_addr(dst_mcast_noc_addr), src, size);
+    __emule_multicast_write(fixed, src, size);
 }
 
 inline void noc_async_write_multicast_loopback_src(
@@ -272,6 +300,12 @@ inline void noc_semaphore_set(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t va
 
 // Wait for semaphore to reach expected value (spin with exponential backoff + hang detection).
 inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t val) {
+    if (__emule_debug_multicast()) {
+        fprintf(stderr, "EMULE DBG: noc_semaphore_wait(%p, %u) current=%u "
+                "[from logical (%u,%u)]\n",
+                (void*)sem_addr, val, *sem_addr,
+                __emule_logical_x, __emule_logical_y);
+    }
     uint64_t spins = 0;
     while (*sem_addr != val) {
         if (spins < 64) {
@@ -293,6 +327,12 @@ inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t v
 
 // Wait for semaphore to reach at least min_val (spin with exponential backoff + hang detection).
 inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t min_val) {
+    if (__emule_debug_multicast()) {
+        fprintf(stderr, "EMULE DBG: noc_semaphore_wait_min(%p, %u) current=%u "
+                "[from logical (%u,%u)]\n",
+                (void*)sem_addr, min_val, *sem_addr,
+                __emule_logical_x, __emule_logical_y);
+    }
     uint64_t spins = 0;
     while (*sem_addr < min_val) {
         if (spins < 64) {
@@ -316,13 +356,19 @@ inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32
 // noc_addr is a 64-bit encoded NOC address pointing to the semaphore.
 inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc = 0) {
     uint64_t fixed = __emule_fixup_noc_addr(noc_addr);
+    uint32_t noc_x = (fixed >> 36) & 0x3F;
+    uint32_t noc_y = (fixed >> 42) & 0x3F;
+    uint32_t offset = static_cast<uint32_t>(fixed & ((1ULL << 36) - 1));
     uint8_t* ptr = __emule_resolve_noc_addr(fixed);
+    if (__emule_debug_multicast()) {
+        fprintf(stderr, "EMULE DBG: noc_semaphore_inc target_core=(%u,%u) offset=0x%x incr=%u resolved=%p "
+                "[from logical (%u,%u)]\n",
+                noc_x, noc_y, offset, incr, (void*)ptr,
+                __emule_logical_x, __emule_logical_y);
+    }
     if (ptr) {
         __atomic_fetch_add(reinterpret_cast<uint32_t*>(ptr), incr, __ATOMIC_SEQ_CST);
     } else {
-        uint32_t noc_x = (fixed >> 36) & 0x3F;
-        uint32_t noc_y = (fixed >> 42) & 0x3F;
-        uint32_t offset = static_cast<uint32_t>(fixed & ((1ULL << 36) - 1));
         fprintf(stderr, "EMULE WARN: noc_semaphore_inc failed to resolve addr 0x%llx "
                 "(target core (%u,%u) offset 0x%x) [from phys (%u,%u) logical (%u,%u)]\n",
                 (unsigned long long)fixed, noc_x, noc_y, offset,
@@ -334,8 +380,21 @@ inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc = 0)
 inline void noc_semaphore_set_multicast(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
     uint32_t num_dests, bool linked = false, uint8_t noc = 0) {
+    uint64_t fixed = __emule_fixup_noc_addr(dst_mcast_noc_addr);
+    if (__emule_debug_multicast()) {
+        uint32_t x_end   = (fixed >> 36) & 0x3F;
+        uint32_t y_end   = (fixed >> 42) & 0x3F;
+        uint32_t x_start = (fixed >> 48) & 0x3F;
+        uint32_t y_start = (fixed >> 54) & 0x3F;
+        uint32_t off     = static_cast<uint32_t>(fixed & ((1ULL << 36) - 1));
+        uint32_t sem_val = *reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(src_local_l1_addr));
+        fprintf(stderr, "EMULE DBG: noc_semaphore_set_multicast (%u,%u)->(%u,%u) offset=0x%x val=%u num_dests=%u "
+                "[from logical (%u,%u)]\n",
+                x_start, y_start, x_end, y_end, off, sem_val, num_dests,
+                __emule_logical_x, __emule_logical_y);
+    }
     uint8_t* src = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(src_local_l1_addr));
-    __emule_multicast_write(__emule_fixup_noc_addr(dst_mcast_noc_addr), src, sizeof(uint32_t));
+    __emule_multicast_write(fixed, src, sizeof(uint32_t));
 }
 
 inline void noc_semaphore_set_multicast_loopback_src(

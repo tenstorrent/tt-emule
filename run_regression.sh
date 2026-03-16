@@ -57,6 +57,7 @@ echo "== Tier 2: Buffer I/O =="
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
 export TT_METAL_EMULATED_MODE=1
 export TT_METAL_SLOW_DISPATCH_MODE=1
+export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
 
 run_test "SimpleL1Buffer"   "$TEST_DIR/test_simple_l1_buffer" --gtest_filter="MeshDeviceFixture.TestSimpleL1Buffer*"
 run_test "SimpleDramBuffer" "$TEST_DIR/test_simple_dram_buffer"
