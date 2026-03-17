@@ -144,7 +144,6 @@ private:
         l1_ = static_cast<uint8_t*>(p);
         l1_base_ = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(l1_));
         // MAP_ANONYMOUS guarantees zero-filled pages; no memset needed.
-        // Skipping memset allows lazy page allocation (pages faulted on demand).
     }
 
     CoreCoord coord_;
