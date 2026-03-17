@@ -4,6 +4,7 @@
 //   - kernel_api/ (standalone tt-emule tests via CircularBuffer)
 //   - jit_hw/ (JIT-compiled kernels via __emule_cb_state / __emule_cbs)
 
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <condition_variable>
@@ -17,7 +18,7 @@ struct CBSyncState {
     uint32_t  page_mask = 0;        // num_pages - 1 (for bitmask modulo; 0 if non-power-of-2)
     uint32_t  write_idx = 0;        // Current write index
     uint32_t  read_idx  = 0;        // Current read index
-    uint32_t  occupied  = 0;        // Number of occupied pages
+    std::atomic<uint32_t> occupied{0};  // Number of occupied pages (atomic for lock-free fast path)
     std::mutex              mu;
     std::condition_variable space_cv;
     std::condition_variable data_cv;
@@ -26,28 +27,34 @@ struct CBSyncState {
 // ---- Sync operations on CBSyncState ----
 
 inline void cb_sync_reserve(CBSyncState& cb, uint32_t n) {
+    // Fast path: lock-free check (safe for SPSC — only consumer decrements occupied)
+    if ((cb.num_pages - cb.occupied.load(std::memory_order_acquire)) >= n) return;
+    // Slow path: wait under lock
     std::unique_lock<std::mutex> lk(cb.mu);
-    cb.space_cv.wait(lk, [&]{ return (cb.num_pages - cb.occupied) >= n; });
+    cb.space_cv.wait(lk, [&]{ return (cb.num_pages - cb.occupied.load(std::memory_order_relaxed)) >= n; });
 }
 
 inline void cb_sync_push(CBSyncState& cb, uint32_t n) {
     std::unique_lock<std::mutex> lk(cb.mu);
     cb.write_idx = cb.page_mask ? (cb.write_idx + n) & cb.page_mask
                                 : (cb.write_idx + n) % cb.num_pages;
-    cb.occupied += n;
+    cb.occupied.fetch_add(n, std::memory_order_release);
     cb.data_cv.notify_one();
 }
 
 inline void cb_sync_wait(CBSyncState& cb, uint32_t n) {
+    // Fast path: lock-free check (safe for SPSC — only producer increments occupied)
+    if (cb.occupied.load(std::memory_order_acquire) >= n) return;
+    // Slow path: wait under lock
     std::unique_lock<std::mutex> lk(cb.mu);
-    cb.data_cv.wait(lk, [&]{ return cb.occupied >= n; });
+    cb.data_cv.wait(lk, [&]{ return cb.occupied.load(std::memory_order_relaxed) >= n; });
 }
 
 inline void cb_sync_pop(CBSyncState& cb, uint32_t n) {
     std::unique_lock<std::mutex> lk(cb.mu);
     cb.read_idx = cb.page_mask ? (cb.read_idx + n) & cb.page_mask
                                : (cb.read_idx + n) % cb.num_pages;
-    cb.occupied -= n;
+    cb.occupied.fetch_sub(n, std::memory_order_release);
     cb.space_cv.notify_one();
 }
 

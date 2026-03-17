@@ -56,15 +56,17 @@ inline int __emule_cb_timeout_sec() {
 
 inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
     auto& cb = __emule_cbs[cb_id];
+    // Lock-free fast path (safe for SPSC — only consumer decrements occupied)
+    if ((cb.num_pages - cb.occupied.load(std::memory_order_acquire)) >= n) return;
     std::unique_lock<std::mutex> lk(cb.mu);
     if (!cb.space_cv.wait_for(lk, std::chrono::seconds(__emule_cb_timeout_sec()),
-            [&]{ return (cb.num_pages - cb.occupied) >= n; })) {
+            [&]{ return (cb.num_pages - cb.occupied.load(std::memory_order_relaxed)) >= n; })) {
         fprintf(stderr, "EMULE HANG: cb_reserve_back(cb_id=%u, n=%u) timed out after %ds "
                 "(occupied=%u, num_pages=%u, page_size=%u) "
                 "[phys (%u,%u) logical (%u,%u)] "
                 "(set TT_EMULE_CB_TIMEOUT=<secs> to adjust)\n",
                 cb_id, n, __emule_cb_timeout_sec(),
-                cb.occupied, cb.num_pages, cb.page_size,
+                cb.occupied.load(), cb.num_pages, cb.page_size,
                 my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
         std::abort();
     }
@@ -76,15 +78,17 @@ inline void cb_push_back(uint32_t cb_id, uint32_t n) {
 
 inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
     auto& cb = __emule_cbs[cb_id];
+    // Lock-free fast path (safe for SPSC — only producer increments occupied)
+    if (cb.occupied.load(std::memory_order_acquire) >= n) return;
     std::unique_lock<std::mutex> lk(cb.mu);
     if (!cb.data_cv.wait_for(lk, std::chrono::seconds(__emule_cb_timeout_sec()),
-            [&]{ return cb.occupied >= n; })) {
+            [&]{ return cb.occupied.load(std::memory_order_relaxed) >= n; })) {
         fprintf(stderr, "EMULE HANG: cb_wait_front(cb_id=%u, n=%u) timed out after %ds "
                 "(occupied=%u, num_pages=%u, page_size=%u) "
                 "[phys (%u,%u) logical (%u,%u)] "
                 "(set TT_EMULE_CB_TIMEOUT=<secs> to adjust)\n",
                 cb_id, n, __emule_cb_timeout_sec(),
-                cb.occupied, cb.num_pages, cb.page_size,
+                cb.occupied.load(), cb.num_pages, cb.page_size,
                 my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
         std::abort();
     }
