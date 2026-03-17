@@ -1,8 +1,14 @@
 #pragma once
 // JIT compute stub for matmul operations.
 // matmul_tiles performs a 32x32 tile GEMM (bfloat16 inputs, float32 DST accumulate).
+// Uses AVX2/FMA intrinsics when available for ~4-8x speedup over scalar.
 
 #include "jit_hw/api/compute/common.h"
+
+#if defined(__AVX2__) && defined(__FMA__)
+#include <immintrin.h>
+#define EMULE_MATMUL_USE_AVX2 1
+#endif
 
 namespace ckernel {
 
@@ -31,7 +37,21 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
             __emule_compute::cb_read_ptr_at(in0_cb, in0_tile));
         const float* b_ptr = reinterpret_cast<const float*>(
             __emule_compute::cb_read_ptr_at(in1_cb, in1_tile));
-        // Loop order r,k,c for sequential B access (cache-friendly).
+#ifdef EMULE_MATMUL_USE_AVX2
+        // AVX2+FMA path: broadcast a_val, FMA over 8 floats at a time (32/8 = 4 iters).
+        for (uint32_t r = 0; r < DIM; r++) {
+            for (uint32_t k = 0; k < DIM; k++) {
+                __m256 a_vec = _mm256_set1_ps(a_ptr[r * DIM + k]);
+                for (uint32_t c = 0; c < DIM; c += 8) {
+                    __m256 b_vec = _mm256_loadu_ps(&b_ptr[k * DIM + c]);
+                    __m256 d_vec = _mm256_loadu_ps(&__emule_dst[idst][r * DIM + c]);
+                    d_vec = _mm256_fmadd_ps(a_vec, b_vec, d_vec);
+                    _mm256_storeu_ps(&__emule_dst[idst][r * DIM + c], d_vec);
+                }
+            }
+        }
+#else
+        // Scalar fallback: loop order r,k,c for sequential B access (cache-friendly).
         for (uint32_t r = 0; r < DIM; r++) {
             for (uint32_t k = 0; k < DIM; k++) {
                 float a_val = a_ptr[r * DIM + k];
@@ -40,6 +60,7 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
                 }
             }
         }
+#endif
     } else {
         // bfloat16 path: pre-convert B tile to f32 for cache-friendly access.
         const uint16_t* a_ptr = reinterpret_cast<const uint16_t*>(
@@ -47,10 +68,34 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
         const uint16_t* b_ptr = reinterpret_cast<const uint16_t*>(
             __emule_compute::cb_read_ptr_at(in1_cb, in1_tile));
         float b_f32[DIM * DIM];
+#ifdef EMULE_MATMUL_USE_AVX2
+        // AVX2 bulk bf16→f32 conversion for B tile.
+        for (uint32_t i = 0; i < DIM * DIM; i += 8) {
+            // Convert 8 bf16 values to f32 via shift-left-16.
+            __m128i raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&b_ptr[i]));
+            __m256i wide = _mm256_cvtepu16_epi32(raw);
+            __m256i shifted = _mm256_slli_epi32(wide, 16);
+            _mm256_storeu_ps(&b_f32[i], _mm256_castsi256_ps(shifted));
+        }
+        // AVX2+FMA matmul with bf16 A (convert per-element) and pre-converted B.
+        for (uint32_t r = 0; r < DIM; r++) {
+            for (uint32_t k = 0; k < DIM; k++) {
+                float a_val = __emule_bf16::to_f32(a_ptr[r * DIM + k]);
+                __m256 a_vec = _mm256_set1_ps(a_val);
+                for (uint32_t c = 0; c < DIM; c += 8) {
+                    __m256 b_vec = _mm256_loadu_ps(&b_f32[k * DIM + c]);
+                    __m256 d_vec = _mm256_loadu_ps(&__emule_dst[idst][r * DIM + c]);
+                    d_vec = _mm256_fmadd_ps(a_vec, b_vec, d_vec);
+                    _mm256_storeu_ps(&__emule_dst[idst][r * DIM + c], d_vec);
+                }
+            }
+        }
+#else
+        // Scalar bf16→f32 conversion for B tile.
         for (uint32_t i = 0; i < DIM * DIM; i++) {
             b_f32[i] = __emule_bf16::to_f32(b_ptr[i]);
         }
-        // Loop order r,k,c for sequential B access.
+        // Scalar fallback: loop order r,k,c for sequential B access.
         for (uint32_t r = 0; r < DIM; r++) {
             for (uint32_t k = 0; k < DIM; k++) {
                 float a_val = __emule_bf16::to_f32(a_ptr[r * DIM + k]);
@@ -59,6 +104,7 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
                 }
             }
         }
+#endif
     }
 }
 
