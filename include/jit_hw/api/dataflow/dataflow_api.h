@@ -301,22 +301,29 @@ inline uint32_t get_semaphore(uint32_t semaphore_id) {
     return l1_base + EMULE_SEM_BASE + semaphore_id * EMULE_SEM_ALIGN;
 }
 
+// Atomic helpers for semaphore operations.
+// volatile reads are unreliable at -O3; use std::atomic for cross-thread visibility.
+inline std::atomic<uint32_t>* __emule_sem_atomic(volatile tt_l1_ptr uint32_t* sem_addr) {
+    return reinterpret_cast<std::atomic<uint32_t>*>(const_cast<uint32_t*>(sem_addr));
+}
+
 // Set semaphore value (local L1 store).
 // addr is a uint32_t L1 address (truncated host pointer).
 inline void noc_semaphore_set(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t val) {
-    *sem_addr = val;
+    __emule_sem_atomic(sem_addr)->store(val, std::memory_order_release);
 }
 
 // Wait for semaphore to reach expected value (spin with exponential backoff + hang detection).
 inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t val) {
+    auto* atom = __emule_sem_atomic(sem_addr);
     if (__emule_debug_multicast()) {
         fprintf(stderr, "EMULE DBG: noc_semaphore_wait(%p, %u) current=%u "
                 "[from logical (%u,%u)]\n",
-                (void*)sem_addr, val, *sem_addr,
+                (void*)sem_addr, val, atom->load(std::memory_order_acquire),
                 __emule_logical_x, __emule_logical_y);
     }
     uint64_t spins = 0;
-    while (*sem_addr != val) {
+    while (atom->load(std::memory_order_acquire) != val) {
         if (spins < 64) {
             // Busy-spin for fast wakeup
         } else if (spins < 1024) {
@@ -327,7 +334,7 @@ inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t v
         if (++spins > 10'000'000ULL) {
             fprintf(stderr, "EMULE HANG: noc_semaphore_wait(%p, %u) stuck at %u after %llu spins "
                     "[phys (%u,%u) logical (%u,%u)]\n",
-                    (void*)sem_addr, val, *sem_addr, (unsigned long long)spins,
+                    (void*)sem_addr, val, atom->load(std::memory_order_relaxed), (unsigned long long)spins,
                     my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
             std::abort();
         }
@@ -336,14 +343,15 @@ inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t v
 
 // Wait for semaphore to reach at least min_val (spin with exponential backoff + hang detection).
 inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t min_val) {
+    auto* atom = __emule_sem_atomic(sem_addr);
     if (__emule_debug_multicast()) {
         fprintf(stderr, "EMULE DBG: noc_semaphore_wait_min(%p, %u) current=%u "
                 "[from logical (%u,%u)]\n",
-                (void*)sem_addr, min_val, *sem_addr,
+                (void*)sem_addr, min_val, atom->load(std::memory_order_acquire),
                 __emule_logical_x, __emule_logical_y);
     }
     uint64_t spins = 0;
-    while (*sem_addr < min_val) {
+    while (atom->load(std::memory_order_acquire) < min_val) {
         if (spins < 64) {
             // Busy-spin for fast wakeup
         } else if (spins < 1024) {
@@ -354,7 +362,7 @@ inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32
         if (++spins > 10'000'000ULL) {
             fprintf(stderr, "EMULE HANG: noc_semaphore_wait_min(%p, %u) stuck at %u after %llu spins "
                     "[phys (%u,%u) logical (%u,%u)]\n",
-                    (void*)sem_addr, min_val, *sem_addr, (unsigned long long)spins,
+                    (void*)sem_addr, min_val, atom->load(std::memory_order_relaxed), (unsigned long long)spins,
                     my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
             std::abort();
         }
