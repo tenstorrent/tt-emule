@@ -56,6 +56,13 @@ inline int __emule_cb_timeout_sec() {
 
 inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
     auto& cb = __emule_cbs[cb_id];
+    if (n > cb.num_pages) {
+        fprintf(stderr, "EMULE BUG: cb_reserve_back(cb_id=%u, n=%u) requests more than capacity "
+                "(num_pages=%u, page_size=%u) [phys (%u,%u) logical (%u,%u)]\n",
+                cb_id, n, cb.num_pages, cb.page_size,
+                my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+        std::abort();
+    }
     // Lock-free fast path (safe for SPSC — only consumer decrements occupied)
     if ((cb.num_pages - cb.occupied.load(std::memory_order_acquire)) >= n) return;
     std::unique_lock<std::mutex> lk(cb.mu);
@@ -78,6 +85,13 @@ inline void cb_push_back(uint32_t cb_id, uint32_t n) {
 
 inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
     auto& cb = __emule_cbs[cb_id];
+    if (n > cb.num_pages) {
+        fprintf(stderr, "EMULE BUG: cb_wait_front(cb_id=%u, n=%u) requests more than capacity "
+                "(num_pages=%u, page_size=%u) [phys (%u,%u) logical (%u,%u)]\n",
+                cb_id, n, cb.num_pages, cb.page_size,
+                my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+        std::abort();
+    }
     // Lock-free fast path (safe for SPSC — only producer increments occupied)
     if (cb.occupied.load(std::memory_order_acquire) >= n) return;
     std::unique_lock<std::mutex> lk(cb.mu);
