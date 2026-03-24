@@ -249,7 +249,7 @@ TT_METAL_MOCK_CLUSTER_DESC_PATH=...   -> SOC descriptor for core/DRAM topology
 TT_METAL_SLOW_DISPATCH_MODE=1         -> Required (no HWCommandQueue in emulation)
 ```
 
-The same binary supports both silicon and emulated execution — no separate "emulation build" is needed. Only the `TT_METAL_EMULATION=ON` CMake flag compiles in the JIT runner; activation is purely runtime.
+Both the build flag and the env var are required. The `TT_METAL_EMULATION=ON` CMake flag compiles in the emulated code paths (`SWEmulatedChip`, `execute_program_emulated`, JIT runner) behind `#ifdef TT_METAL_EMULATION`. Without it, these code paths do not exist in the binary. The env var then selects the emulated path at runtime. A single binary built with this flag supports both silicon and emulated execution — the env var toggles which path is taken.
 
 #### Layer 3: JIT Kernel Execution
 
@@ -478,7 +478,7 @@ The complete set of tt-metal modifications for emulation support:
 
 **Semaphore layout matches hardware.** The HAL-based semaphore base (`kernel_config_base + prog_config.sem_offset`) uses the same values computed by `finalize_sems()` for real firmware. This eliminated the CB/semaphore overlap bug that caused matmul_block-2048x2048 to abort, and ensures that any future changes to semaphore placement in tt-metal are automatically reflected in emulation.
 
-**Runtime activation, not compile-time.** The same binary supports both silicon and emulated execution. Activation is purely via environment variables. The emulated code path is dead code in non-emulation builds (guarded by `#ifdef TT_METAL_EMULATION`).
+**Runtime toggle from a single binary.** A binary built with `TT_METAL_EMULATION=ON` supports both silicon and emulated execution — the `TT_METAL_EMULATED_MODE` environment variable selects which path is taken at runtime. The build flag is a prerequisite: without it, the emulated code paths (`SWEmulatedChip`, `execute_program_emulated`) are not compiled in (`#ifdef TT_METAL_EMULATION`).
 
 **Interleaved DRAM banking is production-accurate.** Bank mapping arrays (`dram_bank_to_noc_xy`, `bank_to_dram_offset`, etc.) are populated from the real `metal_SocDescriptor` at program execution time. `InterleavedAddrGen<DRAM>` computes proper banked NOC addresses matching the real firmware's banking logic.
 
