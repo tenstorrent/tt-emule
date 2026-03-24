@@ -2,8 +2,8 @@
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TT_METAL_DIR="${TT_METAL_DIR:-/localdev/xchin/project_emule/tt-metal}"
-TT_MLIR_DIR="${TT_MLIR_DIR:-/localdev/xchin/project_emule/tt-mlir}"
+TT_METAL_DIR="${TT_METAL_DIR:-/localdev/arminale/tt-metal}"
+TT_MLIR_DIR="${TT_MLIR_DIR:-/localdev/arminale/tt-mlir}"
 BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule_clang}"
 TEST_DIR="$TT_MLIR_DIR/test/python/golden"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"

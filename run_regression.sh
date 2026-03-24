@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TT_METAL_DIR="${TT_METAL_DIR:-/localdev/xchin/project_emule/tt-metal}"
+TT_METAL_DIR="${TT_METAL_DIR:-/localdev/arminale/tt-metal}"
 BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule_clang}"
 TEST_DIR="$BUILD_DIR/test/tt_emule"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"
