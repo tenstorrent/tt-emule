@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <cstring>
 
+extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src, uint32_t size);
+
 namespace experimental {
 
 template <typename T>
@@ -52,8 +54,30 @@ public:
         }
     }
 
+    // async_write_multicast: Delegates to __emule_multicast_write which
+    // iterates over the rectangle of target cores and copies data to each.
+    template <typename... Extra, typename Src, typename Dst>
+    void async_write_multicast(
+        const Src& src,
+        const Dst& dst,
+        uint32_t size_bytes,
+        uint32_t num_dsts,
+        const typename noc_traits_t<Src>::src_args_type& src_args,
+        const typename noc_traits_t<Dst>::dst_args_mcast_type& dst_args,
+        bool linked = false,
+        uint32_t trid = 0) const {
+        uintptr_t s = noc_traits_t<Src>::template src_addr<AddressType::LOCAL_L1>(src, *this, src_args);
+        auto mcast_noc_addr = noc_traits_t<Dst>::template dst_addr_mcast<AddressType::NOC>(dst, *this, dst_args);
+        if (s) {
+            __emule_multicast_write(static_cast<uint64_t>(mcast_noc_addr),
+                                    reinterpret_cast<const uint8_t*>(s), size_bytes);
+        }
+    }
+
     void async_read_barrier() const {}
     void async_write_barrier() const {}
+    void async_writes_flushed() const {}
+    void async_atomic_barrier() const {}
     void async_full_barrier() const {}
 
 private:
