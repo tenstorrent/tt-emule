@@ -1,4 +1,4 @@
-# Implementation Report v4: Software-Emulated Device (tt-emule) Integration into tt-metal
+# Implementation Report v5: Software-Emulated Device (tt-emule) Integration into tt-metal
 
 ## Table of Contents
 
@@ -107,7 +107,7 @@ Four inline operations (`cb_sync_reserve`, `cb_sync_push`, `cb_sync_wait`, `cb_s
 ### Codebase Structure
 
 ```
-tt-emule/                           (~6,000 lines across 110 files)
+tt-emule/                           (~6,800 lines across 113 files)
 ├── include/
 │   ├── tt_emule/       (11 files)  Host-side types: Device, Core, L1Pool, Buffer, Program,
 │   │                               CircularBuffer, CBSyncState, DstRegisterFile
@@ -125,17 +125,18 @@ tt-emule/                           (~6,000 lines across 110 files)
 
 ### JIT Kernel API Coverage
 
-The `jit_hw/` directory provides stub implementations for 78 header files covering:
+The `jit_hw/` directory provides stub implementations for 75 header files covering:
 
 | Category | Files | Key APIs |
 |----------|-------|----------|
-| Compute | 53 | `matmul_tiles`, `matmul_block`, `add/sub/mul_tiles`, `pack_tile`, `copy_tile`, `bcast`, `reduce`, `tilize/untilize`, `transpose_wh`, `quantization`, 23 eltwise_unary SFPU ops, binary bitwise/shift/comp/fmod/max_min, `gcd/lcm`, `xlogy`, `copy_dest_values` |
+| Compute | 53 | `matmul_tiles`, `matmul_block`, `add/sub/mul_tiles`, `pack_tile`, `copy_tile`, `bcast`, `reduce`, `tilize/untilize`, `pack_untilize` (with `experimental::pack_untilize_block`), `transpose_wh`, `quantization`, 23 eltwise_unary SFPU ops (`abs_tile`, `exp_tile`, `negative_tile`, `typecast_tile`, etc.), binary bitwise/shift/comp/fmod/max_min, `gcd/lcm`, `xlogy`, `copy_dest_values` |
 | Dataflow | 2 | `noc_async_read/write`, `noc_async_write_multicast`, semaphore ops, `InterleavedAddrGen<DRAM/L1>`, banking arrays |
-| CB sync | 1 | `cb_reserve_back`, `cb_push_back`, `cb_wait_front`, `cb_pop_front` |
+| CB sync | 1 | `cb_reserve_back`, `cb_push_back`, `cb_wait_front`, `cb_pop_front` (uint32_t and int32_t overloads) |
+| LLK defs | 1 | `llk_unpack_A`, `llk_wait_tiles`, `llk_pop_tiles`, `llk_push_tiles`, `llk_wait_for_free_tiles`, `get_output_id`, `FACE_R_DIM`, `TILE_C_DIM`, coordinate APIs (`get_absolute_logical_x/y`) |
 | Tensor | 1 | `TensorAccessor`, `TensorAccessorArgs` |
 | Infrastructure | 8 | compile-time args, bfloat16, dprint, assert stubs, DataFormat enum, tile constants |
 | Experimental | 5 | `Noc`, `CircularBuffer`, `AllocatorBank`, `Lock`, `CoreLocalMem` |
-| Compatibility | 8 | `ckernel.h`, `ckernel_defs.h`, `common_values.hpp`, `risc_attribs.h`, profiler stub, tt-metalium stubs |
+| Compatibility | 4 | `ckernel.h`, `ckernel_defs.h`, `common_values.hpp`, `risc_attribs.h` |
 
 ### Dual API Paths
 
@@ -165,25 +166,25 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 | 4 | TTNN Relational | 1 | 66 sub-cases: eq, ne, gt, lt, ge, le on INT32 (Blackhole P100) |
 | 5 | TTNN Matmul Sweep | 1 | 14 sub-cases: multi-core matmul 32x32x32 through 2048x2048x2048 (Wormhole N150) |
 
-**D2M golden test regression** (249 pass / ~244 fail / 56 skip-xfail):
+**D2M golden test regression** (1589 pass / 147 fail / 142 skip-xfail):
 
 | Test File | Total | Passed | Failed | Skip/XFail | Status |
 |-----------|-------|--------|--------|------------|--------|
-| test_metal_layout | 94 | 94 | 0 | 0 | PASS |
-| test_metal_allocate | 6 | 6 | 0 | 0 | PASS |
+| test_metal_layout | 94 | 94 | 0 | 0 | **PASS** |
+| test_metal_matmul | 127 | 113 | 0 | 14 xfail | **PASS** |
+| test_metal_matmul_higher_rank | 10 | 10 | 0 | 0 | **PASS** |
+| test_metal_allocate | 6 | 6 | 0 | 0 | **PASS** |
+| test_metal_tms | 339 | 332 | 4 | 3 skip | PASS (arange only) |
+| test_metal_reductions | 1096 | 932 | 68 | 96 skip | FAIL (unaligned) |
+| test_metal_dma | 49 | 39 | 10 | 0 | FAIL (DRAM aborts) |
+| test_metal_tilize | 44 | 12 | 32 | 0 | FAIL (untilize/tilize PCC) |
+| test_metal_tensor_collapsing | 14 | 12 | 0 | 2 skip | **PASS** |
+| test_metal_virtual_grids | 39 | 39 | 0 | 0 | **PASS** |
 | test_metal_virtual_grid_rowmajor | 27 | 0 | 0 | 27 skip | SKIP (needs n300) |
-| test_metal_matmul | 127 | 56 | 0 | 5 xfail | HUNG at 48% (timeout, 0 failures) |
-| test_metal_dma | 49 | 8 | 0 | 0 | ABORT at test 9 (DRAM DMA) |
-| test_metal_matmul_higher_rank | 10 | 0 | 10 | 0 | FAIL (PCC mismatch) |
-| test_metal_tilize | 11 | 3 | 4 | 4 skip | FAIL (PCC mismatch) |
-| test_metal_masking | 20 | 2 | 18 | 0 | FAIL (JIT compile errors) |
-| test_metal_bfp8_typecast | 13 | 0 | 13 | 0 | FAIL (JIT compile errors) |
-| test_metal_tensor_collapsing | 14 | 0 | 10 | 2 skip, 2 xfail | FAIL (JIT + PCC) |
-| test_metal_virtual_grids | 39 | 0 | 39 | 0 | FAIL (JIT compile errors) |
-| test_metal_tms | 173 | 68 | 64 | 0 | HUNG at ~76% |
-| test_metal_reductions | 548 | 12 | 86 | 16 skip | HUNG at ~21% |
+| test_metal_masking | 20 | 0 | 20 | 0 | FAIL (runtime crashes) |
+| test_metal_bfp8_typecast | 13 | 0 | 13 | 0 | FAIL (PCC mismatch) |
 
-See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md) for detailed failure analysis.
+See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md) for detailed failure analysis and historical progression.
 
 ---
 
@@ -444,9 +445,9 @@ Tests in `tt_emule/` are organized in tiers and use standard tt-metal fixtures �
 
 Additional ttnn tests built but not in regression: `test_ttnn_add`, `test_ttnn_add_int`, `test_ttnn_sub_int`, `test_ttnn_rsub_int`, `test_ttnn_matmul`.
 
-D2M golden test regression: `run_d2m_regression.sh` — runs 13 tt-mlir test files (~1146 tests) against the emulated backend. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
+D2M golden test regression: `run_d2m_regression.sh` — runs 13 tt-mlir test files (1878 tests) against the emulated backend. 1589 pass, 147 fail, 142 skip. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
 
-Regression scripts: `run_regression.sh` (91 lines, 18 tt-metal tests) + `run_d2m_regression.sh` (151 lines, 13 D2M test files).
+Regression scripts: `run_regression.sh` (18 tt-metal tests) + `run_d2m_regression.sh` (13 D2M test files, 1863 tests).
 
 ### tt-metal Files Modified
 
@@ -484,7 +485,7 @@ The complete set of tt-metal modifications for emulation support:
 
 **Incrementally extensible.** New compute ops are single-file headers in `jit_hw/api/compute/`. The pattern (DST-to-DST operations with format-aware load/store) has been applied consistently across 53 compute headers.
 
-**D2M golden test coverage.** 249 of ~1146 D2M golden tests pass, covering layout transforms, buffer allocation, matmul (single-core and multi-core up to 2048x2048x2048), DMA (L1-to-L1), and tile-aligned reshapes. This provides a broad regression signal for emulation correctness.
+**D2M golden test coverage.** 1589 of 1878 D2M golden tests pass (85% pass rate), covering layout transforms, buffer allocation, matmul (single-core, multi-core, double-buffered, 3D/4D batched up to 2048x2048x2048), reductions (sum, max, mean), DMA (L1-to-L1 and partial DRAM), TMS (reshape, permute, concatenate_heads), virtual grids, and tensor collapsing. This provides broad regression coverage for D2M-generated kernels.
 
 ### Cons
 
@@ -508,7 +509,7 @@ Tests that pass in emulation may fail on silicon due to timing, precision, or re
 
 **Address translation complexity.** The host-pointer convention requires careful translation at three well-defined points: encode (`__emule_addr_to_offset` in `get_noc_addr`/`get_noc_multicast_addr`), fixup (`__emule_fixup_noc_addr` in NOC operation functions), and decode (`__emule_resolve_noc_addr` in the program runner). The fixup point exists because real tt-metal kernels construct NOC addresses by ORing host pointers into pre-computed NOC bases. With L1Pool, the fixup is a fast bitmask (`addr & 0x1FFFFF`) rather than a TLS lookup, but each new NOC-level function must still remember to apply it.
 
-**D2M coverage gaps.** 4 test files fail entirely due to missing JIT compute stubs (~70 failures for `abs_tile`, `typecast_tile`, `exp_tile`, etc.). 4 files produce incorrect numeric results (~164 failures in reductions, batched matmul, permutes, non-aligned tilize). 3 files time out before completing. These gaps limit the emulator's value as a full regression tool for D2M-generated kernels.
+**D2M coverage gaps.** 2 test files fail entirely: masking (20 runtime crashes) and bfp8_typecast (13 PCC mismatches). 3 files have partial failures: reductions (68/1096 fail on unaligned shapes), tilize (32/44 fail on standalone untilize/tilize PCC), and DMA (10/49 fail on DRAM paths). The remaining 8 files pass fully. The primary gaps are unaligned tensor masking, standalone tilize/untilize data layout correctness, and DRAM DMA address resolution.
 
 ### Maintainability
 
@@ -552,6 +553,24 @@ Rebasing onto new tt-metal versions primarily requires:
 | Matmul D2M coverage | 15 pass, abort at 2048x matmul_block | 56 pass (incl. 2048x2048x2048 bf16+f32), timeout at 48% |
 | Regression scripts | `run_regression.sh` (18 tests) | + `run_d2m_regression.sh` (13 D2M test files, ~1146 tests) |
 
+### Changes from v4 to v5
+
+| Aspect | v4 | v5 |
+|--------|----|----|
+| Codebase size | ~6,000 lines, 110 files | ~6,800 lines, 113 files |
+| JIT stubs | 78 files | 75 files (consolidated) |
+| tt-mlir base | Pre-uplift | Rebased on `milant/uplift_mar_25` (new LLK APIs, expanded test suites) |
+| D2M golden tests | 832 pass / 162 fail / 81 skip (1075 tests) | **1589 pass** / 147 fail / 142 skip (1878 tests) |
+| D2M pass rate | ~77% | **85%** |
+| D2M fully-passing files | 5 of 13 | **8 of 13** |
+| Matmul D2M | 108 pass, 7 double-buffered fail | **113 pass**, 14 xfail (all functional tests pass) |
+| Pack untilize | Not supported | `experimental::pack_untilize_block` with `copy_tile` + `__llk_pack_untilize` |
+| LLK CB stubs | Not present | `llk_wait_tiles`, `llk_pop_tiles`, `llk_push_tiles`, `llk_wait_for_free_tiles` delegating to `cb_api.h` |
+| SFPU ops | Stubs only (no logic) | Functional: `abs_tile`, `exp_tile`, `negative_tile`, `typecast_tile` with DST element-wise math |
+| CB API | uint32_t only | + int32_t overloads for D2M-generated code |
+| Coordinate API | Not present | `get_absolute_logical_x/y` in compute context |
+| New D2M wins | — | virtual_grids (0→39), tensor_collapsing (2→12), TMS (169→332), reductions (420→932), DMA (16→39) |
+
 ---
 
-*Report updated 2026-03-16. Covers tt-emule at commit `8129ac5` (master) / tt-metal commit `7adf382d27` (xchin/tt-emule branch).*
+*Report updated 2026-03-30. Covers tt-emule on branch `armin` / tt-mlir rebased on `milant/uplift_mar_25`.*
