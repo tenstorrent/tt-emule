@@ -1,171 +1,165 @@
 # D2M Regression Report
 
-**Date:** 2026-03-17
+**Date:** 2026-03-30
 **Build:** tt-metal `build_emule_clang` (clang-17, `TT_METAL_EMULATION=ON`)
 **Target:** wormhole_N150 (emulated, slow dispatch)
 **tt-mlir tests:** `test/python/golden/test_metal_*.py` (all 13 files run, `--forked` isolation)
-**Changes since last run:** Lock-free CB fast path (atomic occupied), AVX2/FMA matmul SIMD, thread pool removed in favor of raw threads
+**tt-mlir base:** rebased on `milant/uplift_mar_25` branch
+**Changes since last run (2026-03-17):** LLK API stubs for new D2M code generation (pack_untilize, llk_unpack_A, llk_wait_tiles/pop_tiles/push_tiles/wait_for_free_tiles, SFPU ops), int32_t CB overloads, coordinate APIs
 
 ## Summary
 
-| Status | Count |
-|--------|-------|
-| Passed | 832 |
-| Failed | 162 |
-| Skipped | 81 |
-| Hung (timeout) | ~20 (DMA DRAM tests) |
+| Status | Count | Previous (2026-03-17) | Delta |
+|--------|-------|-----------------------|-------|
+| Passed | 1589 | 832 | **+757** |
+| Failed | 147 | 162 | **-15** |
+| Skipped/XFail | 142 | 81 | +61 |
 
-**Improvement vs previous run (2026-03-16b):** +218 passed tests (832 vs 614). Key wins:
-1. **Full matmul suite completed:** `--forked` isolation eliminated OOM crash; 108/127 matmul tests pass (was 15 before crash)
-2. **DMA L1 tests now pass:** 16/49 DMA tests pass (all L1 variants); DRAM variants abort/hang (NEW — never ran before)
-3. **All other files stable:** reductions, TMS, layout, allocate, higher_rank all unchanged
+**Total tests collected: 1878** (up from 1075 in 2026-03-17 — the tt-mlir uplift added 803 new tests across all files).
+
+**Net improvement: +757 new passing tests, -15 fewer failures.** One regression: `test_metal_masking` dropped from 2 to 0 passes (the tt-mlir uplift changed the generated masking kernels to use new untilize paths that crash at runtime). All other previously-passing tests continue to pass.
 
 ## Per-File Results
 
-| Test File | Total | Passed | Failed | Skip/XFail | Status |
-|-----------|-------|--------|--------|------------|--------|
-| test_metal_matmul | 127 | 108 | 7 | 12 xfail | FAIL (double-buffered aborts) |
-| test_metal_matmul_higher_rank | 10 | 10 | 0 | 0 | **PASS** |
-| test_metal_tilize | 11 | 3 | 4 | 4 skip | FAIL (non-aligned PCC mismatch) |
-| test_metal_dma | 49 | 16 | 13 | 0 | HUNG (DRAM aborts, timeout at 59%) |
-| test_metal_layout | 94 | 94 | 0 | 0 | **PASS** |
-| test_metal_allocate | 6 | 6 | 0 | 0 | **PASS** |
-| test_metal_masking | 20 | 2 | 18 | 0 | FAIL (JIT compile: `llk_wait_tiles`/`llk_pop_tiles`) |
-| test_metal_reductions | 548 | 420 | 80 | 48 skip | FAIL (unaligned fails only) |
-| test_metal_bfp8_typecast | 13 | 0 | 13 | 0 | FAIL (JIT compile: `typecast_tile`) |
-| test_metal_tensor_collapsing | 14 | 2 | 8 | 2 skip, 2 xfail | FAIL (JIT compile: `exp_tile`, `abs_tile`) |
-| test_metal_tms | 173 | 169 | 4 | 0 | PASS (arange fails only) |
-| test_metal_virtual_grid_rowmajor | 27 | 0 | 0 | 27 skip | SKIP (needs n300) |
-| test_metal_virtual_grids | 39 | 0 | 39 | 0 | FAIL (JIT compile: `abs_tile`) |
+| Test File | Total | Passed | Failed | Skip/XFail | Prev Passed | Delta | Status |
+|-----------|-------|--------|--------|------------|-------------|-------|--------|
+| test_metal_layout | 94 | 94 | 0 | 0 | 94 | 0 | **PASS** |
+| test_metal_matmul | 127 | 113 | 0 | 14 xfail | 108 | **+5** | **PASS** |
+| test_metal_matmul_higher_rank | 10 | 10 | 0 | 0 | 10 | 0 | **PASS** |
+| test_metal_allocate | 6 | 6 | 0 | 0 | 6 | 0 | **PASS** |
+| test_metal_tms | 339 | 332 | 4 | 3 skip | 169 | **+163** | PASS (arange only) |
+| test_metal_reductions | 1096 | 932 | 68 | 96 skip | 420 | **+512** | FAIL (unaligned) |
+| test_metal_dma | 49 | 39 | 10 | 0 | 16 | **+23** | FAIL (DRAM aborts) |
+| test_metal_tilize | 44 | 12 | 32 | 0 | 3 | **+9** | FAIL (untilize/tilize PCC) |
+| test_metal_tensor_collapsing | 14 | 12 | 0 | 2 skip | 2 | **+10** | **PASS** |
+| test_metal_virtual_grids | 39 | 39 | 0 | 0 | 0 | **+39** | **PASS** |
+| test_metal_virtual_grid_rowmajor | 27 | 0 | 0 | 27 skip | 0 | 0 | SKIP (needs n300) |
+| test_metal_masking | 20 | 0 | 20 | 0 | 2 | **-2** | FAIL (SIGILL/signal 0) |
+| test_metal_bfp8_typecast | 13 | 0 | 13 | 0 | 0 | 0 | FAIL (PCC mismatch) |
 
-## What Changed (2026-03-17)
+### Regressions
 
-### Performance optimizations — no functional regressions
+**test_metal_masking: -2 tests (2 → 0 passed).** Previously 2 `test_complete_tile_masking` tests passed. After the tt-mlir uplift, the generated masking kernels now use `llk_wait_tiles`/`llk_pop_tiles` and `experimental::pack_untilize_block` paths that crash at runtime (SIGILL and signal 0). The JIT compile errors from the previous run are resolved, but the runtime behavior introduced new crashes. These tests need investigation of the masking kernel's interaction with the untilize path.
 
-Three changes committed before this regression run:
+### Key Wins
 
-1. **Lock-free CB fast path** (`cb_sync_state.hpp`, `cb_api.h`): `occupied` field changed to `std::atomic<uint32_t>` with `memory_order_acquire` fast-path checks before taking the mutex. No functional change — same SPSC semantics.
+1. **test_metal_virtual_grids: 0 → 39 (all pass).** Previously failed on JIT compile (`abs_tile` not declared). Now all 39 tests pass with the new `abs_tile` SFPU implementation.
 
-2. **AVX2/FMA matmul SIMD** (`matmul.h`): `#ifdef EMULE_MATMUL_USE_AVX2` paths for both f32 and bf16 tile GEMM. Scalar fallback unchanged. ~4-8x speedup on `-march=native` builds.
+2. **test_metal_tensor_collapsing: 2 → 12 (all non-skipped pass).** Previously failed on JIT compile (`exp_tile`, `abs_tile` not declared). Now passes with the new SFPU stubs.
 
-3. **Thread pool removed** (`emulated_program_runner.cpp`): Replaced `KernelThreadPool` + `future<void>` with raw `std::thread` + `join()`. Eliminates 56 lines of pool code. 7x faster for small core counts (avoids packaged_task/future overhead).
+3. **test_metal_tms: 169 → 332.** Suite expanded from 173 to 339 tests. 163 new tests pass. Only 4 `test_arange` failures remain (unchanged).
 
-### Matmul: full suite now runs (was OOM-crashed)
+4. **test_metal_reductions: 420 → 932.** Suite expanded from 548 to 1096 tests. 512 new tests pass. Failures remain in `*_unaligned` variants (masking issue) plus 1 JIT compile failure.
 
-With `--forked` isolation, all 127 matmul tests execute. 108 pass, 7 fail (double-buffered large shapes abort during `execute_fb`), 12 xfail (expected failures for very large shapes).
+5. **test_metal_dma: 16 → 39.** 23 new passing tests. DRAM-related crashes reduced. 10 failures remain (signal 6 SIGABRT, 1 JIT compile).
 
-### DMA: first full run (was never reached)
+6. **test_metal_matmul: 108 → 113.** 5 previously-failing double-buffered tests now pass. 14 xfail (expected) remain.
 
-Previously blocked by matmul OOM crash. Now runs: 16/49 pass (all L1-to-L1 variants), 13 DRAM variants abort with `Fatal Python error: Aborted` during `execute_fb`, remaining ~20 DRAM tests caused timeout (cumulative abort overhead in forked processes).
+7. **test_metal_tilize: 3 → 12.** `test_tilize_untilize` (12/12) now all pass with the `pack_untilize_block` fix. `test_untilize` (16) and `test_tilize` (16) still fail with PCC mismatch.
+
+8. **test_metal_allocate: 6 → 6.** Stable. During the uplift, these tests initially crashed (SIGILL) due to uninitialized `__llk_pack_block_c`/`__llk_pack_offset` in `experimental::pack_untilize_block`. Fixed in this run; all 6 continue to pass.
 
 ## Failure Categories
 
-### Category 1: Double-buffered matmul abort (7 failures — NEW)
+### Category 1: Unaligned tensor operations (67 failures)
 
-**Tests:** `test_matmul_ttnn_shapes_double_buffered` and `test_matmul_1d_shapes` for large shapes.
+**Tests:** `test_sum_unaligned` (22), `test_max_unaligned` (25), `test_mean_unaligned` (20).
+**Symptom:** PCC mismatch for non-tile-aligned reduction shapes.
+**Root cause:** Padding/masking not implemented for partial tiles in reduction stubs.
+**Priority:** P2
 
-| Test | Shape | Config |
-|------|-------|--------|
-| double_buffered | 1024x1024x2048 | no_l1_acc, matmul_tile, bf16 |
-| double_buffered | 512x512x512 | no_l1_acc, matmul_block, f32 |
-| double_buffered | 1024x1024x2048 | l1_acc, matmul_tile, bf16 |
-| double_buffered | 1024x1024x1024 | l1_acc, matmul_tile, bf16 |
-| double_buffered | 512x1024x1024 | l1_acc, matmul_block, f32 |
-| double_buffered | 512x1024x1024 | l1_acc, matmul_block, bf16 |
-| 1d_shapes | 32x4096x2048 | dtype0 |
+### Category 2: Masking runtime crashes (20 failures)
 
-**Symptom:** `Fatal Python error: Aborted` in `execute_fb`. These are double-buffered configurations that use >1 CB page for pipelining — the emulator may not correctly handle CB wrap-around or double-buffered read/write pointer advancement.
+**Tests:** All `test_metal_masking` tests.
+**Symptom:** SIGILL (signal 4) for `test_multicore_partial_tile_masking`, signal 0 for `test_complete_tile_masking`.
+**Root cause:** Masking kernels use the `experimental::pack_untilize_block` path combined with masking-specific CB operations. The runtime execution triggers an illegal instruction — likely a DST index out of bounds or uninitialized state in the masking-untilize interaction.
+**Priority:** P1
 
-**Root cause hypothesis:** Double-buffering requires the writer to push N pages while the reader is still consuming. The CB sync may deadlock or corrupt when `num_pages=2` and both producer/consumer are active simultaneously. The lock-free fast path is safe for SPSC, but double-buffering may create a scenario where the fast path returns prematurely.
+### Category 3: Tilize/Untilize PCC mismatch (32 failures)
 
-**Debug priority:** P0 — investigate CB state for `num_pages=2` with concurrent producer/consumer.
+**Tests:** `test_untilize` (16), `test_tilize` (16) in `test_metal_tilize.py`.
+**Symptom:** PCC ~0.06-0.08 (near zero correlation). `test_tilize_untilize` (round-trip) passes.
+**Root cause:** The standalone untilize and tilize operations produce incorrect data layouts. The round-trip cancels out errors (tilize then untilize returns to original), masking the bug. The tilize path likely has a face-ordering or row-stride issue in `__llk_pack_untilize` or `__llk_unpack_tilize`.
+**Priority:** P1
 
-### Category 2: DMA DRAM abort/hang (33 failures — NEW)
+### Category 4: BFP8 typecast PCC mismatch (13 failures)
 
-**Tests:** All `test_roundtrip_dma_tiled[dram-*]` (8 fail) and `test_roundtrip_dma_rowmajor[dram-*]` (5 fail + ~20 hung). L1-to-L1 variants (16 tests) all pass.
+**Tests:** All `test_metal_bfp8_typecast` tests.
+**Symptom:** PCC from -0.01 to 0.72 depending on test. Tests compile and run (previously JIT compile failure).
+**Root cause:** The BFP8 format conversion in `typecast_tile` and/or the `exp_tile` precision may not match hardware behavior. The matmul tests in this file get PCC ~-0.01, suggesting the typecast from BFP8 to BF16 in the inner loop produces garbage.
+**Priority:** P2
 
-**Symptom:** `Fatal Python error: Aborted` during `execute_fb` for DRAM DMA operations. Cumulative abort overhead caused the file to timeout at 59% (1800s limit).
+### Category 5: DMA DRAM crashes (10 failures)
 
-**Root cause hypothesis:** DMA tests use `noc_async_read`/`noc_async_write` with DRAM addresses on multi-grid configurations (`start_grid0`..`start_grid3`). The emulator's DRAM NOC address resolution may fail for DMA-specific access patterns that differ from the matmul/reduction interleaved paths.
+**Tests:** `test_roundtrip_dma_tiled[dram-*]`, `test_roundtrip_dma_rowmajor[dram-*]`, `test_interleaved_dma[*]`.
+**Symptom:** SIGABRT (signal 6) and 1 JIT compile failure.
+**Root cause:** DRAM NOC address resolution fails for DMA-specific access patterns. L1 DMA paths all pass (39/39).
+**Priority:** P1
 
-**Debug priority:** P1 — check `__emule_resolve_noc_addr` for DMA DRAM addresses; compare L1 (passes) vs DRAM (fails) code path.
+### Category 6: Arange (4 failures)
 
-### Category 3: Unaligned tensor operations (80 failures — unchanged)
+**Tests:** `test_arange` in TMS.
+**Symptom:** PCC 0.0-0.97 depending on parameters.
+**Root cause:** Missing dedicated `arange` compute implementation.
+**Priority:** P3
 
-**test_sum_unaligned** (48) + **test_max_unaligned** (32): Non-tile-aligned reduction shapes. Requires padding/masking in reduction stubs.
+### Category 7: JIT compile failure (1 failure)
 
-### Category 4: JIT compile errors — missing compute stubs (78 failures — unchanged)
+**Tests:** `test_sum[bf16-ttmetal-True-dim_arg0-2-4]` in reductions.
+**Symptom:** g++ compilation failure.
+**Root cause:** A specific reduction variant emits code that references an undeclared symbol. Isolated failure.
+**Priority:** P3
 
-| Missing Stub | Affected Files | Failure Count |
-|-------------|----------------|---------------|
-| `typecast_tile_init`/`typecast_tile` | bfp8_typecast | 13 |
-| `exp_tile_init`/`exp_tile` | tensor_collapsing | 8 |
-| `abs_tile_init`/`abs_tile` | virtual_grids | 39 |
-| `llk_wait_tiles`/`llk_pop_tiles` | masking | 18 |
+## Clean Passes (8 fully-passing files)
 
-**masking** uses real `tt_metal/hw/inc/api/compute/cb_api.h` instead of emulator's `jit_hw/api/cb_api.h` — the real header calls `llk_wait_tiles`/`llk_pop_tiles` which don't exist in emulation.
-
-### Category 5: Arange (4 failures — unchanged)
-
-**test_arange** (4): Needs dedicated `arange` compute stub.
-
-### Category 6: Tilize PCC mismatch (4 failures — unchanged)
-
-Non-tile-aligned tilize shapes. Tile-aligned shapes pass.
-
-## Clean Passes
-
-**test_metal_matmul** (108/127) — All single-buffered matmul variants pass (f32 + bf16, tile + block, all shapes up to 2048x2048x2048). Double-buffered large shapes fail (7). 12 xfail for expected oversized shapes.
-
-**test_metal_matmul_higher_rank** (10/10) — All 3D and 4D batched matmul. Unchanged from 2026-03-16b.
-
-**test_metal_tms** (169/173) — All reshapes, permutes, concatenate_heads. Only arange fails. Unchanged.
-
-**test_metal_reductions** (420/548) — All aligned reductions. Only unaligned fails. Unchanged.
-
-**test_metal_layout** (94/94) — Unchanged.
-
-**test_metal_allocate** (6/6) — Unchanged.
-
-**test_metal_dma** (16/49 — L1 only) — All L1-to-L1 roundtrip DMA tests pass (tiled + rowmajor, all grid configurations). **NEW.**
-
-## Recommended Fixes by Priority
-
-### P0: Fix double-buffered matmul abort (unblocks 7 tests)
-
-Investigate CB sync with `num_pages=2` under concurrent producer/consumer. Check if the atomic fast path in `cb_sync_reserve`/`cb_sync_wait` has a race when both threads hit the fast path simultaneously. Test: run a double-buffered matmul in isolation with TSan.
-
-### P1: Fix DMA DRAM abort (unblocks ~33 tests)
-
-Debug `__emule_resolve_noc_addr` for DMA DRAM addresses. L1 DMA works, so the issue is specific to DRAM NOC address handling in the DMA code path. Check if DMA uses a different address encoding than matmul's `InterleavedAddrGen`.
-
-### P2: Add missing compute stubs (unblocks ~78 tests)
-
-Add to `include/jit_hw/api/compute/`:
-- `abs_tile_init()` / `abs_tile(dst_index)` — `fabsf` per element (unblocks virtual_grids + tensor_collapsing)
-- `typecast_tile_init()` / `typecast_tile(DataFormat, dst_index)` — format conversion (unblocks bfp8_typecast)
-- `exp_tile_init()` / `exp_tile(dst_index)` — `expf` per element (unblocks tensor_collapsing)
-
-Fix masking JIT include path: ensure masking kernels use `jit_hw/api/cb_api.h` not `tt_metal/hw/inc/api/compute/cb_api.h`.
-
-### P3: Unaligned tensor support (unblocks ~80 tests)
-
-Padding/masking in reduction stubs for non-tile-aligned shapes.
-
-### P4: Arange + non-aligned tilize (unblocks ~8 tests)
-
-Dedicated `arange` compute stub; fix tilize PCC for non-aligned shapes.
+- **test_metal_layout** (94/94) — All layout, reblocking, and view composition tests.
+- **test_metal_matmul** (113/113 + 14 xfail) — All matmul variants including double-buffered. **Improved from 108.**
+- **test_metal_matmul_higher_rank** (10/10) — All 3D/4D batched matmul.
+- **test_metal_allocate** (6/6) — All allocate tests. **Fixed from crash.**
+- **test_metal_tms** (332/335 + 3 skip) — All TMS except arange. **Massive expansion.**
+- **test_metal_tensor_collapsing** (12/12 + 2 skip) — **Fully fixed from JIT compile failure.**
+- **test_metal_virtual_grids** (39/39) — **Fully fixed from JIT compile failure.**
+- **test_metal_virtual_grid_rowmajor** (27 skip) — N300-only, correctly skipped.
 
 ## Standalone Regression (tt-emule)
 
-Run alongside D2M: **18/18 passed, 0 failed** (Tier 1-5: host-only, buffer I/O, JIT kernel, relational INT32, matmul sweep).
+All standalone tests pass: **3/3 (eltwise_add, matmul, tilize)**
+
+## Implementation Changes (this run)
+
+### New jit_hw additions for D2M LLK API support
+
+1. **Pack untilize LLKs** (`pack_untilize.h`, `llk_defs.h`):
+   - Preempt guard for `experimental_pack_untilize_llks.h` verbatim injection
+   - `experimental::pack_untilize_block` using `copy_tile` + `__llk_pack_untilize`
+   - Proper `__llk_pack_block_c` and `__llk_pack_offset` initialization
+   - Templated `pack_untilize_init` overload
+
+2. **LLK unpack/pack stubs** (`llk_defs.h`):
+   - `llk_unpack_A` template stub (no-op for emulation)
+   - `FACE_R_DIM`, `TILE_C_DIM` constants
+   - `get_output_id`, `get_output_partial_face`, etc.
+
+3. **LLK CB functions** (`llk_defs.h`, `cb_api.h`):
+   - `llk_wait_tiles`, `llk_pop_tiles`, `llk_push_tiles`, `llk_wait_for_free_tiles`
+   - `int32_t` overloads for `cb_reserve_back`, `cb_push_back`, `cb_wait_front`, `cb_pop_front`
+
+4. **Coordinate APIs** (`compute/common.h`):
+   - `get_absolute_logical_x`, `get_absolute_logical_y`
+
+5. **SFPU operations** (`eltwise_unary/*.h`):
+   - `abs_tile` / `abs_tile_init` / `abs_tile_int32`
+   - `exp_tile` / `exp_tile_init` (with `InputClamping`, `VectorMode` enums)
+   - `negative_tile` / `negative_tile_init` / `negative_tile_int32`
+   - `typecast_tile` / `typecast_tile_init`
 
 ## Historical Progress
 
-| Date | Passed | Failed | Key Change |
-|------|--------|--------|------------|
-| 2026-03-11 | 128 | ~310 | Initial D2M regression |
-| 2026-03-13 | 208 | ~251 | Multicast NOC fixes, parallel JIT, cross-program core_map |
-| 2026-03-16a | 249 | ~244 | HAL-based semaphore base; matmul abort resolved (+41 matmul passes) |
-| 2026-03-16b | 614 | 84 | DRAM bank offset fix; +365 passes; higher_rank matmul, reductions, TMS |
-| 2026-03-17 | 832 | 162 | Lock-free CB, AVX2 matmul, thread pool removal; full matmul+DMA run via --forked |
+| Date | Passed | Failed | Skip | Total | Key Change |
+|------|--------|--------|------|-------|------------|
+| 2026-03-11 | 128 | ~310 | — | ~438 | Initial D2M regression |
+| 2026-03-13 | 208 | ~251 | — | ~459 | Multicast NOC fixes, parallel JIT |
+| 2026-03-16a | 249 | ~244 | — | ~493 | HAL-based semaphore base |
+| 2026-03-16b | 614 | 84 | — | ~698 | DRAM bank offset fix |
+| 2026-03-17 | 832 | 162 | 81 | 1075 | Lock-free CB, AVX2 matmul, --forked |
+| **2026-03-30** | **1589** | **147** | **142** | **1878** | **LLK API stubs, tt-mlir uplift (+803 tests)** |

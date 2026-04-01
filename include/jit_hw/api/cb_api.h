@@ -112,6 +112,12 @@ inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
     tt_emule::cb_sync_pop(__emule_cbs[cb_id], n);
 }
 
+// ---- int32_t overloads (D2M int32 support emits int32_t tile counts) ----
+inline void cb_reserve_back(uint32_t cb_id, int32_t n) { cb_reserve_back(cb_id, static_cast<uint32_t>(n)); }
+inline void cb_push_back(uint32_t cb_id, int32_t n)    { cb_push_back(cb_id, static_cast<uint32_t>(n)); }
+inline void cb_wait_front(uint32_t cb_id, int32_t n)   { cb_wait_front(cb_id, static_cast<uint32_t>(n)); }
+inline void cb_pop_front(uint32_t cb_id, int32_t n)    { cb_pop_front(cb_id, static_cast<uint32_t>(n)); }
+
 // ---- Pointer accessors ----
 
 // Return uint32_t (truncated host pointer). CB memory is mmap'd below 4 GB.

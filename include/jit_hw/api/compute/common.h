@@ -100,6 +100,11 @@ ALWI void tile_regs_commit()  {}
 ALWI void tile_regs_wait()    {}
 ALWI void tile_regs_release() {}
 
+// ---- Core logical coordinates (for D2M compute kernels) ----
+// Dataflow version is in dataflow_api.h; compute kernels need their own.
+inline uint8_t get_absolute_logical_x() { return static_cast<uint8_t>(__emule_logical_x); }
+inline uint8_t get_absolute_logical_y() { return static_cast<uint8_t>(__emule_logical_y); }
+
 // ---- CB helpers (read/write via shared CBSyncState) ----
 
 namespace __emule_compute {

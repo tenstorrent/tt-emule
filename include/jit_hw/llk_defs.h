@@ -9,6 +9,15 @@
 #define A2D 0
 #endif
 
+// Tile dimension constants (used by experimental LLK headers)
+#ifndef FACE_R_DIM
+#define FACE_R_DIM 16
+#endif
+
+#ifndef TILE_C_DIM
+#define TILE_C_DIM 32
+#endif
+
 // Pool type for reduce operations
 enum class PoolType : uint8_t {
     SUM = 0,
@@ -40,9 +49,14 @@ inline CbInterface& get_local_cb_interface(uint32_t) {
 }
 
 inline uint32_t get_operand_id(uint32_t operand) { return operand; }
+inline uint32_t get_output_id(uint32_t output) { return output; }
 inline uint32_t get_operand_face_r_dim(uint32_t) { return 16; }
 inline uint32_t get_operand_num_faces(uint32_t) { return 4; }
 inline bool get_operand_narrow_tile(uint32_t) { return false; }
+inline bool get_output_partial_face(uint32_t) { return false; }
+inline bool get_output_narrow_tile(uint32_t) { return false; }
+inline uint32_t get_output_face_r_dim(uint32_t) { return 16; }
+inline uint32_t get_output_num_faces(uint32_t) { return 4; }
 
 // Format arrays (stub)
 inline uint32_t unpack_src_format[32] = {};
@@ -82,6 +96,33 @@ inline void llk_unpack_untilize(uint32_t icb, uint32_t block_c, uint32_t start_t
     __llk_unpack_block_c = block_c;
     __llk_unpack_current_tile = 0;
     __llk_pack_block_c = block_c;
+}
+
+// ---- llk_unpack_A: general-purpose tile unpack (no-op in emulation) ----
+// In emulation, actual data movement happens in copy_tile / datacopy helpers.
+// This stub exists so that code paths referencing llk_unpack_A compile.
+template <ckernel::BroadcastType BType = ckernel::BroadcastType::NONE,
+          bool acc_to_dest = false,
+          ckernel::EltwiseBinaryReuseDestType binary_reuse_dest = ckernel::EltwiseBinaryReuseDestType::NONE,
+          bool unpack_to_dest = false>
+inline void llk_unpack_A(uint32_t /*operand*/, uint32_t /*tile_index*/) {}
+
+// ---- LLK CB stubs (delegate to cb_api.h functions) ----
+// The real tt-metal cb_api.h inlines these as calls to llk_wait_tiles etc.
+// In emulation, the CB functions are the real implementation; llk_* wrappers delegate.
+inline void llk_wait_tiles(int operand, std::int32_t num_tiles) {
+    cb_wait_front(static_cast<uint32_t>(operand), static_cast<uint32_t>(num_tiles));
+}
+inline void llk_pop_tiles(std::int32_t operand, std::int32_t num_tiles, std::int32_t = 0) {
+    cb_pop_front(static_cast<uint32_t>(operand), static_cast<uint32_t>(num_tiles));
+}
+template <bool = false, bool = false, bool = false>
+inline void llk_wait_for_free_tiles(std::int32_t operand, std::int32_t num_tiles) {
+    cb_reserve_back(static_cast<uint32_t>(operand), static_cast<uint32_t>(num_tiles));
+}
+template <bool = false, bool = false>
+inline void llk_push_tiles(std::int32_t operand, std::int32_t num_tiles) {
+    cb_push_back(static_cast<uint32_t>(operand), static_cast<uint32_t>(num_tiles));
 }
 
 // ---- Sync stubs (no-op in single-threaded compute) ----
@@ -238,3 +279,34 @@ inline void untilize_init_short(uint32_t) {
     __llk_unpack_is_tilize = false;
     __llk_pack_is_untilize = true;
 }
+
+// ---- Experimental pack_untilize_block (used by D2M-generated untilize kernels) ----
+// Uses copy_tile (CB→DST) + __llk_pack_untilize (DST→CB row-major).
+// __llk_pack_untilize needs __llk_pack_block_c (row stride in tiles) and
+// __llk_pack_offset (linear tile position) to compute scatter coordinates.
+namespace experimental {
+
+template <uint32_t cols_per_dst_pass, uint32_t total_col_tiles>
+inline void pack_untilize_block(uint32_t icb, uint32_t ocb,
+                                uint32_t block_row_tiles,
+                                uint32_t block_col_tiles) {
+    __llk_pack_block_c = total_col_tiles;
+    __llk_pack_offset = 0;
+
+    const uint32_t num_col_blocks = block_col_tiles / cols_per_dst_pass;
+    for (uint32_t r = 0; r < block_row_tiles; ++r) {
+        for (uint32_t b = 0; b < num_col_blocks; ++b) {
+            for (uint32_t c = 0; c < cols_per_dst_pass; ++c) {
+                uint32_t src_tile = r * block_col_tiles + b * cols_per_dst_pass + c;
+                copy_tile(icb, src_tile, c);
+            }
+
+            for (uint32_t c = 0; c < cols_per_dst_pass; ++c) {
+                __llk_pack_untilize(c, ocb);
+                __llk_pack_offset++;
+            }
+        }
+    }
+}
+
+} // namespace experimental

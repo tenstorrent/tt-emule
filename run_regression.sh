@@ -41,6 +41,7 @@ run_test "bit_utils"          "$TEST_DIR/test_bit_utils"
 run_test "host_buffer"        "$TEST_DIR/test_host_buffer"
 run_test "tilize_untilize"    "$TEST_DIR/test_tilize_untilize"
 run_test "blockfloat_common"  "$TEST_DIR/test_blockfloat_common"
+run_test "emulation_toggle_default" "$TEST_DIR/test_emulation_toggle" --gtest_filter="EmulationToggle.*"
 
 for t in adjacent contains intersects merge iterator; do
     run_test "CoreRange_$t" "$TEST_DIR/test_CoreRange_$t"
@@ -61,6 +62,7 @@ export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
 
 run_test "SimpleL1Buffer"   "$TEST_DIR/test_simple_l1_buffer" --gtest_filter="MeshDeviceFixture.TestSimpleL1Buffer*"
 run_test "SimpleDramBuffer" "$TEST_DIR/test_simple_dram_buffer"
+run_test "emulation_toggle_active" "$TEST_DIR/test_emulation_toggle"
 
 echo ""
 echo "== Tier 3: JIT Kernel Execution =="
@@ -74,6 +76,7 @@ echo "== Tier 4: TTNN Relational INT32 =="
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/blackhole_P100.yaml"
 
 run_test "ttnn_relational" "$TEST_DIR/test_ttnn_relational_int"
+run_test "ttnn_add_int_emulated" "$TEST_DIR/test_ttnn_add_int"
 
 # Tier 5: TTNN Matmul Sweep (wormhole — multi-core matmul with semaphore sync)
 echo ""
@@ -82,6 +85,14 @@ echo "== Tier 5: TTNN Matmul Sweep =="
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
 
 run_test "ttnn_matmul_sweep" "$TEST_DIR/test_ttnn_matmul_sweep"
+
+# Tier 6: Silicon toggle proof (requires real hardware)
+echo ""
+echo "== Tier 6: Silicon (toggle proof) =="
+
+unset TT_METAL_MOCK_CLUSTER_DESC_PATH TT_METAL_EMULATED_MODE TT_METAL_SLOW_DISPATCH_MODE 2>/dev/null || true
+
+run_test "ttnn_add_int_silicon" "$TEST_DIR/test_ttnn_add_int"
 
 echo ""
 echo "========================================"
