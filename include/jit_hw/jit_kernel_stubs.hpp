@@ -11,6 +11,7 @@
 #include "internal/risc_attribs.h"
 #include "api/compile_time_args.h"
 #include "emule_cb_state.h"
+#include "emule_dfb_state.h"
 
 #include <vector>
 #include <cstdint>
@@ -49,6 +50,9 @@ extern thread_local uint8_t my_y[2];
 // Per-core logical coordinates (for D2M get_absolute_logical_x/y).
 extern thread_local uint32_t __emule_logical_x;
 extern thread_local uint32_t __emule_logical_y;
+
+// Processor ID — substitutes RISC-V mhartid CSR in emulation.
+extern thread_local uint8_t __processor_id;
 
 // NOC index — always 0 for emulation (real firmware sets this per core).
 constexpr uint8_t noc_index = 0;

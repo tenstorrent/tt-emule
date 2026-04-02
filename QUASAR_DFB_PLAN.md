@@ -33,10 +33,10 @@ On Quasar, **Dataflow Buffers (DFBs)** replace CBs. The key difference: a single
 
 ### Confirmed Facts (reviewed with hardware team)
 
-- **24 logical processors per Tensix**: 8 Data Movement (DM) + 4 Neo groups x 4 TRISCs (TRISC0-3) = 16 compute slots. HAL: `max_processors_per_core_ = 24`
-- **4 MB shared L1**: all 12 cores access the same L1
+- **24 logical processors per Tensix**: 8 Data Movement (DM0-DM7) + 4 Neo groups x 4 compute slots (E0_MATH0-E3_MATH3) = 16 compute slots. HAL: `max_processors_per_core_ = 24`. Enum: `TensixProcessorTypes` in `core_config.h` (DM0=0..DM7=7, E0_MATH0=8..E3_MATH3=23, COUNT=24).
+- **4 MB shared L1**: all processors within one Tensix access the same L1
 - **DMs are fully shared**: any of the 8 DMs can interact with any Neo's tile counters (RISC mask determines participation)
-- **TRISC roles**: TRISC0 = unpacker/consumer, TRISC1 = math-only (no DFB), TRISC2 = packer/producer, TRISC3 = alternate consumer
+- **TRISC roles** (internal names mapping to `MATHn` enum slots): MATH0 = TRISC0 (unpacker/consumer), MATH1 = TRISC1 (math-only, no DFB interaction), MATH2 = TRISC2 (packer/producer), MATH3 = TRISC3 (alternate consumer)
 - **Remapper is credits-only**: routes tile counter updates between Neo domains; data stays in shared L1
 - **TC slots are logical views**: multiple TC slots point into the same L1 region with independent rd/wr cursors
 - **Intra-Tensix DFBs**: simpler variant for same-Neo packer-to-unpacker communication
@@ -61,7 +61,7 @@ TENSIX_RISC_OFFSET = 8                 # Bits 0-7 = DM, bits 8-15 = Tensix in RI
 | File | Role |
 |------|------|
 | `tt_metal/api/tt-metalium/experimental/dataflow_buffer/dataflow_buffer.hpp` | Public API: `DataflowBufferConfig`, `CreateDataflowBuffer`, `BindDataflowBufferToProducerConsumerKernels` |
-| `tt_metal/impl/dataflow_buffer/dataflow_buffer_impl.hpp` | `DataflowBufferImpl`, `TileCounterAllocator`, `RemapperIndexAllocator`, `TxnIdAllocator`, `ClientTypeAllocator` |
+| `tt_metal/impl/dataflow_buffer/dataflow_buffer_impl.hpp` | `DataflowBufferImpl`, `TileCounterAllocator`, `RemapperIndexAllocator`, `TxnIdAllocator`, `ClientTypeAllocator`, `LocalDFBInterfaceHost`, `DFBRiscConfig` (host-side serialization helpers) |
 | `tt_metal/impl/dataflow_buffer/dataflow_buffer.cpp` | ~1160 lines: validation, TC allocation, remapper setup, serialization |
 | `tt_metal/impl/program/program_impl.hpp` | `ProgramImpl::add_dataflow_buffer`, finalize/allocate hooks |
 
@@ -83,7 +83,9 @@ TENSIX_RISC_OFFSET = 8                 # Bits 0-7 = DM, bits 8-15 = Tensix in RI
 |------|------|
 | `tests/tt_metal/tt_metal/test_kernels/dataflow/dfb_producer.cpp` | DM producer: explicit + implicit sync paths |
 | `tests/tt_metal/tt_metal/test_kernels/dataflow/dfb_consumer.cpp` | DM consumer: explicit + implicit, strided + blocked |
-| `tests/tt_metal/tt_metal/test_kernels/compute/dfb_t6.cpp` | Compute kernel using DFBs |
+| `tests/tt_metal/tt_metal/test_kernels/compute/dfb_t6.cpp` | Compute kernel: passthrough (in->out) using DFBs |
+| `tests/tt_metal/tt_metal/test_kernels/compute/dfb_t6_producer.cpp` | Compute-side producer: `reserve_back`, `push_back`, `finish` |
+| `tests/tt_metal/tt_metal/test_kernels/compute/dfb_t6_consumer.cpp` | Compute-side consumer: `wait_front`, `pop_front` |
 | `tests/tt_metal/tt_metal/api/dataflow_buffer/test_dataflow_buffer.cpp` | Host API integration test |
 | `tests/tt_metal/tt_metal/api/dataflow_buffer/test_dataflow_buffer_configs.cpp` | Config/finalization unit tests |
 
@@ -167,7 +169,7 @@ class DataflowBuffer {
     void pop_front(uint16_t num_entries);      // consumer: signal data consumed
     void finish();                             // drain barrier
 
-    // Implicit sync (DM only, deferred for emulation)
+    // Implicit sync (DM only -- gated by #ifndef COMPILE_FOR_TRISC, deferred for emulation)
     void read_in(noc, src, args);
     void write_out(noc, dst, args);
 
@@ -176,6 +178,11 @@ class DataflowBuffer {
     uint32_t get_read_ptr() const;
     uint32_t get_entry_size() const;
     uint32_t get_stride_size() const;
+    uint16_t get_id() const;              // returns logical_dfb_id_
+
+    // Misc
+    Lock scoped_lock();                   // Lock wrapper (body TODO in upstream)
+    // noc_traits_t<DataflowBuffer> specialization for NOC addressing (DM-only)
 };
 ```
 
@@ -252,6 +259,8 @@ struct DFBTCSlot {
 
 ### `DataflowBufferConfig`
 
+> **Note**: The upstream API header explicitly marks this config as a "placeholder" pending a host API redesign. The emulation layer should implement the current interface but avoid over-investing in exact field-level fidelity -- the struct may change upstream.
+
 ```cpp
 struct DataflowBufferConfig {
     uint32_t entry_size = 0;
@@ -300,7 +309,7 @@ In emulation, steps 2-3 simplify to: allocate tile counter structs, set capaciti
 
 ### Phase 1: Explicit Sync, STRIDED Mode
 
-**Scope**: Explicit `reserve_back/push_back/wait_front/pop_front` with configurable cluster count. Validate with 2 DM producers + 4 Tensix consumers initially, then scale to full device (8 DMs, all Neos).
+**Scope**: Explicit `reserve_back/push_back/wait_front/pop_front` with configurable cluster count. Design for the general case (up to 8 DMs, 4 Neos) from the start with data-driven thread/cluster counts; initial tests may exercise subsets (e.g. 1 DM + 1 Neo) but the infrastructure must not hard-code these limits.
 
 **Data-driven configuration**: The number of Neos (clusters), DMs, and tile counters per Neo must come from a configuration descriptor, not hard-coded constants. Different Quasar variants will have different cluster counts. The tile counter array dimensions should be `num_neos * NUM_TILE_COUNTERS_PER_TENSIX`.
 
@@ -353,6 +362,30 @@ In emulation, steps 2-3 simplify to: allocate tile counter structs, set capaciti
 
 **Key simplification**: Since all emulation threads share the same address space, the tile counter array is a plain shared data structure. The hardware remapper is a no-op -- any thread can directly read/write any tile counter. This eliminates the most complex hardware-specific logic.
 
+### Phase 1 Implementation Status (as of 2026-03-31)
+
+**All Phase 1 infrastructure is implemented and passing tests.** Files created/modified:
+
+| File | What was done |
+|------|---------------|
+| `include/tt_emule/tile_counter.hpp` | **New.** `TileCounter` (atomic posted/acked, capacity, mutex, 2 CVs) + `TileCounterArray` (flat `unique_ptr<TileCounter[]>`, parameterized by num_neos). Includes `inc_posted`, `inc_acked`, `wait_free_space`, `wait_occupancy`, `reset_all`. |
+| `include/tt_emule/dfb_sync_state.hpp` | **New.** `DFBTCSlot` (rd/wr ptr, base/limit, neo/counter id), `EmuleDFBInterface` (4 TC slots, round-robin state, entry/stride/num_entries, broadcast/active flags), `DFBSyncState` (base ptr, entry geometry, capacity). |
+| `include/tt_emule/dataflow_buffer.hpp` | **New.** `DataflowBuffer` class: `reserve_back`, `push_back` (strided + broadcast), `wait_front`, `pop_front`, `finish` (drain barrier on space_cv), pointer accessors. Takes `EmuleDFBInterface&` + `TileCounterArray&`. |
+| `include/jit_hw/emule_dfb_state.h` | **New.** Thread-local `__emule_dfbs` (EmuleDFBInterface*) + `__emule_tc_array` (TileCounterArray*). |
+| `include/jit_hw/api/dfb_api.h` | **New.** JIT DFB ops with timeout detection (`TT_EMULE_DFB_TIMEOUT` env, default 120s). Same semantics as `DataflowBuffer` class but operates directly on thread-locals. |
+| `include/kernel_api/dfb_dataflow_api.hpp` | **New.** Standalone DFB ops. Constructs temporary `DataflowBuffer` per call via `__core->tile_counters()` and `__dfb_ifaces`. |
+| `include/tt_emule/program.hpp` | **Modified.** Added `QuasarDM`/`QuasarCompute` to `KernelType`, `processor_id` to `KernelDescriptor`, `AccessPattern` enum, `DataflowBufferConfig`, `DFBHandle`, `QuasarDataMovementConfig`, `QuasarComputeConfig`, `Program::add_dfb()`. |
+| `include/tt_emule/device.hpp` | **Modified.** Added `TileCounterArray` (unique_ptr) + `DFBSyncState[32]` to `Core`, with `init_tile_counters()`, `init_dfb_sync()`, `reset_dfb_sync()`. |
+| `src/kernel_runner.cpp` | **Modified.** Added `build_dfb_interfaces()` (per-thread EmuleDFBInterface construction from DataflowBufferConfig + RISC masks), `std::barrier` init sync, DFB thread-locals (`__dfb_ifaces`, `__emule_dfbs`, `__emule_tc_array`, `__processor_id`), DFB teardown. |
+| `src/host_api.cpp` | **Modified.** Added `CreateDataflowBuffer()`, Quasar `CreateKernel()` overloads for `QuasarDataMovementConfig`/`QuasarComputeConfig`. |
+| `include/tt_emule/host_api.hpp` | **Modified.** Declared Quasar `CreateKernel` and `CreateDataflowBuffer`. |
+| `tests/dfb_passthrough/` | **New.** 1 DM producer + 1 DM consumer, 8x1KB entries, STRIDED 1:1. Validates full reserve/push/wait/pop/finish cycle + pointer accessors. |
+
+**Minor deviations from the planned spec:**
+- `TileCounterArray` uses flat `unique_ptr<TileCounter[]>` instead of `vector<array<TileCounter,32>>` (functionally equivalent, avoids non-movability of `std::array<TileCounter,32>`)
+- `DFBSyncState` does not contain a `TileCounterArray*` pointer; the TC array is owned by `Core` and accessed via thread-local `__emule_tc_array` or `__core->tile_counters()`
+- `DataflowBuffer` in the standalone path is ephemeral (constructed per API call from `EmuleDFBInterface&`); the JIT path operates directly on thread-locals without constructing the class
+
 ### Phase 2: BLOCKED Mode + Implicit Sync
 
 - BLOCKED: producer posts to ALL consumer TCs; straightforward once per-TC counters work
@@ -361,15 +394,18 @@ In emulation, steps 2-3 simplify to: allocate tile counter structs, set capaciti
 
 ### Integration Points in tt-emule
 
-| Component | Change needed |
-|-----------|---------------|
-| `device.hpp` / `Core` | Add `TileCounterArray`, DFB storage, init/reset methods |
-| `program.hpp` | Add `DataflowBufferConfig`, `add_dfb()` alongside `add_cb()` |
-| `kernel_runner.cpp` | Instantiate DFBs, set up per-thread `EmuleDFBInterface`, init barrier |
-| New: `dfb_sync_state.hpp` | `TileCounter`, `TileCounterArray`, `DFBSyncState` |
-| New: `dataflow_buffer.hpp` | `DataflowBuffer` class (emulation version) |
-| New: `jit_hw/api/dfb_api.h` | JIT-facing DFB operations (parallel to `cb_api.h`) |
-| New: `kernel_api/dfb_dataflow_api.hpp` | Standalone DFB operations (parallel to `dataflow_api.hpp`) |
+| Component | Change needed | Status |
+|-----------|---------------|--------|
+| `device.hpp` / `Core` | Add `TileCounterArray`, DFB sync state array, init/reset methods | **Done** -- `tile_counters_`, `dfb_sync_states_[32]`, `init_tile_counters()`, `init_dfb_sync()`, `reset_dfb_sync()` |
+| `program.hpp` | Add `DataflowBufferConfig`, `DFBHandle`, `add_dfb()` alongside `add_cb()` | **Done** -- also added `QuasarDM`/`QuasarCompute` to `KernelType`, `processor_id` to `KernelDescriptor`, `QuasarDataMovementConfig`/`QuasarComputeConfig` |
+| `kernel_runner.cpp` | Instantiate DFBs, set up per-thread `EmuleDFBInterface`, init barrier | **Done** -- `build_dfb_interfaces()`, `std::barrier`, per-thread `__dfb_ifaces`/`__emule_dfbs`/`__emule_tc_array`/`__processor_id` |
+| `host_api.hpp` / `host_api.cpp` | `CreateDataflowBuffer`, Quasar `CreateKernel` overloads | **Done** |
+| New: `tile_counter.hpp` | `TileCounter` (atomic posted/acked + mutex/CVs), `TileCounterArray` (parameterized by `num_neos`) | **Done** |
+| New: `dfb_sync_state.hpp` | `DFBTCSlot`, `EmuleDFBInterface`, `DFBSyncState` | **Done** |
+| New: `dataflow_buffer.hpp` | `DataflowBuffer` class (emulation version) | **Done** |
+| New: `jit_hw/emule_dfb_state.h` | Thread-local `__emule_dfbs`, `__emule_tc_array` | **Done** |
+| New: `jit_hw/api/dfb_api.h` | JIT-facing DFB operations with timeout detection (parallel to `cb_api.h`) | **Done** |
+| New: `kernel_api/dfb_dataflow_api.hpp` | Standalone DFB operations (parallel to `dataflow_api.hpp`) | **Done** |
 
 ---
 
@@ -424,40 +460,78 @@ Most tests use these patterns:
 ### Required Emulation API Surface (Phase 1)
 
 **DFB operations** (minimum for explicit sync tests):
-- `reserve_back(n)`, `push_back(n)`, `wait_front(n)`, `pop_front(n)`
-- `finish()`
-- `get_write_ptr()`, `get_read_ptr()`, `get_entry_size()`, `get_stride_size()`, `get_id()`
+- `reserve_back(n)`, `push_back(n)`, `wait_front(n)`, `pop_front(n)` -- **Done** (standalone + JIT paths)
+- `finish()` -- **Done** (DM variant: `posted == acked`; TRISC variant `posted == 0` not yet needed)
+- `get_write_ptr()`, `get_read_ptr()`, `get_entry_size()`, `get_stride_size()`, `get_id()` -- **Done**
 
-**Compute operations** (from kernel analysis):
+**Compute operations** (from kernel analysis) -- **Not yet implemented**:
 - `mm_init(in0, in1, out)`, `matmul_tiles(in0, in1, tile_a, tile_b, dst_idx)`
 - `mm_block_init(in0, in1, out)`, `matmul_block(in0, in1, ...block dims...)`
 - `unary_op_init_common(in, out)`, `copy_tile(cb_id, tile_idx, dst_idx)`
 - `pack_tile(dst_idx, out_cb_id)`, `acquire_dst()`, `release_dst()`
 
-**NOC operations** (from dataflow kernels):
+**NOC operations** (from dataflow kernels) -- **Not yet implemented for DFB path**:
 - `noc.async_read(src, dfb, size, src_args, dst_args)` -- with DFB as endpoint
 - `noc.async_write(dfb, dst, size, src_args, dst_args)` -- with DFB as endpoint
 - `noc.async_read_barrier()`, `noc.async_write_barrier()`
 - Legacy: `noc_async_read_tile(tile_id, tensor, addr)`, `noc_async_write_tile(tile_id, tensor, addr)`
 
 **Host operations**:
-- `CreateDataflowBuffer(program, core, config)` -> logical DFB id
-- `BindDataflowBufferToProducerConsumerKernels(program, dfb_id, producer, consumer)`
-- `experimental::quasar::CreateKernel(program, path, core, config)` with `QuasarDataMovementConfig` / `QuasarComputeConfig`
+- `CreateDataflowBuffer(program, config)` -> logical DFB id -- **Done**
+- `BindDataflowBufferToProducerConsumerKernels(program, dfb_id, producer, consumer)` -- **Not yet implemented** (RISC masks set manually)
+- `experimental::quasar::CreateKernel(program, path, core, config)` with `QuasarDataMovementConfig` / `QuasarComputeConfig` -- **Partially done** (function-pointer overloads work; JIT path with source path not yet done)
 
 **Other kernel APIs** (each needs an emulation stub or implementation):
-- `get_compile_time_arg_val(idx)`, `get_arg_val<T>(idx)` -- already supported in tt-emule for WH; extend for Quasar
-- `TensorAccessor`, `TensorAccessorArgs` -- page-oriented DRAM address generator; see emulation plan Section 11
-- `AllocatorBank<DRAM>` -- used in `reader_matmul_with_bias_blocked` and `direct_reader/writer_unary`; wraps bank-interleaved DRAM addressing. Needs stub that maps to emulated DRAM
-- `experimental::Noc` class -- `async_read`/`async_write`/barriers; emulate as synchronous memcpy
-- `get_my_thread_id()` / `mhartid` -- returns per-thread processor ID; used in implicit sync kernels to select DFB config. Emulation: return thread-local processor index matching `TensixProcessorTypes` enum
-- `DPRINT` -- debug printing from device kernels; forward to host `printf`/`stdout`
+- `get_compile_time_arg_val(idx)`, `get_arg_val<T>(idx)` -- `get_arg_val` works for Quasar; `get_compile_time_arg_val` needs JIT
+- `TensorAccessor`, `TensorAccessorArgs` -- **Not yet implemented**
+- `AllocatorBank<DRAM>` -- **Not yet implemented**
+- `experimental::Noc` class -- **Not yet implemented** (free-function `noc_async_read/write` exists for WH, but OOP Noc class needed for Quasar)
+- `get_my_thread_id()` / `mhartid` -- `__processor_id` thread-local exists; kernel-accessible wrapper not yet exposed
+- `DPRINT` -- **Not yet implemented**
 
-**Outstanding: JIT header structure for Quasar build**
+**JIT header structure for Quasar build**
 
-The Quasar build needs a parallel `jit_hw/` header tree (or `#ifdef ARCH_QUASAR` branches) to expose DFB APIs instead of CB APIs. Key new headers:
-- `jit_hw/api/dfb_api.h` (parallel to `cb_api.h`)
-- `jit_hw/emule_dfb_state.h` (parallel to `emule_cb_state.h`)
-- Compute headers referencing DFB IDs instead of CB IDs in `llk_io_unpack.h`/`llk_io_pack.h` stubs
+The Quasar JIT DFB headers now exist:
+- `jit_hw/api/dfb_api.h` -- **Done** (timeout-wrapped DFB ops with `TT_EMULE_DFB_TIMEOUT` env var)
+- `jit_hw/emule_dfb_state.h` -- **Done** (thread-local `__emule_dfbs`, `__emule_tc_array`)
 
-The exact structure depends on whether Quasar kernels use `#include <experimental/dataflow_buffer.h>` (the upstream header) or a tt-emule-specific header. This is an open design question.
+### Metal DFB Test JIT Bringup (as of 2026-04-02)
+
+**Two upstream-style DFB tests now pass through the tt-metal emulation path.** These use real `tt-metal` host APIs (`CreateDataflowBuffer`, `BindDataflowBufferToProducerConsumerKernels`, `experimental::quasar::CreateKernel`, `LaunchProgram`) linked against `Metalium::Metal`, with device kernels JIT-compiled by the `emulated_program_runner`.
+
+| Test | Topology | DFBs | Kernels | Status |
+|------|----------|------|---------|--------|
+| `DFBEmuleDMTest` | 1 DM producer → 1 DM consumer | 1 | `dfb_producer.cpp`, `dfb_consumer.cpp` | **PASS** |
+| `DFBEmuleBridgeTest` | 1 DM producer → 1 Compute bridge → 1 DM consumer | 2 | `dfb_producer.cpp`, `dfb_t6.cpp`, `dfb_consumer.cpp` | **PASS** |
+
+**Files created/modified in tt-metal:**
+
+| File | What was done |
+|------|---------------|
+| `tests/tt_metal/tt_metal/api/dataflow_buffer/test_dfb_emulation.cpp` | **New.** Two GTest cases using real Metal host APIs for DFB configuration, kernel creation, and data verification. |
+| `tt_emule/CMakeLists.txt` | **Modified.** Added `test_dfb_emulation` target at Tier 3b. |
+| `tt_metal/impl/emulation/emulated_program_runner.cpp` | **Modified.** Added DFB TLS variables (`__emule_dfbs`, `__emule_tc_array`, `__processor_id`), DFB L1 allocation with shared-L1 for connected DFBs, per-thread `EmuleDFBInterface` construction, `mhartid` CSR patching in JIT source, DRAM bank setup. |
+| `tt_metal/llrt/tt_cluster.cpp` | **Modified.** Added `ARCH::QUASAR` → `quasar_32_arch.yaml` mapping. |
+| `tt_metal/tests/tt_metal/test_utils/env_vars.hpp` | **Modified.** Added `ARCH::QUASAR` string conversion. |
+| `tt_metal/third_party/umd/tests/cluster_descriptor_examples/quasar_1chip.yaml` | **New.** Mock cluster descriptor for single-chip Quasar emulation. |
+| `tt_metal/soc_descriptors/quasar_32_arch.yaml` | **Modified.** Fixed `dram_views` aliasing (both channels pointed to channel 0). |
+
+**Files created/modified in tt-emule:**
+
+| File | What was done |
+|------|---------------|
+| `include/jit_hw/experimental/dataflow_buffer.h` | **New.** JIT-compatible `experimental::DataflowBuffer` class wrapping `dfb_api.h` + `noc_traits_t<DataflowBuffer>` specialization. |
+| `include/jit_hw/experimental/tensor.h` | **Modified.** Added `noc_traits_t<TensorAccessor>` with `__emule_resolve_noc_addr` for DRAM page resolution. |
+| `include/jit_hw/api/tensor/tensor_accessor.h` | **Modified.** Added `InterleavedAddrGen` include for complete type. |
+| `include/jit_hw/jit_kernel_stubs.hpp` | **Modified.** Added `emule_dfb_state.h` include and `__processor_id` TLS declaration. |
+| `run_regression.sh` | **Modified.** Added Tier 3b DFB Emulation (Quasar) with both test cases. |
+
+**Key debugging findings and fixes:**
+- `EmuleDFBInterface` must be per-thread (not shared), matching real HW where each RISC has a separate `LocalDFBInterface`
+- DRAM bank aliasing in `quasar_32_arch.yaml` caused data corruption (both `dram_views` mapped to channel 0)
+- `__processor_id` must match the kernel's actual RISC ID from `get_kernel_processor_type()`, not the kernel iteration index
+- Connected DFBs (same dimensions, same core) share L1 to emulate the HW register file data path through compute bridge kernels
+
+**Still outstanding**:
+- Quasar JIT compilation pipeline (clang-17, correct include paths)
+- LLK compute stubs (`llk_io_unpack.h`/`llk_io_pack.h`) wrapping DFB ops for TRISC kernels

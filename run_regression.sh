@@ -7,6 +7,7 @@ BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule_clang}"
 TEST_DIR="$BUILD_DIR/test/tt_emule"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"
 
+LOG_FILE="${LOG_FILE:-$SCRIPT_DIR/regression_$(date +%Y%m%d_%H%M%S).log}"
 PASS=0; FAIL=0; SKIP=0
 
 run_test() {
@@ -26,11 +27,42 @@ run_test() {
     fi
 }
 
+run_test_verbose() {
+    local name="$1"; shift
+    if [ ! -f "$1" ]; then
+        echo "  SKIP: $name (binary not found)"
+        SKIP=$((SKIP + 1))
+        return
+    fi
+    echo "--- $name ---"
+    if "$@" 2>&1; then
+        echo "  PASS"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL"
+        FAIL=$((FAIL + 1))
+    fi
+}
+
 echo "========================================"
 echo " tt-emule Regression Tests"
 echo "========================================"
 echo "tt-metal: $TT_METAL_DIR"
 echo "build:    $BUILD_DIR"
+
+# Tier 0: Standalone tt-emule tests (built in standalone CMake)
+echo ""
+echo "== Tier 0: Standalone =="
+
+STANDALONE_BUILD="${STANDALONE_BUILD:-$SCRIPT_DIR/build}"
+STANDALONE_TEST="$STANDALONE_BUILD/tests"
+
+if [ -d "$STANDALONE_BUILD" ]; then
+    run_test "dfb_passthrough" "$STANDALONE_TEST/dfb_passthrough/test_dfb_passthrough"
+    run_test "eltwise_add"     "$STANDALONE_TEST/eltwise_add/test_eltwise_add"
+else
+    echo "  SKIP: standalone build not found at $STANDALONE_BUILD"
+fi
 
 # Tier 1: Host-only (no env vars needed)
 echo ""
@@ -69,6 +101,18 @@ echo "== Tier 3: JIT Kernel Execution =="
 
 run_test "TensixL1Tile"     "$TEST_DIR/test_simple_l1_buffer" --gtest_filter="*Tensix*"
 
+echo ""
+echo "== Tier 3b: DFB Emulation (Quasar) =="
+
+export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/quasar_1chip.yaml"
+export ARCH_NAME=QUASAR
+
+run_test "DFBEmuleDMTest"     "$TEST_DIR/test_dfb_emulation" --gtest_filter="*DFBEmuleDMTest*"
+run_test "DFBEmuleBridgeTest" "$TEST_DIR/test_dfb_emulation" --gtest_filter="*DFBEmuleBridgeTest*"
+
+unset ARCH_NAME
+export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
+
 # Tier 4: TTNN (blackhole — larger worker grid, no wormhole mmap exhaustion for ttnn)
 echo ""
 echo "== Tier 4: TTNN Relational INT32 =="
@@ -84,7 +128,7 @@ echo "== Tier 5: TTNN Matmul Sweep =="
 
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
 
-run_test "ttnn_matmul_sweep" "$TEST_DIR/test_ttnn_matmul_sweep"
+run_test_verbose "ttnn_matmul_sweep" "$TEST_DIR/test_ttnn_matmul_sweep"
 
 # Tier 6: Silicon toggle proof (requires real hardware)
 echo ""
