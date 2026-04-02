@@ -32,11 +32,22 @@ KernelHandle CreateKernel(Program& program, KernelFn fn, CoreCoord core,
 KernelHandle CreateKernel(Program& program, KernelFn fn, CoreCoord core,
                            ComputeConfig config);
 
+// Quasar kernel creation
+KernelHandle CreateKernel(Program& program, KernelFn fn, CoreCoord core,
+                           QuasarDataMovementConfig config,
+                           uint8_t processor_id = 0);
+KernelHandle CreateKernel(Program& program, KernelFn fn, CoreCoord core,
+                           QuasarComputeConfig config,
+                           uint8_t processor_id = 8);
+
 void SetRuntimeArgs(Program& program, KernelHandle kernel_id, CoreCoord core,
                     std::vector<uint32_t> args);
 
 CBHandle CreateCircularBuffer(Program& program, CoreCoord core,
                                CircularBufferConfig config);
+
+// ---- Quasar DFB construction ----
+DFBHandle CreateDataflowBuffer(Program& program, DataflowBufferConfig config);
 
 // ---- Buffer operations (Device overloads) ----
 std::shared_ptr<Buffer> CreateBuffer(Device& device, size_t size_bytes,

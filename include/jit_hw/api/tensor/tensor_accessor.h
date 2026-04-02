@@ -11,9 +11,8 @@
 // Dependency chain: tensor_accessor_args.h -> arg_config.hpp -> flags.hpp, const.h
 #include "api/tensor/tensor_accessor_args.h"
 
-// Forward-declare InterleavedAddrGen (full definition in dataflow_api_addrgen.h,
-// included by dataflow_api.h which comes after this header).
-template <bool DRAM> struct InterleavedAddrGen;
+// Full definition of InterleavedAddrGen needed for TensorAccessor::get_noc_addr.
+#include "internal/dataflow/dataflow_api_addrgen.h"
 
 // Simplified TensorAccessor for emulation.
 // Wraps bank_base_address + page_size, delegates to InterleavedAddrGen for

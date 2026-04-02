@@ -30,18 +30,24 @@ tt-emule is a single-core, multi-threaded, in-process emulator for Tenstorrent T
 
 | File                                     | Role                                                                                   |
 | ---------------------------------------- | -------------------------------------------------------------------------------------- |
-| `include/tt_emule/device.hpp`            | `Core` (1 MB L1, 32 CBs, DST, bump alloc) + `Device` (DRAM, NOC resolve, IDevice impl) |
-| `include/tt_emule/program.hpp`           | `Program`, `KernelDescriptor`, `KernelType` (DM0/DM1/Compute), `CircularBufferConfig`  |
-| `src/kernel_runner.cpp`                  | `EnqueueProgram`: instantiate CBs, spawn threads, join, cleanup                        |
-| `src/host_api.cpp`                       | Host API wrappers, buffer operations, JIT kernel creation                              |
-| `include/tt_emule/cb_sync_state.hpp`     | `CBSyncState`: the SPSC sync primitive                                                 |
-| `include/tt_emule/circular_buffer.hpp`   | `CircularBuffer`: owns storage + `CBSyncState`                                         |
-| `include/jit_hw/api/cb_api.h`            | JIT CB API with timeout detection                                                      |
-| `include/kernel_api/dataflow_api.hpp`    | Standalone CB + NOC API                                                                |
+| `include/tt_emule/device.hpp`            | `Core` (L1 mmap, 32 CBs, DST, bump alloc, TileCounterArray, DFBSyncState[32]) + `Device` (DRAM, NOC resolve, IDevice impl) |
+| `include/tt_emule/program.hpp`           | `Program`, `KernelDescriptor` (+processor_id), `KernelType` (DM0/DM1/Compute/QuasarDM/QuasarCompute), `CircularBufferConfig`, `DataflowBufferConfig`, Quasar config structs |
+| `src/kernel_runner.cpp`                  | `EnqueueProgram`: instantiate CBs/DFBs, build per-thread DFB interfaces, spawn threads with init barrier, join, cleanup |
+| `src/host_api.cpp`                       | Host API wrappers, buffer operations, JIT kernel creation, `CreateDataflowBuffer`, Quasar `CreateKernel` overloads |
+| `include/tt_emule/cb_sync_state.hpp`     | `CBSyncState`: the SPSC sync primitive (Wormhole)                                      |
+| `include/tt_emule/circular_buffer.hpp`   | `CircularBuffer`: owns storage + `CBSyncState` (Wormhole)                              |
+| `include/tt_emule/tile_counter.hpp`      | **New (Quasar):** `TileCounter` (atomic posted/acked + mutex/CVs), `TileCounterArray` (num_neos x 32) |
+| `include/tt_emule/dfb_sync_state.hpp`    | **New (Quasar):** `DFBTCSlot`, `EmuleDFBInterface` (per-thread per-DFB), `DFBSyncState` |
+| `include/tt_emule/dataflow_buffer.hpp`   | **New (Quasar):** `DataflowBuffer` class: MPMC sync operations + pointer accessors     |
+| `include/jit_hw/api/cb_api.h`            | JIT CB API with timeout detection (Wormhole)                                           |
+| `include/jit_hw/api/dfb_api.h`           | **New (Quasar):** JIT DFB API with timeout detection                                   |
+| `include/jit_hw/emule_dfb_state.h`       | **New (Quasar):** Thread-local `__emule_dfbs`, `__emule_tc_array`                      |
+| `include/kernel_api/dataflow_api.hpp`    | Standalone CB + NOC API (Wormhole)                                                     |
+| `include/kernel_api/dfb_dataflow_api.hpp`| **New (Quasar):** Standalone DFB operations                                            |
 | `include/kernel_api/compute_api.hpp`     | Tile math: add, matmul, copy, pack                                                     |
 | `include/tt_emule/dst_register_file.hpp` | 8 DST slots with state machine                                                         |
-| `src/jit_kernel.cpp`                     | JIT compilation (g++ wrapper)                                                          |
-| `CMakeLists.txt`                         | Build: tt_emule_lib static + tests                                                     |
+| `src/jit_kernel.cpp`                     | JIT compilation (g++ for WH; clang-17 for Quasar pending)                              |
+| `CMakeLists.txt`                         | Build: tt_emule_lib static + tests (including dfb_passthrough)                         |
 
 
 ---
@@ -166,9 +172,40 @@ Key Quasar HAL flags (from `qa_hal.cpp` / `qa_hal_tensix.cpp`):
 
 Quasar uses `experimental::quasar::CreateKernel` (in `/localdev/arminale/tt-metal-main/tt_metal/api/tt-metalium/experimental/host_api.hpp`) with dedicated config structs:
 
-**`QuasarDataMovementConfig`**: `num_threads_per_cluster` (1-8, default 8) determines how many DMs run. The runtime reserves the lowest-numbered available DM processors (DM0-DM7) consistent across all clusters. Non-legacy: single shared binary for all threads. Legacy (`is_legacy_kernel = true`): separate binary per DM.
+**`QuasarDataMovementConfig`** (full struct from `experimental/host_api.hpp`):
 
-**`QuasarComputeConfig`**: `num_threads_per_cluster` (1-4, default 4) = number of Neos. Each Neo has 4 TRISCs (TRISC0-3), so N Neos = 4N compute processor slots. Max one compute kernel per cluster. Includes `math_fidelity`, `fp32_dest_acc_en`, and other compute settings.
+```cpp
+struct QuasarDataMovementConfig {
+    uint32_t num_threads_per_cluster = QUASAR_NUM_DM_CORES_PER_CLUSTER;  // 1-8, default 8
+    std::vector<uint32_t> compile_args;
+    std::map<std::string, std::string> defines;
+    std::unordered_map<std::string, uint32_t> named_compile_args;
+    bool is_legacy_kernel = false;        // true = duplicate binary per DM (WH/BH porting aid)
+    KernelBuildOptLevel opt_level = KernelBuildOptLevel::O2;
+};
+```
+
+The runtime reserves the lowest-numbered available DM processors (DM0-DM7) consistent across all clusters. Non-legacy: single shared binary for all threads. Legacy (`is_legacy_kernel = true`): separate binary per DM, with globals treated as thread-local.
+
+**`QuasarComputeConfig`** (full struct):
+
+```cpp
+struct QuasarComputeConfig {
+    uint32_t num_threads_per_cluster = QUASAR_NUM_TENSIX_ENGINES_PER_CLUSTER;  // 1-4, default 4
+    MathFidelity math_fidelity = MathFidelity::HiFi4;
+    bool fp32_dest_acc_en = false;
+    bool dst_full_sync_en = false;
+    std::vector<UnpackToDestMode> unpack_to_dest_mode;
+    bool bfp8_pack_precise = false;
+    bool math_approx_mode = false;
+    std::vector<uint32_t> compile_args;
+    std::map<std::string, std::string> defines;
+    std::unordered_map<std::string, uint32_t> named_compile_args;
+    KernelBuildOptLevel opt_level = KernelBuildOptLevel::O3;
+};
+```
+
+Each Neo has 4 TRISCs (MATH0-MATH3), so N Neos = 4N compute processor slots. Max one compute kernel per cluster. The `compile_args`, `defines`, and `named_compile_args` must be propagated to JIT compilation.
 
 **Dispatch**: `LaunchProgram` is arch-agnostic. Quasar-specific behavior is in kernel group configuration: each DM/Neo slot gets `num_sw_threads` and `kernel_thread_id` metadata. The DM slots are indices 0-7; Neo slots are at offset `QUASAR_NUM_DM_CORES_PER_CLUSTER + neo_id`.
 
@@ -231,50 +268,112 @@ These tt-metal tests define the emulation surface. All use DFBs on Quasar with e
 
 ---
 
-## Exploration Status
+## Exploration and Implementation Status
 
 
 | Area                                      | Status               | Notes                                                            |
 | ----------------------------------------- | -------------------- | ---------------------------------------------------------------- |
-| DFB API + sync model                      | Explored             | Full analysis in [QUASAR_DFB_PLAN.md](QUASAR_DFB_PLAN.md)        |
-| Core/thread model (8 DM + 4 Neo)          | Explored             | HAL, core_config, dev_mem_map analyzed                           |
-| Memory map (4 MB L1, reserved regions)    | Explored             | dev_mem_map.h, llk_memory_checks.h                               |
-| Device grid (8x4 Tensix, 8 DRAM)          | Explored             | grendel_implementation.hpp, SoC YAML                             |
-| NOC differences (mesh, 1 NOC, V2/overlay) | Explored             | noc_nonblocking_api, NOC register headers                        |
-| Compute / LLK differences                 | Explored             | Subset API, simpler templates                                    |
-| Kernel dispatch (24 processors)           | Explored             | qa_hal.cpp linker flags, processor assignment                    |
+| DFB API + sync model                      | **Implemented**      | Full Phase 1 (explicit sync, STRIDED) implemented and tested. See [QUASAR_DFB_PLAN.md](QUASAR_DFB_PLAN.md) |
+| Core/thread model (8 DM + 4 Neo)          | **Implemented**      | `KernelType::QuasarDM`/`QuasarCompute`, `processor_id` on KernelDescriptor, `QuasarDataMovementConfig`/`QuasarComputeConfig`, `std::barrier` init sync |
+| Memory map (4 MB L1, reserved regions)    | **Partially done**   | `Core::l1_size_` is runtime-configurable; default `L1_SIZE` constexpr still 1 MB. Needs Quasar Device constructor or `#ifdef` |
+| Device grid (8x4 Tensix, 8 DRAM)          | Explored             | grendel_implementation.hpp, SoC YAML. Not needed for Phase 1 (single-Tensix) |
+| NOC differences (mesh, 1 NOC, V2/overlay) | Explored             | noc_nonblocking_api, NOC register headers. Free-function NOC works; OOP `Noc` class needed |
+| Compute / LLK differences                 | Explored             | Subset API, simpler templates. LLK DFB stubs not yet implemented |
+| Kernel dispatch (24 processors)           | **Implemented**      | kernel_runner spawns per `KernelDescriptor` with `processor_id`, `std::barrier` |
 | HAL capabilities                          | Explored             | qa_hal.cpp, qa_hal_tensix.cpp                                    |
 | RISC-V atomics (Zalrsc)                   | Noted                | Quasar-only; test_riscv_atomics.cpp                              |
-| Quasar kernel APIs                        | Explored             | `QuasarDataMovementConfig` (num_threads 1-8, DM processor reservation) + `QuasarComputeConfig` (num_threads 1-4 Neos, 4 TRISCs each) |
-| Quasar program dispatch model             | Explored             | `LaunchProgram` shared path; Quasar-specific: `num_sw_threads`/`kernel_thread_id` per DM/Neo slot in kernel group config |
-| DFB test kernels + workloads              | Explored             | BMM, block matmul, datacopy, synthetic DFB; full API surface in DFB plan Section 11 |
-| Quasar semaphore model                    | Explored             | L1-resident counters; `experimental::Semaphore` (DM) + `ckernel::Semaphore` (compute); remote via `noc_semaphore_inc`; not used by DFB workloads |
-| Multi-Tensix NOC communication            | Explored             | All DFB tests are single-Tensix; cross-core only in semaphore pipeline test; does not block Phase 1 |
-| Tensor/TensorAccessor API                 | Explored             | Page-oriented address generator; `TensorAccessorArgs` from compile-time args; `noc_traits_t` maps page_id -> NOC addr; needs emulation stub |
-| Global Semaphores                         | Not yet explored     | Current tt-metal `GlobalSemaphore` is a host-side sharded L1 buffer wrapper for cross-core/cross-chip sync. Quasar may introduce a hardware-level global semaphore primitive (specs TBD). Key files: `tt_metal/api/tt-metalium/global_semaphore.hpp`, `tt_metal/impl/buffers/global_semaphore.cpp`, `tests/tt_metal/tt_metal/api/test_global_semaphores.cpp`. Used by: `point_to_point`, `strided_all_gather_async`, `sdpa`, `deepseek_prefill`, fabric tests |
+| Quasar kernel APIs                        | **Implemented**      | Config structs done; function-pointer `CreateKernel` overloads done; JIT path pending |
+| Quasar program dispatch model             | **Implemented**      | `EnqueueProgram` handles DFBs: allocates L1, builds per-thread interfaces, init barrier, teardown |
+| DFB test kernels + workloads              | **Substantially done** | Standalone `dfb_passthrough` + 2 upstream Metal DFB tests pass (DM-only + Compute bridge via `emulated_program_runner` JIT). BMM/matmul/datacopy tests remain (need compute LLK stubs). |
+| Quasar semaphore model                    | Explored             | L1-resident counters; not used by DFB workloads; deferred |
+| Multi-Tensix NOC communication            | Explored             | All DFB tests are single-Tensix; does not block Phase 1 |
+| Tensor/TensorAccessor API                 | **Implemented**      | JIT stub for `TensorAccessor` + `noc_traits_t<TensorAccessor>` with `InterleavedAddrGen` DRAM banking. Used by Metal DFB tests. |
+| Global Semaphores                         | Deferred             | Not needed for Phase 1 DFB workloads |
 
 
 ---
 
 ## Implementation Phases
 
-### Phase 0: Exploration (current)
+### Phase 0: Exploration (complete)
 
-- Understand all Quasar-specific APIs and their emulation requirements
-- Review DFB plan (done)
-- Explore remaining areas marked "not yet explored" above
+- Understand all Quasar-specific APIs and their emulation requirements (done)
+- Review DFB plan (done -- see [QUASAR_DFB_PLAN.md](QUASAR_DFB_PLAN.md))
+- All areas explored except Global Semaphores (deferred -- not needed for Phase 1)
+
+### Phase 1 Progress Summary (as of 2026-04-02)
+
+**Infrastructure steps 1-8: DONE.** All core DFB emulation structures, sync operations, API paths (standalone + JIT), kernel runner integration, and program model updates are implemented and working.
+
+**Step 9 (tests): SUBSTANTIALLY DONE.** `dfb_passthrough` standalone test passes (1 DM producer + 1 DM consumer, STRIDED 1:1). Two upstream-style Metal DFB tests now pass through the full tt-metal emulation path (`emulated_program_runner` JIT pipeline):
+- `DFBEmuleDMTest` — DM producer + DM consumer, 1 DFB, STRIDED, explicit sync
+- `DFBEmuleBridgeTest` — DM producer + Compute bridge (dfb_t6) + DM consumer, 2 DFBs
+
+These tests use real `tt-metal` host APIs (`CreateDataflowBuffer`, `BindDataflowBufferToProducerConsumerKernels`, `experimental::quasar::CreateKernel`, `LaunchProgram`) and JIT-compile upstream device kernels (`dfb_producer.cpp`, `dfb_consumer.cpp`, `dfb_t6.cpp`). See [QUASAR_DFB_PLAN.md](QUASAR_DFB_PLAN.md) for full details.
 
 ### Phase 1: Single-Tensix DFB Emulation
 
-- Implement tile counter array (`TileCounter`, `TileCounterArray`)
-- Implement `DFBSyncState` and per-thread `EmuleDFBInterface`
-- Implement explicit sync DFB API (reserve_back/push_back/wait_front/pop_front/finish)
-- STRIDED access pattern only
-- 2 DM producers + 4 Tensix consumers (expandable to 8 DM)
-- Update `Core` for 4 MB L1, DFB storage
-- Update `kernel_runner.cpp` for multi-DM thread model
-- Update `Program` for DFB configs
-- Regression tests
+Ordered by dependency -- each step builds on the previous.
+
+**Step 1: Core/Thread Model** -- **DONE.** Extended `KernelType` with `QuasarDM`/`QuasarCompute` in `program.hpp`. Added `QuasarDataMovementConfig`/`QuasarComputeConfig` structs. Added `processor_id` (0-23) to `KernelDescriptor`. `Core` L1 is runtime-configurable via existing role-aware constructor (default remains 1 MB; `L1_SIZE` constexpr not yet changed to 4 MB -- needs `#ifdef ARCH_QUASAR` or separate Quasar Device constructor).
+
+**Step 2: Tile Counter Infrastructure** -- **DONE.** New `include/tt_emule/tile_counter.hpp` with `TileCounter` (atomic posted/acked, capacity, mutex, 2 CVs) and `TileCounterArray` (flat `unique_ptr<TileCounter[]>`, parameterized by num_neos, 32 TCs per neo). Added `TileCounterArray` to `Core` (lazy init via `init_tile_counters(num_neos)`).
+
+**Step 3: DFB Sync State** -- **DONE.** New `include/tt_emule/dfb_sync_state.hpp` with `DFBTCSlot`, `EmuleDFBInterface` (per-thread per-DFB view: 4 TC slots, round-robin, entry/stride, broadcast/active flags), and `DFBSyncState` (buffer geometry). `TileCounterArray*` pointer lives on `Core` rather than per-`DFBSyncState`.
+
+**Step 4: DFB Device API** -- **DONE.** New `include/tt_emule/dataflow_buffer.hpp` with `DataflowBuffer` class implementing `reserve_back` (strided + broadcast), `push_back`, `wait_front`, `pop_front`, `finish` (drain barrier), `get_write_ptr`, `get_read_ptr`, `get_entry_size`, `get_stride_size`, `get_id`.
+
+**Step 5: JIT DFB API** -- **DONE.** New `include/jit_hw/emule_dfb_state.h` (thread-local `__emule_dfbs`, `__emule_tc_array`) and `include/jit_hw/api/dfb_api.h` (timeout-wrapped ops with `TT_EMULE_DFB_TIMEOUT` env var, default 120s).
+
+**Step 6: Kernel Runner Update** -- **DONE.** Updated `src/kernel_runner.cpp` with: `build_dfb_interfaces()` (builds per-thread EmuleDFBInterface arrays from DataflowBufferConfig + RISC masks), `std::barrier` init sync, per-thread DFB thread-locals (`__dfb_ifaces`, `__emule_dfbs`, `__emule_tc_array`), per-thread `__processor_id`, DFB teardown via `core.reset_dfb_sync()`.
+
+**Step 7: Program Model** -- **DONE.** Added `DataflowBufferConfig`, `DFBHandle`, `AccessPattern` enum, `Program::add_dfb()` to `program.hpp`. Added `CreateDataflowBuffer()` and Quasar `CreateKernel()` overloads (for function-pointer kernels) in `host_api.cpp`/`host_api.hpp`. Note: `BindDataflowBufferToProducerConsumerKernels` not yet implemented (RISC masks are set manually in config).
+
+**Step 8: Standalone API** -- **DONE.** New `include/kernel_api/dfb_dataflow_api.hpp` for standalone DFB operations via `__core->tile_counters()` and `__dfb_ifaces` thread-local.
+
+**Step 9: Regression Tests** -- **PARTIALLY DONE.** Added `tests/dfb_passthrough/` (1 DM producer + 1 DM consumer, 8x1KB entries, STRIDED 1:1, validates full sync cycle). Extended `run_regression.sh` with Tier 0 standalone section. All 4 standalone tests pass (eltwise_add, matmul, tilize, dfb_passthrough). Remaining from plan: eltwise_copy (needs compute ops), bmm (needs matmul + multi-DFB), multi-producer/consumer tests.
+
+### Phase 1 Remaining Work (to run upstream metal DFB tests)
+
+The core DFB sync infrastructure is complete. The following gaps must be closed to run the actual tt-metal DFB tests listed in Section "Target Test Workloads" above:
+
+**Host API gaps (resolved):**
+- ~~`BindDataflowBufferToProducerConsumerKernels`~~ -- **Done.** Used by Metal DFB tests via real tt-metal API.
+- ~~Quasar JIT `CreateKernel` with source file path~~ -- **Done.** `emulated_program_runner` handles JIT compilation with g++.
+
+**Device API gaps (resolved):**
+- ~~`#include <experimental/dataflow_buffer.h>` shim header~~ -- **Done.** `jit_hw/experimental/dataflow_buffer.h` wraps `dfb_api.h`.
+- ~~`experimental::Noc` class~~ -- **Done.** JIT stubs for `Noc::async_read/write/barriers` with memcpy semantics.
+- ~~`TensorAccessor` / `TensorAccessorArgs`~~ -- **Done.** JIT stub with `InterleavedAddrGen` DRAM banking.
+- ~~`get_my_thread_id()` / `mhartid`~~ -- **Done.** `__processor_id` TLS + JIT `mhartid` CSR patching.
+- ~~`DPRINT`~~ -- **Done.** Forward to host `fprintf(stderr)`.
+
+**Device API gaps (remaining):**
+- `noc_async_read_tile()` / `noc_async_write_tile()` -- tile-indexed NOC (needed by BMM tests)
+- `AllocatorBank<DRAM>` -- bank-interleaved DRAM addressing (needed by matmul tests)
+- `read_in()` / `write_out()` -- implicit sync (Phase 2, needed by `test_direct.cpp`)
+
+**Compute API gaps (remaining, for bmm/matmul/datacopy tests):**
+- `mm_init`, `matmul_tiles`, `mm_block_init`, `matmul_block`
+- `unary_op_init_common`, `copy_tile`
+- `pack_tile`, `acquire_dst`, `release_dst`
+- LLK stubs: `llk_wait_tiles`, `llk_pop_tiles`, `llk_wait_for_free_tiles`, `llk_push_tiles` (TRISC DFB wrappers)
+
+**JIT / build infrastructure (remaining):**
+- Quasar JIT compilation pipeline switch to clang-17 (currently uses g++ which works)
+- `L1_SIZE` = 4 MB for Quasar builds (currently still 1 MB default)
+
+**Recommended priority order (updated):**
+1. ~~`get_my_thread_id()` / `mhartid`~~ -- **Done**
+2. ~~`<experimental/dataflow_buffer.h>` shim header~~ -- **Done**
+3. ~~`TensorAccessor` stub~~ -- **Done**
+4. ~~`experimental::Noc` class~~ -- **Done**
+5. L1_SIZE = 4 MB for Quasar Device
+6. LLK DFB stubs for TRISC
+7. Compute ops (`mm_init`, `matmul_tiles`, `pack_tile`, etc.)
+8. `noc_async_read_tile()` / `noc_async_write_tile()`
+9. Implicit sync (`read_in`/`write_out`)
+10. Quasar JIT pipeline switch to clang-17
 
 ### Phase 2: Extended DFB Features
 
@@ -327,13 +426,13 @@ There will be **many different Quasar configurations**, primarily varying in the
 
 ---
 
-## Key Design Decisions (to be made)
+## Key Design Decisions (all resolved)
 
 1. **Arch selection**: **Resolved -- Quasar is a separate build.** The emulator binary is compiled for one arch at a time. Arch-specific code paths (DFB vs CB, thread model, L1 size, etc.) use compile-time `#ifdef` rather than runtime dispatch.
 2. **CB coexistence**: **Resolved -- DFBs only for Quasar build.** Quasar HAL says `supports_cbs = true` AND `supports_dfbs = true`, but programs cannot mix them (DFB plan Section 8). Since Quasar is a separate build, the Quasar emulator only needs DFB support. CBs remain in the Wormhole build.
 3. **Thread count**: **Resolved -- driven by kernel config.** `QuasarDataMovementConfig::num_threads_per_cluster` (1-8) and `QuasarComputeConfig::num_threads_per_cluster` (1-4 Neos, each with 4 TRISCs) determine how many threads to spawn per Tensix. The emulator reads these from the program's kernel descriptors.
 4. **L1 addressing**: **Resolved -- no issue.** `MAP_32BIT` gives 2 GB address space; 4 MB L1 fits trivially.
-5. **JIT toolchain**: Current emule uses `g++` for JIT. Workspace rules say clang-17. When do we switch?
-6. **Configuration format**: What data-driven format for Quasar variants? Options: SoC YAML from tt-metal, custom JSON/YAML, C++ config struct, or compile-time constants.
-7. **JIT header tree structure**: How should the Quasar build expose DFB APIs to JIT-compiled kernels? Options: separate `jit_hw/` tree, `#ifdef ARCH_QUASAR` in existing headers, or redirect to upstream `experimental/dataflow_buffer.h` with emulation shims.
+5. **JIT toolchain**: **Resolved -- clang-17 for Quasar build per workspace rules; g++ remains for Wormhole build.** The JIT path in `jit_kernel.cpp` currently hardcodes `g++`; the Quasar build will switch to `clang-17`. This is a Phase 1 change since JIT-compiled Quasar kernels need the correct toolchain from the start.
+6. **Configuration format**: **Resolved -- C++ config struct parameterized at build time.** A `QuasarConfig` struct with `num_neos`, `num_dms`, `l1_size`, `num_tile_counters_per_neo` fields, initialized from compile-time defaults with optional runtime override. SoC YAML loading deferred to Phase 3.
+7. **JIT header tree structure**: **Resolved -- parallel `jit_hw/` headers with `#ifdef ARCH_QUASAR` gating in shared headers.** Quasar build gets new DFB-specific headers (`jit_hw/api/dfb_api.h`, `jit_hw/emule_dfb_state.h`) paralleling the existing CB headers. Shared headers (e.g. compute) use `#ifdef ARCH_QUASAR` to select DFB vs CB paths. This matches the existing `jit_hw/api/cb_api.h` pattern.
 

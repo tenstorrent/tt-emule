@@ -14,9 +14,13 @@ namespace tt_emule {
 using KernelFn = std::function<void()>;
 
 enum class KernelType {
-    DataMovement0, // NOC reader (DM thread 0)
-    DataMovement1, // NOC writer (DM thread 1)
+    // Wormhole kernel types
+    DataMovement0,
+    DataMovement1,
     Compute,
+    // Quasar kernel types (processor_id field carries the specific slot)
+    QuasarDM,       // DM0-DM7, processor_id = 0-7
+    QuasarCompute,  // E0_MATH0-E3_MATH3, processor_id = 8-23
 };
 
 // tt-metal compatibility enums
@@ -29,6 +33,9 @@ enum class NOC : uint8_t { RISCV_0_default = 0, RISCV_1_default = 1, NOC_0 = 0, 
 enum class NOC_MODE : uint8_t { DM_DEDICATED_NOC = 0, DM_DYNAMIC_NOC = 1 };
 enum class MathFidelity : uint8_t { LoFi = 0, HiFi2 = 2, HiFi3 = 3, HiFi4 = 4, Invalid = 0xff };
 enum class UnpackToDestMode : uint8_t { UnpackToDestFp32, Default };
+
+// DFB access pattern (Quasar)
+enum class AccessPattern : uint8_t { STRIDED = 0, BLOCKED = 1 };
 
 struct DataMovementConfig {
     KernelType             type      = KernelType::DataMovement0;
@@ -51,7 +58,28 @@ struct ComputeConfig {
     std::vector<uint32_t>         compile_args;
     std::map<std::string, std::string> defines;
     std::unordered_map<std::string, uint32_t> named_compile_args;
-    // All fields are ignored at runtime; compute kernel execution unchanged.
+};
+
+// Quasar kernel config structs (emulation-side equivalents of upstream)
+struct QuasarDataMovementConfig {
+    uint32_t num_threads_per_cluster = 8;
+    std::vector<uint32_t> compile_args;
+    std::map<std::string, std::string> defines;
+    std::unordered_map<std::string, uint32_t> named_compile_args;
+    bool is_legacy_kernel = false;
+};
+
+struct QuasarComputeConfig {
+    uint32_t num_threads_per_cluster = 4;
+    MathFidelity math_fidelity = MathFidelity::HiFi4;
+    bool fp32_dest_acc_en = false;
+    bool dst_full_sync_en = false;
+    std::vector<UnpackToDestMode> unpack_to_dest_mode;
+    bool bfp8_pack_precise = false;
+    bool math_approx_mode = false;
+    std::vector<uint32_t> compile_args;
+    std::map<std::string, std::string> defines;
+    std::unordered_map<std::string, uint32_t> named_compile_args;
 };
 
 struct KernelDescriptor {
@@ -60,9 +88,24 @@ struct KernelDescriptor {
     KernelFn fn;
     CoreCoord core;
     std::vector<uint32_t> rt_args;
+    uint8_t processor_id = 0;  // Quasar: TensixProcessorTypes index (0-23)
 };
 
 using CBHandle = uint32_t;
+using DFBHandle = uint32_t;
+
+// Quasar DFB configuration
+struct DataflowBufferConfig {
+    uint32_t dfb_index     = 0;
+    uint32_t entry_size    = 0;
+    uint32_t num_entries   = 0;
+    uint16_t producer_risc_mask = 0x0;  // bits 0-7 = DM, 8-15 = Tensix Neo
+    uint8_t  num_producers = 1;
+    AccessPattern producer_access_pattern = AccessPattern::STRIDED;
+    uint16_t consumer_risc_mask = 0x0;
+    uint8_t  num_consumers = 1;
+    AccessPattern consumer_access_pattern = AccessPattern::STRIDED;
+};
 
 struct CircularBufferConfig {
     uint32_t cb_index    = 0;  // 0-31
@@ -110,9 +153,10 @@ struct CircularBufferConfig {
 
 class Program {
 public:
-    uint32_t add_kernel(KernelType type, KernelFn fn, CoreCoord core) {
+    uint32_t add_kernel(KernelType type, KernelFn fn, CoreCoord core,
+                        uint8_t processor_id = 0) {
         uint32_t id = static_cast<uint32_t>(kernels_.size());
-        kernels_.push_back({id, type, std::move(fn), core, {}});
+        kernels_.push_back({id, type, std::move(fn), core, {}, processor_id});
         return id;
     }
 
@@ -126,12 +170,23 @@ public:
         return h;
     }
 
+    DFBHandle add_dfb(DataflowBufferConfig cfg) {
+        DFBHandle h = static_cast<DFBHandle>(dfb_configs_.size());
+        cfg.dfb_index = h;
+        dfb_configs_.push_back(cfg);
+        return h;
+    }
+
     std::vector<KernelDescriptor>& kernels() { return kernels_; }
     std::vector<CircularBufferConfig>& cb_configs() { return cb_configs_; }
+    std::vector<DataflowBufferConfig>& dfb_configs() { return dfb_configs_; }
+
+    bool has_dfbs() const { return !dfb_configs_.empty(); }
 
 private:
     std::vector<KernelDescriptor> kernels_;
     std::vector<CircularBufferConfig> cb_configs_;
+    std::vector<DataflowBufferConfig> dfb_configs_;
 };
 
 } // namespace tt_emule
