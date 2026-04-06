@@ -134,6 +134,8 @@ echo ""
 echo "== Tier 3d: DFB Compute Bridge Tests (Groups B/C) =="
 
 # Group B: DM producer → Tensix consumer
+run_test "DMTensixTest1xDFB1Sx1S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB1Sx1S/ImplicitSyncFalse"
 run_test "DMTensixTest1xDFB1Sx4S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB1Sx4S/ImplicitSyncFalse"
 run_test "DMTensixTest1xDFB4Sx1S" "$DFB_TEST" \
@@ -146,6 +148,8 @@ run_test "DMTensixTest1xDFB4Sx2S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx2S/ImplicitSyncFalse"
 
 # Group C: Tensix producer → DM consumer
+run_test "TensixDMTest1xDFB1Sx1S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB1Sx1S/ImplicitSyncFalse"
 run_test "TensixDMTest1xDFB1Sx4S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB1Sx4S/ImplicitSyncFalse"
 run_test "TensixDMTest1xDFB4Sx1S" "$DFB_TEST" \

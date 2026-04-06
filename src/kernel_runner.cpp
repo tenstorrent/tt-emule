@@ -50,6 +50,11 @@ std::vector<std::vector<EmuleDFBInterface>> build_dfb_interfaces(
         uint32_t stride_size = M * cfg.entry_size;
         // Space counter IDs by MAX_TC_SLOTS_PER_DFB per DFB to prevent
         // cross-DFB TC index collision in multi-DFB programs.
+        // With neo_id=0, effective limit is TILE_COUNTERS_PER_NEO / MAX_TC_SLOTS_PER_DFB = 8 DFBs.
+        if (cfg.dfb_index >= (TILE_COUNTERS_PER_NEO / MAX_TC_SLOTS_PER_DFB)) {
+            throw std::out_of_range(
+                "dfb_index exceeds safe TC range (max 8 DFBs per NEO with neo_id=0)");
+        }
         uint8_t counter_base = static_cast<uint8_t>(
             cfg.dfb_index * MAX_TC_SLOTS_PER_DFB);
 
@@ -158,6 +163,11 @@ void EnqueueProgram(Device& device, Program& program, bool /*blocking*/) {
 
             // Set up tile counter capacities; space counter IDs by
             // MAX_TC_SLOTS_PER_DFB per DFB (same formula as build_dfb_interfaces).
+            // With neo_id=0, effective limit is TILE_COUNTERS_PER_NEO / MAX_TC_SLOTS_PER_DFB = 8 DFBs.
+            if (cfg.dfb_index >= (TILE_COUNTERS_PER_NEO / MAX_TC_SLOTS_PER_DFB)) {
+                throw std::out_of_range(
+                    "dfb_index exceeds safe TC range (max 8 DFBs per NEO with neo_id=0)");
+            }
             uint8_t counter_base = static_cast<uint8_t>(
                 cfg.dfb_index * MAX_TC_SLOTS_PER_DFB);
             uint8_t num_tcs = static_cast<uint8_t>(M);
