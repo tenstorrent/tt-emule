@@ -93,7 +93,7 @@ public:
 private:
     uint32_t advance_ptr(uint32_t ptr, uint32_t base, uint32_t limit,
                          uint16_t n) const {
-        ptr += static_cast<uint32_t>(n) * iface_.entry_size;
+        ptr += static_cast<uint32_t>(n) * iface_.stride_size;
         if (ptr >= limit)
             ptr = base + (ptr - limit);
         return ptr;
