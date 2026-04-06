@@ -208,6 +208,33 @@ run_test "DMTensixDMTest1xDFB2Sx1S1xDFB1Sx2S" "$DFB_TEST" \
 run_test "DMTensixDMTest1xDFB4Sx1S1xDFB1Sx4S" "$DFB_TEST" \
     --gtest_filter="MeshDeviceFixture.DMTensixDMTest1xDFB4Sx1S1xDFB1Sx4S"
 
+echo ""
+echo "== Tier 3f: DFB BLOCKED Consumer =="
+
+# BLOCKED DM-DM
+for test in DMTest1xDFB1Sx4B DMTest1xDFB4Sx1B DMTest1xDFB4Sx4B DMTest1xDFB4Sx2B DMTest1xDFB2Sx4B; do
+    run_test "${test}" "$DFB_TEST" \
+        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncFalse"
+    run_test "${test}_IS" "$DFB_TEST" \
+        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
+done
+
+# BLOCKED DM→Tensix
+for test in DMTensixTest1xDFB1Sx4B DMTensixTest1xDFB4Sx1B DMTensixTest1xDFB4Sx4B DMTensixTest1xDFB4Sx2B DMTensixTest1xDFB2Sx4B; do
+    run_test "${test}" "$DFB_TEST" \
+        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncFalse"
+    run_test "${test}_IS" "$DFB_TEST" \
+        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
+done
+
+# BLOCKED Tensix→DM
+for test in TensixDMTest1xDFB1Sx4B TensixDMTest1xDFB4Sx1B TensixDMTest1xDFB4Sx4B TensixDMTest1xDFB4Sx2B TensixDMTest1xDFB2Sx4B; do
+    run_test "${test}" "$DFB_TEST" \
+        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncFalse"
+    run_test "${test}_IS" "$DFB_TEST" \
+        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
+done
+
 unset ARCH_NAME
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
 
