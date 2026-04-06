@@ -4,7 +4,7 @@ Machine-optimized build instructions. All paths use `<ROOT>` as the parent direc
 
 ## Preconditions
 
-- `clang-17`, `clang++-17`, `cmake` (>=3.24), `ninja`, `python3` (>=3.10) in PATH
+- `clang-20`, `clang++-20`, `cmake` (>=3.24), `ninja`, `python3` (>=3.10) in PATH
 - `/opt/ttmlir-toolchain` installed (LLVM/MLIR toolchain with venv)
 - SSH access to github.com configured
 - Repos checked out:
@@ -41,7 +41,8 @@ git submodule update --init --recursive
 ```bash
 cd <ROOT>/tt-metal
 cmake -B build_emule_clang -G Ninja \
-    -DCMAKE_C_COMPILER=clang-17 -DCMAKE_CXX_COMPILER=clang++-17 \
+    -DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20 \
+    -DCMAKE_AR=/usr/bin/llvm-ar-20 -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
     -DCMAKE_BUILD_TYPE=Release \
     -DTT_METAL_USE_TT_EMULE=ON -DTT_METAL_EMULATION=ON \
     -DTT_EMULE_PATH=<ROOT>/tt-emule \
@@ -60,7 +61,7 @@ cd <ROOT>/tt-emule
 ./run_regression.sh
 ```
 
-**Success:** Output ends with `Results: 18 passed, 0 failed, 0 skipped` and exit code 0.
+**Success:** Output ends with `Results: 23 passed, 1 failed, 2 skipped` and exit code 1. The 1 failure is Tier 6 (silicon toggle proof, requires real hardware). The 2 skips are `test_emulation_toggle` (not yet in CMakeLists). All emulation tests pass.
 
 ## Step 5: Set Up tt-mlir
 
@@ -98,11 +99,14 @@ cd <ROOT>/tt-mlir
 source env/activate
 cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release \
     -DTT_METAL_LOCAL_BUILD=ON -DTTMLIR_ENABLE_RUNTIME=ON \
-    -DTTMLIR_ENABLE_STABLEHLO=ON -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+    -DTTMLIR_ENABLE_STABLEHLO=ON -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    -DLLVM_USE_LINKER=lld-20
 cmake --build build -j$(nproc)
 ```
 
 **Critical:** `TTMLIR_ENABLE_STABLEHLO=ON` is mandatory. Without it, all D2M tests fail with `ImportError: cannot import name 'stablehlo'`.
+
+**Critical:** `-DLLVM_USE_LINKER=lld-20` is required. Without it, GNU ld is used and fails on `--color-diagnostics`.
 
 **Success:** `ls build/python_packages/ttmlir/dialects/stablehlo.py build/runtime/python/_ttmlir_runtime*.so` exits 0.
 
@@ -130,9 +134,9 @@ export SYSTEM_DESC_PATH="<ROOT>/tt-mlir/ttrt-artifacts/system_desc.ttsys"
 ./run_d2m_regression.sh --serial
 ```
 
-**Success criteria:** Total passed >= 249. Count with: `for f in /tmp/tt_emule_d2m_logs_*/*.log; do grep -c PASSED "$f"; done | paste -sd+ | bc`
+**Success criteria:** Total individual test passes >= 1600. The script reports file-level pass/fail (7 passed, 6 failed is normal).
 
-Expected per-file passes: layout=94, allocate=6, matmul=78+, tms=68, reductions=12, dma=8, tilize=3, masking=2, virtual_grid_rowmajor=0(skip).
+Expected per-file passes: matmul=113, matmul_higher_rank=10, layout=94, allocate=6, reductions=940, tms=332, dma=41, virtual_grids=39, tilize=12, tensor_collapsing=12, masking=5, bfp8_typecast=0(JIT errors), virtual_grid_rowmajor=0(skip/N300 only).
 
 ## Error Reference
 
@@ -143,3 +147,5 @@ Expected per-file passes: layout=94, allocate=6, matmul=78+, tms=68, reductions=
 | `ImportError: cannot import name 'stablehlo'` | Rebuild tt-mlir with `-DTTMLIR_ENABLE_STABLEHLO=ON` |
 | ninja: `libtt_metal.so` missing | Create symlinks in `build_emule_clang/lib/` pointing to actual .so locations |
 | ttrt query fails | Ensure `LD_LIBRARY_PATH` includes build lib dir and emulation env vars are set |
+| `llvm-ar-17: not found` during link | Delete `CMakeCache.txt` and reconfigure with `-DCMAKE_AR=/usr/bin/llvm-ar-20 -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20` |
+| `ld: unrecognized option '--color-diagnostics'` | Add `-DLLVM_USE_LINKER=lld-20` to tt-mlir cmake configure |

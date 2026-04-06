@@ -16,7 +16,7 @@ A complete, step-by-step guide to building tt-emule and all its dependencies fro
 
 | Tool | Minimum Version | Check Command |
 |------|----------------|---------------|
-| clang-17 | 17.x | `clang-17 --version` |
+| clang-20 | 20.x | `clang-20 --version` |
 | CMake | 3.24 | `cmake --version` |
 | Ninja | 1.10+ | `ninja --version` |
 | Python | 3.10+ | `python3 --version` |
@@ -99,8 +99,10 @@ cd /localdev/<user>/tt-metal
 
 cmake -B build_emule_clang \
     -G Ninja \
-    -DCMAKE_C_COMPILER=clang-17 \
-    -DCMAKE_CXX_COMPILER=clang++-17 \
+    -DCMAKE_C_COMPILER=clang-20 \
+    -DCMAKE_CXX_COMPILER=clang++-20 \
+    -DCMAKE_AR=/usr/bin/llvm-ar-20 \
+    -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
     -DCMAKE_BUILD_TYPE=Release \
     -DTT_METAL_USE_TT_EMULE=ON \
     -DTT_METAL_EMULATION=ON \
@@ -116,7 +118,7 @@ cmake --build build_emule_clang -j$(nproc)
 
 | Option | Value | Purpose |
 |--------|-------|---------|
-| `CMAKE_C/CXX_COMPILER` | `clang-17`/`clang++-17` | Must use clang-17 as specified by project conventions |
+| `CMAKE_C/CXX_COMPILER` | `clang-20`/`clang++-20` | Must use clang-20 as specified by project conventions |
 | `CMAKE_BUILD_TYPE` | `Release` | Release mode avoids ThreadSanitizer overhead and unused-variable warnings in debug macros |
 | `TT_METAL_USE_TT_EMULE` | `ON` | Adds `tt_emule/` test subdirectory to the build |
 | `TT_METAL_EMULATION` | `ON` | Compiles `emulated_program_runner.cpp`, defines `TT_METAL_EMULATION=1`, adds tt-emule include paths |
@@ -134,7 +136,7 @@ After a successful build, you should see:
 
 ### Known Build Issue: Unused Lambda Capture
 
-In Release mode, `log_debug` macros compile to nothing, which can cause `-Wunused-lambda-capture` errors under clang-17 with `-Werror`. If you see an error like:
+In Release mode, `log_debug` macros compile to nothing, which can cause `-Wunused-lambda-capture` errors under clang-20 with `-Werror`. If you see an error like:
 
 ```
 emulated_program_runner.cpp:788: error: lambda capture 'kidx' is not required
@@ -165,7 +167,7 @@ This runs 5 tiers of tests:
 4. **Tier 4 (TTNN Relational):** ttnn_relational
 5. **Tier 5 (TTNN Matmul):** ttnn_matmul_sweep
 
-**Expected result:** 18 passed, 0 failed, 0 skipped.
+**Expected result:** 23 passed, 1 failed, 2 skipped. The 1 failure is Tier 6 (silicon toggle proof, requires real hardware). The 2 skips are `test_emulation_toggle` (not yet in CMakeLists). All emulation tests pass.
 
 ---
 
@@ -215,12 +217,15 @@ cmake -G Ninja -B build \
     -DTT_METAL_LOCAL_BUILD=ON \
     -DTTMLIR_ENABLE_RUNTIME=ON \
     -DTTMLIR_ENABLE_STABLEHLO=ON \
-    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    -DLLVM_USE_LINKER=lld-20
 
 cmake --build build -j$(nproc)
 ```
 
 **Important:** `TTMLIR_ENABLE_STABLEHLO=ON` is required. The D2M test builder unconditionally imports `stablehlo` from `ttmlir.dialects`. Without it, all 13 test files fail with `ImportError`.
+
+**Important:** `-DLLVM_USE_LINKER=lld-20` is required when using clang-20. Without it, GNU ld is used and fails on the `--color-diagnostics` flag.
 
 ### Step 5e: Generate System Descriptor
 
@@ -260,20 +265,23 @@ The `--serial` flag runs test files one at a time (recommended to avoid memory c
 
 ### Expected Results
 
-Total: **271+ passed** across 13 test files (~1146 total tests).
+Total: **1604+ individual test passes** across 13 test files. The script reports 7 file-level passes, 6 file-level failures (normal — some files have a mix of passing and failing tests).
 
 | Test File | Expected Passed | Expected Failed | Notes |
 |-----------|----------------|----------------|-------|
+| test_metal_matmul | 113 | 0 (14 xfailed) | 100% pass with 1800s timeout |
+| test_metal_matmul_higher_rank | 10 | 0 | 100% pass |
 | test_metal_layout | 94 | 0 | 100% pass |
 | test_metal_allocate | 6 | 0 | 100% pass |
-| test_metal_matmul | 78+ | 0 | Times out at 300s; all executed tests pass |
-| test_metal_tms | 68 | ~65 | Tile-aligned reshapes pass, permutes fail |
-| test_metal_reductions | 12 | ~88 | Times out; sum variants fail |
-| test_metal_dma | 8 | ~41 | Aborts on first DRAM-backed test |
-| test_metal_masking | 2 | 18 | JIT compile errors |
-| test_metal_tilize | 3 | 4 | Non-aligned shapes fail |
+| test_metal_reductions | 940 | 60 | 96 skipped; some sum variants fail PCC |
+| test_metal_tms | 332 | 4 | 3 skipped; most reshapes/permutes pass |
+| test_metal_dma | 41 | 8 | DRAM-backed interleaved tests crash (signal 6) |
+| test_metal_virtual_grids | 39 | 0 | 100% pass |
+| test_metal_tensor_collapsing | 12 | 0 | 2 skipped; 100% pass |
+| test_metal_tilize | 12 | 32 | Non-aligned shapes fail PCC |
+| test_metal_masking | 5 | 15 | PCC mismatch on most tests |
+| test_metal_bfp8_typecast | 0 | 13 | JIT compile errors |
 | test_metal_virtual_grid_rowmajor | 0 (27 skip) | 0 | Requires N300 multi-chip |
-| Others | 0 | varies | JIT errors or PCC mismatch |
 
 ### Increasing Timeout
 
@@ -301,6 +309,12 @@ Create symlinks as described in Step 5c. The emulation build places .so files in
 
 ### ttrt query fails
 Make sure `LD_LIBRARY_PATH` includes the emulation build lib directory, and all emulation environment variables (`TT_METAL_MOCK_CLUSTER_DESC_PATH`, `TT_METAL_EMULATED_MODE`, `TT_METAL_SLOW_DISPATCH_MODE`) are set.
+
+### `llvm-ar-17: not found` during tt-metal build
+The CMake cache has stale references to clang-17 tools. Delete `build_emule_clang/CMakeCache.txt` and reconfigure with `-DCMAKE_AR=/usr/bin/llvm-ar-20 -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20`.
+
+### `ld: unrecognized option '--color-diagnostics'` during tt-mlir build
+GNU ld doesn't support this LLD flag. Add `-DLLVM_USE_LINKER=lld-20` to the tt-mlir cmake configure command.
 
 ---
 
