@@ -36,8 +36,8 @@ std::vector<std::vector<EmuleDFBInterface>> build_dfb_interfaces(
     Core& core, Program& program)
 {
     auto& dfb_cfgs = program.dfb_configs();
-    auto& kernels = program.kernels();
-    size_t nk = kernels.size();
+    auto& kernels  = program.kernels();
+    size_t nk      = kernels.size();
 
     std::vector<std::vector<EmuleDFBInterface>> result(
         nk, std::vector<EmuleDFBInterface>(MAX_DFBS));
@@ -46,62 +46,79 @@ std::vector<std::vector<EmuleDFBInterface>> build_dfb_interfaces(
 
     for (auto& cfg : dfb_cfgs) {
         auto& dsync = core.dfb_sync_array()[cfg.dfb_index];
+        uint32_t M = std::max(cfg.num_producers, cfg.num_consumers);
+        uint32_t stride_size = M * cfg.entry_size;
+        // Space counter IDs by MAX_TC_SLOTS_PER_DFB per DFB to prevent
+        // cross-DFB TC index collision in multi-DFB programs.
+        uint8_t counter_base = static_cast<uint8_t>(
+            cfg.dfb_index * MAX_TC_SLOTS_PER_DFB);
 
         for (size_t ki = 0; ki < nk; ++ki) {
-            auto& kd = kernels[ki];
+            auto& kd    = kernels[ki];
             auto& iface = result[ki][cfg.dfb_index];
             iface.entry_size  = cfg.entry_size;
             iface.num_entries = cfg.num_entries;
-
-            bool is_producer = false;
-            bool is_consumer = false;
+            iface.stride_size = stride_size;
 
             uint16_t proc_bit = static_cast<uint16_t>(1u << kd.processor_id);
-            if (cfg.producer_risc_mask & proc_bit) is_producer = true;
-            if (cfg.consumer_risc_mask & proc_bit) is_consumer = true;
+            bool is_producer  = (cfg.producer_risc_mask & proc_bit) != 0;
+            bool is_consumer  = (cfg.consumer_risc_mask & proc_bit) != 0;
 
             if (!is_producer && !is_consumer) continue;
-            iface.active = true;
+            iface.active       = true;
+            iface.broadcast_tc = false;  // STRIDED: round-robin, not broadcast
 
-            uint8_t neo_id = 0;
-            uint8_t counter_base = cfg.dfb_index;
+            uint32_t base_addr = static_cast<uint32_t>(
+                reinterpret_cast<uintptr_t>(dsync.base));
 
             if (is_producer) {
-                iface.num_tcs_to_rr = cfg.num_consumers;
-                iface.stride_size = cfg.entry_size * cfg.num_producers;
-                for (uint8_t c = 0; c < cfg.num_consumers && c < MAX_TC_SLOTS_PER_DFB; ++c) {
-                    auto& slot = iface.tc_slots[c];
-                    slot.neo_id = neo_id;
-                    slot.counter_id = counter_base + c;
-                    slot.base_addr = static_cast<uint32_t>(
-                        reinterpret_cast<uintptr_t>(dsync.base));
-                    slot.limit = slot.base_addr + cfg.num_entries * cfg.entry_size;
-                    slot.wr_ptr = slot.base_addr;
-                    slot.rd_ptr = slot.base_addr;
+                // Determine this producer's ordinal among all producers
+                uint8_t p = 0;
+                for (uint8_t b = 0; b < 16; ++b) {
+                    if (!(cfg.producer_risc_mask & (1u << b))) continue;
+                    if (b == kd.processor_id) break;
+                    ++p;
                 }
-                if (cfg.num_consumers > 1)
-                    iface.broadcast_tc = true;
+                // Each producer round-robins over M/P TC slots
+                uint32_t num_tcs = M / cfg.num_producers;
+                iface.num_tcs_to_rr = static_cast<uint8_t>(num_tcs);
+                for (uint32_t k = 0; k < num_tcs && k < MAX_TC_SLOTS_PER_DFB; ++k) {
+                    // STRIDED: producer p owns TC indices p, p+P, p+2P, ...
+                    uint8_t tc_idx   = static_cast<uint8_t>(p + k * cfg.num_producers);
+                    auto& slot       = iface.tc_slots[k];
+                    slot.neo_id      = 0;
+                    slot.counter_id  = counter_base + tc_idx;
+                    slot.base_addr   = base_addr;
+                    slot.limit       = base_addr + cfg.num_entries * cfg.entry_size;
+                    // Initial pointer offset = TC slot ordinal * entry_size
+                    uint32_t offset  = tc_idx * cfg.entry_size;
+                    slot.wr_ptr      = base_addr + offset;
+                    slot.rd_ptr      = base_addr + offset;
+                }
             } else {
-                iface.num_tcs_to_rr = 1;
-                iface.stride_size = cfg.entry_size * cfg.num_consumers;
-                auto& slot = iface.tc_slots[0];
-                slot.neo_id = neo_id;
-                // Each consumer gets its own TC slot index
-                uint8_t consumer_ordinal = 0;
-                uint16_t mask = cfg.consumer_risc_mask;
-                for (uint8_t b = 0; b < 16 && mask; ++b) {
-                    if (mask & (1u << b)) {
-                        if (b == kd.processor_id) break;
-                        ++consumer_ordinal;
-                    }
-                    mask &= ~(1u << b);
+                // Determine this consumer's ordinal among all consumers
+                uint8_t c = 0;
+                for (uint8_t b = 0; b < 16; ++b) {
+                    if (!(cfg.consumer_risc_mask & (1u << b))) continue;
+                    if (b == kd.processor_id) break;
+                    ++c;
                 }
-                slot.counter_id = counter_base + consumer_ordinal;
-                slot.base_addr = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(dsync.base));
-                slot.limit = slot.base_addr + cfg.num_entries * cfg.entry_size;
-                slot.wr_ptr = slot.base_addr;
-                slot.rd_ptr = slot.base_addr;
+                // Each consumer round-robins over M/C TC slots
+                uint32_t num_tcs = M / cfg.num_consumers;
+                iface.num_tcs_to_rr = static_cast<uint8_t>(num_tcs);
+                for (uint32_t k = 0; k < num_tcs && k < MAX_TC_SLOTS_PER_DFB; ++k) {
+                    // STRIDED: consumer c owns TC indices c, c+C, c+2C, ...
+                    uint8_t tc_idx   = static_cast<uint8_t>(c + k * cfg.num_consumers);
+                    auto& slot       = iface.tc_slots[k];
+                    slot.neo_id      = 0;
+                    slot.counter_id  = counter_base + tc_idx;
+                    slot.base_addr   = base_addr;
+                    slot.limit       = base_addr + cfg.num_entries * cfg.entry_size;
+                    // Initial pointer offset = TC slot ordinal * entry_size
+                    uint32_t offset  = tc_idx * cfg.entry_size;
+                    slot.rd_ptr      = base_addr + offset;
+                    slot.wr_ptr      = base_addr + offset;
+                }
             }
         }
     }
@@ -133,13 +150,17 @@ void EnqueueProgram(Device& device, Program& program, bool /*blocking*/) {
             uint32_t base_addr = core.l1_alloc(total_bytes);
             uint8_t* base = reinterpret_cast<uint8_t*>(
                 static_cast<uintptr_t>(base_addr));
-            uint32_t capacity = cfg.num_entries;
+            // Per-TC capacity = total entries divided by interleaving factor M
+            uint32_t M = std::max(cfg.num_producers, cfg.num_consumers);
+            uint32_t capacity = cfg.num_entries / M;
             core.init_dfb_sync(cfg.dfb_index, base, cfg.entry_size,
                                cfg.num_entries, capacity);
 
-            // Set up tile counter capacities
-            uint8_t counter_base = static_cast<uint8_t>(cfg.dfb_index);
-            uint8_t num_tcs = std::max(cfg.num_producers, cfg.num_consumers);
+            // Set up tile counter capacities; space counter IDs by
+            // MAX_TC_SLOTS_PER_DFB per DFB (same formula as build_dfb_interfaces).
+            uint8_t counter_base = static_cast<uint8_t>(
+                cfg.dfb_index * MAX_TC_SLOTS_PER_DFB);
+            uint8_t num_tcs = static_cast<uint8_t>(M);
             for (uint8_t c = 0; c < num_tcs; ++c) {
                 auto& tc = core.tile_counters()->get(0, counter_base + c);
                 tc.capacity = capacity;

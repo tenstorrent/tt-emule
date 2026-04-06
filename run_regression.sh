@@ -58,8 +58,9 @@ STANDALONE_BUILD="${STANDALONE_BUILD:-$SCRIPT_DIR/build}"
 STANDALONE_TEST="$STANDALONE_BUILD/tests"
 
 if [ -d "$STANDALONE_BUILD" ]; then
-    run_test "dfb_passthrough" "$STANDALONE_TEST/dfb_passthrough/test_dfb_passthrough"
-    run_test "eltwise_add"     "$STANDALONE_TEST/eltwise_add/test_eltwise_add"
+    run_test "dfb_passthrough"    "$STANDALONE_TEST/dfb_passthrough/test_dfb_passthrough"
+    run_test "dfb_multi_consumer" "$STANDALONE_TEST/dfb_multi_consumer/test_dfb_mc"
+    run_test "eltwise_add"        "$STANDALONE_TEST/eltwise_add/test_eltwise_add"
 else
     echo "  SKIP: standalone build not found at $STANDALONE_BUILD"
 fi
