@@ -88,14 +88,15 @@ std::vector<std::vector<EmuleDFBInterface>> build_dfb_interfaces(
                     ++p;
                 }
                 if (is_blocked) {
-                    // BLOCKED: producer broadcasts to all consumer TCs
+                    // BLOCKED DM-DM: producer broadcasts to all consumer TCs.
+                    // TC for (producer p, consumer c) has counter_id = p*C + c.
                     iface.broadcast_tc = true;
                     iface.num_tcs_to_rr = static_cast<uint8_t>(cfg.num_consumers);
                     iface.stride_size = cfg.num_producers * cfg.entry_size;
                     for (uint32_t c = 0; c < cfg.num_consumers && c < MAX_TC_SLOTS_PER_DFB; ++c) {
                         auto& slot       = iface.tc_slots[c];
                         slot.neo_id      = 0;
-                        slot.counter_id  = counter_base + static_cast<uint8_t>(c);
+                        slot.counter_id  = counter_base + static_cast<uint8_t>(p * cfg.num_consumers + c);
                         slot.base_addr   = base_addr;
                         slot.limit       = base_addr + cfg.num_entries * cfg.entry_size;
                         uint32_t offset  = p * cfg.entry_size;
@@ -127,16 +128,19 @@ std::vector<std::vector<EmuleDFBInterface>> build_dfb_interfaces(
                     ++c;
                 }
                 if (is_blocked) {
-                    // BLOCKED consumer: 1 TC, sequential stride
-                    iface.num_tcs_to_rr = 1;
-                    iface.stride_size = cfg.entry_size;
-                    auto& slot       = iface.tc_slots[0];
-                    slot.neo_id      = 0;
-                    slot.counter_id  = counter_base + static_cast<uint8_t>(c);
-                    slot.base_addr   = base_addr;
-                    slot.limit       = base_addr + cfg.num_entries * cfg.entry_size;
-                    slot.rd_ptr      = base_addr;
-                    slot.wr_ptr      = base_addr;
+                    // BLOCKED DM-DM consumer: round-robin through num_producers TCs.
+                    // TC for (producer p, consumer c) has counter_id = p*C + c.
+                    iface.num_tcs_to_rr = static_cast<uint8_t>(cfg.num_producers);
+                    iface.stride_size = cfg.num_producers * cfg.entry_size;
+                    for (uint32_t pi = 0; pi < cfg.num_producers && pi < MAX_TC_SLOTS_PER_DFB; ++pi) {
+                        auto& slot       = iface.tc_slots[pi];
+                        slot.neo_id      = 0;
+                        slot.counter_id  = counter_base + static_cast<uint8_t>(pi * cfg.num_consumers + c);
+                        slot.base_addr   = base_addr;
+                        slot.limit       = base_addr + cfg.num_entries * cfg.entry_size;
+                        slot.rd_ptr      = base_addr + pi * cfg.entry_size;
+                        slot.wr_ptr      = base_addr + pi * cfg.entry_size;
+                    }
                 } else {
                     // STRIDED: existing code
                     uint32_t num_tcs = M / cfg.num_consumers;
@@ -201,7 +205,10 @@ void EnqueueProgram(Device& device, Program& program, bool /*blocking*/) {
             }
             uint8_t counter_base = static_cast<uint8_t>(
                 cfg.dfb_index * MAX_TC_SLOTS_PER_DFB);
-            uint8_t num_tcs = static_cast<uint8_t>(M);
+            // BLOCKED DM-DM uses P*C TCs (one per producer-consumer pair)
+            uint8_t num_tcs = is_blocked
+                ? static_cast<uint8_t>(cfg.num_producers * cfg.num_consumers)
+                : static_cast<uint8_t>(M);
             for (uint8_t c = 0; c < num_tcs; ++c) {
                 auto& tc = core.tile_counters()->get(0, counter_base + c);
                 tc.capacity = capacity;

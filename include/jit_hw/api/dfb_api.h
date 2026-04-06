@@ -63,14 +63,13 @@ inline void dfb_push_back(uint32_t dfb_id, uint16_t n) {
             __emule_tc_array->inc_posted(slot.neo_id, slot.counter_id, n);
         }
         auto& slot0 = iface.tc_slots[0];
-        slot0.wr_ptr += static_cast<uint32_t>(n) * iface.entry_size;
-        uint32_t total = iface.num_entries * iface.entry_size;
-        if (slot0.wr_ptr >= slot0.base_addr + total)
-            slot0.wr_ptr = slot0.base_addr + (slot0.wr_ptr - slot0.base_addr - total);
+        slot0.wr_ptr += static_cast<uint32_t>(n) * iface.stride_size;
+        if (slot0.wr_ptr >= slot0.limit)
+            slot0.wr_ptr = slot0.base_addr + (slot0.wr_ptr - slot0.limit);
     } else {
         auto& slot = iface.tc_slots[iface.tc_idx];
         __emule_tc_array->inc_posted(slot.neo_id, slot.counter_id, n);
-        slot.wr_ptr += static_cast<uint32_t>(n) * iface.entry_size;
+        slot.wr_ptr += static_cast<uint32_t>(n) * iface.stride_size;
         if (slot.wr_ptr >= slot.limit)
             slot.wr_ptr = slot.base_addr + (slot.wr_ptr - slot.limit);
         iface.tc_idx = (iface.tc_idx + 1) % iface.num_tcs_to_rr;
@@ -101,7 +100,7 @@ inline void dfb_pop_front(uint32_t dfb_id, uint16_t n) {
     if (!iface.active) return;
     auto& slot = iface.tc_slots[iface.tc_idx];
     __emule_tc_array->inc_acked(slot.neo_id, slot.counter_id, n);
-    slot.rd_ptr += static_cast<uint32_t>(n) * iface.entry_size;
+    slot.rd_ptr += static_cast<uint32_t>(n) * iface.stride_size;
     if (slot.rd_ptr >= slot.limit)
         slot.rd_ptr = slot.base_addr + (slot.rd_ptr - slot.limit);
     iface.rd_entry_idx += n;
