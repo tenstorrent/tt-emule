@@ -53,11 +53,12 @@ enum class ReluType { NO_RELU, ZERO_RELU, MIN_THRESHOLD_RELU, MAX_THRESHOLD_RELU
 #include "jit_hw/api/bfloat16.h"
 
 // ---- Thread-local DST register file ----
-// 8 tile slots, each 1024 elements × 4 bytes = 4096 bytes.
+// 16 tile slots (bf16 half-dest), each 1024 elements × 4 bytes = 4096 bytes.
 // Stores float32 for bfloat16 ops or raw int32 bit patterns for INT32 ops.
+// Quasar matmul_block with rt_dim=ct_dim=4 needs 16 DST tiles.
 
-static constexpr uint32_t __EMULE_DST_TILES = 8;      // bf16 half-dest
-static constexpr uint32_t __EMULE_DST_TILES_FP32 = 4; // f32 half-dest (2x element size)
+static constexpr uint32_t __EMULE_DST_TILES = 16;     // bf16 half-dest
+static constexpr uint32_t __EMULE_DST_TILES_FP32 = 8; // f32 half-dest (2x element size)
 static constexpr uint32_t __EMULE_TILE_ELEMS = 1024;
 static constexpr uint32_t __EMULE_DST_BYTES = __EMULE_TILE_ELEMS * sizeof(float);
 static thread_local float __emule_dst[__EMULE_DST_TILES][__EMULE_TILE_ELEMS];
