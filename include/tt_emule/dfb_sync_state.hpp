@@ -5,11 +5,18 @@
 // DFBSyncState: per-DFB metadata (buffer geometry, shared across threads).
 
 #include <cstdint>
+#include "tt_emule/tile_counter.hpp"
 
 namespace tt_emule {
 
 static constexpr uint32_t MAX_DFBS = 32;
 static constexpr uint32_t MAX_TC_SLOTS_PER_DFB = 4;
+// NOTE: With neo_id=0, effective limit is TILE_COUNTERS_PER_NEO / MAX_TC_SLOTS_PER_DFB = 8 DFBs.
+// Programs using more than 8 DFBs require multi-NEO counter assignment.
+// MAX_NEOS is the number of NEOs initialized by default (4); total safe DFB capacity =
+//   4 NEOs * (TILE_COUNTERS_PER_NEO / MAX_TC_SLOTS_PER_DFB) = 32.
+static_assert(MAX_DFBS <= 4 * (TILE_COUNTERS_PER_NEO / MAX_TC_SLOTS_PER_DFB),
+    "MAX_DFBS exceeds total available tile counter slots across 4 NEOs");
 
 struct DFBTCSlot {
     uint32_t rd_ptr    = 0;
