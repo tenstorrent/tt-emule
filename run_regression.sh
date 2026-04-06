@@ -130,6 +130,44 @@ run_test "DMTest1xDFB2Sx4S" "$DFB_TEST" \
 run_test "DMTest1xDFB4Sx2S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx2S/ImplicitSyncFalse"
 
+echo ""
+echo "== Tier 3d: DFB Compute Bridge Tests (Groups B/C) =="
+
+# Group B: DM producer → Tensix consumer
+run_test "DMTensixTest1xDFB1Sx4S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB1Sx4S/ImplicitSyncFalse"
+run_test "DMTensixTest1xDFB4Sx1S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx1S/ImplicitSyncFalse"
+run_test "DMTensixTest1xDFB4Sx4S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx4S/ImplicitSyncFalse"
+run_test "DMTensixTest1xDFB2Sx4S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB2Sx4S/ImplicitSyncFalse"
+run_test "DMTensixTest1xDFB4Sx2S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx2S/ImplicitSyncFalse"
+
+# Group C: Tensix producer → DM consumer
+run_test "TensixDMTest1xDFB1Sx4S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB1Sx4S/ImplicitSyncFalse"
+run_test "TensixDMTest1xDFB4Sx1S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx1S/ImplicitSyncFalse"
+run_test "TensixDMTest1xDFB4Sx4S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx4S/ImplicitSyncFalse"
+run_test "TensixDMTest1xDFB2Sx4S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB2Sx4S/ImplicitSyncFalse"
+run_test "TensixDMTest1xDFB4Sx2S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx2S/ImplicitSyncFalse"
+
+echo ""
+echo "== Tier 3e: DFB Multi-DFB Pipeline (Group D) =="
+
+# Group D: DM→Tensix→DM multi-DFB pipeline
+run_test "DMTensixDMTest2xDFB1Sx1S" "$DFB_TEST" \
+    --gtest_filter="MeshDeviceFixture.DMTensixDMTest2xDFB1Sx1S"
+run_test "DMTensixDMTest1xDFB2Sx1S1xDFB1Sx2S" "$DFB_TEST" \
+    --gtest_filter="MeshDeviceFixture.DMTensixDMTest1xDFB2Sx1S1xDFB1Sx2S"
+run_test "DMTensixDMTest1xDFB4Sx1S1xDFB1Sx4S" "$DFB_TEST" \
+    --gtest_filter="MeshDeviceFixture.DMTensixDMTest1xDFB4Sx1S1xDFB1Sx4S"
+
 unset ARCH_NAME
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
 
