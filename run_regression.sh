@@ -111,6 +111,25 @@ export ARCH_NAME=QUASAR
 run_test "DFBEmuleDMTest"     "$TEST_DIR/test_dfb_emulation" --gtest_filter="*DFBEmuleDMTest*"
 run_test "DFBEmuleBridgeTest" "$TEST_DIR/test_dfb_emulation" --gtest_filter="*DFBEmuleBridgeTest*"
 
+echo ""
+echo "== Tier 3c: DFB Multi-P/C STRIDED (test_dataflow_buffer) =="
+
+DFB_TEST="$TEST_DIR/test_dataflow_buffer"
+
+# Group A: DM-DM multi-P/C explicit sync (exact filters avoid matching Tensix variants)
+run_test "DMTest1xDFB1Sx1S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB1Sx1S/ImplicitSyncFalse"
+run_test "DMTest1xDFB1Sx4S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB1Sx4S/ImplicitSyncFalse"
+run_test "DMTest1xDFB4Sx1S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx1S/ImplicitSyncFalse"
+run_test "DMTest1xDFB4Sx4S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx4S/ImplicitSyncFalse"
+run_test "DMTest1xDFB2Sx4S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB2Sx4S/ImplicitSyncFalse"
+run_test "DMTest1xDFB4Sx2S" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx2S/ImplicitSyncFalse"
+
 unset ARCH_NAME
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
 
