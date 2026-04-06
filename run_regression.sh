@@ -119,16 +119,28 @@ DFB_TEST="$TEST_DIR/test_dataflow_buffer"
 # Group A: DM-DM multi-P/C explicit sync (exact filters avoid matching Tensix variants)
 run_test "DMTest1xDFB1Sx1S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB1Sx1S/ImplicitSyncFalse"
+run_test "DMTest1xDFB1Sx1S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB1Sx1S/ImplicitSyncTrue"
 run_test "DMTest1xDFB1Sx4S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB1Sx4S/ImplicitSyncFalse"
+run_test "DMTest1xDFB1Sx4S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB1Sx4S/ImplicitSyncTrue"
 run_test "DMTest1xDFB4Sx1S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx1S/ImplicitSyncFalse"
+run_test "DMTest1xDFB4Sx1S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx1S/ImplicitSyncTrue"
 run_test "DMTest1xDFB4Sx4S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx4S/ImplicitSyncFalse"
+run_test "DMTest1xDFB4Sx4S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx4S/ImplicitSyncTrue"
 run_test "DMTest1xDFB2Sx4S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB2Sx4S/ImplicitSyncFalse"
+run_test "DMTest1xDFB2Sx4S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB2Sx4S/ImplicitSyncTrue"
 run_test "DMTest1xDFB4Sx2S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx2S/ImplicitSyncFalse"
+run_test "DMTest1xDFB4Sx2S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx2S/ImplicitSyncTrue"
 
 echo ""
 echo "== Tier 3d: DFB Compute Bridge Tests (Groups B/C) =="
@@ -136,30 +148,54 @@ echo "== Tier 3d: DFB Compute Bridge Tests (Groups B/C) =="
 # Group B: DM producer → Tensix consumer
 run_test "DMTensixTest1xDFB1Sx1S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB1Sx1S/ImplicitSyncFalse"
+run_test "DMTensixTest1xDFB1Sx1S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB1Sx1S/ImplicitSyncTrue"
 run_test "DMTensixTest1xDFB1Sx4S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB1Sx4S/ImplicitSyncFalse"
+run_test "DMTensixTest1xDFB1Sx4S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB1Sx4S/ImplicitSyncTrue"
 run_test "DMTensixTest1xDFB4Sx1S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx1S/ImplicitSyncFalse"
+run_test "DMTensixTest1xDFB4Sx1S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx1S/ImplicitSyncTrue"
 run_test "DMTensixTest1xDFB4Sx4S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx4S/ImplicitSyncFalse"
+run_test "DMTensixTest1xDFB4Sx4S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx4S/ImplicitSyncTrue"
 run_test "DMTensixTest1xDFB2Sx4S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB2Sx4S/ImplicitSyncFalse"
+run_test "DMTensixTest1xDFB2Sx4S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB2Sx4S/ImplicitSyncTrue"
 run_test "DMTensixTest1xDFB4Sx2S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx2S/ImplicitSyncFalse"
+run_test "DMTensixTest1xDFB4Sx2S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx2S/ImplicitSyncTrue"
 
 # Group C: Tensix producer → DM consumer
 run_test "TensixDMTest1xDFB1Sx1S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB1Sx1S/ImplicitSyncFalse"
+run_test "TensixDMTest1xDFB1Sx1S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB1Sx1S/ImplicitSyncTrue"
 run_test "TensixDMTest1xDFB1Sx4S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB1Sx4S/ImplicitSyncFalse"
+run_test "TensixDMTest1xDFB1Sx4S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB1Sx4S/ImplicitSyncTrue"
 run_test "TensixDMTest1xDFB4Sx1S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx1S/ImplicitSyncFalse"
+run_test "TensixDMTest1xDFB4Sx1S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx1S/ImplicitSyncTrue"
 run_test "TensixDMTest1xDFB4Sx4S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx4S/ImplicitSyncFalse"
+run_test "TensixDMTest1xDFB4Sx4S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx4S/ImplicitSyncTrue"
 run_test "TensixDMTest1xDFB2Sx4S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB2Sx4S/ImplicitSyncFalse"
+run_test "TensixDMTest1xDFB2Sx4S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB2Sx4S/ImplicitSyncTrue"
 run_test "TensixDMTest1xDFB4Sx2S" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx2S/ImplicitSyncFalse"
+run_test "TensixDMTest1xDFB4Sx2S_IS" "$DFB_TEST" \
+    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx2S/ImplicitSyncTrue"
 
 echo ""
 echo "== Tier 3e: DFB Multi-DFB Pipeline (Group D) =="
