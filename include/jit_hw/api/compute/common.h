@@ -36,9 +36,10 @@ enum class EltwiseBinaryReuseDestType { NONE, DEST_TO_SRCA, DEST_TO_SRCB };
 } // namespace ckernel
 
 // Note: MathFidelity may also be defined in llk_defs.h — guard against redefinition.
+// Values must match tt-metal's enum: LoFi=0, HiFi2=2, HiFi3=3, HiFi4=4.
 #ifndef __EMULE_MATH_FIDELITY_DEFINED
 #define __EMULE_MATH_FIDELITY_DEFINED
-enum class MathFidelity { LoFi, HiFi2, HiFi3, HiFi4 };
+enum class MathFidelity : uint8_t { LoFi = 0, HiFi2 = 2, HiFi3 = 3, HiFi4 = 4 };
 #endif
 
 enum class ReluType { NO_RELU, ZERO_RELU, MIN_THRESHOLD_RELU, MAX_THRESHOLD_RELU };
@@ -53,9 +54,9 @@ enum class ReluType { NO_RELU, ZERO_RELU, MIN_THRESHOLD_RELU, MAX_THRESHOLD_RELU
 #include "jit_hw/api/bfloat16.h"
 
 // ---- Thread-local DST register file ----
-// 16 tile slots (bf16 half-dest), each 1024 elements × 4 bytes = 4096 bytes.
+// Physical size: 16 tile slots × 1024 elements × 4 bytes = 64 KB (same on WH/BH/Quasar).
+// Active slots depend on DST_ACCUM_MODE: bf16 mode → 16 slots, fp32 mode → 8 slots.
 // Stores float32 for bfloat16 ops or raw int32 bit patterns for INT32 ops.
-// Quasar matmul_block with rt_dim=ct_dim=4 needs 16 DST tiles.
 
 static constexpr uint32_t __EMULE_DST_TILES = 16;     // bf16 half-dest
 static constexpr uint32_t __EMULE_DST_TILES_FP32 = 8; // f32 half-dest (2x element size)
@@ -69,11 +70,19 @@ static thread_local bool __emule_l1_acc_enabled = false;
 #error "FULL DEST mode is not supported in emulation"
 #endif
 
+// Active DST tile count depends on accumulation mode, not architecture.
+// bf16 mode (DST_ACCUM_MODE==0): 16 half-dest slots.
+// fp32 mode (DST_ACCUM_MODE!=0): 8 half-dest slots (elements are 2x size).
+inline constexpr uint32_t __emule_dst_active_tiles() {
+    return (DST_ACCUM_MODE != 0) ? __EMULE_DST_TILES_FP32 : __EMULE_DST_TILES;
+}
+
 // DST bounds guard — call before any DST[slot] access
 inline void __emule_dst_check(uint32_t slot, const char* caller) {
-    if (slot >= __EMULE_DST_TILES) {
-        fprintf(stderr, "[EMULE] DST out-of-bounds: %s accessed slot %u (max %u)\n",
-                caller, slot, __EMULE_DST_TILES);
+    uint32_t limit = __emule_dst_active_tiles();
+    if (slot >= limit) {
+        fprintf(stderr, "[EMULE] DST out-of-bounds: %s accessed slot %u (max %u, DST_ACCUM_MODE=%d)\n",
+                caller, slot, limit, DST_ACCUM_MODE);
         std::abort();
     }
 }
@@ -94,7 +103,8 @@ inline void __emule_dst_store_i32(uint32_t slot, uint32_t idx, int32_t v) {
 
 ALWI void tile_regs_acquire() {
     // Zero DST on acquire (matches device behavior: acquire gives clean regs)
-    for (uint32_t s = 0; s < __EMULE_DST_TILES; s++)
+    uint32_t active = __emule_dst_active_tiles();
+    for (uint32_t s = 0; s < active; s++)
         std::memset(__emule_dst[s], 0, sizeof(__emule_dst[s]));
 }
 ALWI void tile_regs_commit()  {}
@@ -102,9 +112,14 @@ ALWI void tile_regs_wait()    {}
 ALWI void tile_regs_release() {}
 
 // ---- Core logical coordinates (for D2M compute kernels) ----
-// Dataflow version is in dataflow_api.h; compute kernels need their own.
-inline uint8_t get_absolute_logical_x() { return static_cast<uint8_t>(__emule_logical_x); }
-inline uint8_t get_absolute_logical_y() { return static_cast<uint8_t>(__emule_logical_y); }
+// Guarded to avoid conflict with dataflow_api.h if both are included.
+// Return uint32_t to match the dataflow API signature (uint8_t is sufficient
+// for real coordinates but uint32_t avoids narrowing surprises).
+#ifndef __EMULE_GET_LOGICAL_COORDS_DEFINED
+#define __EMULE_GET_LOGICAL_COORDS_DEFINED
+inline uint32_t get_absolute_logical_x() { return __emule_logical_x; }
+inline uint32_t get_absolute_logical_y() { return __emule_logical_y; }
+#endif
 
 // ---- CB helpers (read/write via shared CBSyncState) ----
 

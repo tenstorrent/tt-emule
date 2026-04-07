@@ -75,6 +75,9 @@ struct noc_traits_t<DataflowBuffer> {
         uint32_t offset_bytes{};
     };
 
+    // DFB wr_ptr/rd_ptr are absolute host addresses (l1_base_ + bump), set by
+    // emulated_program_runner via l1_alloc().  MAP_32BIT guarantees they fit in
+    // uint32_t; zero-extending to uintptr_t yields a valid host pointer.
     template <Noc::AddressType address_type>
     static uintptr_t src_addr(const DataflowBuffer& src, const Noc&, const src_args_type& args) {
         static_assert(

@@ -30,10 +30,14 @@ namespace {
 constexpr std::pair<std::string_view, uint32_t> __emule_named_ct_args[] = {KERNEL_COMPILE_TIME_ARG_MAP};
 } // anonymous namespace
 
-constexpr uint32_t get_named_compile_time_arg_val(std::string_view name) {
+constexpr uint32_t get_named_ct_arg(std::string_view name) {
     for (const auto& [arg_name, arg_value] : __emule_named_ct_args) {
         if (name == arg_name) return arg_value;
     }
     return 0; // unreachable for valid args
+}
+
+constexpr uint32_t get_named_compile_time_arg_val(std::string_view name) {
+    return get_named_ct_arg(name);
 }
 #endif

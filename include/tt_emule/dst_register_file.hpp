@@ -6,15 +6,24 @@
 
 namespace tt_emule {
 
-// DST register file: 8 tile slots.
+// DST register file: fixed physical size of 16 tile slots (64 KB).
+// Active slot count depends on accumulation mode:
+//   BF16 (DST_ACCUM_MODE==0): 16 active slots (2 bytes/element)
+//   FP32 (DST_ACCUM_MODE!=0):  8 active slots (4 bytes/element, 2x per slot)
 // State machine: IDLE -> ACQUIRED -> COMMITTED -> PACKING -> IDLE
 class DstRegisterFile {
 public:
-    static constexpr size_t NUM_SLOTS = 8;
+    static constexpr size_t TOTAL_SLOTS = 16;  // physical size, always 16
+    static constexpr size_t BF16_SLOTS  = 16;  // half-dest, bf16 mode
+    static constexpr size_t FP32_SLOTS  =  8;  // half-dest, fp32 mode
 
     enum class State { IDLE, ACQUIRED, COMMITTED, PACKING };
 
-    DstRegisterFile() : state_(State::IDLE) {}
+    DstRegisterFile() : state_(State::IDLE), fp32_mode_(false) {}
+
+    void set_fp32_mode(bool fp32) { fp32_mode_ = fp32; }
+    bool fp32_mode() const { return fp32_mode_; }
+    size_t active_slots() const { return fp32_mode_ ? FP32_SLOTS : BF16_SLOTS; }
 
     // Compute thread: acquire DST; blocks if not IDLE
     void acquire() {
@@ -53,8 +62,9 @@ public:
     }
 
 private:
-    std::array<Tile, NUM_SLOTS> slots_;
+    std::array<Tile, TOTAL_SLOTS> slots_;
     State state_;
+    bool fp32_mode_;
     mutable std::mutex mu_;
     std::condition_variable cv_;
 };

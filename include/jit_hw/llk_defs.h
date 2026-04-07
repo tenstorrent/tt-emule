@@ -43,10 +43,15 @@ struct CbInterface {
 };
 
 // Global operand interface stubs
+// Guarded: dataflow_api.h provides a CB-backed version; if both headers are
+// included, the dataflow version (which reads real CB state) should win.
+#ifndef __EMULE_GET_LOCAL_CB_INTERFACE_DEFINED
+#define __EMULE_GET_LOCAL_CB_INTERFACE_DEFINED
 inline CbInterface& get_local_cb_interface(uint32_t) {
     static CbInterface dummy;
     return dummy;
 }
+#endif
 
 inline uint32_t get_operand_id(uint32_t operand) { return operand; }
 inline uint32_t get_output_id(uint32_t output) { return output; }

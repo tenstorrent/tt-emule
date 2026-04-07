@@ -532,6 +532,10 @@ The Quasar JIT DFB headers now exist:
 - `__processor_id` must match the kernel's actual RISC ID from `get_kernel_processor_type()`, not the kernel iteration index
 - Connected DFBs (same dimensions, same core) share L1 to emulate the HW register file data path through compute bridge kernels
 
+**emulated_program_runner interface construction vs. build_dfb_interfaces():**
+
+The runner uses a simpler `EmuleDFBInterface` setup than the standalone path's `build_dfb_interfaces()`. All threads on a core get `active = true` for all DFBs on that core (`num_tcs_to_rr = 1`, `stride_size = entry_size`, single TC slot). RISC mask enforcement is left to the upstream device kernels (which call `mhartid` to decide whether to participate). `build_dfb_interfaces()` filters by RISC mask at the emulator level and sets `active = false` for non-participants. Both approaches are correct; the runner's simpler approach relies on upstream kernel self-selection.
+
 **Still outstanding**:
 - Quasar JIT compilation pipeline (clang-17, correct include paths)
 - LLK compute stubs (`llk_io_unpack.h`/`llk_io_pack.h`) wrapping DFB ops for TRISC kernels

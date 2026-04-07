@@ -3,6 +3,7 @@
 // Delegates to shared tt_emule::cb_sync_* functions — single source of truth.
 
 #include "jit_hw/emule_cb_state.h"
+#include "jit_hw/emule_dfb_state.h"
 #include "jit_hw/api/compute/common_globals.h"
 #include <chrono>
 #include <cstdint>
@@ -81,6 +82,28 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
 
 inline void cb_push_back(uint32_t cb_id, uint32_t n) {
     tt_emule::cb_sync_push(__emule_cbs[cb_id], n);
+    // Bridge CB→DFB: update tile counters so DM's dfb_wait_front sees compute's output.
+    // cb.mu already released; now safe to acquire tc.mu (consistent lock ordering).
+    if (__emule_dfbs && __emule_tc_array && __emule_dfbs[cb_id].active) {
+        auto& iface = __emule_dfbs[cb_id];
+        if (iface.broadcast_tc) {
+            for (uint8_t i = 0; i < iface.num_tcs_to_rr; ++i) {
+                auto& slot = iface.tc_slots[i];
+                __emule_tc_array->inc_posted(slot.neo_id, slot.counter_id, n);
+                slot.wr_ptr += static_cast<uint32_t>(n) * iface.stride_size;
+                if (slot.wr_ptr >= slot.limit)
+                    slot.wr_ptr = slot.base_addr + (slot.wr_ptr - slot.limit);
+            }
+        } else {
+            auto& slot = iface.tc_slots[iface.tc_idx];
+            __emule_tc_array->inc_posted(slot.neo_id, slot.counter_id, n);
+            slot.wr_ptr += static_cast<uint32_t>(n) * iface.stride_size;
+            if (slot.wr_ptr >= slot.limit)
+                slot.wr_ptr = slot.base_addr + (slot.wr_ptr - slot.limit);
+            iface.tc_idx = (iface.tc_idx + 1) % iface.num_tcs_to_rr;
+        }
+        iface.wr_entry_idx += n;
+    }
 }
 
 inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
@@ -110,6 +133,17 @@ inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
 
 inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
     tt_emule::cb_sync_pop(__emule_cbs[cb_id], n);
+    // Bridge CB→DFB: update tile counter acked so DM's dfb_reserve_back sees freed space.
+    if (__emule_dfbs && __emule_tc_array && __emule_dfbs[cb_id].active) {
+        auto& iface = __emule_dfbs[cb_id];
+        auto& slot = iface.tc_slots[iface.tc_idx];
+        __emule_tc_array->inc_acked(slot.neo_id, slot.counter_id, n);
+        slot.rd_ptr += static_cast<uint32_t>(n) * iface.stride_size;
+        if (slot.rd_ptr >= slot.limit)
+            slot.rd_ptr = slot.base_addr + (slot.rd_ptr - slot.limit);
+        iface.rd_entry_idx += n;
+        iface.tc_idx = (iface.tc_idx + 1) % iface.num_tcs_to_rr;
+    }
 }
 
 // ---- int32_t overloads (D2M int32 support emits int32_t tile counts) ----
