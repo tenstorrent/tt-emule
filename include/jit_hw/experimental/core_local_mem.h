@@ -1,6 +1,12 @@
 #pragma once
 // Emulation stub for experimental::CoreLocalMem<T>.
 // Wraps an L1 address as a typed pointer into Core's mmap'd L1 region.
+//
+// Address translation: kernel code may pass either a raw firmware L1 offset
+// (e.g. 0xfa000, below 16 MB) or a truncated host pointer from MAP_32BIT
+// (e.g. 0x41bfa000).  We detect the former by checking if the value is
+// below a threshold and translate it to a host pointer by adding the L1
+// base (__emule_bridge_l1).
 
 #include <cstdint>
 #include <cstddef>
@@ -8,15 +14,27 @@
 #include "jit_hw/experimental/noc.h"
 
 extern thread_local tt_emule::Core* __core;
+extern thread_local uint8_t* __emule_bridge_l1;
 
 namespace experimental {
+
+// Raw L1 offsets are always < 16 MB (L1 is at most 4 MB).
+// MAP_32BIT host pointers are >= 0x40000000.
+static constexpr uintptr_t CORE_LOCAL_MEM_RAW_OFFSET_THRESHOLD = 0x1000000;
 
 template <typename T, typename AddressType = uintptr_t>
 class CoreLocalMem {
     using difference_type = std::ptrdiff_t;
 
+    static uintptr_t translate(uintptr_t addr) {
+        if (addr < CORE_LOCAL_MEM_RAW_OFFSET_THRESHOLD && __emule_bridge_l1) {
+            return reinterpret_cast<uintptr_t>(__emule_bridge_l1) + addr;
+        }
+        return addr;
+    }
+
 public:
-    CoreLocalMem(AddressType address) : address_(static_cast<uintptr_t>(address)) {}
+    CoreLocalMem(AddressType address) : address_(translate(static_cast<uintptr_t>(address))) {}
     CoreLocalMem(T* ptr) : address_(reinterpret_cast<uintptr_t>(ptr)) {}
     CoreLocalMem(const CoreLocalMem&) = default;
     CoreLocalMem& operator=(const CoreLocalMem&) = default;

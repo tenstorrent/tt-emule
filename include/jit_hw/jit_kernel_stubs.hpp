@@ -10,8 +10,10 @@
 
 #include "internal/risc_attribs.h"
 #include "api/compile_time_args.h"
+#include "dev_mem_map.h"
 #include "emule_cb_state.h"
 #include "emule_dfb_state.h"
+#include "tools/profiler/kernel_profiler.hpp"
 
 #include <vector>
 #include <cstdint>
@@ -54,34 +56,50 @@ extern thread_local uint32_t __emule_logical_y;
 // Processor ID — substitutes RISC-V mhartid CSR in emulation.
 extern thread_local uint8_t __processor_id;
 
+// CSR emulation: NEO engine ID and TRISC core ID within engine.
+extern thread_local uint8_t __emule_neo_id;
+extern thread_local uint8_t __emule_trisc_id;
+
+// Thread ID: number of compute/DM engines and this engine's index.
+extern thread_local uint32_t __emule_num_threads;
+extern thread_local uint32_t __emule_my_thread_id;
+
+// tt_l1_ptr: type qualifier for L1 pointers. On real HW, this adds volatile.
+// In emulation, L1 is normal host memory — the qualifier is empty.
+#ifndef tt_l1_ptr
+#define tt_l1_ptr
+#endif
+
 // NOC index — always 0 for emulation (real firmware sets this per core).
 constexpr uint8_t noc_index = 0;
 
 // get_arg_addr(idx) — mirrors tt-metal's rta_l1_base-based implementation.
 // Returns a pointer to the idx-th runtime arg (held in __rt_args).
-inline void* get_arg_addr(uint32_t idx) {
-    return static_cast<void*>(&__rt_args[idx]);
+// Signature matches real firmware: int param, uintptr_t return.
+static inline uintptr_t get_arg_addr(int arg_idx) {
+    return reinterpret_cast<uintptr_t>(&__rt_args[arg_idx]);
 }
 
 // get_common_arg_addr(idx) — pointer to common runtime arg.
-inline void* get_common_arg_addr(uint32_t idx) {
-    return static_cast<void*>(&__common_rt_args[idx]);
+static inline uintptr_t get_common_arg_addr(int arg_idx) {
+    return reinterpret_cast<uintptr_t>(&__common_rt_args[arg_idx]);
 }
 
 // Per-core and common runtime argument value access.
+// Signatures match real firmware: int param, template return.
 template<typename T = uint32_t>
-inline T get_arg_val(uint32_t idx) {
+inline T get_arg_val(int arg_idx) {
     static_assert(sizeof(T) <= sizeof(uint32_t));
     T val;
-    std::memcpy(&val, &__rt_args[idx], sizeof(T));
+    std::memcpy(&val, &__rt_args[arg_idx], sizeof(T));
     return val;
 }
 
 template<typename T = uint32_t>
-inline T get_common_arg_val(uint32_t idx) {
+inline T get_common_arg_val(int arg_idx) {
     static_assert(sizeof(T) <= sizeof(uint32_t));
     T val;
-    std::memcpy(&val, &__common_rt_args[idx], sizeof(T));
+    std::memcpy(&val, &__common_rt_args[arg_idx], sizeof(T));
     return val;
 }
 
@@ -125,6 +143,23 @@ struct CBIndex {
 
 // No-op assertion macro used in some kernel headers.
 #define ASSERT(...) ((void)0)
+
+// Semaphore address helper — returns a uint32_t L1 address for the given
+// semaphore ID.  Defined here so both compute and dataflow kernels can use it.
+// EMULE_SEM_BASE should be passed as a JIT compiler define (e.g. -DEMULE_SEM_BASE=0xFFE00).
+// If not defined here, dataflow_api.h provides the default (0xFFE00).
+#ifndef EMULE_SEM_ALIGN
+#define EMULE_SEM_ALIGN 16
+#endif
+#if defined(EMULE_SEM_BASE)
+#ifndef __EMULE_GET_SEMAPHORE_DEFINED
+#define __EMULE_GET_SEMAPHORE_DEFINED
+inline uint32_t get_semaphore(uint32_t semaphore_id) {
+    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
+    return l1_base + EMULE_SEM_BASE + semaphore_id * EMULE_SEM_ALIGN;
+}
+#endif
+#endif
 
 // ---- ThreadId enum + mailbox stubs (used by both compute and dataflow kernels) ----
 namespace ckernel {

@@ -1,8 +1,7 @@
 #pragma once
-// Emulation stub for experimental::Semaphore.
-// Semaphore operations use atomic memory ops and spin-waits for cross-thread
-// synchronization.  up/down are atomic fetch_add/fetch_sub; wait/wait_min
-// spin with exponential back-off and hang detection.
+// Emulation stub for ckernel::Semaphore (Quasar compute kernels).
+// Same L1-resident atomic counter as experimental::Semaphore but in the
+// ckernel namespace and used by TRISC/compute-side code.
 
 #include <atomic>
 #include <chrono>
@@ -10,26 +9,20 @@
 #include <cstdio>
 #include <cstdlib>
 #include <thread>
-#include "jit_hw/experimental/noc.h"
 
-namespace experimental {
+// get_semaphore() is defined in jit_kernel_stubs.hpp (included by all JIT
+// kernels).  It returns a uint32_t L1 address (truncated host pointer) for
+// the given semaphore ID.
 
-template <int core_type = 0>
+namespace ckernel {
+
 class Semaphore {
 public:
-    explicit Semaphore(uint32_t semaphore_id) : local_l1_addr_(get_semaphore(semaphore_id)) {}
+    explicit Semaphore(uint32_t semaphore_id)
+        : local_l1_addr_(static_cast<uintptr_t>(get_semaphore(semaphore_id))) {}
 
     void up(uint32_t value) {
         atom()->fetch_add(value, std::memory_order_release);
-    }
-
-    void up(const Noc&, uint32_t remote_noc_x, uint32_t remote_noc_y,
-            uint32_t value, uint8_t = 0) {
-        // For single-core (self-address), just do a local increment.
-        // Multi-core remote increment would need NOC routing (Phase 8).
-        (void)remote_noc_x;
-        (void)remote_noc_y;
-        up(value);
     }
 
     void down(uint32_t value) {
@@ -49,7 +42,7 @@ public:
             }
             if (++spins > 10'000'000ULL) {
                 fprintf(stderr,
-                    "EMULE HANG: experimental::Semaphore::wait(%u) stuck at %u "
+                    "EMULE HANG: ckernel::Semaphore::wait(%u) stuck at %u "
                     "after %llu spins\n",
                     target, a->load(std::memory_order_relaxed),
                     (unsigned long long)spins);
@@ -71,7 +64,7 @@ public:
             }
             if (++spins > 10'000'000ULL) {
                 fprintf(stderr,
-                    "EMULE HANG: experimental::Semaphore::wait_min(%u) stuck at %u "
+                    "EMULE HANG: ckernel::Semaphore::wait_min(%u) stuck at %u "
                     "after %llu spins\n",
                     min_val, a->load(std::memory_order_relaxed),
                     (unsigned long long)spins);
@@ -84,13 +77,6 @@ public:
         atom()->store(value, std::memory_order_release);
     }
 
-    template <typename M = void>
-    void set_multicast(const Noc&, uint32_t, uint32_t, uint32_t, uint32_t,
-                       uint32_t, bool = false) {}
-
-    void inc_multicast(const Noc&, uint32_t, uint32_t, uint32_t, uint32_t,
-                       uint32_t, uint32_t) {}
-
 private:
     uintptr_t local_l1_addr_;
 
@@ -99,4 +85,4 @@ private:
     }
 };
 
-}  // namespace experimental
+}  // namespace ckernel

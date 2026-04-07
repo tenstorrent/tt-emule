@@ -71,14 +71,15 @@ public:
 
     void wait_free_space(uint8_t neo_id, uint8_t counter_id, uint32_t n) {
         auto& tc = get(neo_id, counter_id);
-        if (tc.free_space() >= n) return;
+        // Always take the mutex — lockless fast path removed because
+        // occupancy()/free_space() read two independent atomics non-atomically,
+        // risking unsigned underflow in MPMC scenarios.
         std::unique_lock<std::mutex> lk(tc.mu);
         tc.space_cv.wait(lk, [&] { return tc.free_space() >= n; });
     }
 
     void wait_occupancy(uint8_t neo_id, uint8_t counter_id, uint32_t n) {
         auto& tc = get(neo_id, counter_id);
-        if (tc.occupancy() >= n) return;
         std::unique_lock<std::mutex> lk(tc.mu);
         tc.data_cv.wait(lk, [&] { return tc.occupancy() >= n; });
     }

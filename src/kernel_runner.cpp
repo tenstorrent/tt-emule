@@ -262,6 +262,9 @@ void EnqueueProgram(Device& device, Program& program, bool /*blocking*/) {
     if (has_dfbs) {
         core.reset_dfb_sync();
     }
+
+    // 7. Reset L1 bump allocator so next EnqueueProgram starts fresh
+    core.reset_l1_bump();
 }
 
 } // namespace tt_emule

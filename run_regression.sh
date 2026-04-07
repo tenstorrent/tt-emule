@@ -84,6 +84,9 @@ for t in construct contains intersects merge; do
     run_test "CoreRangeSet_$t" "$TEST_DIR/test_CoreRangeSet_$t"
 done
 
+run_test "dst_capacity_bf16"  "$TEST_DIR/test_dst_capacity_bf16"
+run_test "dst_capacity_fp32"  "$TEST_DIR/test_dst_capacity_fp32"
+
 # Tier 2+3: Buffer I/O + JIT (wormhole for buffer tests)
 echo ""
 echo "== Tier 2: Buffer I/O =="
@@ -235,8 +238,65 @@ for test in TensixDMTest1xDFB1Sx4B TensixDMTest1xDFB4Sx1B TensixDMTest1xDFB4Sx4B
         --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
 done
 
+echo ""
+echo "== Tier 3g: Quasar Compute Kernel Tests =="
+
+# Create a fake simulator directory with a valid soc_descriptor.yaml so that
+# get_simulator_enabled() returns true (the env var is set and the path is non-
+# empty) while the actual device is still emulated (ChipType::EMULATED).
+EMULE_SIM_DIR="$(mktemp -d /tmp/tt_emule_sim.XXXXXX)"
+ln -sf "$TT_METAL_DIR/tt_metal/soc_descriptors/quasar_32_arch.yaml" "$EMULE_SIM_DIR/soc_descriptor.yaml"
+export TT_METAL_SIMULATOR="$EMULE_SIM_DIR"
+
+run_test "QuasarComputeKernelMultipleThreads" "$TEST_DIR/test_quasar_compute_kernels" \
+    --gtest_filter="*QuasarComputeKernelMultipleThreads*"
+run_test "QuasarComputeKernelSingleThread" "$TEST_DIR/test_quasar_compute_kernels" \
+    --gtest_filter="*QuasarComputeKernelSingleThread*"
+run_test "QuasarCreateMultipleComputeKernelsSingleCluster" "$TEST_DIR/test_quasar_compute_kernels" \
+    --gtest_filter="*QuasarCreateMultipleComputeKernelsSingleCluster*"
+
+run_test "QuasarComputeKernelTLS" "$TEST_DIR/test_globals_tls" \
+    --gtest_filter="*QuasarComputeKernelTLS*"
+
+echo ""
+echo "== Tier 3h: Quasar Semaphore Tests =="
+
+run_test "QuasarComputeKernelSemaphores" "$TEST_DIR/test_quasar_semaphores" \
+    --gtest_filter="*QuasarComputeKernelSemaphores*"
+run_test "QuasarDmAndComputeKernelSemaphores" "$TEST_DIR/test_quasar_semaphores" \
+    --gtest_filter="*QuasarDmAndComputeKernelSemaphores*"
+run_test "DmLoopback" "$TEST_DIR/test_dm_loopback" \
+    --gtest_filter="*DmLoopback*"
+
+echo ""
+echo "== Tier 3i: Simple DM + RISCV Atomics =="
+
+run_test "SingleDmL1Write" "$TEST_DIR/test_single_dm_l1_write" \
+    --gtest_filter="*SingleDmL1Write*"
+run_test "TestAtomicLoadStoreRISCV" "$TEST_DIR/test_riscv_atomics" \
+    --gtest_filter="*TestAtomicLoadStoreRISCV*"
+run_test "TestAtomicAddFetchRISCV" "$TEST_DIR/test_riscv_atomics" \
+    --gtest_filter="*TestAtomicAddFetchRISCV*"
+run_test "TestAtomicCASRISCV" "$TEST_DIR/test_riscv_atomics" \
+    --gtest_filter="*TestAtomicCASRISCV*"
+
+unset TT_METAL_SIMULATOR
+rm -rf "$EMULE_SIM_DIR"
+
+echo ""
+echo "== Tier 3j: Data Movement Tests (Phase 8) =="
+
 unset ARCH_NAME
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
+
+run_test "DmLoopbackPacketSizes" "$TEST_DIR/test_dm_loopback_noc" \
+    --gtest_filter="*LoopbackPacketSizes*"
+run_test "DmLoopbackDirectedIdeal" "$TEST_DIR/test_dm_loopback_noc" \
+    --gtest_filter="*LoopbackDirectedIdeal*"
+run_test "DmOneFromOnePacketSizes" "$TEST_DIR/test_dm_one_from_one" \
+    --gtest_filter="*OneFromOnePacketSizes" --gtest_also_run_disabled_tests
+run_test "DmOneFromOneDirectedIdeal" "$TEST_DIR/test_dm_one_from_one" \
+    --gtest_filter="*OneFromOneDirectedIdeal*"
 
 # Tier 4: TTNN (blackhole — larger worker grid, no wormhole mmap exhaustion for ttnn)
 echo ""

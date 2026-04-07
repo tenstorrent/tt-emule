@@ -4,6 +4,7 @@
 #define DeviceZoneScoped(...)
 #define DeviceZoneScopedMainN(...)
 #define DeviceZoneScopedMainChildN(...)
+#define DeviceTimestampedData(...)
 namespace kernel_profiler {
 inline void mark_time(unsigned = 0) {}
 inline void mark_padding() {}

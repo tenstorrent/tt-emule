@@ -104,6 +104,9 @@ public:
         return addr;
     }
 
+    // Reset the L1 bump allocator (between program runs).
+    void reset_l1_bump() { l1_bump_ = 0; }
+
     // ---- CB sync state array (for JIT kernel threads) ----
 
     CBSyncState* cb_sync_array() { return cb_sync_states_; }

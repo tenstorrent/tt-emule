@@ -35,7 +35,7 @@ inline bool __emule_debug_multicast() {
     return val;
 }
 
-// ---- L1 address conversion helper ----
+// ---- L1 address conversion helpers ----
 // Extract L1 offset from a host address using bitmask.
 // L1Pool allocates worker slots at 2 MB alignment, so addr & 0x1FFFFF
 // gives the offset within the slot — one AND instruction, no TLS lookup.
@@ -53,6 +53,23 @@ inline uint32_t __emule_addr_to_offset(uint32_t addr) {
     if (addr >= l1_base) return addr - l1_base;
     return addr;
 #endif
+}
+
+// Inverse of __emule_addr_to_offset: convert a uint32_t L1 address (which
+// may be either a firmware-style offset or an absolute host pointer from
+// l1_alloc / CB / DFB) to a dereferenceable host pointer.
+//
+// l1_alloc() returns l1_base_ + bump  (>= l1_base, always a valid host ptr).
+// Firmware HAL addresses (e.g. 0x19520) are offsets into the L1 buffer.
+// We distinguish by comparing against __emule_bridge_l1's numeric address.
+inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
+    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
+    if (l1_addr >= l1_base) {
+        // Already an absolute host pointer (from l1_alloc / CB / DFB).
+        return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
+    }
+    // Firmware L1 offset — translate via bridge pointer.
+    return __emule_bridge_l1 + l1_addr;
 }
 
 // ---- Coordinate translation tables ----
@@ -79,8 +96,12 @@ inline uint32_t worker_logical_row_to_virtual_row[64] = {
 
 // Return the absolute logical x/y coordinate of the current core.
 // D2M kernels use these to index into the translation tables above.
+// Guarded to avoid conflict with compute/common.h if both are included.
+#ifndef __EMULE_GET_LOGICAL_COORDS_DEFINED
+#define __EMULE_GET_LOGICAL_COORDS_DEFINED
 inline uint32_t get_absolute_logical_x() { return __emule_logical_x; }
 inline uint32_t get_absolute_logical_y() { return __emule_logical_y; }
+#endif
 
 // ---- NOC address encoding (matches real firmware) ----
 // Unicast: y in bits [47:42], x in bits [41:36], addr in bits [35:0]
@@ -144,7 +165,7 @@ FORCE_INLINE void noc_async_read_page(
         page_size = (1u << addrgen.log_base_2_of_page_size);
     }
     uint64_t noc_addr = addrgen.get_noc_addr(id, offset, noc);
-    uint8_t* dst = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(dst_local_l1_addr));
+    uint8_t* dst = __emule_local_l1_to_ptr(dst_local_l1_addr);
     uint8_t* src = __emule_resolve_noc_addr(noc_addr);
     if (src) {
         std::memcpy(dst, src, page_size);
@@ -169,7 +190,7 @@ FORCE_INLINE void noc_async_write_page(
     }
     uint32_t sz = size ? size : page_size;
     uint64_t noc_addr = addrgen.get_noc_addr(id, offset, noc);
-    uint8_t* src = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(src_local_l1_addr));
+    uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     uint8_t* dst = __emule_resolve_noc_addr(noc_addr);
     if (dst) {
         std::memcpy(dst, src, sz);
@@ -214,11 +235,11 @@ inline uint64_t __emule_fixup_noc_addr(uint64_t noc_addr) {
 // ---- Raw NOC read/write ----
 
 inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
-                           uint32_t size, uint8_t noc = 0) {
+                           uint32_t size, uint8_t noc = 0, uint32_t vc = 0) {
     // NOC addresses are already properly constructed by get_noc_addr() or
     // get_noc_addr_from_bank_id() — no fixup needed here.  Applying
     // __emule_fixup_noc_addr would destroy DRAM bank offsets (> 2MB).
-    uint8_t* dst = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(dst_local_l1_addr));
+    uint8_t* dst = __emule_local_l1_to_ptr(dst_local_l1_addr);
     uint8_t* src = __emule_resolve_noc_addr(src_noc_addr);
     if (__emule_debug_multicast()) {
         uint32_t nx = (src_noc_addr >> 36) & 0x3F;
@@ -240,8 +261,8 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
 }
 
 inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
-                            uint32_t size, uint8_t noc = 0) {
-    uint8_t* src = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(src_local_l1_addr));
+                            uint32_t size, uint8_t noc = 0, uint32_t vc = 0) {
+    uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     uint8_t* dst = __emule_resolve_noc_addr(dst_noc_addr);
     if (dst) {
         std::memcpy(dst, src, size);
@@ -269,7 +290,7 @@ inline void noc_async_write_multicast(
                 x_start, y_start, x_end, y_end, off, size, num_dests,
                 __emule_logical_x, __emule_logical_y);
     }
-    uint8_t* src = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(src_local_l1_addr));
+    uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     __emule_multicast_write(dst_mcast_noc_addr, src, size);
 }
 
@@ -296,10 +317,13 @@ inline void noc_async_writes_flushed() {}
 #define EMULE_SEM_ALIGN 16
 #endif
 
+#ifndef __EMULE_GET_SEMAPHORE_DEFINED
+#define __EMULE_GET_SEMAPHORE_DEFINED
 inline uint32_t get_semaphore(uint32_t semaphore_id) {
     uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
     return l1_base + EMULE_SEM_BASE + semaphore_id * EMULE_SEM_ALIGN;
 }
+#endif
 
 // Atomic helpers for semaphore operations.
 // volatile reads are unreliable at -O3; use std::atomic for cross-thread visibility.
@@ -408,7 +432,7 @@ inline void noc_semaphore_set_multicast(
                 x_start, y_start, x_end, y_end, off, sem_val, num_dests,
                 __emule_logical_x, __emule_logical_y);
     }
-    uint8_t* src = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(src_local_l1_addr));
+    uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t));
 }
 
@@ -423,9 +447,14 @@ struct CBInterface {
     uint32_t fifo_page_size;
 };
 
+// Guarded: llk_defs.h provides a dummy version for compute kernels.
+// Dataflow kernels should use this one, which reads real CB state.
+#ifndef __EMULE_GET_LOCAL_CB_INTERFACE_DEFINED
+#define __EMULE_GET_LOCAL_CB_INTERFACE_DEFINED
 inline CBInterface get_local_cb_interface(uint32_t cb_id) {
     return CBInterface{__emule_cbs[cb_id].page_size};
 }
+#endif
 
 // ---- Standalone NOC address helpers (matching firmware) ----
 
