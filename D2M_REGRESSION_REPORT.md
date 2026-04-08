@@ -1,165 +1,192 @@
 # D2M Regression Report
 
-**Date:** 2026-03-30
-**Build:** tt-metal `build_emule_clang` (clang-17, `TT_METAL_EMULATION=ON`)
+**Date:** 2026-04-08
+**Build:** tt-metal `build_emule_clang` (clang-20, `TT_METAL_EMULATION=ON`)
 **Target:** wormhole_N150 (emulated, slow dispatch)
 **tt-mlir tests:** `test/python/golden/test_metal_*.py` (all 13 files run, `--forked` isolation)
 **tt-mlir base:** rebased on `milant/uplift_mar_25` branch
-**Changes since last run (2026-03-17):** LLK API stubs for new D2M code generation (pack_untilize, llk_unpack_A, llk_wait_tiles/pop_tiles/push_tiles/wait_for_free_tiles, SFPU ops), int32_t CB overloads, coordinate APIs
+**Changes since last run (2026-03-30):** Nfaces tile format (4x16x16 face layout), INT32 memcpy fix, NUM_DRAM_BANKS set to real device count (6 for wormhole), remote semaphore operations, multicast NOC address resolution, thread-local compute state reset, debug noise removal
 
 ## Summary
 
-| Status | Count | Previous (2026-03-17) | Delta |
+| Status | Count | Previous (2026-03-30) | Delta |
 |--------|-------|-----------------------|-------|
-| Passed | 1589 | 832 | **+757** |
-| Failed | 147 | 162 | **-15** |
-| Skipped/XFail | 142 | 81 | +61 |
+| Passed | 1256 | 1589 | **-333** |
+| Failed | 480 | 147 | **+333** |
+| Skipped/XFail | 142 | 142 | 0 |
 
-**Total tests collected: 1878** (up from 1075 in 2026-03-17 — the tt-mlir uplift added 803 new tests across all files).
+**Total tests collected: 1878** (unchanged from 2026-03-30).
 
-**Net improvement: +757 new passing tests, -15 fewer failures.** One regression: `test_metal_masking` dropped from 2 to 0 passes (the tt-mlir uplift changed the generated masking kernels to use new untilize paths that crash at runtime). All other previously-passing tests continue to pass.
+**Net regression: -333 passing tests.** Root cause: the change from `NUM_DRAM_BANKS=1` to `NUM_DRAM_BANKS=6` (real wormhole bank count) fixed standalone tests but broke D2M-generated kernels. D2M kernels use `InterleavedAddrGen` for DRAM access; with 6 banks the address computation distributes pages across banks, but the emulated host-side buffer write/read uses a single contiguous allocation. This mismatch causes kernels to read from wrong offsets, producing PCC ~0.06-0.25 (scrambled data, not garbage). Additionally, the nfaces tile format change (row-major to 4x16x16 faces) affects how D2M kernels unpack/pack tile data.
 
 ## Per-File Results
 
 | Test File | Total | Passed | Failed | Skip/XFail | Prev Passed | Delta | Status |
 |-----------|-------|--------|--------|------------|-------------|-------|--------|
-| test_metal_layout | 94 | 94 | 0 | 0 | 94 | 0 | **PASS** |
-| test_metal_matmul | 127 | 113 | 0 | 14 xfail | 108 | **+5** | **PASS** |
-| test_metal_matmul_higher_rank | 10 | 10 | 0 | 0 | 10 | 0 | **PASS** |
-| test_metal_allocate | 6 | 6 | 0 | 0 | 6 | 0 | **PASS** |
-| test_metal_tms | 339 | 332 | 4 | 3 skip | 169 | **+163** | PASS (arange only) |
-| test_metal_reductions | 1096 | 932 | 68 | 96 skip | 420 | **+512** | FAIL (unaligned) |
-| test_metal_dma | 49 | 39 | 10 | 0 | 16 | **+23** | FAIL (DRAM aborts) |
-| test_metal_tilize | 44 | 12 | 32 | 0 | 3 | **+9** | FAIL (untilize/tilize PCC) |
-| test_metal_tensor_collapsing | 14 | 12 | 0 | 2 skip | 2 | **+10** | **PASS** |
-| test_metal_virtual_grids | 39 | 39 | 0 | 0 | 0 | **+39** | **PASS** |
+| test_metal_reductions | 1096 | 934 | 66 | 96 skip | 932 | **+2** | FAIL (unaligned) |
+| test_metal_tms | 339 | 193 | 143 | 3 skip | 332 | **-139** | FAIL (reshape/permute/concat_heads) |
+| test_metal_layout | 94 | 91 | 3 | 0 | 94 | **-3** | FAIL (tiled_grid_reblocking) |
+| test_metal_matmul | 127 | 0 | 113 | 14 xfail | 113 | **-113** | **REGRESSED** |
+| test_metal_tilize | 44 | 16 | 28 | 0 | 12 | **+4** | FAIL (untilize/tilize PCC) |
+| test_metal_dma | 49 | 15 | 34 | 0 | 39 | **-24** | FAIL (tiled DMA) |
+| test_metal_virtual_grids | 39 | 0 | 39 | 0 | 39 | **-39** | **REGRESSED** |
 | test_metal_virtual_grid_rowmajor | 27 | 0 | 0 | 27 skip | 0 | 0 | SKIP (needs n300) |
-| test_metal_masking | 20 | 0 | 20 | 0 | 2 | **-2** | FAIL (SIGILL/signal 0) |
+| test_metal_masking | 20 | 3 | 17 | 0 | 0 | **+3** | FAIL (partial tile) |
 | test_metal_bfp8_typecast | 13 | 0 | 13 | 0 | 0 | 0 | FAIL (PCC mismatch) |
+| test_metal_tensor_collapsing | 14 | 0 | 12 | 2 skip | 12 | **-12** | **REGRESSED** |
+| test_metal_matmul_higher_rank | 10 | 0 | 10 | 0 | 10 | **-10** | **REGRESSED** |
+| test_metal_allocate | 6 | 4 | 2 | 0 | 6 | **-2** | FAIL |
 
-### Regressions
+### Regressions (NUM_DRAM_BANKS / nfaces related)
 
-**test_metal_masking: -2 tests (2 → 0 passed).** Previously 2 `test_complete_tile_masking` tests passed. After the tt-mlir uplift, the generated masking kernels now use `llk_wait_tiles`/`llk_pop_tiles` and `experimental::pack_untilize_block` paths that crash at runtime (SIGILL and signal 0). The JIT compile errors from the previous run are resolved, but the runtime behavior introduced new crashes. These tests need investigation of the masking kernel's interaction with the untilize path.
+**test_metal_matmul: -113 tests (113 -> 0 passed).** All matmul variants now produce PCC ~0.20-0.30. The D2M matmul kernels use `InterleavedAddrGen` to read input tiles from DRAM. With `NUM_DRAM_BANKS=6`, tile page `id` maps to `bank_index = id % 6`, but the emulated DRAM buffer is a single flat allocation. Tiles land in wrong banks, producing scrambled accumulation results. This was previously masked by `NUM_DRAM_BANKS=1` (all tiles in bank 0, sequential).
 
-### Key Wins
+**test_metal_matmul_higher_rank: -10 tests (10 -> 0 passed).** Same root cause as matmul.
 
-1. **test_metal_virtual_grids: 0 → 39 (all pass).** Previously failed on JIT compile (`abs_tile` not declared). Now all 39 tests pass with the new `abs_tile` SFPU implementation.
+**test_metal_virtual_grids: -39 tests (39 -> 0 passed).** All eltwise tests produce PCC ~0.06. Multi-core eltwise operations read from wrong DRAM offsets. Low PCC (~0.06 vs ~0.25 for matmul) indicates nearly uncorrelated data — consistent with reading from completely wrong tile locations.
 
-2. **test_metal_tensor_collapsing: 2 → 12 (all non-skipped pass).** Previously failed on JIT compile (`exp_tile`, `abs_tile` not declared). Now passes with the new SFPU stubs.
+**test_metal_tensor_collapsing: -12 tests (12 -> 0 passed).** PCC ranges from -0.025 to 0.08. Same DRAM bank offset mismatch.
 
-3. **test_metal_tms: 169 → 332.** Suite expanded from 173 to 339 tests. 163 new tests pass. Only 4 `test_arange` failures remain (unchanged).
+**test_metal_tms: -139 tests (332 -> 193 passed).** Breakdown of 143 failures:
+- 100 `test_reshape` failures across all 5 dtypes (i1, i32, i64, f32, bf16) x 20 shapes — new
+- 28 `test_permute` failures — new
+- 11 `test_concatenate_heads` failures — new
+- 4 `test_arange` failures — unchanged from previous
 
-4. **test_metal_reductions: 420 → 932.** Suite expanded from 548 to 1096 tests. 512 new tests pass. Failures remain in `*_unaligned` variants (masking issue) plus 1 JIT compile failure.
+All reshape/permute/concat_heads failures are PCC mismatches from DRAM bank addressing issues. The 193 passing tests are single-core operations that happen to use small enough buffers to fit in bank 0.
 
-5. **test_metal_dma: 16 → 39.** 23 new passing tests. DRAM-related crashes reduced. 10 failures remain (signal 6 SIGABRT, 1 JIT compile).
+**test_metal_dma: -24 tests (39 -> 15 passed).** All `test_roundtrip_dma_tiled` (16 L1 + 8 DRAM = 24 new failures) now fail. DMA tiled tests move tile-formatted data through DRAM, which is affected by bank addressing. The 15 passing tests are all `test_roundtrip_dma_rowmajor` (14) + `test_host_interop_single_bank_dram_dma` (1). Rowmajor DMA uses byte-level addressing unaffected by tile-bank mapping.
 
-6. **test_metal_matmul: 108 → 113.** 5 previously-failing double-buffered tests now pass. 14 xfail (expected) remain.
+**test_metal_layout: -3 tests (94 -> 91 passed).** The 3 failing tests are `test_tiled_grid_reblocking` variants (multi-core tiled grid reblocking). PCC ~0.063.
 
-7. **test_metal_tilize: 3 → 12.** `test_tilize_untilize` (12/12) now all pass with the `pack_untilize_block` fix. `test_untilize` (16) and `test_tilize` (16) still fail with PCC mismatch.
+**test_metal_allocate: -2 tests (6 -> 4 passed).** 2 allocate tests now fail, likely from DRAM bank offset computation.
 
-8. **test_metal_allocate: 6 → 6.** Stable. During the uplift, these tests initially crashed (SIGILL) due to uninitialized `__llk_pack_block_c`/`__llk_pack_offset` in `experimental::pack_untilize_block`. Fixed in this run; all 6 continue to pass.
+### Improvements
+
+**test_metal_tilize: +4 tests (12 -> 16 passed).** 4 additional `test_tilize_untilize` round-trip tests now pass with the nfaces tile format fix.
+
+**test_metal_masking: +3 tests (0 -> 3 passed).** Three `test_complete_tile_masking` tests now pass (inf, -inf, 1.0 padding values). Previously all 20 tests crashed (SIGILL/signal 0). 17 still fail with PCC mismatch but no longer crash.
+
+**test_metal_reductions: +2 tests (932 -> 934 passed).** 2 additional reduction tests pass.
 
 ## Failure Categories
 
-### Category 1: Unaligned tensor operations (67 failures)
+### Category 1: DRAM bank addressing mismatch (~310 failures) -- NEW
 
-**Tests:** `test_sum_unaligned` (22), `test_max_unaligned` (25), `test_mean_unaligned` (20).
+**Tests:** All matmul (113), virtual_grids (39), tensor_collapsing (12), matmul_higher_rank (10), TMS reshape/permute/concat_heads (139), DMA tiled (24), layout reblocking (3), allocate (2).
+**Symptom:** PCC 0.06-0.30 (scrambled data, not garbage).
+**Root cause:** `NUM_DRAM_BANKS` changed from 1 to 6 (real wormhole count). D2M kernels use `InterleavedAddrGen` which computes `bank_index = tile_id % NUM_DRAM_BANKS` and `offset = (tile_id / NUM_DRAM_BANKS) * aligned_page_size`. The emulated DRAM allocation is flat — pages are at `base + tile_id * page_size`. The bank-interleaved address doesn't match the flat layout, so kernels read wrong data.
+**Fix direction:** The emulated DRAM allocator/accessor needs to match the bank-interleaved layout that `InterleavedAddrGen` expects, or the JIT-compiled `InterleavedAddrGen` needs a flat-mode fallback for emulation.
+**Priority:** P0 (blocks 333 tests)
+
+### Category 2: Unaligned tensor operations (65 failures)
+
+**Tests:** `test_sum_unaligned`, `test_max_unaligned`, `test_mean_unaligned` in reductions.
 **Symptom:** PCC mismatch for non-tile-aligned reduction shapes.
 **Root cause:** Padding/masking not implemented for partial tiles in reduction stubs.
 **Priority:** P2
 
-### Category 2: Masking runtime crashes (20 failures)
+### Category 3: Masking partial tile PCC (17 failures)
 
-**Tests:** All `test_metal_masking` tests.
-**Symptom:** SIGILL (signal 4) for `test_multicore_partial_tile_masking`, signal 0 for `test_complete_tile_masking`.
-**Root cause:** Masking kernels use the `experimental::pack_untilize_block` path combined with masking-specific CB operations. The runtime execution triggers an illegal instruction — likely a DST index out of bounds or uninitialized state in the masking-untilize interaction.
-**Priority:** P1
-
-### Category 3: Tilize/Untilize PCC mismatch (32 failures)
-
-**Tests:** `test_untilize` (16), `test_tilize` (16) in `test_metal_tilize.py`.
-**Symptom:** PCC ~0.06-0.08 (near zero correlation). `test_tilize_untilize` (round-trip) passes.
-**Root cause:** The standalone untilize and tilize operations produce incorrect data layouts. The round-trip cancels out errors (tilize then untilize returns to original), masking the bug. The tilize path likely has a face-ordering or row-stride issue in `__llk_pack_untilize` or `__llk_unpack_tilize`.
-**Priority:** P1
-
-### Category 4: BFP8 typecast PCC mismatch (13 failures)
-
-**Tests:** All `test_metal_bfp8_typecast` tests.
-**Symptom:** PCC from -0.01 to 0.72 depending on test. Tests compile and run (previously JIT compile failure).
-**Root cause:** The BFP8 format conversion in `typecast_tile` and/or the `exp_tile` precision may not match hardware behavior. The matmul tests in this file get PCC ~-0.01, suggesting the typecast from BFP8 to BF16 in the inner loop produces garbage.
+**Tests:** 17 of 20 `test_metal_masking` tests.
+**Symptom:** PCC ranges from 0.0 to 0.92. No longer crashing (improved from SIGILL/signal 0).
+**Root cause:** Masking kernels produce partially correct results. The 3 passing tests use simple padding values (inf, -inf, 1.0) on complete tiles.
 **Priority:** P2
 
-### Category 5: DMA DRAM crashes (10 failures)
+### Category 4: Tilize/Untilize PCC mismatch (28 failures)
 
-**Tests:** `test_roundtrip_dma_tiled[dram-*]`, `test_roundtrip_dma_rowmajor[dram-*]`, `test_interleaved_dma[*]`.
-**Symptom:** SIGABRT (signal 6) and 1 JIT compile failure.
-**Root cause:** DRAM NOC address resolution fails for DMA-specific access patterns. L1 DMA paths all pass (39/39).
+**Tests:** `test_untilize` (16), `test_tilize` (12) in `test_metal_tilize.py`.
+**Symptom:** PCC near zero. Round-trip (`test_tilize_untilize`) passes (16/16).
+**Root cause:** Standalone untilize/tilize operations have face-ordering or row-stride issues. Round-trip cancels out errors.
 **Priority:** P1
 
-### Category 6: Arange (4 failures)
+### Category 5: BFP8 typecast PCC mismatch (13 failures)
+
+**Tests:** All `test_metal_bfp8_typecast` tests.
+**Symptom:** PCC from -0.01 to 0.72.
+**Root cause:** BFP8 format conversion precision doesn't match hardware.
+**Priority:** P2
+
+### Category 6: DMA crashes (11 failures)
+
+**Tests:** DRAM DMA tests in `test_metal_dma.py`.
+**Symptom:** SIGABRT (signal 6, 7 tests) and signal 0 (4 tests).
+**Root cause:** DRAM NOC address resolution fails for specific DMA access patterns.
+**Priority:** P1
+
+### Category 7: Reduction JIT compile (1 failure)
+
+**Tests:** `test_sum[bf16-ttmetal-True-dim_arg0-2-4]`.
+**Symptom:** g++ compilation failure.
+**Root cause:** Specific reduction variant references undeclared symbol.
+**Priority:** P3
+
+### Category 8: Arange (4 failures)
 
 **Tests:** `test_arange` in TMS.
-**Symptom:** PCC 0.0-0.97 depending on parameters.
+**Symptom:** PCC 0.0-0.97.
 **Root cause:** Missing dedicated `arange` compute implementation.
 **Priority:** P3
 
-### Category 7: JIT compile failure (1 failure)
-
-**Tests:** `test_sum[bf16-ttmetal-True-dim_arg0-2-4]` in reductions.
-**Symptom:** g++ compilation failure.
-**Root cause:** A specific reduction variant emits code that references an undeclared symbol. Isolated failure.
-**Priority:** P3
-
-## Clean Passes (8 fully-passing files)
-
-- **test_metal_layout** (94/94) — All layout, reblocking, and view composition tests.
-- **test_metal_matmul** (113/113 + 14 xfail) — All matmul variants including double-buffered. **Improved from 108.**
-- **test_metal_matmul_higher_rank** (10/10) — All 3D/4D batched matmul.
-- **test_metal_allocate** (6/6) — All allocate tests. **Fixed from crash.**
-- **test_metal_tms** (332/335 + 3 skip) — All TMS except arange. **Massive expansion.**
-- **test_metal_tensor_collapsing** (12/12 + 2 skip) — **Fully fixed from JIT compile failure.**
-- **test_metal_virtual_grids** (39/39) — **Fully fixed from JIT compile failure.**
-- **test_metal_virtual_grid_rowmajor** (27 skip) — N300-only, correctly skipped.
-
 ## Standalone Regression (tt-emule)
 
-All standalone tests pass: **3/3 (eltwise_add, matmul, tilize)**
+**110 passed, 1 failed (Tier 6 silicon toggle — requires real hardware), 2 skipped (emulation_toggle binary not found)**
+
+| Tier | Description | Status |
+|------|-------------|--------|
+| Tier 1 | Eltwise (add, sub, mul, sqrt, relu, gelu) | PASS |
+| Tier 2 | Matmul sweep (14 shapes, 1-4 cores) | PASS |
+| Tier 3 | Tilize round-trip, reduction sweep | PASS |
+| Tier 3b | INT32 add | PASS (8/8) |
+| Tier 3c | Relational INT32 | PASS (66/66) |
+| Tier 3d | Matmul L1 accumulation | PASS |
+| Tier 3e | DFB emulation (DM + Bridge) | PASS |
+| Tier 3f | DFB multi-P/C BLOCKED | PASS (30/30) |
+| Tier 4 | Blackhole P100 eltwise | PASS |
+| Tier 5 | Multi-device cluster | PASS |
+| Tier 6 | Silicon toggle | FAIL (expected — no hardware) |
 
 ## Implementation Changes (this run)
 
-### New jit_hw additions for D2M LLK API support
+### Nfaces tile format
+- `include/jit_hw/nfaces.h`: constexpr LUT converting between row-major 32x32 and 4-face 16x16 tile layout
+- `include/jit_hw/api/compute/common.h`: `copy_tile()`, `pack_dst_to_buf()`, `pack_tile()` updated to use nfaces index mapping
+- `include/jit_hw/api/compute/matmul.h`: matmul tile I/O uses nfaces layout
 
-1. **Pack untilize LLKs** (`pack_untilize.h`, `llk_defs.h`):
-   - Preempt guard for `experimental_pack_untilize_llks.h` verbatim injection
-   - `experimental::pack_untilize_block` using `copy_tile` + `__llk_pack_untilize`
-   - Proper `__llk_pack_block_c` and `__llk_pack_offset` initialization
-   - Templated `pack_untilize_init` overload
+### INT32 bit pattern preservation
+- `copy_tile()` and `pack_dst_to_buf()` use `uint32_t*` + `memcpy` instead of `float*` assignment for 32-bit formats (prevents x86 DAZ/FTZ denormal flush of small INT32 values)
 
-2. **LLK unpack/pack stubs** (`llk_defs.h`):
-   - `llk_unpack_A` template stub (no-op for emulation)
-   - `FACE_R_DIM`, `TILE_C_DIM` constants
-   - `get_output_id`, `get_output_partial_face`, etc.
+### DRAM bank count
+- `emulated_program_runner.cpp`: `NUM_DRAM_BANKS` JIT define changed from `"1"` to `std::to_string(num_dram_channels)` (6 for wormhole, 8 for blackhole, 2 for quasar)
 
-3. **LLK CB functions** (`llk_defs.h`, `cb_api.h`):
-   - `llk_wait_tiles`, `llk_pop_tiles`, `llk_push_tiles`, `llk_wait_for_free_tiles`
-   - `int32_t` overloads for `cb_reserve_back`, `cb_push_back`, `cb_wait_front`, `cb_pop_front`
+### Remote semaphore operations
+- `include/jit_hw/experimental/noc_semaphore.h`: Full rewrite with remote `up()`, `set_multicast()`, `inc_multicast()` using NOC address resolution
 
-4. **Coordinate APIs** (`compute/common.h`):
-   - `get_absolute_logical_x`, `get_absolute_logical_y`
+### Thread-local state management
+- `include/jit_hw/llk_defs.h`: `compute_kernel_hw_startup()` resets `__emule_pack_offset` and `__emule_l1_acc_enabled`
 
-5. **SFPU operations** (`eltwise_unary/*.h`):
-   - `abs_tile` / `abs_tile_init` / `abs_tile_int32`
-   - `exp_tile` / `exp_tile_init` (with `InputClamping`, `VectorMode` enums)
-   - `negative_tile` / `negative_tile_init` / `negative_tile_int32`
-   - `typecast_tile` / `typecast_tile_init`
+### DFB test fixes
+- `test_dfb_emulation.cpp`, `test_dataflow_buffer.cpp`: Buffer `page_size` changed from `buffer_size` to `entry_size` to match kernel TensorAccessor addressing
 
 ## Historical Progress
 
 | Date | Passed | Failed | Skip | Total | Key Change |
 |------|--------|--------|------|-------|------------|
-| 2026-03-11 | 128 | ~310 | — | ~438 | Initial D2M regression |
-| 2026-03-13 | 208 | ~251 | — | ~459 | Multicast NOC fixes, parallel JIT |
-| 2026-03-16a | 249 | ~244 | — | ~493 | HAL-based semaphore base |
-| 2026-03-16b | 614 | 84 | — | ~698 | DRAM bank offset fix |
+| 2026-03-11 | 128 | ~310 | -- | ~438 | Initial D2M regression |
+| 2026-03-13 | 208 | ~251 | -- | ~459 | Multicast NOC fixes, parallel JIT |
+| 2026-03-16a | 249 | ~244 | -- | ~493 | HAL-based semaphore base |
+| 2026-03-16b | 614 | 84 | -- | ~698 | DRAM bank offset fix |
 | 2026-03-17 | 832 | 162 | 81 | 1075 | Lock-free CB, AVX2 matmul, --forked |
-| **2026-03-30** | **1589** | **147** | **142** | **1878** | **LLK API stubs, tt-mlir uplift (+803 tests)** |
+| 2026-03-30 | 1589 | 147 | 142 | 1878 | LLK API stubs, tt-mlir uplift (+803 tests) |
+| **2026-04-08** | **1256** | **480** | **142** | **1878** | **Nfaces, NUM_DRAM_BANKS=real, remote semaphore** |
+
+## Next Steps
+
+1. **P0: Fix DRAM bank interleaving for emulation.** The emulated DRAM allocator writes pages sequentially (`base + id * page_size`) but `InterleavedAddrGen` reads with bank interleaving (`bank[id % N] + (id / N) * aligned_size`). Options:
+   - (a) Make the emulated DRAM allocation bank-interleaved to match `InterleavedAddrGen`
+   - (b) Patch `InterleavedAddrGen` at JIT time to use flat addressing in emulation mode
+   - (c) Revert `NUM_DRAM_BANKS` to 1 for D2M (but keep real count for standalone) — quick fix but diverges from hardware behavior
+
+2. **P1: Fix tilize/untilize standalone PCC** — face-ordering issue in the nfaces layout conversion.
+
+3. **P1: Fix DMA tiled crashes** — DRAM NOC address resolution for tiled DMA patterns.

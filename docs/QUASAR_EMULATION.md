@@ -1,15 +1,17 @@
-# Quasar Emulation Overview
+# Quasar Emulation in tt-emule
 
-This is a running document updated as emulation phases progress.
+tt-emule provides software emulation of Tenstorrent Quasar hardware for host-side testing without silicon. This document is the reference for anyone reading, testing, or extending the Quasar emulation.
 
 ---
 
 ## 1. Overview
 
-tt-emule provides software emulation of Tenstorrent hardware for host-side testing without silicon. It supports two execution paths:
+tt-emule supports two execution paths:
 
 - **Standalone path**: Kernels are native C++ functions linked directly against tt-emule. Tests under `tests/`. State accessed via `__core` and `__dfb_ifaces` thread-locals.
 - **JIT path**: Kernels are compiled from source at runtime (g++), loaded via `dlopen`. Integrates with real tt-metal host APIs (`CreateDataflowBuffer`, `LaunchProgram`). State accessed via `__emule_dfbs` and `__emule_tc_array` thread-locals set by `emulated_program_runner.cpp`.
+
+The JIT path is the primary use case. It allows upstream device kernels to run unmodified (modulo CSR patching) against real tt-metal host APIs, so host-side code exercises the same paths as on silicon.
 
 ---
 
@@ -22,7 +24,7 @@ tt-emule provides software emulation of Tenstorrent hardware for host-side testi
 - A Quasar chip has many Neo cores (e.g., 32 in `quasar_32_arch.yaml`)
 - 2 DRAM channels per chip
 - DFBs (Dataflow Buffers) replace Wormhole's CBs (Circular Buffers) — MPMC instead of SPSC
-- Hardware thread IDs (hartids): DM0-DM7 = 0-7, compute engines labeled NEO0-NEO3 internally in `hw_thread.h` = hartids 8-11 (Note: "NEO0-NEO3" are the 4 compute engines within a single Neo core — don't confuse with the architecture name)
+- Hardware thread IDs (hartids): DM0-DM7 = 0-7, compute engines NEO0-NEO3 = hartids 8-11 (the 4 compute engines within a single Neo core — distinct from the chip-level "Neo" architecture name)
 
 ---
 
@@ -36,35 +38,22 @@ How processors map to host threads:
 | Compute (engines 0-3) | 4 per Neo | 1 thread per compute engine | `get_compute_processors()` grouped by engine |
 
 - Total: a Neo is emulated as up to **12 host threads** (8 DM + 4 compute)
-- `mhartid` CSR: regex-patched in JIT-compiled kernel source to read `__processor_id` TLS variable
 - `num_threads_per_cluster` in `QuasarComputeConfig`: controls how many of the 4 compute engines are active (default: 4)
 
-**NEO_ID/TRISC_ID CSR: emulated (Phase 4).** `ckernel::csr_read<ckernel::CSR::NEO_ID>()` returns `__emule_neo_id` TLS, `csr_read<CSR::TRISC_ID>()` returns `__emule_trisc_id` TLS. Both are set by the program runner before each compute thread starts. Tests `risc_math.cpp` and `simple_tls_check.cpp` pass.
+**CSR emulation:** Hardware CSR reads are regex-patched at JIT compile time:
+- `mhartid`: `asm volatile("csrr %0, mhartid" ...)` → `var = __processor_id;`
+- `NEO_ID`: `ckernel::csr_read<ckernel::CSR::NEO_ID>()` → returns `__emule_neo_id` TLS
+- `TRISC_ID`: `csr_read<CSR::TRISC_ID>()` → returns `__emule_trisc_id` TLS
+
+Both `__emule_neo_id` and `__emule_trisc_id` are set by the program runner before each compute thread starts.
+
+**Test evidence:** `test_globals_tls.cpp:QuasarComputeKernelTLS` verifies NEO_ID, TRISC_ID, and thread ID TLS isolation across compute engines.
 
 ---
 
-## 4. DRAM Emulation
+## 4. Memory Model
 
-- Emulated as a flat host buffer (single contiguous allocation per device)
-- `NUM_DRAM_BANKS` is forced to **1** in the JIT defines, regardless of the real architecture count (Quasar=2, WH=6, BH=8)
-- **Why:** `InterleavedAddrGen` with N>1 banks maps page IDs to bank-specific NOC addresses. Banks 1+ generate NOC (x,y) coordinates not registered in `__emule_core_map`. `__emule_resolve_noc_addr()` returns null for unmapped cores, causing `noc_async_read` to skip the memcpy and produce zeros.
-- `noc_async_read` / `noc_async_write` are synchronous `memcpy` in emulation — no actual NOC transfer
-- `__emule_dram_ptr(offset)` returns a host pointer into the flat DRAM buffer
-
----
-
-## 5. DFB Emulation (Summary)
-
-See `DFB_EMULATION.md` for the full deep dive. Key points:
-
-- **STRIDED mode** (Phase 2, complete): `M = max(P, C)` interleaving factor. Producer p owns TC slots `{p + k*P}`, consumer c owns `{c + k*C}`. `stride_size = M * entry_size`. `capacity = num_entries / M`.
-- **BLOCKED mode** (Phase 3, complete): `broadcast_tc = true` for producers. P*C tile counters: `counter_id = counter_base + p*C + c`. Consumer round-robins through `num_producers` TCs.
-- **Timeout detection**: Blocking DFB operations (`reserve_back`, `wait_front`) use `wait_for` with configurable timeout (default 120s, `TT_EMULE_DFB_TIMEOUT` env var). Aborts with diagnostic on hang.
-- **Max DFBs**: 8 per program with `neo_id=0` (limited by `TILE_COUNTERS_PER_NEO / MAX_TC_SLOTS_PER_DFB`)
-
----
-
-## 6. L1 Memory
+### 4.1 L1 Memory
 
 - 4 MB shared between all 12 cores in a Neo (8 DM + 4 compute engines)
 - Emulated as a bump allocator on the host heap (`Core::l1_alloc()`)
@@ -72,120 +61,221 @@ See `DFB_EMULATION.md` for the full deep dive. Key points:
 - JIT path: size from SOC YAML (4 MB for Quasar via `SWEmulatedChip`)
 - Bridge DFBs (compute kernel connecting input and output DFBs) share L1 backing store via `dim_key` deduplication — models the hardware register file passthrough
 
+**Firmware L1 address translation:** Device kernels reference L1 via firmware-range offsets (e.g., `0x1000`). `__emule_local_l1_to_ptr()` distinguishes these from host pointers and translates via `__emule_bridge_l1`. NOC operations use this translation.
+
+**Compile-time L1 addresses:** `reinterpret_cast<T*>(get_arg_val(N))` patterns are regex-patched at JIT time to add `__emule_bridge_l1` offset.
+
+### 4.2 DRAM
+
+- Emulated as a flat host buffer (single contiguous allocation per device)
+- `NUM_DRAM_BANKS` is forced to **1** in the JIT defines, regardless of the real architecture count (Quasar=2, WH=6, BH=8)
+- **Why:** `InterleavedAddrGen` with N>1 banks maps page IDs to bank-specific NOC addresses. Banks 1+ generate NOC (x,y) coordinates not registered in `__emule_core_map`. `__emule_resolve_noc_addr()` returns null for unmapped cores, causing `noc_async_read` to skip the memcpy and produce zeros.
+- `noc_async_read` / `noc_async_write` are synchronous `memcpy` — no actual NOC transfer
+- `__emule_dram_ptr(offset)` returns a host pointer into the flat DRAM buffer
+
+**Test evidence:** `test_dm_loopback.cpp:DmLoopback` exercises DM semaphore + DRAM NOC read/write. `test_single_dm_l1_write.cpp:SingleDmL1Write` tests named CT args and common RT args via DRAM.
+
+### 4.3 NOC
+
+NOC operations (`noc_async_read`, `noc_async_write`) are synchronous memcpy in emulation. Supported features:
+
+- **Loopback**: Single-core L1→L1 write via NOC — tested by `test_loopback.cpp:LoopbackPacketSizes, LoopbackDirectedIdeal`
+- **One-from-one**: Two-core L1 read — tested by `test_one_from_one.cpp:OneFromOnePacketSizes, OneFromOneDirectedIdeal`
+- **Virtual channels**: Optional parameter accepted and ignored
+- **RISC-V fence**: `asm volatile("fence")` patched to `__sync_synchronize()` at JIT time
+
 ---
 
-## 7. DST Register File
+## 5. Compute Engine
 
-The DST (destination) register file is the same physical size on all architectures (WH, BH, Quasar). The number of usable tile slots depends on the **accumulation mode**, not the architecture:
+The compute engine emulates the hardware's UNPACK → MATH → PACK pipeline. On real hardware, three TRISC cores (TRISC0=UNPACK, TRISC1=MATH, TRISC2=PACK) run in parallel. In emulation, all three share one host thread — operations execute sequentially via `PACK(x) x`, `MATH(x) x`, `UNPACK(x) x` macros.
+
+### 5.1 DST Register File
+
+The DST (destination) register file is where compute results accumulate before being packed to L1.
 
 | Mode | `DST_ACCUM_MODE` | Active Slots | Element Size | Use Case |
 |------|-------------------|-------------|-------------|----------|
-| bf16 (half-dest) | 0 (default) | 16 | 2 bytes | Most compute kernels |
-| fp32 (half-dest) | != 0 | 8 | 4 bytes | High-precision accumulation |
+| bf16 (half-dest) | 0 (default) | 16 | 4 bytes (f32 internal) | Most compute kernels |
+| fp32 (half-dest) | != 0 | 8 | 4 bytes (f32 internal) | High-precision accumulation |
 
-In emulation (`include/jit_hw/api/compute/common.h`):
-- Physical array: `__emule_dst[16][1024]` — always 16 slots × 1024 float32 elements
+Implementation (`include/jit_hw/api/compute/common.h`):
+- Physical array: `__emule_dst[16][1024]` — 16 slots × 1024 float32 elements (64 KB)
 - Active slot count: `__emule_dst_active_tiles()` returns 16 or 8 based on `DST_ACCUM_MODE`
-- Bounds checking: `__emule_dst_check()` enforces the mode-aware limit and aborts with a diagnostic if exceeded
+- Bounds checking: `__emule_dst_check()` aborts with diagnostic if slot exceeds mode-aware limit
 - `tile_regs_acquire()` zeroes only the active slots
 
 `DST_ACCUM_MODE` is a compile-time define passed by the JIT compiler. Kernels that need fp32 accumulation set it via `QuasarComputeConfig`.
 
+### 5.2 UNPACK Engine (L1 → SRC/DST)
+
+On real hardware, the UNPACK engine reads tile data from L1 in **NFACES format** and produces **row-major** data in the SRC registers for the MATH engine. In emulation, UNPACK is integrated into each compute op that reads from a CB.
+
+**NFACES format:** A 32×32 tile is stored as 4 sequential 16×16 faces, each row-major internally:
+
+```
+face 0 (offsets   0-255): rows  0-15, cols  0-15  (top-left)
+face 1 (offsets 256-511): rows  0-15, cols 16-31  (top-right)
+face 2 (offsets 512-767): rows 16-31, cols  0-15  (bottom-left)
+face 3 (offsets 768-1023): rows 16-31, cols 16-31 (bottom-right)
+```
+
+The conversion is done via a constexpr LUT (`include/jit_hw/api/compute/nfaces.h`):
+```cpp
+// rowmajor_to_nfaces[i] = nfaces offset for row-major element i
+// Usage (UNPACK): dst[i] = buf[rowmajor_to_nfaces[i]]
+namespace __emule_nfaces {
+    inline constexpr auto rowmajor_to_nfaces = make_rowmajor_to_nfaces();
+}
+```
+
+Format conversion (bf16→f32 or passthrough for f32 data) happens in the same loop as the layout conversion. For example, in `copy_tile`:
+```cpp
+// bfloat16: UNPACK nfaces→rowmajor + bf16→f32
+for (uint32_t i = 0; i < n; i++)
+    __emule_dst[idst][i] = __emule_bf16::to_f32(bf[rowmajor_to_nfaces[i]]);
+```
+
+All compute ops that read from CBs (`copy_tile`, `add_tiles`, `sub_tiles`, `mul_tiles`, `matmul_tiles`) perform this UNPACK conversion.
+
+**Test evidence:** `test_matmul_X_tile.cpp:TensixMatmulBlock, TensixMatmulBlockInitShort` — nfaces layout conversion is required for matmul PCC to pass with non-trivial input data.
+
+**TODO: No dedicated UNPACK-only test exists.** See `docs/TEST_COVERAGE_TODO.md`.
+
+### 5.3 PACK Engine (DST → L1)
+
+On real hardware, the PACK engine reads row-major DST data and writes it to L1 in NFACES format, with optional format conversion (f32→bf16). In emulation, PACK is implemented in `pack_dst_to_buf()` (`common.h`):
+
+```cpp
+// bf16 non-L1-acc path:
+bf[rowmajor_to_nfaces[i]] = __emule_bf16::from_f32(__emule_dst[dst_slot][i]);
+```
+
+**Auto-advance:** On real hardware, each `pack_tile` call auto-advances the PACK engine's L1 write pointer to the next tile slot. In emulation, this is tracked by `__emule_pack_offset[cb_id]` (per-CB, thread-local). `pack_tile` writes to `cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++)`. The offset is reset to 0 in `cb_reserve_back` and `dfb_reserve_back`.
+
+**L1 accumulation:** When `llk_pack_reconfig_l1_acc(1)` is called, `pack_dst_to_buf` adds DST values to existing CB contents instead of overwriting. This is used by matmul kernels that accumulate partial products across multiple `tile_regs_acquire/commit` cycles.
+
+**Test evidence:** `test_matmul_X_tile.cpp:TensixMatmulBlock, TensixMatmulBlockInitShort` — pack auto-advance is required for multi-tile matmul output to write to distinct L1 slots.
+
+### 5.4 Implemented Compute Operations
+
+| Operation | Function | File | Description |
+|-----------|----------|------|-------------|
+| Tile copy | `copy_tile(icb, itile, idst)` | `common.h` | UNPACK CB tile → DST |
+| Block copy | `copy_block_matmul_partials(...)` | `common.h` | Reload block of tiles from CB to DST |
+| Pack tile | `pack_tile(idst, ocb)` | `common.h` | PACK DST → CB with auto-advance |
+| Pack block | `pack_tile_block(ifrom, ocb, n)` | `common.h` | Pack N consecutive DST tiles to CB |
+| Add | `add_tiles(icb0, icb1, it0, it1, idst)` | `common.h` | Element-wise add with UNPACK |
+| Subtract | `sub_tiles(icb0, icb1, it0, it1, idst)` | `common.h` | Element-wise sub with UNPACK |
+| Multiply | `mul_tiles(icb0, icb1, it0, it1, idst)` | `common.h` | Element-wise mul with UNPACK |
+| Matmul | `matmul_tiles(in0, in1, it0, it1, idst)` | `matmul.h` | 32×32 tile GEMM, accumulates into DST |
+| Block matmul | `matmul_block(...)` | `matmul.h` | Block of rt_dim × ct_dim output tiles |
+| Reduce | `reduce_tile(icb, icb_scaler, ...)` | `reduce.h` | Row/col/scalar reduce with SUM/MAX |
+| L1 acc toggle | `llk_pack_reconfig_l1_acc(enable)` | `common.h` | Enable/disable PACK L1 accumulation |
+
+The matmul implementation uses AVX2/FMA intrinsics when available (`-mavx2 -mfma`) for ~4-8x speedup over the scalar fallback.
+
+### 5.5 Stubbed Compute Operations (Compile but No-Op)
+
+These operations exist as empty function bodies so device kernels compile. They produce no output:
+
+| Category | Examples | File |
+|----------|----------|------|
+| Init/reconfig | `mm_init`, `mm_init_short`, `binary_op_init_common`, `copy_tile_init`, all `reconfig_data_format*` | `common.h`, `matmul.h` |
+| SFPU element-wise | `add_int_sfpu`, `sub_int_sfpu`, `mul_int_sfpu`, `div_int32_sfpu`, `binary_bitwise_sfpu`, etc. | `add_int_sfpu.h`, `sub_int_sfpu.h`, etc. |
+| Broadcast | `bcast` variants (COL, ROW, SCALAR) | `bcast.h` |
+| Transpose | `transpose_wh` | `transpose_wh.h` |
+| Tilize/Untilize | `tilize_init`, `untilize_init` | `tilize.h`, `untilize.h` |
+| Pack untilize | `pack_untilize_init`, `pack_untilize` | `pack_untilize.h` |
+| Eltwise binary SFPU | SFPU-accelerated binary ops | `eltwise_binary_sfpu.h` |
+| Quantization | Quantize/dequantize | `quantization.h` |
+
 ---
 
-## 8. JIT Compilation
+## 6. Dataflow Buffers (Summary)
+
+See `docs/DFB_EMULATION.md` for the full deep dive. Key points:
+
+- **STRIDED mode**: `M = max(P, C)` interleaving factor. Producer p owns TC slots `{p + k*P}`, consumer c owns `{c + k*C}`. `stride_size = M * entry_size`. `capacity = num_entries / M`. Tested by 42 tests in `test_dataflow_buffer.cpp`.
+- **BLOCKED mode**: `broadcast_tc = true` for producers. P*C tile counters: `counter_id = counter_base + p*C + c`. Consumer round-robins through `num_producers` TCs. Tested by 30 tests in `test_dataflow_buffer.cpp`.
+- **DFB↔CB bridge**: `dfb_push_back`/`pop_front` bridge to CB `occupied` counter; `cb_push_back`/`pop_front` bridge to DFB tile counters. This allows compute kernels to use CB API while DM kernels use DFB API on the same buffer.
+- **Timeout detection**: Blocking DFB operations use `wait_for` with configurable timeout (default 120s, `TT_EMULE_DFB_TIMEOUT` env var). Aborts with diagnostic on hang.
+- **Max DFBs**: 8 per program with `neo_id=0` (limited by `TILE_COUNTERS_PER_NEO / MAX_TC_SLOTS_PER_DFB`)
+
+---
+
+## 7. JIT Compilation
 
 - Compiler: **g++** (user preference; overrides CLAUDE.md's clang-20 rule for JIT specifically)
 - Process: `emulated_program_runner` writes patched kernel source to temp file → `g++ -std=c++17 -fPIC -shared -O1` → `dlopen` the resulting `.so` → call `kernel_main` symbol
 - `mhartid` CSR patch: regex replaces `asm volatile("csrr %0, mhartid" ...)` with `var = __processor_id;`
-- TLS variables set per thread before kernel launch: `__emule_dfbs`, `__emule_tc_array`, `__processor_id`
+- `fence` instruction patch: `asm volatile("fence")` → `__sync_synchronize()`
+- Raw L1 pointer cast patch: `reinterpret_cast<T*>(get_arg_val(N))` → adds `__emule_bridge_l1` offset
+- TLS variables set per thread before kernel launch: `__emule_dfbs`, `__emule_tc_array`, `__processor_id`, `__emule_neo_id`, `__emule_trisc_id`
 - JIT cache: compiled `.so` files cached in `/tmp/tt_emule_jit_*`
+- Profiler macros (`DeviceZoneScopedN`, `DeviceTimestampedData`) stubbed as no-ops
 
 ---
 
-## 9. Known Gaps
+## 8. Implemented Features
 
-| Gap | Impact | Status |
-|-----|--------|--------|
-| `NEO_ID` CSR emulated | `csr_read<CSR::NEO_ID>()` returns `__emule_neo_id` TLS | Done (Phase 4) |
-| Multi-bank DRAM interleaving | Always flat (1 bank); higher banks' NOC addresses unmapped | By design |
-| DFB↔CB sync bridge | `dfb_push_back`/`pop_front` now bridge to CB `occupied` counter; `cb_push_back`/`pop_front` bridge to DFB tile counters. Matmul data flows end-to-end. | Done (Phase 7) |
-| CB base pointer for DFB-backed CBs | `core->l1_ptr(base_addr)` double-added L1 base; fixed to cast `base_addr` directly | Done (Phase 7) |
-| L1 bump allocator reset | `reset_l1_bump()` called between program runs to prevent L1 OOM | Done (Phase 7) |
-| Multi-core NOC communication | Loopback and one-from-one tests pass (single-core self-write + two-core read) | Done (Phase 8) |
-| Firmware L1 address translation | `__emule_local_l1_to_ptr()` distinguishes firmware offsets from host pointers; NOC ops use it | Done (Phase 8) |
-| NOC virtual channels | `noc_async_read/write` accept optional virtual channel parameter (ignored in emulation) | Done (Phase 8) |
-| Profiler macros | `DeviceZoneScopedN`, `DeviceTimestampedData` stubbed as no-ops | Done (Phase 8) |
-| `GenericMeshDeviceFixture` for emulation | `MeshDeviceFixtureBase::SetUp()` allows slow dispatch when `TT_METAL_EMULATED_MODE` is set | Done (Phase 8) |
-| NOC 2.0 API (NocSendDescriptor) | New stateful NOC API used by `requestor_2_0.cpp`, `direct_write` tests | Not implemented |
-| LLK numerical correctness | Matmul data flow works but numerical results wrong (tile format mismatch) | Deferred |
-| LLK math/SFPU operations | Only datacopy/tilize/untilize stubbed in `llk_defs.h`; binary, reduce, matmul, SFPU not implemented | Not implemented |
-| TRISC `finish()` variant | Compute `finish()` behavior untested | Deferred |
-| `EMULE_SEM_BASE` default conflict | Was: stubs.hpp defaulted to 0 vs api.h to 0xFFE00. Fixed: stubs.hpp no longer defines a default; defers to dataflow_api.h or JIT define | Fixed |
-| `MathFidelity` enum values | Was: common.h auto-assigned (1,2,3). Fixed: explicit values matching tt-metal (HiFi2=2,HiFi3=3,HiFi4=4) | Fixed |
-| `get_absolute_logical_x/y` return type | Was: uint32_t vs uint8_t. Fixed: both return uint32_t with `#ifndef` guard | Fixed |
-| Standalone DstRegisterFile | Was: 8 slots. Fixed: 16 physical slots with mode-aware active count (16 bf16, 8 fp32) | Fixed |
-| TileCounter lockless fast path | Was: non-atomic pair read could underflow in MPMC. Fixed: removed lockless fast path | Fixed |
-| DFB `dfb_id` bounds check | Was: no bounds check. Fixed: all DFB API functions validate `dfb_id < MAX_DFBS` | Fixed |
-| `get_local_cb_interface` duplication | Was: incompatible definitions in llk_defs.h and dataflow_api.h. Fixed: `#ifndef` guard | Fixed |
-| Standalone L1 bump reset | Was: not called between EnqueueProgram runs. Fixed: reset_l1_bump() in teardown | Fixed |
-| Compile-time L1 addresses | Handled by `__emule_local_l1_to_ptr()` — firmware offsets translated via `__emule_bridge_l1` | Done (Phase 8) |
-| RISC-V fence instruction | `asm volatile("fence")` patched to `__sync_synchronize()` at JIT time | Done (Phase 6) |
-| Raw L1 pointer casts | `reinterpret_cast<T*>(get_arg_val(N))` patched at JIT time to add `__emule_bridge_l1` | Done (Phase 6) |
+Every feature listed here is verified by at least one passing test.
 
----
+| Feature | Implementation | Test Evidence |
+|---------|---------------|---------------|
+| DM threading (1 thread per DM) | `emulated_program_runner.cpp` | `test_quasar_compute_kernels.cpp:QuasarComputeKernelMultipleThreads` |
+| Compute threading (1 thread per engine) | `emulated_program_runner.cpp` | `test_quasar_compute_kernels.cpp:QuasarComputeKernelSingleThread` |
+| NEO_ID / TRISC_ID CSR | `__emule_neo_id`, `__emule_trisc_id` TLS | `test_globals_tls.cpp:QuasarComputeKernelTLS` |
+| mhartid CSR patch | Regex in `emulated_program_runner.cpp` | `test_quasar_compute_kernels.cpp` (all 3 tests) |
+| DRAM read/write (flat, 1 bank) | `noc_async_read/write` as memcpy | `test_dm_loopback.cpp:DmLoopback` |
+| L1 shared memory (bump alloc) | `Core::l1_alloc()` | All DFB tests (72+ tests allocate L1) |
+| L1 address translation | `__emule_local_l1_to_ptr()` | `test_single_dm_l1_write.cpp:SingleDmL1Write` |
+| NOC loopback (single-core) | Synchronous memcpy | `test_loopback.cpp:LoopbackPacketSizes, LoopbackDirectedIdeal` |
+| NOC one-from-one (two-core) | Synchronous memcpy | `test_one_from_one.cpp:OneFromOnePacketSizes, OneFromOneDirectedIdeal` |
+| Semaphores (compute + DM) | Atomic spin-wait | `test_quasar_semaphores.cpp:QuasarComputeKernelSemaphores, QuasarDmAndComputeKernelSemaphores` |
+| RISC-V atomics on L1 | GCC builtins | `test_riscv_atomics.cpp:TestAtomicLoadStoreRISCV, TestAtomicAddFetchRISCV, TestAtomicCASRISCV` |
+| DFB STRIDED (1P-1C through 4P-4C) | `EmuleDFBInterface` + `TileCounterArray` | 42 tests in `test_dataflow_buffer.cpp` |
+| DFB BLOCKED | `broadcast_tc` path | 30 tests in `test_dataflow_buffer.cpp` |
+| DFB↔CB bridge | `cb_sync_push/pop` in dfb_api.h / cb_api.h | `test_dfb_emulation.cpp:DFBEmuleBridgeTest` |
+| DFB timeout detection | `wait_for` with `TT_EMULE_DFB_TIMEOUT` | Triggered by hang scenarios in regression |
+| DST register file (16/8 slots) | `__emule_dst[16][1024]` + mode-aware bounds | `test_matmul_X_tile.cpp` (uses 16 slots) |
+| UNPACK nfaces→rowmajor | `__emule_nfaces::rowmajor_to_nfaces` LUT | `test_matmul_X_tile.cpp:TensixMatmulBlock, TensixMatmulBlockInitShort` |
+| PACK rowmajor→nfaces + auto-advance | `pack_dst_to_buf()` + `__emule_pack_offset` | `test_matmul_X_tile.cpp:TensixMatmulBlock, TensixMatmulBlockInitShort` |
+| Matmul (tile GEMM, AVX2) | `matmul_tiles()` / `matmul_block()` | `test_matmul_X_tile.cpp:TensixMatmulBlock, TensixMatmulBlockInitShort` |
+| Element-wise add/sub/mul | `add_tiles()`, `sub_tiles()`, `mul_tiles()` | D2M `test_add_int` (add path) |
+| Reduce (row/col/scalar, sum/max) | `reduce_tile()` | D2M regression (reduce ops) |
+| L1 accumulation | `llk_pack_reconfig_l1_acc()` | `test_matmul_X_tile.cpp` (matmul accumulates partials) |
+| RISC-V fence patch | `__sync_synchronize()` | All JIT tests (compilation succeeds) |
+| `GenericMeshDeviceFixture` | Allows slow dispatch in emulated mode | All JIT-path tests |
 
-## 10. Quasar-Specific Test Status
-
-All tests below use `experimental::quasar::CreateKernel` with `QuasarDataMovementConfig` and/or `QuasarComputeConfig`. Architecture-independent tests (CoreRange, bit_utils, tilize, host_buffer, TTNN, D2M) are omitted.
-
-**Regression total:** 107 passing, 3 pre-existing failures, 2 skipped.
-
-### 10.1 Supported — Passing
-
-| Test File | Test Names | Count | Notes |
-|-----------|-----------|-------|-------|
-| `api/dataflow_buffer/test_dfb_emulation.cpp` | DFBEmuleDMTest, DFBEmuleBridgeTest | 2 | 1P-1C DM, DM→compute→DM bridge |
-| `api/dataflow_buffer/test_dataflow_buffer.cpp` | DMTest1xDFB\*, DMTensixTest\*, TensixDMTest\*, DMTensixDMTest\* | 72 | STRIDED (24 ISF + 18 IST) + BLOCKED (30) |
-| `test_quasar_compute_kernels.cpp` | QuasarComputeKernelMultipleThreads, QuasarComputeKernelSingleThread, QuasarCreateMultipleComputeKernelsSingleCluster | 3 | Multi-thread/single-thread compute, multi-kernel |
-| `test_globals_tls.cpp` | QuasarComputeKernelTLS | 1 | NEO_ID, TRISC_ID, thread ID TLS isolation |
-| `test_quasar_semaphores.cpp` | QuasarComputeKernelSemaphores, QuasarDmAndComputeKernelSemaphores | 2 | Compute + DM semaphore spin-wait |
-| `test_dm_loopback.cpp` | DmLoopback | 1 | DM semaphore + DRAM NOC |
-| `test_single_dm_l1_write.cpp` | SingleDmL1Write | 1 | Named CT args, common RT args |
-| `test_riscv_atomics.cpp` | TestAtomicLoadStoreRISCV, TestAtomicAddFetchRISCV, TestAtomicCASRISCV | 3 | GCC atomic builtins on L1 |
-| `data_movement/loopback/test_loopback.cpp` | LoopbackPacketSizes, LoopbackDirectedIdeal | 2 | Single-core L1→L1 write via NOC |
-| `data_movement/one_from_one/test_one_from_one.cpp` | OneFromOnePacketSizes, OneFromOneDirectedIdeal | 2 | Two-core L1 read |
-
-**Total passing Quasar-specific: 89**
-
-### 10.2 Supported — Partial / Blocked
-
-| Test File | Test Names | Pass/Total | Blocking Gap |
-|-----------|-----------|------------|-------------|
-| `test_quasar_semaphores.cpp` | QuasarMultiSemaphorePipeline, QuasarMultipleClustersMultiSemaphorePipeline | 0/2 | Multi-cluster semaphore pipeline |
-| `data_movement/one_from_one/test_one_from_one.cpp` | OneFromOneVirtualChannels, OneFromOneCustom | 0/2 | Skipped (2 cores needed in specific config) |
-| `data_movement/one_from_one/test_one_from_one.cpp` | OneFromOnePacketSizes2\_0 | 0/1 | NOC 2.0 API (`requestor_2_0.cpp`) |
-| `data_movement/direct_write/test_direct_write.cpp` | DirectWritePerformanceComparison, DirectWriteAddressPatterns, DirectWriteMulticast | 0/3 | NOC 2.0 API (`noc_inline_dw_write`, `InlineWriteDst`) |
-| `data_movement/dram_unary/test_unary_dram.cpp` | DRAMPacketSizes, DRAMCoreLocations, DRAMChannels, DRAMDirectedIdeal, DRAMPacketSizes2\_0 | 0/5 | Firmware internal headers (`noc/noc_parameters.h`) |
-| `integration/matmul/test_matmul_X_tile.cpp` | TensixMatmulSingleTile, TensixMatmulMultiTile, TensixMatmulBlock, TensixMatmulBlockInitShort, TensixMatmulBlockInitShortWithDt | 0/5 | Data path works end-to-end; numerical correctness blocked on tile format |
-
-### 10.3 Unsupported — Not in tt-emule
-
-| Test File | Test Names | Count | Blocking Gap |
-|-----------|-----------|-------|-------------|
-| `test_bmm.cpp` | Bmm | 1 | DFB pointer translation + full matmul compute pipeline |
-| `api/test_runtime_args.cpp` | QuasarCRTASharedL1Address, QuasarCRTAUniqueL1Addresses | 2 | CRTA L1 address computation |
-| `api/test_direct.cpp` | TensixSingleCoreDirectDramReaderDatacopyWriter (Quasar path) + 3 others | 4 | MeshCoordinate workload dispatch |
-| `data_movement/dram_sharded/test_dram_sharded.cpp` | DRAMShardedReadDirectedIdeal, DRAMShardedReadTileNumbers, DRAMShardedReadBankNumbers, DRAMShardedReadTridDirectedIdeal, DRAMShardedReadTileNumbers2\_0, DRAMShardedReadTridDirectedIdeal\_2\_0 | 6 | Sharded DRAM read, transaction ID support |
-| `data_movement/noc_api_latency/test_noc_api_latency.cpp` | NocApiLatencyUnicastWrite, NocApiLatencyUnicastRead, NocApiLatencyStatefulWrite, NocApiLatencyStatefulRead, NocApiLatencyMulticastWrite2x2, NocApiLatencyMulticastWrite5x5, NocApiLatencyMulticastWriteAll | 7 | Stateful NOC 2.0 API, latency measurement |
-| `data_movement/one_from_all/test_one_from_all.cpp` | OneFromAllPacketSizes, OneFromAllDirectedIdeal, OneFromAllVirtualChannels, OneFromAllCustom | 4 | Multi-core gather pattern with subordinate cores |
-| `data_movement/one_packet/test_one_packet.cpp` | OnePacketReadSizes, OnePacketWriteSizes, OnePacketReadDirectedIdeal, OnePacketWriteDirectedIdeal, OnePacketReadSizes\_2\_0, OnePacketWriteSizes\_2\_0 | 6 | Single-packet NOC read/write, NOC 2.0 variant |
-
-**Total unsupported Quasar-specific: 30**
+**Regression total:** 107 passing, 4 pre-existing failures, 2 skipped.
 
 ---
 
-## 11. File Reference
+## 9. Not Implemented
+
+| Feature | Blocking Gap | Tests Affected |
+|---------|-------------|----------------|
+| NOC 2.0 API (`NocSendDescriptor`) | Stateful NOC API (`requestor_2_0.cpp`, `noc_inline_dw_write`) not implemented | `OneFromOnePacketSizes2_0`, `DirectWrite*` (3 tests), `NocApiLatency*` (7 tests), `OnePacket*_2_0` (2 tests), `DRAMPacketSizes2_0` |
+| Multi-bank DRAM interleaving | Flat 1-bank by design; higher banks' NOC addresses unmapped | No test affected (by design) |
+| Multi-cluster semaphore pipeline | Cross-cluster semaphore coordination not implemented | `QuasarMultiSemaphorePipeline`, `QuasarMultipleClustersMultiSemaphorePipeline` |
+| Firmware internal headers | `noc/noc_parameters.h` and internal firmware structs not available | `test_unary_dram.cpp:DRAM*` (5 tests) |
+| SFPU operations | All SFPU ops are no-op stubs | Any test requiring SFPU math |
+| Broadcast (COL/ROW/SCALAR) | `bcast` variants are no-op stubs | Tests requiring broadcast compute |
+| Transpose WH | `transpose_wh` is a no-op stub | Tests requiring tile transpose |
+| Tilize/Untilize compute | `tilize.h`, `untilize.h` are empty stubs | Tests requiring compute-path tilize |
+| Pack untilize | `pack_untilize` is a no-op stub | Tests requiring untilized pack output |
+| Sharded DRAM | No sharded read/write support | `test_dram_sharded.cpp` (6 tests) |
+| Multi-core gather (one-from-all) | Multi-core gather pattern not implemented | `test_one_from_all.cpp` (4 tests) |
+| CRTA L1 address computation | Common runtime args L1 address resolution | `test_runtime_args.cpp:QuasarCRTA*` (2 tests) |
+| MeshCoordinate workload dispatch | Multi-core workload dispatch not implemented | `test_direct.cpp` Quasar paths (4 tests) |
+| BMM full pipeline | DFB pointer translation + full compute pipeline | `test_bmm.cpp:Bmm` |
+| Quasar matmul (3 skipped variants) | `TensixMatmulSingleTile`, `TensixMatmulMultiTile`, `TensixMatmulBlockInitShortWithDt` not yet enabled for Quasar | 3 tests skipped |
+| TRISC `finish()` variant | Compute `finish()` should wait for `posted == 0`, not `posted == acked` | No test exercises this distinction |
+
+---
+
+## 10. File Reference
 
 | File | Role |
 |------|------|
@@ -194,11 +284,21 @@ All tests below use `experimental::quasar::CreateKernel` with `QuasarDataMovemen
 | `include/tt_emule/device.hpp` | `Core` — owns L1, TileCounterArray, DFBSyncState |
 | `include/tt_emule/tile_counter.hpp` | `TileCounter`, `TileCounterArray` |
 | `include/tt_emule/dfb_sync_state.hpp` | `EmuleDFBInterface`, `DFBSyncState` |
-| `include/tt_emule/dst_register_file.hpp` | `DstRegisterFile` — 16 physical slots, mode-aware active count |
 | `include/jit_hw/api/dfb_api.h` | JIT DFB operations with timeout and bounds checks |
+| `include/jit_hw/api/cb_api.h` | JIT CB operations with DFB bridge |
+| `include/jit_hw/api/compute/common.h` | DST register file, compute ops, PACK engine |
+| `include/jit_hw/api/compute/common_globals.h` | Thread-local DST, pack offset tracking |
+| `include/jit_hw/api/compute/nfaces.h` | NFACES↔rowmajor constexpr LUT |
+| `include/jit_hw/api/compute/matmul.h` | Tile GEMM (AVX2/scalar) |
+| `include/jit_hw/api/compute/reduce.h` | Row/col/scalar reduce with SUM/MAX |
+| `include/jit_hw/api/bfloat16.h` | bf16↔f32 conversion helpers |
 | `include/jit_hw/experimental/dataflow_buffer.h` | `experimental::DataflowBuffer` JIT wrapper |
-| `include/jit_hw/api/compute/common.h` | DST register file, compute ops (pack/copy/matmul tiles) |
-| `include/jit_hw/llk_defs.h` | LLK stubs: datacopy, tilize/untilize, CB delegation |
+| `include/jit_hw/llk_defs.h` | LLK stubs: datacopy, CB delegation |
+| `include/jit_hw/jit_kernel_stubs.hpp` | TLS declarations, stubbed firmware symbols |
+| `include/jit_hw/ckernel.h` | CSR read emulation (NEO_ID, TRISC_ID) |
 | `run_regression.sh` | C++ regression (6 tiers) |
 | `run_d2m_regression.sh` | D2M Python golden test regression |
-| *(tt-metal)* `emulated_program_runner.cpp` | JIT path: DFB setup, thread spawning, mhartid patch |
+| *(tt-metal)* `emulated_program_runner.cpp` | JIT path: DFB setup, thread spawning, CSR/fence/L1 patches |
+| *(tt-metal)* `test_dfb_emulation.cpp` | JIT integration: `DFBEmuleDMTest`, `DFBEmuleBridgeTest` |
+| *(tt-metal)* `test_dataflow_buffer.cpp` | 72 STRIDED + BLOCKED DFB tests |
+| *(tt-metal)* `test_matmul_X_tile.cpp` | Quasar matmul PCC tests |

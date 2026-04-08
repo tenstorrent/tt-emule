@@ -204,7 +204,7 @@ The `posted` and `acked` counters are `std::atomic<uint32_t>` to allow lockless 
 
 ## 4. Access Patterns
 
-### 4.1 STRIDED (Phase 1, default)
+### 4.1 STRIDED
 
 Entries are interleaved across consumers. With P producers and C consumers:
 - Producer i writes entries `i, i+P, i+2P, ...` (its stride)
@@ -219,14 +219,18 @@ In the emulation, the interleaving factor `M = max(P, C)` determines the TC assi
 
 The `stride_size` field = `M * entry_size` for all participants. Initial pointer offsets: producer p slot k starts at `base + (p + k*P) * entry_size`; consumer c slot k starts at `base + (c + k*C) * entry_size`.
 
-### 4.2 BLOCKED (Phase 3, complete)
+**Test evidence (STRIDED):** 42 tests in `test_dataflow_buffer.cpp` cover 1P-1C through 4P-4C STRIDED topologies across DM-DM, DM→Tensix, Tensix→DM, and multi-DFB pipeline topologies. Each runs with both `ImplicitSyncFalse` and `ImplicitSyncTrue`. Example filters: `DMTest1xDFB4Sx4S`, `DMTensixTest1xDFB1Sx4S`, `TensixDMTest1xDFB4Sx2S`.
+
+### 4.2 BLOCKED
 
 All consumers see all data. The producer posts to every consumer TC simultaneously. The `broadcast_tc` flag on `EmuleDFBInterface` enables this path.
 
 In `reserve_back`: wait for `free_space >= n` on **all** TC slots (loop over `num_tcs_to_rr`).
 In `push_back`: call `inc_posted` on **all** TC slots; advance the write pointer on slot 0 only (`tc_idx` does not advance).
 
-BLOCKED consumer TC assignment uses `P*C` counter scheme: `counter_id = counter_base + p*C + c`. Consumer round-robins through `num_producers` TCs. 30 BLOCKED tests pass (DM-DM, DM→Tensix, Tensix→DM, both ImplicitSync variants).
+BLOCKED consumer TC assignment uses `P*C` counter scheme: `counter_id = counter_base + p*C + c`. Consumer round-robins through `num_producers` TCs.
+
+**Test evidence (BLOCKED):** 30 tests in `test_dataflow_buffer.cpp` cover DM-DM, DM→Tensix, and Tensix→DM topologies with both ImplicitSync variants. Example filters: `DMTest1xDFB1Sx1B`, `DMTensixTest1xDFB4Sx4B`, `TensixDMTest1xDFB4Sx2B`.
 
 ---
 
@@ -309,9 +313,9 @@ experimental::dfb::BindDataflowBufferToProducerConsumerKernels(
 
 `Bind` populates `producer_risc_mask` and `consumer_risc_mask` from the kernel handles' processor types. The emulated runner then reads these masks back via `program.impl().get_dataflow_buffer(dfb_id)->config`.
 
-**Per-thread TC assignment (Phase 2 rewrite):**
+**Per-thread TC assignment:**
 
-The runner now applies the same STRIDED TC assignment algorithm as the standalone `build_dfb_interfaces()`: `M = max(P, C)`, `stride_size = M * entry_size`, producer p owns TC slots `{p + k*P}`, consumer c owns `{c + k*C}`. Key Phase 2 fixes in the runner:
+The runner applies the same STRIDED TC assignment algorithm as the standalone `build_dfb_interfaces()`: `M = max(P, C)`, `stride_size = M * entry_size`, producer p owns TC slots `{p + k*P}`, consumer c owns `{c + k*C}`. Key implementation details:
 
 1. **NUM_DRAM_BANKS=1**: Flat DRAM emulation — always 1 bank regardless of architecture (Quasar=2, WH=6, BH=8). Multi-bank interleaving generates NOC addresses not in the core map, causing zeros.
 2. **Multi-thread spawning**: `QuasarDataMovementKernel` — one thread per DM processor via `get_dm_processors()`. `QuasarComputeKernel` — one thread per compute engine (groups of 4 TRISCs into 1 thread via `get_compute_processors()`).
@@ -427,32 +431,29 @@ The standalone path (via `DataflowBuffer` and `TileCounterArray`) uses `wait` wi
 
 ## 8. Known Limitations and Remaining Gaps
 
-### 8.1–8.3: Resolved
-
-The following gaps from Phase 1 were fixed in Phase 2:
-- **STRIDED multi-consumer slot offsets**: `build_dfb_interfaces()` now initializes each TC slot at `base + tc_index * entry_size`.
-- **Per-RISC capacity**: `capacity = num_entries / M` where `M = max(P, C)`.
-- **Implicit sync**: `read_in()`/`write_out()` implemented as 4-step wrappers. 18 ImplicitSyncTrue STRIDED tests pass.
-
-### 8.4 TRISC `finish()` variant not distinguished
+### 8.1 TRISC `finish()` variant not distinguished
 
 Hardware `finish()` has two behaviors: DM waits for `posted == acked` (drain), while TRISC waits for `posted == 0` (all slots empty from the start). The emulation implements the DM variant only.
 
-### 8.5 `BindDataflowBufferToProducerConsumerKernels` not wired in standalone path
+**TODO: No test exercises TRISC `finish()` in isolation.** See `docs/TEST_COVERAGE_TODO.md`.
+
+### 8.2 `BindDataflowBufferToProducerConsumerKernels` not wired in standalone path
 
 In the standalone path, RISC masks must be set manually in `DataflowBufferConfig`. The upstream `BindDataflowBufferToProducerConsumerKernels` host API is used correctly in the JIT/Metal path (§5.5) but is not available to tt-emule's `CreateDataflowBuffer` / `EnqueueProgram` directly.
 
-### 8.6 dfb_index bounds
+### 8.3 dfb_index bounds
 
 With `neo_id=0` (current default), the maximum number of DFBs per program is `TILE_COUNTERS_PER_NEO / MAX_TC_SLOTS_PER_DFB = 8`. Counter IDs are spaced by `MAX_TC_SLOTS_PER_DFB` (4) per DFB to prevent cross-DFB collision. A `std::out_of_range` exception is thrown if `dfb_index >= 8`. Multi-NEO spreading (distributing DFBs across neo_ids) would be needed for >8 DFBs.
 
-### 8.7 L1 architecture
+### 8.4 L1 architecture
 
 The 4 MB L1 is shared between all 12 cores in a Neo (8 DM processors + 4 compute engines). The emulation models this correctly with a single `Core` object per Neo that all threads access. This is documented here for architectural clarity — the emulation's shared-memory model naturally reflects the hardware's shared L1.
 
-### 8.8 Standalone path has no timeout on blocking waits
+### 8.5 Standalone path has no timeout on blocking waits
 
 The JIT path (`dfb_api.h`) wraps all blocking waits with `wait_for` and a configurable timeout (default 120s, `TT_EMULE_DFB_TIMEOUT`). The standalone path (`DataflowBuffer` via `TileCounterArray`) uses `wait` without any timeout, so hung standalone tests block indefinitely.
+
+**TODO: No test exercises standalone path timeout behavior.** See `docs/TEST_COVERAGE_TODO.md`.
 
 ---
 
@@ -473,7 +474,7 @@ The JIT path (`dfb_api.h`) wraps all blocking waits with `wait_for` and a config
 | `include/jit_hw/experimental/dataflow_buffer.h` | `experimental::DataflowBuffer` class (JIT wrapper) |
 | `include/kernel_api/dfb_dataflow_api.hpp` | Standalone DFB free functions |
 | `tests/dfb_passthrough/` | Standalone end-to-end test: 1 DM producer + 1 DM consumer, 8×1 KB entries |
-| `tests/dfb_multi_consumer/` | Standalone 1P-4C STRIDED test (Phase 2) |
+| `tests/dfb_multi_consumer/` | Standalone 1P-4C STRIDED test |
 | *(tt-metal)* `tt_metal/impl/emulation/emulated_program_runner.cpp` | JIT path: DFB L1 alloc, shared-backing for bridges, per-thread interface construction, `__processor_id` TLS, `mhartid` CSR patching |
 | *(tt-metal)* `tests/tt_metal/tt_metal/api/dataflow_buffer/test_dfb_emulation.cpp` | JIT integration tests: `DFBEmuleDMTest` and `DFBEmuleBridgeTest` |
 | *(tt-metal)* `tests/tt_metal/tt_metal/api/dataflow_buffer/test_dataflow_buffer.cpp` | 72 STRIDED + BLOCKED DFB tests (all P/C combinations, both ImplicitSync modes) |
