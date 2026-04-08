@@ -65,7 +65,10 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
         std::abort();
     }
     // Lock-free fast path (safe for SPSC — only consumer decrements occupied)
-    if ((cb.num_pages - cb.occupied.load(std::memory_order_acquire)) >= n) return;
+    if ((cb.num_pages - cb.occupied.load(std::memory_order_acquire)) >= n) {
+        __emule_pack_offset[cb_id] = 0;
+        return;
+    }
     std::unique_lock<std::mutex> lk(cb.mu);
     if (!cb.space_cv.wait_for(lk, std::chrono::seconds(__emule_cb_timeout_sec()),
             [&]{ return (cb.num_pages - cb.occupied.load(std::memory_order_relaxed)) >= n; })) {
@@ -78,6 +81,8 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
                 my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
         std::abort();
     }
+    // Reset PACK engine auto-advance offset for this new batch.
+    __emule_pack_offset[cb_id] = 0;
 }
 
 inline void cb_push_back(uint32_t cb_id, uint32_t n) {

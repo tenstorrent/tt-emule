@@ -4,6 +4,7 @@
 
 #include "jit_hw/emule_dfb_state.h"
 #include "jit_hw/emule_cb_state.h"
+#include "jit_hw/api/compute/common_globals.h"
 #include "tt_emule/tile_counter.hpp"
 #include <chrono>
 #include <cstdint>
@@ -62,6 +63,8 @@ inline void dfb_reserve_back(uint32_t dfb_id, uint16_t n) {
             std::abort();
         }
     }
+    // Reset PACK engine auto-advance offset for this new batch.
+    __emule_pack_offset[dfb_id] = 0;
 }
 
 inline void dfb_push_back(uint32_t dfb_id, uint16_t n) {
