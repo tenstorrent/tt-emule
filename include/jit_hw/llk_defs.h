@@ -2,6 +2,7 @@
 // LLK definitions stub for emulated mode
 // Core enums come from api/compute/common.h; this adds LLK-level stubs.
 #include "api/compute/common.h"
+#include "jit_hw/api/compute/nfaces.h"
 #include "internal/firmware_common.h"
 
 // Data copy type constant (used as template parameter)
@@ -192,18 +193,24 @@ inline void llk_math_eltwise_unary_datacopy(uint32_t dst_idx) {
 
 // ---- Pack helpers ----
 
-// Tilize pack: write DST tile as individual page at pack_offset
+// Tilize pack: PACK row-major DST → nfaces CB at pack_offset
 inline void __llk_pack_tiled(uint32_t tile_idx, uint32_t ocb) {
     uint8_t* buf = __emule_compute::cb_write_ptr_at(ocb, __llk_pack_offset);
     if (__emule_compute::cb_is_32bit_format(ocb)) {
-        uint32_t sz = __emule_compute::cb_page_size(ocb);
-        if (sz > __EMULE_DST_BYTES) sz = __EMULE_DST_BYTES;
-        std::memcpy(buf, __emule_dst[tile_idx], sz);
+        uint32_t n = __emule_compute::cb_page_size(ocb) / sizeof(uint32_t);
+        if (n > __EMULE_TILE_ELEMS) n = __EMULE_TILE_ELEMS;
+        uint32_t* out = reinterpret_cast<uint32_t*>(buf);
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
+            std::memcpy(&out[ni], &__emule_dst[tile_idx][i], sizeof(uint32_t));
+        }
     } else {
         uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
         uint32_t n = __emule_compute::cb_tile_elems(ocb);
-        for (uint32_t i = 0; i < n; i++)
-            bf[i] = __emule_bf16::from_f32(__emule_dst[tile_idx][i]);
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
+            bf[ni] = __emule_bf16::from_f32(__emule_dst[tile_idx][i]);
+        }
     }
 }
 

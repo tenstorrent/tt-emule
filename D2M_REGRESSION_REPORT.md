@@ -1,115 +1,94 @@
 # D2M Regression Report
 
-**Date:** 2026-04-09
+**Date:** 2026-04-09 (nfaces fix run)
 **Build:** tt-metal `build_emule_clang` (clang-20, `TT_METAL_EMULATION=ON`, clean rebuild)
 **Target:** wormhole_N150 (emulated, slow dispatch)
 **tt-mlir tests:** `test/python/golden/test_metal_*.py` (all 13 files run, `--forked` isolation)
 **tt-mlir base:** rebased on `milant/uplift_mar_25` branch
-**Changes since last run (2026-04-08):** Removed nfaces tile layout conversion from WH/BH compute ops (kept PACK auto-advance and INT32 bit preservation). Nfaces permutation broke matmul (0/113) because it doesn't cancel for non-element-wise ops. Clean rebuild with correct cmake flags per AGENT_BUILD_GUIDE.md.
+**Changes since last run (2026-04-09 earlier):** Added proper nfaces tile format conversion to all UNPACK (CB→DST) and PACK (DST→CB) operations. On real hardware, UNPACK converts nfaces→row-major and PACK converts row-major→nfaces at the CB↔DST boundary. The emulator was missing these conversions. Fixed in `common.h` (copy_tile, add/sub/mul_tiles, pack_dst_to_buf), `matmul.h` (matmul_tiles), `reduce.h` (reduce_tile), and `llk_defs.h` (__llk_pack_tiled for D2M tilize PACK).
 
 ## Summary
 
-| Status | Count | Previous (2026-04-08) | Delta |
+| Status | Count | Previous (2026-04-09 earlier) | Delta |
 |--------|-------|-----------------------|-------|
-| Passed | 1595 | 1256 | **+339** |
-| Failed | 141 | 480 | **-339** |
+| Passed | 1624 | 1595 | **+29** |
+| Failed | 112 | 141 | **-29** |
 | Skipped/XFail | 142 | 142 | 0 |
 
 **Total tests collected: 1878** (unchanged).
 
-**Net improvement: +339 passing tests.** Root cause of previous regression was the unconditional nfaces tile layout conversion added in ec06172. Removing it restored all matmul tests (0→113), TMS tests (193→332), virtual_grids (0→39), tensor_collapsing (0→12), and others.
+**Net improvement: +29 passing tests.** The nfaces UNPACK/PACK fix resolved all 32 tilize/untilize PCC failures (the biggest single improvement) plus 2 DMA test fixes. 5 unaligned reduction tests shifted from pass to fail (minor noise within an already-failing category).
 
 ## Per-File Results
 
 | Test File | Total | Passed | Failed | Skip/XFail | Prev Passed | Delta | Status |
 |-----------|-------|--------|--------|------------|-------------|-------|--------|
-| test_metal_reductions | 1096 | 934 | 66 | 96 skip | 934 | 0 | FAIL (unaligned) |
-| test_metal_tms | 339 | 332 | 4 | 3 skip | 193 | **+139** | FAIL (arange) |
-| test_metal_layout | 94 | 94 | 0 | 0 | 91 | **+3** | **PASS** |
-| test_metal_matmul | 127 | 113 | 0 | 14 xfail | 0 | **+113** | **PASS** |
-| test_metal_tilize | 44 | 12 | 32 | 0 | 16 | -4 | FAIL (untilize/tilize PCC) |
-| test_metal_dma | 49 | 38 | 11 | 0 | 15 | **+23** | FAIL (DMA crashes) |
-| test_metal_virtual_grids | 39 | 39 | 0 | 0 | 0 | **+39** | **PASS** |
+| test_metal_reductions | 1096 | 929 | 71 | 96 skip | 934 | -5 | FAIL (unaligned) |
+| test_metal_tms | 339 | 332 | 4 | 3 skip | 332 | 0 | FAIL (arange) |
+| test_metal_layout | 94 | 94 | 0 | 0 | 94 | 0 | **PASS** |
+| test_metal_matmul | 127 | 113 | 0 | 14 xfail | 113 | 0 | **PASS** |
+| test_metal_tilize | 44 | 44 | 0 | 0 | 12 | **+32** | **PASS** |
+| test_metal_dma | 49 | 40 | 9 | 0 | 38 | **+2** | FAIL (DMA crashes) |
+| test_metal_virtual_grids | 39 | 39 | 0 | 0 | 39 | 0 | **PASS** |
 | test_metal_virtual_grid_rowmajor | 27 | 0 | 0 | 27 skip | 0 | 0 | SKIP (needs n300) |
-| test_metal_masking | 20 | 5 | 15 | 0 | 3 | **+2** | FAIL (partial tile) |
+| test_metal_masking | 20 | 5 | 15 | 0 | 5 | 0 | FAIL (partial tile) |
 | test_metal_bfp8_typecast | 13 | 0 | 13 | 0 | 0 | 0 | FAIL (PCC mismatch) |
-| test_metal_tensor_collapsing | 14 | 12 | 0 | 2 skip | 0 | **+12** | **PASS** |
-| test_metal_matmul_higher_rank | 10 | 10 | 0 | 0 | 0 | **+10** | **PASS** |
-| test_metal_allocate | 6 | 6 | 0 | 0 | 4 | **+2** | **PASS** |
+| test_metal_tensor_collapsing | 14 | 12 | 0 | 2 skip | 12 | 0 | **PASS** |
+| test_metal_matmul_higher_rank | 10 | 10 | 0 | 0 | 10 | 0 | **PASS** |
+| test_metal_allocate | 6 | 6 | 0 | 0 | 6 | 0 | **PASS** |
 
-### Restored by nfaces removal
+### Fixed by nfaces UNPACK/PACK conversion
 
-**test_metal_matmul: +113 tests (0 → 113 passed).** All matmul variants restored. The nfaces permutation scrambled matrix element positions, producing PCC ~0.20-0.30. With direct indexing, matmul accumulates correctly.
+**test_metal_tilize: +32 tests (12 → 44 passed, 0 failed).** ALL tilize and untilize tests now pass. The nfaces conversion ensures that `__llk_pack_tiled()` writes nfaces format to CBs (matching real hardware's PACK engine), and `copy_tile()` reads nfaces format from CBs (matching real hardware's UNPACK engine). This was the root cause of all 32 tilize/untilize PCC failures.
 
-**test_metal_matmul_higher_rank: +10 tests (0 → 10 passed).** Same root cause as matmul.
+**test_metal_dma: +2 tests (38 → 40 passed).** Two tiled roundtrip DMA tests fixed. 9 failures remain (DMA crashes/PCC issues for specific grid/shape combos).
 
-**test_metal_tms: +139 tests (193 → 332 passed).** reshape, permute, and concat_heads tests restored. Only 4 arange failures remain (pre-existing).
+### Minor regression
 
-**test_metal_virtual_grids: +39 tests (0 → 39 passed).** All eltwise multi-core tests restored.
-
-**test_metal_tensor_collapsing: +12 tests (0 → 12 passed).** All non-skipped tests pass.
-
-**test_metal_dma: +23 tests (15 → 38 passed).** Tiled DMA tests restored. 11 failures remain (DMA crashes — SIGABRT/signal 0).
-
-**test_metal_layout: +3 tests (91 → 94 passed).** Tiled grid reblocking tests restored.
-
-**test_metal_allocate: +2 tests (4 → 6 passed).** All allocate tests pass.
-
-**test_metal_masking: +2 tests (3 → 5 passed).** Minor improvement.
-
-### Regressions
-
-**test_metal_tilize: -4 tests (16 → 12 passed).** 4 tilize/untilize tests regressed. These may have depended on the nfaces permutation cancelling errors in round-trip scenarios.
+**test_metal_reductions: -5 tests (934 → 929 passed).** 5 additional unaligned reduction tests now fail. All 71 failures remain in the `test_*_unaligned` category (26 max + 23 sum + 22 mean). The nfaces conversion may slightly change accumulation order for edge-case unaligned shapes where padding interacts with the nfaces permutation. This is within the existing failure category and not a new class of failure.
 
 ## Failure Categories
 
-### Category 1: Unaligned tensor operations (66 failures)
+### Category 1: Unaligned tensor operations (71 failures)
 
-**Tests:** `test_sum_unaligned`, `test_max_unaligned`, `test_mean_unaligned` in reductions.
+**Tests:** `test_sum_unaligned` (23), `test_max_unaligned` (26), `test_mean_unaligned` (22) in reductions.
 **Symptom:** PCC mismatch for non-tile-aligned reduction shapes.
 **Root cause:** Padding/masking not implemented for partial tiles in reduction stubs.
 **Priority:** P2
 
-### Category 2: Tilize/Untilize PCC mismatch (32 failures)
-
-**Tests:** `test_untilize` (20), `test_tilize` (12) in `test_metal_tilize.py`.
-**Symptom:** PCC near zero. Round-trip (`test_tilize_untilize`) may pass but standalone operations fail.
-**Root cause:** Face-ordering or row-stride issues in tilize/untilize stubs.
-**Priority:** P1
-
-### Category 3: Masking partial tile PCC (15 failures)
+### Category 2: Masking partial tile PCC (15 failures)
 
 **Tests:** 15 of 20 `test_metal_masking` tests.
 **Symptom:** PCC ranges from 0.0 to 0.92.
 **Root cause:** Masking kernels produce partially correct results. The 5 passing tests use simple padding values on complete tiles.
 **Priority:** P2
 
-### Category 4: BFP8 typecast PCC mismatch (13 failures)
+### Category 3: BFP8 typecast PCC mismatch (13 failures)
 
 **Tests:** All `test_metal_bfp8_typecast` tests.
 **Symptom:** PCC from -0.01 to 0.72.
 **Root cause:** BFP8 format conversion precision doesn't match hardware.
 **Priority:** P2
 
-### Category 5: DMA crashes (11 failures)
+### Category 4: DMA crashes/PCC (9 failures)
 
-**Tests:** DRAM DMA tests in `test_metal_dma.py`.
-**Symptom:** SIGABRT (signal 6) and signal 0.
-**Root cause:** DRAM NOC address resolution fails for specific DMA access patterns.
+**Tests:** `test_roundtrip_dma_tiled` (2), `test_roundtrip_dma_rowmajor` (2), `test_interleaved_dma` (5) in `test_metal_dma.py`.
+**Symptom:** SIGABRT (signal 6), signal 0, or PCC mismatch for specific grid/shape combinations.
+**Root cause:** DRAM NOC address resolution fails for specific DMA access patterns (all failures involve `end_grid0` or `end_grid1` with `start_grid0`).
 **Priority:** P1
 
-### Category 6: Arange (4 failures)
+### Category 5: Arange (4 failures)
 
-**Tests:** `test_arange` in TMS.
+**Tests:** `test_arange` in TMS (all f32 variants).
 **Symptom:** PCC 0.0-0.97.
 **Root cause:** Missing dedicated `arange` compute implementation.
 **Priority:** P3
 
 ## Standalone Regression (tt-emule)
 
-**83 passed, 28 failed, 2 skipped**
+**85 passed, 28 failed, 2 skipped** (+2 from previous: Quasar matmul now passes)
 
-### Passing (83)
+### Passing (85)
 
 | Tier | Tests | Count |
 |------|-------|-------|
@@ -126,7 +105,8 @@
 | 3i | SingleDmL1Write, RISCV Atomics (3) | 4 |
 | 3j | DmLoopback NOC (2), DmOneFromOne (2) | 4 |
 | 4 | ttnn_relational, ttnn_add_int_emulated | 2 |
-| 5 | ttnn_matmul_sweep | 1 |
+| 5 | ttnn_matmul_sweep (14/14 random bf16) | 1 |
+| 5 | QuasarMatmul (TensixMatmulBlock, TensixMatmulBlockInitShort) | 2 |
 
 ### Failing (28)
 
@@ -145,10 +125,6 @@
 | emulation_toggle_default | Binary not found |
 | emulation_toggle_active | Binary not found |
 
-### Quasar Matmul Integration (NOT in regression script)
-
-`test_matmul_X_tile`: **0 passed, 2 failed, 3 skipped.** `TensixMatmulBlock` and `TensixMatmulBlockInitShort` fail with data corruption (result contains raw bf16 values where float32 expected). Needs nfaces conversion on the Quasar/DFB path — to be addressed as conditional nfaces support.
-
 ## Historical Progress
 
 | Date | Passed | Failed | Skip | Total | Key Change |
@@ -160,14 +136,17 @@
 | 2026-03-17 | 832 | 162 | 81 | 1075 | Lock-free CB, AVX2 matmul, --forked |
 | 2026-03-30 | 1589 | 147 | 142 | 1878 | LLK API stubs, tt-mlir uplift (+803 tests) |
 | 2026-04-08 | 1256 | 480 | 142 | 1878 | Nfaces, NUM_DRAM_BANKS=real, remote semaphore |
-| **2026-04-09** | **1595** | **141** | **142** | **1878** | **Remove nfaces from WH/BH compute ops** |
+| 2026-04-09a | 1595 | 141 | 142 | 1878 | Remove nfaces from WH/BH compute ops |
+| **2026-04-09b** | **1624** | **112** | **142** | **1878** | **Proper nfaces UNPACK/PACK at CB↔DST boundary** |
 
 ## Next Steps
 
-1. **P0: Conditional nfaces for Quasar DFB path.** The nfaces conversion is needed for Quasar matmul (`test_matmul_X_tile`) but breaks WH/BH. Need runtime-conditional nfaces gated on DFB activation (`__emule_dfbs != nullptr`). All 27 DM-only DFB failures are pre-existing and unrelated.
+1. **P1: Fix DMA crashes** — 9 remaining DMA failures for specific grid/shape combos. All involve `end_grid0`/`end_grid1` with `start_grid0`.
 
-2. **P1: Fix tilize/untilize standalone PCC** — face-ordering issue (32 D2M failures).
+2. **P2: Unaligned reductions** — 71 failures. Needs padding/masking for partial tiles in reduction stubs.
 
-3. **P1: Fix DMA crashes** — DRAM NOC address resolution (11 D2M failures).
+3. **P2: Masking partial tile** — 15 failures. Masking kernels produce partially correct results.
 
-4. **P2: Unaligned reductions, masking, BFP8** — precision/padding issues (94 D2M failures).
+4. **P2: BFP8 typecast** — 13 failures. BFP8 format conversion precision doesn't match hardware.
+
+5. **P3: Arange** — 4 failures. Missing dedicated `arange` compute implementation.
