@@ -1,4 +1,4 @@
-# Implementation Report v6: Software-Emulated Device (tt-emule) Integration into tt-metal
+# Implementation Report v7: Software-Emulated Device (tt-emule) Integration into tt-metal
 
 ## Table of Contents
 
@@ -241,7 +241,7 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 
 **Standalone tests** (5/5 pass): dfb_passthrough, dfb_multi_consumer, eltwise_add, matmul, tilize
 
-**tt-metal emulated regression** (107 passing, 4 pre-existing failures, 2 skipped):
+**tt-metal emulated regression** (85 passing, 28 pre-existing failures, 2 skipped):
 
 | Tier | Tests | Count | Description | Cluster |
 |------|-------|-------|-------------|---------|
@@ -265,7 +265,7 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 
 See [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) section 8 for a feature-by-feature table with test evidence.
 
-**D2M golden test regression** (1589 pass / 147 fail / 142 skip-xfail):
+**D2M golden test regression** (1624 pass / 112 fail / 142 skip-xfail):
 
 | Test File | Total | Passed | Failed | Skip/XFail | Status |
 |-----------|-------|--------|--------|------------|--------|
@@ -274,13 +274,13 @@ See [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) section 8 for a feature-by-f
 | test_metal_matmul_higher_rank | 10 | 10 | 0 | 0 | **PASS** |
 | test_metal_allocate | 6 | 6 | 0 | 0 | **PASS** |
 | test_metal_tms | 339 | 332 | 4 | 3 skip | PASS (arange only) |
-| test_metal_reductions | 1096 | 932 | 68 | 96 skip | FAIL (unaligned) |
-| test_metal_dma | 49 | 39 | 10 | 0 | FAIL (DRAM aborts) |
-| test_metal_tilize | 44 | 12 | 32 | 0 | FAIL (untilize/tilize PCC) |
+| test_metal_reductions | 1096 | 929 | 71 | 96 skip | FAIL (unaligned) |
+| test_metal_dma | 49 | 40 | 9 | 0 | FAIL (DMA crashes) |
+| test_metal_tilize | 44 | 44 | 0 | 0 | **PASS** |
 | test_metal_tensor_collapsing | 14 | 12 | 0 | 2 skip | **PASS** |
 | test_metal_virtual_grids | 39 | 39 | 0 | 0 | **PASS** |
 | test_metal_virtual_grid_rowmajor | 27 | 0 | 0 | 27 skip | SKIP (needs n300) |
-| test_metal_masking | 20 | 0 | 20 | 0 | FAIL (runtime crashes) |
+| test_metal_masking | 20 | 5 | 15 | 0 | FAIL (partial tile) |
 | test_metal_bfp8_typecast | 13 | 0 | 13 | 0 | FAIL (PCC mismatch) |
 
 See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md) for detailed failure analysis and historical progression.
@@ -560,9 +560,9 @@ Tests in `tt_emule/` are organized in tiers and use standard tt-metal fixtures �
 
 The tier table above in Test Results reflects the full `run_regression.sh` structure (84 test invocations across 10+ tiers). Additional ttnn tests built but not in regression: `test_ttnn_add`, `test_ttnn_sub_int`, `test_ttnn_rsub_int`, `test_ttnn_matmul`.
 
-D2M golden test regression: `run_d2m_regression.sh` — runs 13 tt-mlir test files (1878 tests) against the emulated backend. 1589 pass, 147 fail, 142 skip. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
+D2M golden test regression: `run_d2m_regression.sh` — runs 13 tt-mlir test files (1878 tests) against the emulated backend. 1624 pass, 112 fail, 142 skip. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
 
-Regression scripts: `run_regression.sh` (107 passing tests) + `run_d2m_regression.sh` (13 D2M test files, 1878 tests).
+Regression scripts: `run_regression.sh` (85 passing tests) + `run_d2m_regression.sh` (13 D2M test files, 1878 tests).
 
 ### tt-metal Files Modified
 
@@ -607,7 +607,7 @@ The complete set of tt-metal modifications for emulation support:
 
 **Incrementally extensible.** New compute ops are single-file headers in `jit_hw/api/compute/`. The pattern (DST-to-DST operations with format-aware load/store) has been applied consistently across 53 compute headers.
 
-**D2M golden test coverage.** 1589 of 1878 D2M golden tests pass (85% pass rate), covering layout transforms, buffer allocation, matmul (single-core, multi-core, double-buffered, 3D/4D batched up to 2048x2048x2048), reductions (sum, max, mean), DMA (L1-to-L1 and partial DRAM), TMS (reshape, permute, concatenate_heads), virtual grids, and tensor collapsing. This provides broad regression coverage for D2M-generated kernels.
+**D2M golden test coverage.** 1624 of 1878 D2M golden tests pass (86% pass rate), covering layout transforms, buffer allocation, matmul (single-core, multi-core, double-buffered, 3D/4D batched up to 2048x2048x2048), reductions (sum, max, mean), DMA (L1-to-L1 and partial DRAM), TMS (reshape, permute, concatenate_heads), tilize/untilize, virtual grids, and tensor collapsing. This provides broad regression coverage for D2M-generated kernels.
 
 ### Cons
 
@@ -633,7 +633,7 @@ Tests that pass in emulation may fail on silicon due to timing, precision, or re
 
 **Nfaces conversion not exercised in isolation.** The UNPACK and PACK engines are tested only indirectly via compute operations (matmul, add_tiles, etc.) that happen to exercise them. No dedicated UNPACK-only or PACK-only test exists. A bug in the nfaces LUT for a specific face/element combination might not be caught if no existing compute test triggers that access pattern. See `docs/TEST_COVERAGE_TODO.md`.
 
-**D2M coverage gaps.** 2 test files fail entirely: masking (20 runtime crashes) and bfp8_typecast (13 PCC mismatches). 3 files have partial failures: reductions (68/1096 fail on unaligned shapes), tilize (32/44 fail on standalone untilize/tilize PCC), and DMA (10/49 fail on DRAM paths). The remaining 8 files pass fully. The primary gaps are unaligned tensor masking, standalone tilize/untilize data layout correctness, and DRAM DMA address resolution.
+**D2M coverage gaps.** 1 test file fails entirely: bfp8_typecast (13 PCC mismatches). 3 files have partial failures: reductions (71/1096 fail on unaligned shapes), masking (15/20 fail on partial tiles), and DMA (9/49 fail on DRAM paths). The remaining 9 files pass fully. The primary gaps are unaligned tensor reductions, partial tile masking, BFP8 format precision, and DRAM DMA address resolution.
 
 ### Maintainability
 
@@ -713,6 +713,22 @@ Rebasing onto new tt-metal versions primarily requires:
 | Matmul PCC | Not tracked | Passing (`TensixMatmulBlock`, `TensixMatmulBlockInitShort`) |
 | Reference docs | None | `docs/DFB_EMULATION.md`, `docs/QUASAR_EMULATION.md`, `docs/TEST_COVERAGE_TODO.md` |
 
+### Changes from v6 to v7
+
+| Aspect | v6 | v7 |
+|--------|----|----|
+| Nfaces UNPACK/PACK | Not applied to general compute ops | All UNPACK (CB→DST) and PACK (DST→CB) ops use nfaces LUT |
+| D2M golden tests | 1595 pass / 141 fail / 142 skip | **1624 pass** / 112 fail / 142 skip |
+| D2M pass rate | 85% | **86%** |
+| D2M fully-passing files | 8 of 13 | **9 of 13** (tilize now passes) |
+| Tilize/Untilize D2M | 12/44 pass (PCC mismatch) | **44/44 pass** — nfaces in `__llk_pack_tiled` and `copy_tile` fixed all 32 failures |
+| DMA D2M | 38/49 pass | **40/49 pass** (+2 tiled roundtrip fixes) |
+| Standalone regression | 83 pass / 28 fail / 2 skip | **85 pass** / 28 fail / 2 skip |
+| Quasar matmul PCC | 0/2 pass (data corruption) | **2/2 pass** — nfaces conversion resolved PCC failures |
+| Files modified | — | `common.h`, `matmul.h`, `reduce.h`, `llk_defs.h` |
+
+**Key insight:** On real hardware, UNPACK converts nfaces→row-major when loading from L1/CB into DST, and PACK converts row-major→nfaces when writing back. The emulator was missing these conversions. Element-wise ops (add/sub/mul) previously worked "by accident" because nfaces permutation cancels for identical per-element operations. Non-element-wise ops (matmul, tilize/untilize) failed because element positions were scrambled. The fix applies the nfaces LUT to all general UNPACK and PACK operations, plus the D2M tilize PACK path (`__llk_pack_tiled`).
+
 ---
 
-*Report updated 2026-04-08. Covers tt-emule on branch `armin` / tt-mlir rebased on `milant/uplift_mar_25`. Quasar support (DFB, compute engine, 12-thread model) documented.*
+*Report updated 2026-04-09. Covers tt-emule on branch `armin` / tt-mlir rebased on `milant/uplift_mar_25`. Nfaces UNPACK/PACK conversion added to all compute ops.*
