@@ -4,7 +4,6 @@
 // Uses AVX2/FMA intrinsics when available for ~4-8x speedup over scalar.
 
 #include "jit_hw/api/compute/common.h"
-#include "jit_hw/api/compute/nfaces.h"
 
 #if defined(__AVX2__) && defined(__FMA__)
 #include <immintrin.h>
@@ -30,30 +29,29 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
                        uint32_t in0_tile, uint32_t in1_tile, uint32_t idst) {
     __emule_dst_check(idst, "matmul_tiles");
     // Standard 32x32 × 32x32 matrix multiply, accumulating into DST[idst].
-    // UNPACK: pre-convert both A and B from nfaces (L1 layout) to row-major (SRC layout).
+    // Layout: row-major, 32 rows × 32 cols = 1024 elements per tile.
     constexpr uint32_t DIM = 32;
     float a_rm[DIM * DIM];
     float b_rm[DIM * DIM];
     if (__emule_compute::cb_is_32bit_format(in0_cb)) {
-        // Float32 path: UNPACK nfaces→rowmajor for both tiles.
+        // Float32 path: read tiles directly (no nfaces conversion).
         const float* a_ptr = reinterpret_cast<const float*>(
             __emule_compute::cb_read_ptr_at(in0_cb, in0_tile));
         const float* b_ptr = reinterpret_cast<const float*>(
             __emule_compute::cb_read_ptr_at(in1_cb, in1_tile));
         for (uint32_t i = 0; i < DIM * DIM; i++) {
-            a_rm[i] = a_ptr[__emule_nfaces::rowmajor_to_nfaces[i]];
-            b_rm[i] = b_ptr[__emule_nfaces::rowmajor_to_nfaces[i]];
+            a_rm[i] = a_ptr[i];
+            b_rm[i] = b_ptr[i];
         }
     } else {
-        // bfloat16 path: UNPACK nfaces→rowmajor + bf16→f32 for both tiles.
+        // bfloat16 path: bf16→f32 conversion (no nfaces conversion).
         const uint16_t* a_ptr = reinterpret_cast<const uint16_t*>(
             __emule_compute::cb_read_ptr_at(in0_cb, in0_tile));
         const uint16_t* b_ptr = reinterpret_cast<const uint16_t*>(
             __emule_compute::cb_read_ptr_at(in1_cb, in1_tile));
         for (uint32_t i = 0; i < DIM * DIM; i++) {
-            uint32_t nf = __emule_nfaces::rowmajor_to_nfaces[i];
-            a_rm[i] = __emule_bf16::to_f32(a_ptr[nf]);
-            b_rm[i] = __emule_bf16::to_f32(b_ptr[nf]);
+            a_rm[i] = __emule_bf16::to_f32(a_ptr[i]);
+            b_rm[i] = __emule_bf16::to_f32(b_ptr[i]);
         }
     }
     // MATH: row-major matmul accumulating into DST.
