@@ -10,7 +10,6 @@
 #include "jit_hw/jit_kernel_stubs.hpp"
 #include "jit_hw/api/cb_api.h"
 #include "jit_hw/api/compute/common_globals.h"
-#include "jit_hw/api/compute/nfaces.h"
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
@@ -157,35 +156,31 @@ inline bool cb_is_32bit_format(uint32_t cb_id) {
 // pack_dst_to_buf: format-aware pack with L1 accumulation support.
 // When __emule_l1_acc_enabled, adds DST to existing CB contents instead of overwriting.
 inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
-    // PACK engine: convert rowmajor DST → nfaces L1 layout.
     if (cb_is_32bit_format(ocb)) {
         uint32_t n = cb_page_size(ocb) / sizeof(uint32_t);
         if (n > __EMULE_TILE_ELEMS) n = __EMULE_TILE_ELEMS;
         if (__emule_l1_acc_enabled) {
-            // L1 accumulation: float addition (only used for bfloat16/float32 matmul partials).
             float* out = reinterpret_cast<float*>(buf);
             for (uint32_t i = 0; i < n; i++)
-                out[__emule_nfaces::rowmajor_to_nfaces[i]] += __emule_dst[dst_slot][i];
+                out[i] += __emule_dst[dst_slot][i];
         } else {
             // Bit-exact copy via memcpy — preserves INT32 bit patterns that are
             // denormalized floats (would be flushed to zero by float assignment
             // when x86 DAZ/FTZ is set).
             uint32_t* out = reinterpret_cast<uint32_t*>(buf);
             for (uint32_t i = 0; i < n; i++)
-                std::memcpy(&out[__emule_nfaces::rowmajor_to_nfaces[i]], &__emule_dst[dst_slot][i], sizeof(uint32_t));
+                std::memcpy(&out[i], &__emule_dst[dst_slot][i], sizeof(uint32_t));
         }
     } else {
         uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
         uint32_t n = cb_tile_elems(ocb);
         if (__emule_l1_acc_enabled) {
-            for (uint32_t i = 0; i < n; i++) {
-                uint32_t nf = __emule_nfaces::rowmajor_to_nfaces[i];
-                bf[nf] = __emule_bf16::from_f32(
-                    __emule_bf16::to_f32(bf[nf]) + __emule_dst[dst_slot][i]);
-            }
+            for (uint32_t i = 0; i < n; i++)
+                bf[i] = __emule_bf16::from_f32(
+                    __emule_bf16::to_f32(bf[i]) + __emule_dst[dst_slot][i]);
         } else {
             for (uint32_t i = 0; i < n; i++)
-                bf[__emule_nfaces::rowmajor_to_nfaces[i]] = __emule_bf16::from_f32(__emule_dst[dst_slot][i]);
+                bf[i] = __emule_bf16::from_f32(__emule_dst[dst_slot][i]);
         }
     }
 }
@@ -212,18 +207,14 @@ ALWI void add_tiles(uint32_t icb0, uint32_t icb1,
         const float* buf0 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
         const float* buf1 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
         uint32_t n = __emule_compute::cb_page_size(icb0) / sizeof(float);
-        for (uint32_t i = 0; i < n; i++) {
-            uint32_t nf = __emule_nfaces::rowmajor_to_nfaces[i];
-            __emule_dst[idst][i] = buf0[nf] + buf1[nf];
-        }
+        for (uint32_t i = 0; i < n; i++)
+            __emule_dst[idst][i] = buf0[i] + buf1[i];
     } else {
         uint16_t* buf0 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
         uint16_t* buf1 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
         uint32_t n = __emule_compute::cb_tile_elems(icb0);
-        for (uint32_t i = 0; i < n; i++) {
-            uint32_t nf = __emule_nfaces::rowmajor_to_nfaces[i];
-            __emule_dst[idst][i] = __emule_bf16::to_f32(buf0[nf]) + __emule_bf16::to_f32(buf1[nf]);
-        }
+        for (uint32_t i = 0; i < n; i++)
+            __emule_dst[idst][i] = __emule_bf16::to_f32(buf0[i]) + __emule_bf16::to_f32(buf1[i]);
     }
 }
 
@@ -235,18 +226,14 @@ ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
         const float* buf0 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
         const float* buf1 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
         uint32_t n = __emule_compute::cb_page_size(icb0) / sizeof(float);
-        for (uint32_t i = 0; i < n; i++) {
-            uint32_t nf = __emule_nfaces::rowmajor_to_nfaces[i];
-            __emule_dst[idst][i] = buf0[nf] - buf1[nf];
-        }
+        for (uint32_t i = 0; i < n; i++)
+            __emule_dst[idst][i] = buf0[i] - buf1[i];
     } else {
         uint16_t* buf0 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
         uint16_t* buf1 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
         uint32_t n = __emule_compute::cb_tile_elems(icb0);
-        for (uint32_t i = 0; i < n; i++) {
-            uint32_t nf = __emule_nfaces::rowmajor_to_nfaces[i];
-            __emule_dst[idst][i] = __emule_bf16::to_f32(buf0[nf]) - __emule_bf16::to_f32(buf1[nf]);
-        }
+        for (uint32_t i = 0; i < n; i++)
+            __emule_dst[idst][i] = __emule_bf16::to_f32(buf0[i]) - __emule_bf16::to_f32(buf1[i]);
     }
 }
 
@@ -258,18 +245,14 @@ ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
         const float* buf0 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
         const float* buf1 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
         uint32_t n = __emule_compute::cb_page_size(icb0) / sizeof(float);
-        for (uint32_t i = 0; i < n; i++) {
-            uint32_t nf = __emule_nfaces::rowmajor_to_nfaces[i];
-            __emule_dst[idst][i] = buf0[nf] * buf1[nf];
-        }
+        for (uint32_t i = 0; i < n; i++)
+            __emule_dst[idst][i] = buf0[i] * buf1[i];
     } else {
         uint16_t* buf0 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
         uint16_t* buf1 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
         uint32_t n = __emule_compute::cb_tile_elems(icb0);
-        for (uint32_t i = 0; i < n; i++) {
-            uint32_t nf = __emule_nfaces::rowmajor_to_nfaces[i];
-            __emule_dst[idst][i] = __emule_bf16::to_f32(buf0[nf]) * __emule_bf16::to_f32(buf1[nf]);
-        }
+        for (uint32_t i = 0; i < n; i++)
+            __emule_dst[idst][i] = __emule_bf16::to_f32(buf0[i]) * __emule_bf16::to_f32(buf1[i]);
     }
 }
 
@@ -310,20 +293,18 @@ ALWI void copy_tile(uint32_t icb, uint32_t itile, uint32_t idst) {
     __emule_dst_check(idst, "copy_tile");
     uint8_t* buf = __emule_compute::cb_read_ptr_at(icb, itile);
     if (__emule_compute::cb_is_32bit_format(icb)) {
-        // 32-bit format: UNPACK nfaces→rowmajor into DST.
+        // 32-bit format: raw copy into DST.
         // Use memcpy to preserve INT32 bit patterns (small positive ints are
         // denormalized floats that x86 DAZ/FTZ would flush to zero).
-        const uint32_t* uptr = reinterpret_cast<const uint32_t*>(buf);
         uint32_t n = __emule_compute::cb_page_size(icb) / sizeof(uint32_t);
         if (n > __EMULE_TILE_ELEMS) n = __EMULE_TILE_ELEMS;
-        for (uint32_t i = 0; i < n; i++)
-            std::memcpy(&__emule_dst[idst][i], &uptr[__emule_nfaces::rowmajor_to_nfaces[i]], sizeof(uint32_t));
+        std::memcpy(__emule_dst[idst], buf, n * sizeof(uint32_t));
     } else {
-        // bfloat16: UNPACK nfaces→rowmajor + bf16→f32
+        // bfloat16: convert bf16 → float32
         uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
         uint32_t n = __emule_compute::cb_tile_elems(icb);
         for (uint32_t i = 0; i < n; i++)
-            __emule_dst[idst][i] = __emule_bf16::to_f32(bf[__emule_nfaces::rowmajor_to_nfaces[i]]);
+            __emule_dst[idst][i] = __emule_bf16::to_f32(bf[i]);
     }
 }
 
