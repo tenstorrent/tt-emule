@@ -258,6 +258,11 @@ run_test "QuasarCreateMultipleComputeKernelsSingleCluster" "$TEST_DIR/test_quasa
 run_test "QuasarComputeKernelTLS" "$TEST_DIR/test_globals_tls" \
     --gtest_filter="*QuasarComputeKernelTLS*"
 
+run_test "QuasarMatmulBlock" "$TEST_DIR/test_matmul_X_tile" \
+    --gtest_filter="*TensixMatmulBlock"
+run_test "QuasarMatmulBlockInitShort" "$TEST_DIR/test_matmul_X_tile" \
+    --gtest_filter="*TensixMatmulBlockInitShort" --gtest_also_run_disabled_tests
+
 echo ""
 echo "== Tier 3h: Quasar Semaphore Tests =="
 
