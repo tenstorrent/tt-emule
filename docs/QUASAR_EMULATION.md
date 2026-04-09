@@ -248,7 +248,7 @@ Every feature listed here is verified by at least one passing test.
 | RISC-V fence patch | `__sync_synchronize()` | All JIT tests (compilation succeeds) |
 | `GenericMeshDeviceFixture` | Allows slow dispatch in emulated mode | All JIT-path tests |
 
-**Regression total:** 107 passing, 4 pre-existing failures, 2 skipped.
+**Regression total:** 85 passing, 28 pre-existing failures, 2 skipped.
 
 ---
 
@@ -270,7 +270,7 @@ Every feature listed here is verified by at least one passing test.
 | CRTA L1 address computation | Common runtime args L1 address resolution | `test_runtime_args.cpp:QuasarCRTA*` (2 tests) |
 | MeshCoordinate workload dispatch | Multi-core workload dispatch not implemented | `test_direct.cpp` Quasar paths (4 tests) |
 | BMM full pipeline | DFB pointer translation + full compute pipeline | `test_bmm.cpp:Bmm` |
-| Quasar matmul (3 skipped variants) | `TensixMatmulSingleTile`, `TensixMatmulMultiTile`, `TensixMatmulBlockInitShortWithDt` not yet enabled for Quasar | 3 tests skipped |
+| Quasar matmul (3 skipped variants) | `TensixMatmulSingleTile`, `TensixMatmulMultiTile`, `TensixMatmulBlockInitShortWithDt` not yet enabled | 3 tests skipped |
 | TRISC `finish()` variant | Compute `finish()` should wait for `posted == 0`, not `posted == acked` | No test exercises this distinction |
 
 ---
