@@ -23,7 +23,8 @@ struct TensorAccessor {
 
     template<std::size_t CTA, std::size_t CRTA>
     TensorAccessor(const TensorAccessorArgs<CTA, CRTA>&,
-                   size_t addr, uint32_t ps)
+                   size_t addr,
+                   uint32_t ps = TensorAccessorArgs<CTA, CRTA>::AlignedPageSize)
         : bank_base_address(static_cast<uint32_t>(addr)), page_size(ps) {}
 
     // get_noc_addr — delegates to InterleavedAddrGen<true> (DRAM) for proper banking.

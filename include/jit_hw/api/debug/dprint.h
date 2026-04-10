@@ -15,3 +15,6 @@ inline DPrintSink make_dprint() { return DPrintSink{}; }
 
 #define DPRINT tt_emule_jit::make_dprint()
 #define ENDL() '\n'
+
+// Support for DEVICE_PRINT.
+#include "device_print.h"
