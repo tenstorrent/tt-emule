@@ -167,7 +167,7 @@ This runs 5 tiers of tests:
 4. **Tier 4 (TTNN Relational):** ttnn_relational
 5. **Tier 5 (TTNN Matmul):** ttnn_matmul_sweep
 
-**Expected result:** 109 passed, 2 failed, 2 skipped. The 2 failures are: DmLoopbackPacketSizes (intermittent) and ttnn_add_int_silicon (requires real hardware). The 2 skips are `test_emulation_toggle` (not yet in CMakeLists).
+**Expected result:** 110 passed, 1 failed, 2 skipped. The 1 failure is ttnn_add_int_silicon (requires real hardware). The 2 skips are `test_emulation_toggle` (not yet in CMakeLists).
 
 ---
 

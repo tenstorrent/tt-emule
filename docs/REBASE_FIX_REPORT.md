@@ -2,7 +2,7 @@
 
 ## Overview
 
-After rebasing tt-metal onto upstream commit `3fa4d75355` (1,669 commits newer), the DFB emulation regression went from **83 passed / 30 failed / 2 skipped** to **24 passed / 89 failed / 2 skipped**. A series of fixes recovered to the current state of **109 passed / 4 failed / 2 skipped**.
+After rebasing tt-metal onto upstream commit `3fa4d75355` (1,669 commits newer), the DFB emulation regression went from **83 passed / 30 failed / 2 skipped** to **24 passed / 89 failed / 2 skipped**. A series of fixes recovered to the current state of **110 passed / 1 failed / 2 skipped**.
 
 ### Progression
 
@@ -13,9 +13,9 @@ After rebasing tt-metal onto upstream commit `3fa4d75355` (1,669 commits newer),
 | After fixes 1-3 | 58 | 55 | 2 | JIT stubs, HAL core count, finalize alloc_addr |
 | After fix 4 (BLOCKED) | 80 | 33 | 2 | Correct BLOCKED stride/offset |
 | After fixes 5-6 (TensixDM) | 94 | 19 | 2 | proc_bit + early DFB finalize |
-| After fix 7 (BLOCKED drain) | **109** | **2** | 2 | BLOCKED consumer drain_per_tc + per-slot limits; removed redundant DFBEmule tests |
+| After fix 7 (BLOCKED drain) | **110** | **1** | 2 | BLOCKED consumer drain_per_tc + per-slot limits; removed redundant DFBEmule tests |
 
-The 2 remaining failures are pre-existing (DmLoopbackPacketSizes, ttnn_add_int_silicon). DFBEmuleDMTest and DFBEmuleBridgeTest were removed as redundant with `test_dataflow_buffer.cpp` coverage.
+The 1 remaining failure is ttnn_add_int_silicon (requires real hardware). DFBEmuleDMTest and DFBEmuleBridgeTest were removed as redundant with `test_dataflow_buffer.cpp` coverage.
 
 ---
 
@@ -143,11 +143,10 @@ Added a diagnostic `fprintf` in `noc_traits_t<TensorAccessor>::dst_addr` that fi
 
 ---
 
-## Remaining Failures (2, all pre-existing)
+## Remaining Failures (1)
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| DmLoopbackPacketSizes | 1 | Pre-existing data movement test failure. |
 | ttnn_add_int_silicon | 1 | Requires real hardware (always fails in emulation). |
 
 ---
