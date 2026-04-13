@@ -228,7 +228,7 @@ All consumers see all data. Each producer owns a **contiguous block** of `capaci
 In `reserve_back`: wait for `free_space >= n` on **all** TC slots (loop over `num_tcs_to_rr`).
 In `push_back`: call `inc_posted` on **all** TC slots; advance the write pointer on slot 0 only (`tc_idx` does not advance).
 
-TC assignment uses `P*C` counter scheme: `counter_id = counter_base + p*C + c`. Consumer round-robins through `num_producers` TCs, with each slot's read pointer starting at the corresponding producer's block (`base + p * capacity * entry_size`).
+TC assignment uses `P*C` counter scheme: `counter_id = counter_base + p*C + c`. Each TC slot has its own sub-range: `base_addr = alloc_base + p * capacity * entry_size`, `limit = base_addr + capacity * entry_size`. Consumer has `drain_per_tc = true`: it reads all `capacity` entries from TC0 (producer 0's block) before advancing to TC1 (producer 1's block), etc.
 
 **Test evidence (BLOCKED):** 30 tests in `test_dataflow_buffer.cpp` cover DM-DM, DM→Tensix, and Tensix→DM topologies with both ImplicitSync variants. Example filters: `DMTest1xDFB1Sx1B`, `DMTensixTest1xDFB4Sx4B`, `TensixDMTest1xDFB4Sx2B`.
 
@@ -397,7 +397,7 @@ The JIT path bypasses the `DataflowBuffer` class and implements the same logic i
 
 The `emulated_program_runner` sets these TLS variables per kernel thread (see §5.5). After the thread completes, the runner clears them back to `nullptr` to prevent stale pointers.
 
-94 of 115 DFB-related JIT tests pass (see §8.6 for the 19 remaining failures). The passing tests span three test files:
+110 of 115 DFB-related JIT tests pass (see §8.6 for the 5 remaining failures). The passing tests span three test files:
 
 | Test File | Tests | Topology |
 |-----------|-------|----------|
@@ -455,51 +455,20 @@ The JIT path (`dfb_api.h`) wraps all blocking waits with `wait_for` and a config
 
 **TODO: No test exercises standalone path timeout behavior.** See `docs/TEST_COVERAGE_TODO.md`.
 
-### 8.6 Remaining DFB test failures (19 tests)
+### 8.6 Remaining DFB test failures (5 tests)
 
-As of 2026-04-10, 19 of the 115 DFB regression tests fail. All 19 are pre-existing failures (they failed before the tt-metal rebase onto upstream `3fa4d75355`). They fall into four categories.
+As of 2026-04-13, 5 of the 115 DFB regression tests fail. All 5 are pre-existing failures. They fall into three categories.
 
-#### 8.6.1 Multi-producer/consumer BLOCKED — DM-DM (8 tests)
+#### 8.6.1 Multi-producer/consumer BLOCKED — FIXED (2026-04-13)
 
-All DM-DM BLOCKED tests with more than one producer or more than one consumer fail with data mismatch. The 1P-1C BLOCKED tests pass.
+All 16 multi-P/C BLOCKED tests (8 DM-DM + 8 TensixDM) now pass after two fixes:
 
-| Test Name | P×C | ImplicitSync |
-|-----------|-----|--------------|
-| `DMTest1xDFB4Sx1B_ImplicitSyncFalse` | 4P-1C | false |
-| `DMTest1xDFB4Sx1B_ImplicitSyncTrue` | 4P-1C | true |
-| `DMTest1xDFB4Sx4B_ImplicitSyncFalse` | 4P-4C | false |
-| `DMTest1xDFB4Sx4B_ImplicitSyncTrue` | 4P-4C | true |
-| `DMTest1xDFB4Sx2B_ImplicitSyncFalse` | 4P-2C | false |
-| `DMTest1xDFB4Sx2B_ImplicitSyncTrue` | 4P-2C | true |
-| `DMTest1xDFB2Sx4B_ImplicitSyncFalse` | 2P-4C | false |
-| `DMTest1xDFB2Sx4B_ImplicitSyncTrue` | 2P-4C | true |
+1. **BLOCKED consumer drain behavior:** BLOCKED consumers must drain each TC slot fully before advancing to the next (`drain_per_tc` flag), not round-robin on every `pop_front`. The hardware reads all `capacity` entries from TC0 before moving to TC1.
+2. **Per-slot base_addr/limit:** Each TC slot must have its own sub-range covering one producer's contiguous block (`base_addr = alloc_base + p * capacity * entry_size`, `limit = base_addr + capacity * entry_size`), not the full buffer range.
 
-**Failure mode:** `EXPECT_EQ(expected, actual)` fails on the output DRAM tensor. The test pre-fills L1 with known data, runs the producer/consumer kernels, then reads DRAM and compares. The output contains data from the wrong producers in the wrong positions — a layout mismatch between what the emulation computes and what the upstream host-side verification expects.
+Files changed: `dfb_sync_state.hpp` (added `drain_per_tc` field), `dfb_api.h` and `dataflow_buffer.hpp` (conditional tc_idx advancement), `kernel_runner.cpp` and `emulated_program_runner.cpp` (per-slot sub-ranges + drain flag).
 
-**Root cause analysis:** The BLOCKED mode TC scheme assigns `P*C` tile counters (one per producer-consumer pair). Each producer broadcasts to all `C` consumer TCs, and each consumer round-robins through `P` producer TCs. The 1P-1C case (1 TC total) works correctly. The multi-P/C case fails because the emulation's mapping of `(producer ordinal, consumer ordinal) → counter_id` or the corresponding read/write pointer initialization does not match what the upstream `BindDataflowBufferToProducerConsumerKernels` serialization expects.
-
-Specifically, the upstream Quasar serialization in `dataflow_buffer.cpp` assigns producer ordinals and consumer ordinals based on the order of bits in the risc_mask. The emulation walks the mask bits in the same order (`for b = 0..15, if mask & (1<<b), assign ordinal++`), so ordinal assignment should be correct. The remaining suspect is how the test verification code reconstructs the expected output — it may use a different convention for which producer's data ends up at which DRAM offset when multiple producers write to the same DFB with BLOCKED access.
-
-This is the highest-priority gap: fixing multi-P/C BLOCKED would recover 16 tests (8 DM-DM + 8 TensixDM below).
-
-#### 8.6.2 Multi-producer/consumer BLOCKED — TensixDM (8 tests)
-
-Same pattern as §8.6.1 but with a Tensix producer instead of a DM producer. These fail for the same reason.
-
-| Test Name | P×C | ImplicitSync |
-|-----------|-----|--------------|
-| `TensixDMTest1xDFB4Sx1B_ImplicitSyncFalse` | 4P-1C | false |
-| `TensixDMTest1xDFB4Sx1B_ImplicitSyncTrue` | 4P-1C | true |
-| `TensixDMTest1xDFB4Sx4B_ImplicitSyncFalse` | 4P-4C | false |
-| `TensixDMTest1xDFB4Sx4B_ImplicitSyncTrue` | 4P-4C | true |
-| `TensixDMTest1xDFB4Sx2B_ImplicitSyncFalse` | 4P-2C | false |
-| `TensixDMTest1xDFB4Sx2B_ImplicitSyncTrue` | 4P-2C | true |
-| `TensixDMTest1xDFB2Sx4B_ImplicitSyncFalse` | 2P-4C | false |
-| `TensixDMTest1xDFB2Sx4B_ImplicitSyncTrue` | 2P-4C | true |
-
-**Failure mode:** Identical to §8.6.1. The Tensix vs. DM distinction only affects `proc_bit` computation (bit 2 vs. bit-per-processor-id), which was fixed in the rebase recovery. The multi-P/C BLOCKED layout issue is the same underlying bug.
-
-#### 8.6.3 DFBEmuleDMTest and DFBEmuleBridgeTest (2 tests)
+#### 8.6.2 DFBEmuleDMTest and DFBEmuleBridgeTest (2 tests)
 
 These are the original DFB emulation integration tests in `test_dfb_emulation.cpp` (tt-metal).
 
@@ -512,7 +481,7 @@ These are the original DFB emulation integration tests in `test_dfb_emulation.cp
 
 **Root cause hypothesis:** These tests run on the `quasar_1chip.yaml` descriptor with `ARCH_NAME=QUASAR`. The tests were written before the upstream DFB API changes and may rely on a host-side tensor readback path that changed during the rebase. The fact that both 1P-1C DM and bridge topology fail with "data looks correct but comparison fails" points to a host-side verification issue rather than an emulation bug.
 
-#### 8.6.4 ttnn_add_int_silicon (1 test)
+#### 8.6.3 ttnn_add_int_silicon (1 test)
 
 | Test Name | Failure |
 |-----------|---------|

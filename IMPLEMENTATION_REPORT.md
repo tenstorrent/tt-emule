@@ -144,7 +144,7 @@ Key data structures (`include/tt_emule/tile_counter.hpp`, `include/tt_emule/dfb_
 
 Two access patterns:
 - **STRIDED**: entries interleaved across consumers. `M = max(P, C)`, producer p owns TC slots `{p + k*P}`, consumer c owns `{c + k*C}`. `stride_size = M * entry_size`.
-- **BLOCKED**: all consumers see all data. Producer posts to ALL consumer TCs simultaneously (`broadcast_tc = true`). P*C counter scheme.
+- **BLOCKED**: all consumers see all data. Producer posts to ALL consumer TCs simultaneously (`broadcast_tc = true`). Consumer drains each TC fully before advancing (`drain_per_tc = true`). Each TC slot has its own sub-range. P*C counter scheme.
 
 See [DFB_EMULATION.md](docs/DFB_EMULATION.md) for the full synchronization deep dive, access pattern details, and program lifecycle.
 
@@ -241,7 +241,7 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 
 **Standalone tests** (5/5 pass): dfb_passthrough, dfb_multi_consumer, eltwise_add, matmul, tilize
 
-**tt-metal emulated regression** (85 passing, 28 pre-existing failures, 2 skipped):
+**tt-metal emulated regression** (109 passing, 4 pre-existing failures, 2 skipped):
 
 | Tier | Tests | Count | Description | Cluster |
 |------|-------|-------|-------------|---------|
@@ -562,7 +562,7 @@ The tier table above in Test Results reflects the full `run_regression.sh` struc
 
 D2M golden test regression: `run_d2m_regression.sh` — runs 13 tt-mlir test files (1878 tests) against the emulated backend. 1624 pass, 112 fail, 142 skip. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
 
-Regression scripts: `run_regression.sh` (85 passing tests) + `run_d2m_regression.sh` (13 D2M test files, 1878 tests).
+Regression scripts: `run_regression.sh` (109 passing tests) + `run_d2m_regression.sh` (13 D2M test files, 1878 tests).
 
 ### tt-metal Files Modified
 
@@ -599,7 +599,7 @@ The complete set of tt-metal modifications for emulation support:
 
 **Interleaved DRAM banking is production-accurate.** Bank mapping arrays (`dram_bank_to_noc_xy`, `bank_to_dram_offset`, etc.) are populated from the real `metal_SocDescriptor` at program execution time. `InterleavedAddrGen<DRAM>` computes proper banked NOC addresses matching the real firmware's banking logic.
 
-**DFB MPMC synchronization is hardware-accurate.** The tile counter model (`TileCounter` + `TileCounterArray` + `EmuleDFBInterface`) replicates the hardware's per-consumer posted/acked counter pair. 72 DFB tests (42 STRIDED + 30 BLOCKED) verify correctness across all P/C combinations from 1P-1C through 4P-4C, with both DM-DM and DM-Tensix-DM topologies.
+**DFB MPMC synchronization is hardware-accurate.** The tile counter model (`TileCounter` + `TileCounterArray` + `EmuleDFBInterface`) replicates the hardware's per-consumer posted/acked counter pair with correct BLOCKED drain semantics (`drain_per_tc`). 72 DFB tests (42 STRIDED + 30 BLOCKED) verify correctness across all P/C combinations from 1P-1C through 4P-4C, with both DM-DM and DM-Tensix-DM topologies.
 
 **UNPACK/PACK nfaces layout conversion is verified by matmul PCC.** The constexpr nfaces LUT (`nfaces.h`) ensures that bfloat16 tile data is correctly converted between L1 (nfaces) and DST (row-major) formats. Matmul PCC tests pass with non-trivial input data, which requires both UNPACK (nfaces→rowmajor) and PACK (rowmajor→nfaces) conversions to be correct.
 
@@ -708,7 +708,7 @@ Rebasing onto new tt-metal versions primarily requires:
 | Implemented compute ops | Not enumerated | 11 operations: copy/pack tile, add/sub/mul_tiles, matmul_tiles/block, reduce_tile, L1 acc toggle |
 | CSR emulation | Not documented | NEO_ID, TRISC_ID via TLS; mhartid regex patch |
 | JIT patches | mhartid only | + fence instruction, L1 pointer cast patches |
-| tt-metal regression | 18 pass | **107 pass**, 4 pre-existing fail, 2 skip |
+| tt-metal regression | 18 pass | **109 pass**, 4 pre-existing fail, 2 skip |
 | Quasar-specific tests | None | 72 DFB + 4 compute + 3 semaphore + 4 atomics/DM + 4 NOC + 2 matmul = 89 tests |
 | Matmul PCC | Not tracked | Passing (`TensixMatmulBlock`, `TensixMatmulBlockInitShort`) |
 | Reference docs | None | `docs/DFB_EMULATION.md`, `docs/QUASAR_EMULATION.md`, `docs/TEST_COVERAGE_TODO.md` |
@@ -723,12 +723,28 @@ Rebasing onto new tt-metal versions primarily requires:
 | D2M fully-passing files | 8 of 13 | **9 of 13** (tilize now passes) |
 | Tilize/Untilize D2M | 12/44 pass (PCC mismatch) | **44/44 pass** — nfaces in `__llk_pack_tiled` and `copy_tile` fixed all 32 failures |
 | DMA D2M | 38/49 pass | **40/49 pass** (+2 tiled roundtrip fixes) |
-| Standalone regression | 83 pass / 28 fail / 2 skip | **85 pass** / 28 fail / 2 skip |
+| Standalone regression | 83 pass / 28 fail / 2 skip | **85 pass** / 28 fail / 2 skip (→ 109/4/2 after rebase fixes in v8) |
 | Quasar matmul PCC | 0/2 pass (data corruption) | **2/2 pass** — nfaces conversion resolved PCC failures |
 | Files modified | — | `common.h`, `matmul.h`, `reduce.h`, `llk_defs.h` |
 
 **Key insight:** On real hardware, UNPACK converts nfaces→row-major when loading from L1/CB into DST, and PACK converts row-major→nfaces when writing back. The emulator was missing these conversions. Element-wise ops (add/sub/mul) previously worked "by accident" because nfaces permutation cancels for identical per-element operations. Non-element-wise ops (matmul, tilize/untilize) failed because element positions were scrambled. The fix applies the nfaces LUT to all general UNPACK and PACK operations, plus the D2M tilize PACK path (`__llk_pack_tiled`).
 
+### Changes from v7 to v8
+
+| Aspect | v7 | v8 |
+|--------|----|----|
+| tt-metal rebase | Pre-rebase (`3fa4d75355`) | Rebased (1,669 commits newer), 7 fixes applied |
+| tt-metal regression | 85 pass / 28 fail / 2 skip | **109 pass** / 4 fail / 2 skip |
+| DFB BLOCKED multi-P/C | All 16 failing (8 DM-DM + 8 TensixDM) | **All 16 passing** |
+| BLOCKED consumer model | Round-robin tc_idx on every pop_front | `drain_per_tc`: drain each TC slot fully before advancing |
+| BLOCKED TC slot layout | All slots share full buffer range | Per-slot sub-ranges: `base_addr = alloc_base + p*capacity*entry_size` |
+| EmuleDFBInterface struct | `broadcast_tc`, `active` | + `drain_per_tc` field between `broadcast_tc` and `active` |
+| JIT cache | Source path + compile args key | Same (struct layout changes require manual cache clear) |
+| Rebase fixes | — | JIT stubs, HAL core count, finalize alloc_addr, BLOCKED stride/offset, WH proc_bit, early DFB finalize, BLOCKED drain |
+| Pre-existing failures | 28 | **4** (DFBEmuleDMTest, DFBEmuleBridgeTest, DmLoopbackPacketSizes, ttnn_add_int_silicon) |
+
+**Key insight:** BLOCKED mode consumers on hardware perform block reads — they exhaust all entries from one producer's TC slot before advancing to the next producer's slot. The emulation was incorrectly round-robining through TC slots on every `pop_front` call, producing a shuffled read order. Additionally, all TC slots shared the full buffer address range instead of each slot having its own contiguous sub-range. Both bugs only manifested with multiple producers or consumers (1P-1C was unaffected since there's only one TC slot).
+
 ---
 
-*Report updated 2026-04-09. Covers tt-emule on branch `armin` / tt-mlir rebased on `milant/uplift_mar_25`. Nfaces UNPACK/PACK conversion added to all compute ops.*
+*Report updated 2026-04-13. Covers tt-emule on branch `armin` / tt-metal rebased on upstream `3fa4d75355`. BLOCKED consumer drain fix recovers all multi-P/C tests.*
