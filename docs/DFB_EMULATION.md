@@ -397,7 +397,7 @@ The JIT path bypasses the `DataflowBuffer` class and implements the same logic i
 
 The `emulated_program_runner` sets these TLS variables per kernel thread (see §5.5). After the thread completes, the runner clears them back to `nullptr` to prevent stale pointers.
 
-74 DFB-related JIT tests pass across three test files:
+94 of 115 DFB-related JIT tests pass (see §8.6 for the 19 remaining failures). The passing tests span three test files:
 
 | Test File | Tests | Topology |
 |-----------|-------|----------|
@@ -454,6 +454,71 @@ The 4 MB L1 is shared between all 12 cores in a Neo (8 DM processors + 4 compute
 The JIT path (`dfb_api.h`) wraps all blocking waits with `wait_for` and a configurable timeout (default 120s, `TT_EMULE_DFB_TIMEOUT`). The standalone path (`DataflowBuffer` via `TileCounterArray`) uses `wait` without any timeout, so hung standalone tests block indefinitely.
 
 **TODO: No test exercises standalone path timeout behavior.** See `docs/TEST_COVERAGE_TODO.md`.
+
+### 8.6 Remaining DFB test failures (19 tests)
+
+As of 2026-04-10, 19 of the 115 DFB regression tests fail. All 19 are pre-existing failures (they failed before the tt-metal rebase onto upstream `3fa4d75355`). They fall into four categories.
+
+#### 8.6.1 Multi-producer/consumer BLOCKED — DM-DM (8 tests)
+
+All DM-DM BLOCKED tests with more than one producer or more than one consumer fail with data mismatch. The 1P-1C BLOCKED tests pass.
+
+| Test Name | P×C | ImplicitSync |
+|-----------|-----|--------------|
+| `DMTest1xDFB4Sx1B_ImplicitSyncFalse` | 4P-1C | false |
+| `DMTest1xDFB4Sx1B_ImplicitSyncTrue` | 4P-1C | true |
+| `DMTest1xDFB4Sx4B_ImplicitSyncFalse` | 4P-4C | false |
+| `DMTest1xDFB4Sx4B_ImplicitSyncTrue` | 4P-4C | true |
+| `DMTest1xDFB4Sx2B_ImplicitSyncFalse` | 4P-2C | false |
+| `DMTest1xDFB4Sx2B_ImplicitSyncTrue` | 4P-2C | true |
+| `DMTest1xDFB2Sx4B_ImplicitSyncFalse` | 2P-4C | false |
+| `DMTest1xDFB2Sx4B_ImplicitSyncTrue` | 2P-4C | true |
+
+**Failure mode:** `EXPECT_EQ(expected, actual)` fails on the output DRAM tensor. The test pre-fills L1 with known data, runs the producer/consumer kernels, then reads DRAM and compares. The output contains data from the wrong producers in the wrong positions — a layout mismatch between what the emulation computes and what the upstream host-side verification expects.
+
+**Root cause analysis:** The BLOCKED mode TC scheme assigns `P*C` tile counters (one per producer-consumer pair). Each producer broadcasts to all `C` consumer TCs, and each consumer round-robins through `P` producer TCs. The 1P-1C case (1 TC total) works correctly. The multi-P/C case fails because the emulation's mapping of `(producer ordinal, consumer ordinal) → counter_id` or the corresponding read/write pointer initialization does not match what the upstream `BindDataflowBufferToProducerConsumerKernels` serialization expects.
+
+Specifically, the upstream Quasar serialization in `dataflow_buffer.cpp` assigns producer ordinals and consumer ordinals based on the order of bits in the risc_mask. The emulation walks the mask bits in the same order (`for b = 0..15, if mask & (1<<b), assign ordinal++`), so ordinal assignment should be correct. The remaining suspect is how the test verification code reconstructs the expected output — it may use a different convention for which producer's data ends up at which DRAM offset when multiple producers write to the same DFB with BLOCKED access.
+
+This is the highest-priority gap: fixing multi-P/C BLOCKED would recover 16 tests (8 DM-DM + 8 TensixDM below).
+
+#### 8.6.2 Multi-producer/consumer BLOCKED — TensixDM (8 tests)
+
+Same pattern as §8.6.1 but with a Tensix producer instead of a DM producer. These fail for the same reason.
+
+| Test Name | P×C | ImplicitSync |
+|-----------|-----|--------------|
+| `TensixDMTest1xDFB4Sx1B_ImplicitSyncFalse` | 4P-1C | false |
+| `TensixDMTest1xDFB4Sx1B_ImplicitSyncTrue` | 4P-1C | true |
+| `TensixDMTest1xDFB4Sx4B_ImplicitSyncFalse` | 4P-4C | false |
+| `TensixDMTest1xDFB4Sx4B_ImplicitSyncTrue` | 4P-4C | true |
+| `TensixDMTest1xDFB4Sx2B_ImplicitSyncFalse` | 4P-2C | false |
+| `TensixDMTest1xDFB4Sx2B_ImplicitSyncTrue` | 4P-2C | true |
+| `TensixDMTest1xDFB2Sx4B_ImplicitSyncFalse` | 2P-4C | false |
+| `TensixDMTest1xDFB2Sx4B_ImplicitSyncTrue` | 2P-4C | true |
+
+**Failure mode:** Identical to §8.6.1. The Tensix vs. DM distinction only affects `proc_bit` computation (bit 2 vs. bit-per-processor-id), which was fixed in the rebase recovery. The multi-P/C BLOCKED layout issue is the same underlying bug.
+
+#### 8.6.3 DFBEmuleDMTest and DFBEmuleBridgeTest (2 tests)
+
+These are the original DFB emulation integration tests in `test_dfb_emulation.cpp` (tt-metal).
+
+| Test Name | Topology | Config |
+|-----------|----------|--------|
+| `DFBEmuleDMTest` | 1P-1C DM-DM | STRIDED, entry_size=1024, num_entries=16 |
+| `DFBEmuleBridgeTest` | DM→Tensix→DM bridge | 2 DFBs, same config |
+
+**Failure mode:** `EXPECT_EQ(expected, actual)` fails on per-element comparison. When the actual and expected data are printed byte-by-byte, they appear identical — the values match visually. This suggests the comparison failure is due to a subtle type or size mismatch in the test harness (e.g., comparing `uint32_t` vectors of different lengths, or a padding/alignment issue in how the DRAM tensor is read back), not a genuine data corruption.
+
+**Root cause hypothesis:** These tests run on the `quasar_1chip.yaml` descriptor with `ARCH_NAME=QUASAR`. The tests were written before the upstream DFB API changes and may rely on a host-side tensor readback path that changed during the rebase. The fact that both 1P-1C DM and bridge topology fail with "data looks correct but comparison fails" points to a host-side verification issue rather than an emulation bug.
+
+#### 8.6.4 ttnn_add_int_silicon (1 test)
+
+| Test Name | Failure |
+|-----------|---------|
+| `ttnn_add_int_silicon` | "No chips detected" |
+
+**Failure mode:** The test attempts to open a silicon device, which is not available in the emulation environment. This is an environment mismatch, not a DFB emulation bug. The test is included in the regression suite because it exercises `ttnn::add` with integer types, but it requires physical hardware.
 
 ---
 
