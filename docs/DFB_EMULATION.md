@@ -397,7 +397,7 @@ The JIT path bypasses the `DataflowBuffer` class and implements the same logic i
 
 The `emulated_program_runner` sets these TLS variables per kernel thread (see §5.5). After the thread completes, the runner clears them back to `nullptr` to prevent stale pointers.
 
-110 of 115 DFB-related JIT tests pass (see §8.6 for the 5 remaining failures). The passing tests span three test files:
+72 of 74 DFB-specific JIT tests pass (see §8.6 for the 2 remaining failures). The tests span three test files:
 
 | Test File | Tests | Topology |
 |-----------|-------|----------|
@@ -455,20 +455,11 @@ The JIT path (`dfb_api.h`) wraps all blocking waits with `wait_for` and a config
 
 **TODO: No test exercises standalone path timeout behavior.** See `docs/TEST_COVERAGE_TODO.md`.
 
-### 8.6 Remaining DFB test failures (5 tests)
+### 8.6 Remaining DFB test failures (2 tests)
 
-As of 2026-04-13, 5 of the 115 DFB regression tests fail. All 5 are pre-existing failures. They fall into three categories.
+2 of the 74 DFB-specific tests fail. Both are in `test_dfb_emulation.cpp`.
 
-#### 8.6.1 Multi-producer/consumer BLOCKED — FIXED (2026-04-13)
-
-All 16 multi-P/C BLOCKED tests (8 DM-DM + 8 TensixDM) now pass after two fixes:
-
-1. **BLOCKED consumer drain behavior:** BLOCKED consumers must drain each TC slot fully before advancing to the next (`drain_per_tc` flag), not round-robin on every `pop_front`. The hardware reads all `capacity` entries from TC0 before moving to TC1.
-2. **Per-slot base_addr/limit:** Each TC slot must have its own sub-range covering one producer's contiguous block (`base_addr = alloc_base + p * capacity * entry_size`, `limit = base_addr + capacity * entry_size`), not the full buffer range.
-
-Files changed: `dfb_sync_state.hpp` (added `drain_per_tc` field), `dfb_api.h` and `dataflow_buffer.hpp` (conditional tc_idx advancement), `kernel_runner.cpp` and `emulated_program_runner.cpp` (per-slot sub-ranges + drain flag).
-
-#### 8.6.2 DFBEmuleDMTest and DFBEmuleBridgeTest (2 tests)
+#### 8.6.1 DFBEmuleDMTest and DFBEmuleBridgeTest (2 tests)
 
 These are the original DFB emulation integration tests in `test_dfb_emulation.cpp` (tt-metal).
 
@@ -480,14 +471,6 @@ These are the original DFB emulation integration tests in `test_dfb_emulation.cp
 **Failure mode:** `EXPECT_EQ(expected, actual)` fails on per-element comparison. When the actual and expected data are printed byte-by-byte, they appear identical — the values match visually. This suggests the comparison failure is due to a subtle type or size mismatch in the test harness (e.g., comparing `uint32_t` vectors of different lengths, or a padding/alignment issue in how the DRAM tensor is read back), not a genuine data corruption.
 
 **Root cause hypothesis:** These tests run on the `quasar_1chip.yaml` descriptor with `ARCH_NAME=QUASAR`. The tests were written before the upstream DFB API changes and may rely on a host-side tensor readback path that changed during the rebase. The fact that both 1P-1C DM and bridge topology fail with "data looks correct but comparison fails" points to a host-side verification issue rather than an emulation bug.
-
-#### 8.6.3 ttnn_add_int_silicon (1 test)
-
-| Test Name | Failure |
-|-----------|---------|
-| `ttnn_add_int_silicon` | "No chips detected" |
-
-**Failure mode:** The test attempts to open a silicon device, which is not available in the emulation environment. This is an environment mismatch, not a DFB emulation bug. The test is included in the regression suite because it exercises `ttnn::add` with integer types, but it requires physical hardware.
 
 ---
 
