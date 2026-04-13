@@ -103,9 +103,9 @@ For STRIDED mode with `M = max(P, C)`:
 - Producer p: `num_tcs_to_rr = M / P` TC slots at indices `{p + k*P for k=0..M/P-1}`. Initial pointers offset by `tc_index * entry_size`. `stride_size = M * entry_size`.
 - Consumer c: `num_tcs_to_rr = M / C` TC slots at indices `{c + k*C for k=0..M/C-1}`. Same pointer offset and stride.
 
-For BLOCKED consumer mode:
-- Producer: `broadcast_tc = true`, `num_tcs_to_rr = num_consumers`. Posts to ALL consumer TCs on each `push_back`. `stride_size = num_producers * entry_size`.
-- Consumer: `num_tcs_to_rr = 1`, `stride_size = entry_size` (reads sequentially).
+For BLOCKED mode (`stride_in_entries = 1`): each producer owns a contiguous block of `capacity = num_entries / num_producers` entries.
+- Producer p: `broadcast_tc = true`, `num_tcs_to_rr = num_consumers`. Posts to ALL consumer TCs on each `push_back`. `stride_size = entry_size`. Initial pointer offset = `p * capacity * entry_size`.
+- Consumer: `num_tcs_to_rr = num_producers`, round-robins through producer blocks. `stride_size = entry_size`. Slot p starts at `base + p * capacity * entry_size`.
 
 ### 2.5 `DFBSyncState` (`include/tt_emule/dfb_sync_state.hpp`)
 
@@ -223,12 +223,12 @@ The `stride_size` field = `M * entry_size` for all participants. Initial pointer
 
 ### 4.2 BLOCKED
 
-All consumers see all data. The producer posts to every consumer TC simultaneously. The `broadcast_tc` flag on `EmuleDFBInterface` enables this path.
+All consumers see all data. Each producer owns a **contiguous block** of `capacity = num_entries / num_producers` entries starting at `base + p * capacity * entry_size`. The `broadcast_tc` flag on `EmuleDFBInterface` enables the producer broadcast path. `stride_size = entry_size` (`stride_in_entries = 1`).
 
 In `reserve_back`: wait for `free_space >= n` on **all** TC slots (loop over `num_tcs_to_rr`).
 In `push_back`: call `inc_posted` on **all** TC slots; advance the write pointer on slot 0 only (`tc_idx` does not advance).
 
-BLOCKED consumer TC assignment uses `P*C` counter scheme: `counter_id = counter_base + p*C + c`. Consumer round-robins through `num_producers` TCs.
+TC assignment uses `P*C` counter scheme: `counter_id = counter_base + p*C + c`. Consumer round-robins through `num_producers` TCs, with each slot's read pointer starting at the corresponding producer's block (`base + p * capacity * entry_size`).
 
 **Test evidence (BLOCKED):** 30 tests in `test_dataflow_buffer.cpp` cover DM-DM, DM→Tensix, and Tensix→DM topologies with both ImplicitSync variants. Example filters: `DMTest1xDFB1Sx1B`, `DMTensixTest1xDFB4Sx4B`, `TensixDMTest1xDFB4Sx2B`.
 

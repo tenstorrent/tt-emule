@@ -68,7 +68,17 @@ std::vector<std::vector<EmuleDFBInterface>> build_dfb_interfaces(
             iface.num_entries = cfg.num_entries;
             iface.stride_size = stride_size;
 
-            uint16_t proc_bit = static_cast<uint16_t>(1u << kd.processor_id);
+            // WH/BH ComputeKernel sets bit 2 in risc_mask; Quasar uses bits 8+.
+            bool is_tensix = (kd.type == KernelType::Compute || kd.type == KernelType::QuasarCompute);
+            uint16_t proc_bit;
+            if (is_tensix) {
+                bool quasar_masks = ((cfg.producer_risc_mask | cfg.consumer_risc_mask) & 0xFF00u) != 0;
+                proc_bit = quasar_masks
+                    ? static_cast<uint16_t>(1u << (kd.processor_id + 8))
+                    : static_cast<uint16_t>(1u << 2);  // WH/BH convention
+            } else {
+                proc_bit = static_cast<uint16_t>(1u << kd.processor_id);
+            }
             bool is_producer  = (cfg.producer_risc_mask & proc_bit) != 0;
             bool is_consumer  = (cfg.consumer_risc_mask & proc_bit) != 0;
 
@@ -92,14 +102,15 @@ std::vector<std::vector<EmuleDFBInterface>> build_dfb_interfaces(
                     // TC for (producer p, consumer c) has counter_id = p*C + c.
                     iface.broadcast_tc = true;
                     iface.num_tcs_to_rr = static_cast<uint8_t>(cfg.num_consumers);
-                    iface.stride_size = cfg.num_producers * cfg.entry_size;
+                    iface.stride_size = cfg.entry_size;  // BLOCKED: stride_in_entries = 1
+                    uint32_t capacity_per_p = cfg.num_entries / cfg.num_producers;
                     for (uint32_t c = 0; c < cfg.num_consumers && c < MAX_TC_SLOTS_PER_DFB; ++c) {
                         auto& slot       = iface.tc_slots[c];
                         slot.neo_id      = 0;
                         slot.counter_id  = counter_base + static_cast<uint8_t>(p * cfg.num_consumers + c);
                         slot.base_addr   = base_addr;
                         slot.limit       = base_addr + cfg.num_entries * cfg.entry_size;
-                        uint32_t offset  = p * cfg.entry_size;
+                        uint32_t offset  = p * capacity_per_p * cfg.entry_size;
                         slot.wr_ptr      = base_addr + offset;
                         slot.rd_ptr      = base_addr + offset;
                     }
@@ -131,15 +142,16 @@ std::vector<std::vector<EmuleDFBInterface>> build_dfb_interfaces(
                     // BLOCKED DM-DM consumer: round-robin through num_producers TCs.
                     // TC for (producer p, consumer c) has counter_id = p*C + c.
                     iface.num_tcs_to_rr = static_cast<uint8_t>(cfg.num_producers);
-                    iface.stride_size = cfg.num_producers * cfg.entry_size;
+                    iface.stride_size = cfg.entry_size;  // BLOCKED: stride_in_entries = 1
+                    uint32_t capacity_per_p = cfg.num_entries / cfg.num_producers;
                     for (uint32_t pi = 0; pi < cfg.num_producers && pi < MAX_TC_SLOTS_PER_DFB; ++pi) {
                         auto& slot       = iface.tc_slots[pi];
                         slot.neo_id      = 0;
                         slot.counter_id  = counter_base + static_cast<uint8_t>(pi * cfg.num_consumers + c);
                         slot.base_addr   = base_addr;
                         slot.limit       = base_addr + cfg.num_entries * cfg.entry_size;
-                        slot.rd_ptr      = base_addr + pi * cfg.entry_size;
-                        slot.wr_ptr      = base_addr + pi * cfg.entry_size;
+                        slot.rd_ptr      = base_addr + pi * capacity_per_p * cfg.entry_size;
+                        slot.wr_ptr      = base_addr + pi * capacity_per_p * cfg.entry_size;
                     }
                 } else {
                     // STRIDED: existing code
