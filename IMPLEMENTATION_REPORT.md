@@ -241,7 +241,7 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 
 **Standalone tests** (5/5 pass): dfb_passthrough, dfb_multi_consumer, eltwise_add, matmul, tilize
 
-**tt-metal emulated regression** (109 passing, 2 pre-existing failures, 2 skipped):
+**tt-metal emulated regression** (110 passing, 1 failure, 2 skipped):
 
 | Tier | Tests | Count | Description | Cluster |
 |------|-------|-------|-------------|---------|
@@ -561,7 +561,7 @@ The tier table above in Test Results reflects the full `run_regression.sh` struc
 
 D2M golden test regression: `run_d2m_regression.sh` — runs 13 tt-mlir test files (1878 tests) against the emulated backend. 1624 pass, 112 fail, 142 skip. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
 
-Regression scripts: `run_regression.sh` (109 passing tests) + `run_d2m_regression.sh` (13 D2M test files, 1878 tests).
+Regression scripts: `run_regression.sh` (110 passing tests) + `run_d2m_regression.sh` (13 D2M test files, 1878 tests).
 
 ### tt-metal Files Modified
 
@@ -707,7 +707,7 @@ Rebasing onto new tt-metal versions primarily requires:
 | Implemented compute ops | Not enumerated | 11 operations: copy/pack tile, add/sub/mul_tiles, matmul_tiles/block, reduce_tile, L1 acc toggle |
 | CSR emulation | Not documented | NEO_ID, TRISC_ID via TLS; mhartid regex patch |
 | JIT patches | mhartid only | + fence instruction, L1 pointer cast patches |
-| tt-metal regression | 18 pass | **109 pass**, 2 pre-existing fail, 2 skip |
+| tt-metal regression | 18 pass | **110 pass**, 1 fail (hardware-only), 2 skip |
 | Quasar-specific tests | None | 72 DFB + 4 compute + 3 semaphore + 4 atomics/DM + 4 NOC + 2 matmul = 89 tests |
 | Matmul PCC | Not tracked | Passing (`TensixMatmulBlock`, `TensixMatmulBlockInitShort`) |
 | Reference docs | None | `docs/DFB_EMULATION.md`, `docs/QUASAR_EMULATION.md`, `docs/TEST_COVERAGE_TODO.md` |
@@ -722,7 +722,7 @@ Rebasing onto new tt-metal versions primarily requires:
 | D2M fully-passing files | 8 of 13 | **9 of 13** (tilize now passes) |
 | Tilize/Untilize D2M | 12/44 pass (PCC mismatch) | **44/44 pass** — nfaces in `__llk_pack_tiled` and `copy_tile` fixed all 32 failures |
 | DMA D2M | 38/49 pass | **40/49 pass** (+2 tiled roundtrip fixes) |
-| Standalone regression | 83 pass / 28 fail / 2 skip | **85 pass** / 28 fail / 2 skip (→ 109/4/2 after rebase fixes in v8) |
+| Standalone regression | 83 pass / 28 fail / 2 skip | **85 pass** / 28 fail / 2 skip (→ 110/1/2 after rebase fixes in v8) |
 | Quasar matmul PCC | 0/2 pass (data corruption) | **2/2 pass** — nfaces conversion resolved PCC failures |
 | Files modified | — | `common.h`, `matmul.h`, `reduce.h`, `llk_defs.h` |
 
@@ -733,14 +733,14 @@ Rebasing onto new tt-metal versions primarily requires:
 | Aspect | v7 | v8 |
 |--------|----|----|
 | tt-metal rebase | Pre-rebase (`3fa4d75355`) | Rebased (1,669 commits newer), 7 fixes applied |
-| tt-metal regression | 85 pass / 28 fail / 2 skip | **109 pass** / 2 fail / 2 skip |
+| tt-metal regression | 85 pass / 28 fail / 2 skip | **110 pass** / 1 fail / 2 skip |
 | DFB BLOCKED multi-P/C | All 16 failing (8 DM-DM + 8 TensixDM) | **All 16 passing** |
 | BLOCKED consumer model | Round-robin tc_idx on every pop_front | `drain_per_tc`: drain each TC slot fully before advancing |
 | BLOCKED TC slot layout | All slots share full buffer range | Per-slot sub-ranges: `base_addr = alloc_base + p*capacity*entry_size` |
 | EmuleDFBInterface struct | `broadcast_tc`, `active` | + `drain_per_tc` field between `broadcast_tc` and `active` |
 | JIT cache | Source path + compile args key | Same (struct layout changes require manual cache clear) |
 | Rebase fixes | — | JIT stubs, HAL core count, finalize alloc_addr, BLOCKED stride/offset, WH proc_bit, early DFB finalize, BLOCKED drain |
-| Pre-existing failures | 28 | **2** (DmLoopbackPacketSizes, ttnn_add_int_silicon) |
+| Pre-existing failures | 28 | **1** (ttnn_add_int_silicon) |
 
 **Key insight:** BLOCKED mode consumers on hardware perform block reads — they exhaust all entries from one producer's TC slot before advancing to the next producer's slot. The emulation was incorrectly round-robining through TC slots on every `pop_front` call, producing a shuffled read order. Additionally, all TC slots shared the full buffer address range instead of each slot having its own contiguous sub-range. Both bugs only manifested with multiple producers or consumers (1P-1C was unaffected since there's only one TC slot).
 
