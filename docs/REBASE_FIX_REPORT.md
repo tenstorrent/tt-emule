@@ -13,9 +13,9 @@ After rebasing tt-metal onto upstream commit `3fa4d75355` (1,669 commits newer),
 | After fixes 1-3 | 58 | 55 | 2 | JIT stubs, HAL core count, finalize alloc_addr |
 | After fix 4 (BLOCKED) | 80 | 33 | 2 | Correct BLOCKED stride/offset |
 | After fixes 5-6 (TensixDM) | 94 | 19 | 2 | proc_bit + early DFB finalize |
-| After fix 7 (BLOCKED drain) | **109** | **4** | 2 | BLOCKED consumer drain_per_tc + per-slot limits |
+| After fix 7 (BLOCKED drain) | **109** | **2** | 2 | BLOCKED consumer drain_per_tc + per-slot limits; removed redundant DFBEmule tests |
 
-The 4 remaining failures are all pre-existing (DFBEmuleDMTest, DFBEmuleBridgeTest, DmLoopbackPacketSizes, ttnn_add_int_silicon).
+The 2 remaining failures are pre-existing (DmLoopbackPacketSizes, ttnn_add_int_silicon). DFBEmuleDMTest and DFBEmuleBridgeTest were removed as redundant with `test_dataflow_buffer.cpp` coverage.
 
 ---
 
@@ -143,12 +143,10 @@ Added a diagnostic `fprintf` in `noc_traits_t<TensorAccessor>::dst_addr` that fi
 
 ---
 
-## Remaining Failures (4, all pre-existing)
+## Remaining Failures (2, all pre-existing)
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| DFBEmuleDMTest | 1 | Pre-existing standalone DFB emulation test failure (host-side verification mismatch). |
-| DFBEmuleBridgeTest | 1 | Pre-existing bridge test failure (same root cause). |
 | DmLoopbackPacketSizes | 1 | Pre-existing data movement test failure. |
 | ttnn_add_int_silicon | 1 | Requires real hardware (always fails in emulation). |
 

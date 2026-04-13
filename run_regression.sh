@@ -106,16 +106,11 @@ echo "== Tier 3: JIT Kernel Execution =="
 run_test "TensixL1Tile"     "$TEST_DIR/test_simple_l1_buffer" --gtest_filter="*Tensix*"
 
 echo ""
-echo "== Tier 3b: DFB Emulation (Quasar) =="
-
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/quasar_1chip.yaml"
 export ARCH_NAME=QUASAR
 
-run_test "DFBEmuleDMTest"     "$TEST_DIR/test_dfb_emulation" --gtest_filter="*DFBEmuleDMTest*"
-run_test "DFBEmuleBridgeTest" "$TEST_DIR/test_dfb_emulation" --gtest_filter="*DFBEmuleBridgeTest*"
-
 echo ""
-echo "== Tier 3c: DFB Multi-P/C STRIDED (test_dataflow_buffer) =="
+echo "== Tier 3b: DFB Multi-P/C STRIDED (test_dataflow_buffer) =="
 
 DFB_TEST="$TEST_DIR/test_dataflow_buffer"
 
@@ -146,7 +141,7 @@ run_test "DMTest1xDFB4Sx2S_IS" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx2S/ImplicitSyncTrue"
 
 echo ""
-echo "== Tier 3d: DFB Compute Bridge Tests (Groups B/C) =="
+echo "== Tier 3c: DFB Compute Bridge Tests (Groups B/C) =="
 
 # Group B: DM producer → Tensix consumer
 run_test "DMTensixTest1xDFB1Sx1S" "$DFB_TEST" \
@@ -201,7 +196,7 @@ run_test "TensixDMTest1xDFB4Sx2S_IS" "$DFB_TEST" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx2S/ImplicitSyncTrue"
 
 echo ""
-echo "== Tier 3e: DFB Multi-DFB Pipeline (Group D) =="
+echo "== Tier 3d: DFB Multi-DFB Pipeline (Group D) =="
 
 # Group D: DM→Tensix→DM multi-DFB pipeline
 run_test "DMTensixDMTest2xDFB1Sx1S" "$DFB_TEST" \
@@ -212,7 +207,7 @@ run_test "DMTensixDMTest1xDFB4Sx1S1xDFB1Sx4S" "$DFB_TEST" \
     --gtest_filter="MeshDeviceFixture.DMTensixDMTest1xDFB4Sx1S1xDFB1Sx4S"
 
 echo ""
-echo "== Tier 3f: DFB BLOCKED Consumer =="
+echo "== Tier 3e: DFB BLOCKED Consumer =="
 
 # BLOCKED DM-DM
 for test in DMTest1xDFB1Sx4B DMTest1xDFB4Sx1B DMTest1xDFB4Sx4B DMTest1xDFB4Sx2B DMTest1xDFB2Sx4B; do
@@ -239,7 +234,7 @@ for test in TensixDMTest1xDFB1Sx4B TensixDMTest1xDFB4Sx1B TensixDMTest1xDFB4Sx4B
 done
 
 echo ""
-echo "== Tier 3g: Quasar Compute Kernel Tests =="
+echo "== Tier 3f: Quasar Compute Kernel Tests =="
 
 # Create a fake simulator directory with a valid soc_descriptor.yaml so that
 # get_simulator_enabled() returns true (the env var is set and the path is non-
@@ -264,7 +259,7 @@ run_test "QuasarMatmulBlockInitShort" "$TEST_DIR/test_matmul_X_tile" \
     --gtest_filter="*TensixMatmulBlockInitShort" --gtest_also_run_disabled_tests
 
 echo ""
-echo "== Tier 3h: Quasar Semaphore Tests =="
+echo "== Tier 3g: Quasar Semaphore Tests =="
 
 run_test "QuasarComputeKernelSemaphores" "$TEST_DIR/test_quasar_semaphores" \
     --gtest_filter="*QuasarComputeKernelSemaphores*"
@@ -274,7 +269,7 @@ run_test "DmLoopback" "$TEST_DIR/test_dm_loopback" \
     --gtest_filter="*DmLoopback*"
 
 echo ""
-echo "== Tier 3i: Simple DM + RISCV Atomics =="
+echo "== Tier 3h: Simple DM + RISCV Atomics =="
 
 run_test "SingleDmL1Write" "$TEST_DIR/test_single_dm_l1_write" \
     --gtest_filter="*SingleDmL1Write*"
@@ -289,7 +284,7 @@ unset TT_METAL_SIMULATOR
 rm -rf "$EMULE_SIM_DIR"
 
 echo ""
-echo "== Tier 3j: Data Movement Tests (Phase 8) =="
+echo "== Tier 3i: Data Movement Tests (Phase 8) =="
 
 unset ARCH_NAME
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"

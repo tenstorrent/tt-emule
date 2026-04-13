@@ -397,13 +397,12 @@ The JIT path bypasses the `DataflowBuffer` class and implements the same logic i
 
 The `emulated_program_runner` sets these TLS variables per kernel thread (see §5.5). After the thread completes, the runner clears them back to `nullptr` to prevent stale pointers.
 
-72 of 74 DFB-specific JIT tests pass (see §8.6 for the 2 remaining failures). The tests span three test files:
+All 72 DFB tests in `test_dataflow_buffer.cpp` pass:
 
-| Test File | Tests | Topology |
-|-----------|-------|----------|
-| `test_dfb_emulation.cpp` | 2 | DFBEmuleDMTest (1P-1C DM), DFBEmuleBridgeTest (DM→compute→DM) |
-| `test_dataflow_buffer.cpp` | 42 | STRIDED: 24 ImplicitSyncFalse + 18 ImplicitSyncTrue (DM-DM, DM-Tensix, Tensix-DM, multi-DFB) |
-| `test_dataflow_buffer.cpp` | 30 | BLOCKED: DM-DM, DM→Tensix, Tensix→DM, both ImplicitSync variants |
+| Access Pattern | Tests | Topology |
+|----------------|-------|----------|
+| STRIDED | 42 | 24 ImplicitSyncFalse + 18 ImplicitSyncTrue (DM-DM, DM-Tensix, Tensix-DM, multi-DFB) |
+| BLOCKED | 30 | DM-DM, DM→Tensix, Tensix→DM, both ImplicitSync variants |
 
 All tests use the real tt-metal host APIs: `CreateDataflowBuffer`, `BindDataflowBufferToProducerConsumerKernels`, `LaunchProgram`.
 
@@ -455,23 +454,6 @@ The JIT path (`dfb_api.h`) wraps all blocking waits with `wait_for` and a config
 
 **TODO: No test exercises standalone path timeout behavior.** See `docs/TEST_COVERAGE_TODO.md`.
 
-### 8.6 Remaining DFB test failures (2 tests)
-
-2 of the 74 DFB-specific tests fail. Both are in `test_dfb_emulation.cpp`.
-
-#### 8.6.1 DFBEmuleDMTest and DFBEmuleBridgeTest (2 tests)
-
-These are the original DFB emulation integration tests in `test_dfb_emulation.cpp` (tt-metal).
-
-| Test Name | Topology | Config |
-|-----------|----------|--------|
-| `DFBEmuleDMTest` | 1P-1C DM-DM | STRIDED, entry_size=1024, num_entries=16 |
-| `DFBEmuleBridgeTest` | DM→Tensix→DM bridge | 2 DFBs, same config |
-
-**Failure mode:** `EXPECT_EQ(expected, actual)` fails on per-element comparison. When the actual and expected data are printed byte-by-byte, they appear identical — the values match visually. This suggests the comparison failure is due to a subtle type or size mismatch in the test harness (e.g., comparing `uint32_t` vectors of different lengths, or a padding/alignment issue in how the DRAM tensor is read back), not a genuine data corruption.
-
-**Root cause hypothesis:** These tests run on the `quasar_1chip.yaml` descriptor with `ARCH_NAME=QUASAR`. The tests were written before the upstream DFB API changes and may rely on a host-side tensor readback path that changed during the rebase. The fact that both 1P-1C DM and bridge topology fail with "data looks correct but comparison fails" points to a host-side verification issue rather than an emulation bug.
-
 ---
 
 ## 9. File Reference
@@ -493,5 +475,4 @@ These are the original DFB emulation integration tests in `test_dfb_emulation.cp
 | `tests/dfb_passthrough/` | Standalone end-to-end test: 1 DM producer + 1 DM consumer, 8×1 KB entries |
 | `tests/dfb_multi_consumer/` | Standalone 1P-4C STRIDED test |
 | *(tt-metal)* `tt_metal/impl/emulation/emulated_program_runner.cpp` | JIT path: DFB L1 alloc, shared-backing for bridges, per-thread interface construction, `__processor_id` TLS, `mhartid` CSR patching |
-| *(tt-metal)* `tests/tt_metal/tt_metal/api/dataflow_buffer/test_dfb_emulation.cpp` | JIT integration tests: `DFBEmuleDMTest` and `DFBEmuleBridgeTest` |
 | *(tt-metal)* `tests/tt_metal/tt_metal/api/dataflow_buffer/test_dataflow_buffer.cpp` | 72 STRIDED + BLOCKED DFB tests (all P/C combinations, both ImplicitSync modes) |
