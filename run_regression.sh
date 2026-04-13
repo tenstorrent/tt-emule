@@ -252,7 +252,27 @@ for test in MultiCoreDMTest2Core_1Sx4B; do
 done
 
 echo ""
-echo "== Tier 3g: Quasar Compute Kernel Tests =="
+echo "== Tier 3g: DFB Config Validation =="
+
+DFB_CFG_TEST="$TEST_DIR/test_dataflow_buffer_configs"
+
+# STRIDED config tests (7 passing)
+for test in DMTest1xDFB1Sx4SConfig DMTensixTest1xDFB4Sx1SConfig DMTest1xDFB4Sx1SConfig \
+            DMTest1xDFB4Sx4SConfig DMTest1xDFB2Sx4SConfig DMTest1xDFB4Sx2SConfig \
+            DMTest1xDFB1Sx1BConfig; do
+    run_test "${test}" "$DFB_CFG_TEST" \
+        --gtest_filter="MeshDeviceFixture.${test}"
+done
+
+# Multi-core config tests (3 passing)
+for test in MultiCoreDFB_1P1C_Strided_NoImplicitSync MultiCoreDFB_1P1C_Strided_ImplicitSync \
+            MultiCoreDFB_HomogeneousGrid_SingleGroup; do
+    run_test "${test}" "$DFB_CFG_TEST" \
+        --gtest_filter="MeshDeviceFixture.${test}"
+done
+
+echo ""
+echo "== Tier 3h: Quasar Compute Kernel Tests =="
 
 # Create a fake simulator directory with a valid soc_descriptor.yaml so that
 # get_simulator_enabled() returns true (the env var is set and the path is non-
@@ -277,7 +297,7 @@ run_test "QuasarMatmulBlockInitShort" "$TEST_DIR/test_matmul_X_tile" \
     --gtest_filter="*TensixMatmulBlockInitShort" --gtest_also_run_disabled_tests
 
 echo ""
-echo "== Tier 3h: Quasar Semaphore Tests =="
+echo "== Tier 3i: Quasar Semaphore Tests =="
 
 run_test "QuasarComputeKernelSemaphores" "$TEST_DIR/test_quasar_semaphores" \
     --gtest_filter="*QuasarComputeKernelSemaphores*"
@@ -287,7 +307,7 @@ run_test "DmLoopback" "$TEST_DIR/test_dm_loopback" \
     --gtest_filter="*DmLoopback*"
 
 echo ""
-echo "== Tier 3i: Simple DM + RISCV Atomics =="
+echo "== Tier 3j: Simple DM + RISCV Atomics =="
 
 run_test "SingleDmL1Write" "$TEST_DIR/test_single_dm_l1_write" \
     --gtest_filter="*SingleDmL1Write*"
@@ -302,7 +322,7 @@ unset TT_METAL_SIMULATOR
 rm -rf "$EMULE_SIM_DIR"
 
 echo ""
-echo "== Tier 3j: Data Movement Tests (Phase 8) =="
+echo "== Tier 3k: Data Movement Tests (Phase 8) =="
 
 unset ARCH_NAME
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"

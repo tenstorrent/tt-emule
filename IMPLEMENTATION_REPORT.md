@@ -241,7 +241,7 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 
 **Standalone tests** (5/5 pass): dfb_passthrough, dfb_multi_consumer, eltwise_add, matmul, tilize
 
-**tt-metal emulated regression** (116 passing, 1 failure, 2 skipped):
+**tt-metal emulated regression** (126 passing, 1 failure, 2 skipped):
 
 | Tier | Tests | Count | Description | Cluster |
 |------|-------|-------|-------------|---------|
@@ -254,10 +254,11 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 | 3e | DFB Pipeline (Group D) | 3 | DM→Tensix→DM multi-DFB pipeline | Quasar |
 | 3e | DFB BLOCKED | 30 | DM-DM + DM→Tensix + Tensix→DM BLOCKED, both ImplicitSync | Quasar |
 | 3f | DFB Multi-Core | 6 | 2-core STRIDED (1Sx1S, 2Sx2S) + BLOCKED (1Sx4B), both ImplicitSync | Quasar |
-| 3g | Quasar Compute | 4 | MultipleThreads, SingleThread, MultipleKernels, TLS | Quasar |
-| 3h | Quasar Semaphores | 3 | ComputeKernelSemaphores, DmAndComputeSemaphores, DmLoopback | Quasar |
-| 3i | Simple DM + Atomics | 4 | SingleDmL1Write, 3× RISC-V atomic tests | Quasar |
-| 3j | Data Movement | 4 | LoopbackPacketSizes, LoopbackDirectedIdeal, OneFromOnePacketSizes, OneFromOneDirectedIdeal | WH N150 |
+| 3g | DFB Config Validation | 10 | TC pairing, risc_mask, remapper validation (7 STRIDED + 3 multi-core) | Quasar |
+| 3h | Quasar Compute | 4 | MultipleThreads, SingleThread, MultipleKernels, TLS | Quasar |
+| 3i | Quasar Semaphores | 3 | ComputeKernelSemaphores, DmAndComputeSemaphores, DmLoopback | Quasar |
+| 3j | Simple DM + Atomics | 4 | SingleDmL1Write, 3× RISC-V atomic tests | Quasar |
+| 3k | Data Movement | 4 | LoopbackPacketSizes, LoopbackDirectedIdeal, OneFromOnePacketSizes, OneFromOneDirectedIdeal | WH N150 |
 | 4 | TTNN INT32 | 2 | ttnn_relational_int (66 sub-cases), ttnn_add_int | BH P100 |
 | 5 | TTNN Matmul Sweep | 1 | 14 sub-cases: multi-core matmul 32² through 2048² | WH N150 |
 | 5b | Quasar Matmul PCC | 2 | TensixMatmulBlock, TensixMatmulBlockInitShort | Quasar |
@@ -562,7 +563,7 @@ The tier table above in Test Results reflects the full `run_regression.sh` struc
 
 D2M golden test regression: `run_d2m_regression.sh` — runs 13 tt-mlir test files (1878 tests) against the emulated backend. 1624 pass, 112 fail, 142 skip. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
 
-Regression scripts: `run_regression.sh` (116 passing tests) + `run_d2m_regression.sh` (13 D2M test files, 1878 tests).
+Regression scripts: `run_regression.sh` (126 passing tests) + `run_d2m_regression.sh` (13 D2M test files, 1878 tests).
 
 ### tt-metal Files Modified
 
@@ -708,7 +709,7 @@ Rebasing onto new tt-metal versions primarily requires:
 | Implemented compute ops | Not enumerated | 11 operations: copy/pack tile, add/sub/mul_tiles, matmul_tiles/block, reduce_tile, L1 acc toggle |
 | CSR emulation | Not documented | NEO_ID, TRISC_ID via TLS; mhartid regex patch |
 | JIT patches | mhartid only | + fence instruction, L1 pointer cast patches |
-| tt-metal regression | 18 pass | **116 pass**, 1 fail (hardware-only), 2 skip |
+| tt-metal regression | 18 pass | **126 pass**, 1 fail (hardware-only), 2 skip |
 | Quasar-specific tests | None | 72 DFB + 4 compute + 3 semaphore + 4 atomics/DM + 4 NOC + 2 matmul = 89 tests |
 | Matmul PCC | Not tracked | Passing (`TensixMatmulBlock`, `TensixMatmulBlockInitShort`) |
 | Reference docs | None | `docs/DFB_EMULATION.md`, `docs/QUASAR_EMULATION.md`, `docs/TEST_COVERAGE_TODO.md` |
@@ -723,7 +724,7 @@ Rebasing onto new tt-metal versions primarily requires:
 | D2M fully-passing files | 8 of 13 | **9 of 13** (tilize now passes) |
 | Tilize/Untilize D2M | 12/44 pass (PCC mismatch) | **44/44 pass** — nfaces in `__llk_pack_tiled` and `copy_tile` fixed all 32 failures |
 | DMA D2M | 38/49 pass | **40/49 pass** (+2 tiled roundtrip fixes) |
-| Standalone regression | 83 pass / 28 fail / 2 skip | **85 pass** / 28 fail / 2 skip (→ 116/1/2 after rebase fixes in v8) |
+| Standalone regression | 83 pass / 28 fail / 2 skip | **85 pass** / 28 fail / 2 skip (→ 126/1/2 after rebase fixes in v8) |
 | Quasar matmul PCC | 0/2 pass (data corruption) | **2/2 pass** — nfaces conversion resolved PCC failures |
 | Files modified | — | `common.h`, `matmul.h`, `reduce.h`, `llk_defs.h` |
 
@@ -734,7 +735,7 @@ Rebasing onto new tt-metal versions primarily requires:
 | Aspect | v7 | v8 |
 |--------|----|----|
 | tt-metal rebase | Pre-rebase (`3fa4d75355`) | Rebased (1,669 commits newer), 7 fixes applied |
-| tt-metal regression | 85 pass / 28 fail / 2 skip | **116 pass** / 1 fail / 2 skip |
+| tt-metal regression | 85 pass / 28 fail / 2 skip | **126 pass** / 1 fail / 2 skip |
 | DFB BLOCKED multi-P/C | All 16 failing (8 DM-DM + 8 TensixDM) | **All 16 passing** |
 | BLOCKED consumer model | Round-robin tc_idx on every pop_front | `drain_per_tc`: drain each TC slot fully before advancing |
 | BLOCKED TC slot layout | All slots share full buffer range | Per-slot sub-ranges: `base_addr = alloc_base + p*capacity*entry_size` |
