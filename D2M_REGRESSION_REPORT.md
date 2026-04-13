@@ -87,7 +87,7 @@
 ## Standalone Regression (tt-emule)
 
 **85 passed, 28 failed, 2 skipped** (+2 from previous: Quasar matmul now passes)
-*Note: After tt-metal rebase + BLOCKED drain fix (2026-04-13), standalone regression is now **110 passed, 1 failed, 2 skipped**.*
+*Note: After tt-metal rebase + BLOCKED drain fix (2026-04-13), standalone regression is now **116 passed, 1 failed, 2 skipped**.*
 
 ### Passing (85)
 

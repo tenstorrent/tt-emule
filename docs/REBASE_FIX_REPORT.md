@@ -2,7 +2,7 @@
 
 ## Overview
 
-After rebasing tt-metal onto upstream commit `3fa4d75355` (1,669 commits newer), the DFB emulation regression went from **83 passed / 30 failed / 2 skipped** to **24 passed / 89 failed / 2 skipped**. A series of fixes recovered to the current state of **110 passed / 1 failed / 2 skipped**.
+After rebasing tt-metal onto upstream commit `3fa4d75355` (1,669 commits newer), the DFB emulation regression went from **83 passed / 30 failed / 2 skipped** to **24 passed / 89 failed / 2 skipped**. A series of fixes recovered to the current state of **116 passed / 1 failed / 2 skipped**.
 
 ### Progression
 
@@ -13,7 +13,7 @@ After rebasing tt-metal onto upstream commit `3fa4d75355` (1,669 commits newer),
 | After fixes 1-3 | 58 | 55 | 2 | JIT stubs, HAL core count, finalize alloc_addr |
 | After fix 4 (BLOCKED) | 80 | 33 | 2 | Correct BLOCKED stride/offset |
 | After fixes 5-6 (TensixDM) | 94 | 19 | 2 | proc_bit + early DFB finalize |
-| After fix 7 (BLOCKED drain) | **110** | **1** | 2 | BLOCKED consumer drain_per_tc + per-slot limits; removed redundant DFBEmule tests |
+| After fix 7 (BLOCKED drain) | **116** | **1** | 2 | BLOCKED consumer drain_per_tc + per-slot limits; removed redundant DFBEmule tests; added multi-core DFB tests |
 
 The 1 remaining failure is ttnn_add_int_silicon (requires real hardware). DFBEmuleDMTest and DFBEmuleBridgeTest were removed as redundant with `test_dataflow_buffer.cpp` coverage.
 

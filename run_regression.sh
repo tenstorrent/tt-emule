@@ -234,7 +234,25 @@ for test in TensixDMTest1xDFB1Sx4B TensixDMTest1xDFB4Sx1B TensixDMTest1xDFB4Sx4B
 done
 
 echo ""
-echo "== Tier 3f: Quasar Compute Kernel Tests =="
+echo "== Tier 3f: DFB Multi-Core =="
+
+for test in MultiCoreDMTest2Core_1Sx1S MultiCoreDMTest2Core_2Sx2S; do
+    run_test "${test}" "$DFB_TEST" \
+        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncFalse"
+    run_test "${test}_IS" "$DFB_TEST" \
+        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
+done
+
+# BLOCKED multi-core
+for test in MultiCoreDMTest2Core_1Sx4B; do
+    run_test "${test}" "$DFB_TEST" \
+        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncFalse"
+    run_test "${test}_IS" "$DFB_TEST" \
+        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
+done
+
+echo ""
+echo "== Tier 3g: Quasar Compute Kernel Tests =="
 
 # Create a fake simulator directory with a valid soc_descriptor.yaml so that
 # get_simulator_enabled() returns true (the env var is set and the path is non-
@@ -259,7 +277,7 @@ run_test "QuasarMatmulBlockInitShort" "$TEST_DIR/test_matmul_X_tile" \
     --gtest_filter="*TensixMatmulBlockInitShort" --gtest_also_run_disabled_tests
 
 echo ""
-echo "== Tier 3g: Quasar Semaphore Tests =="
+echo "== Tier 3h: Quasar Semaphore Tests =="
 
 run_test "QuasarComputeKernelSemaphores" "$TEST_DIR/test_quasar_semaphores" \
     --gtest_filter="*QuasarComputeKernelSemaphores*"
@@ -269,7 +287,7 @@ run_test "DmLoopback" "$TEST_DIR/test_dm_loopback" \
     --gtest_filter="*DmLoopback*"
 
 echo ""
-echo "== Tier 3h: Simple DM + RISCV Atomics =="
+echo "== Tier 3i: Simple DM + RISCV Atomics =="
 
 run_test "SingleDmL1Write" "$TEST_DIR/test_single_dm_l1_write" \
     --gtest_filter="*SingleDmL1Write*"
@@ -284,7 +302,7 @@ unset TT_METAL_SIMULATOR
 rm -rf "$EMULE_SIM_DIR"
 
 echo ""
-echo "== Tier 3i: Data Movement Tests (Phase 8) =="
+echo "== Tier 3j: Data Movement Tests (Phase 8) =="
 
 unset ARCH_NAME
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
