@@ -61,7 +61,7 @@ cd <ROOT>/tt-emule
 ./run_regression.sh
 ```
 
-**Success:** Output ends with `Results: 109 passed, 4 failed, 2 skipped` and exit code 1. The 2 skips are `test_emulation_toggle` (not yet in CMakeLists). Known failures: DFBEmuleDMTest, DFBEmuleBridgeTest (pre-existing host-side verification issue), DmLoopbackPacketSizes (intermittent), and ttnn_add_int_silicon (requires real hardware).
+**Success:** Output ends with `Results: 109 passed, 2 failed, 2 skipped` and exit code 1. The 2 skips are `test_emulation_toggle` (not yet in CMakeLists). Known failures: DmLoopbackPacketSizes (intermittent) and ttnn_add_int_silicon (requires real hardware).
 
 ## Step 5: Set Up tt-mlir
 
