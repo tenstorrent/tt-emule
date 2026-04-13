@@ -57,7 +57,13 @@ public:
         slot.rd_ptr = advance_ptr(slot.rd_ptr, slot.base_addr,
                                   slot.limit, n);
         iface_.rd_entry_idx += n;
-        iface_.tc_idx = (iface_.tc_idx + 1) % iface_.num_tcs_to_rr;
+        if (iface_.drain_per_tc) {
+            // BLOCKED consumer: advance to next TC only when current slot is drained.
+            if (slot.rd_ptr == slot.base_addr)
+                iface_.tc_idx = (iface_.tc_idx + 1) % iface_.num_tcs_to_rr;
+        } else {
+            iface_.tc_idx = (iface_.tc_idx + 1) % iface_.num_tcs_to_rr;
+        }
     }
 
     void finish() {
