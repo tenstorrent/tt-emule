@@ -18,6 +18,7 @@ struct noc_traits_t {
 class Noc {
 public:
     enum class AddressType { NOC, LOCAL_L1 };
+    enum class McastMode { INCLUDE_SRC, EXCLUDE_SRC };
 
     Noc() : noc_id_(0) {}
     explicit Noc(uint8_t noc_id) : noc_id_(noc_id) {}
