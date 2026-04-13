@@ -2,7 +2,7 @@
 
 ## Overview
 
-After rebasing tt-metal onto upstream commit `3fa4d75355` (1,669 commits newer), the DFB emulation regression went from **83 passed / 30 failed / 2 skipped** to **24 passed / 89 failed / 2 skipped**. A series of fixes recovered to the current state of **94 passed / 19 failed / 2 skipped**.
+After rebasing tt-metal onto upstream commit `3fa4d75355` (1,669 commits newer), the DFB emulation regression went from **83 passed / 30 failed / 2 skipped** to **24 passed / 89 failed / 2 skipped**. A series of fixes recovered to the current state of **109 passed / 4 failed / 2 skipped**.
 
 ### Progression
 
@@ -12,9 +12,10 @@ After rebasing tt-metal onto upstream commit `3fa4d75355` (1,669 commits newer),
 | Post-rebase (broken) | 24 | 89 | 2 | After rebase, no fixes |
 | After fixes 1-3 | 58 | 55 | 2 | JIT stubs, HAL core count, finalize alloc_addr |
 | After fix 4 (BLOCKED) | 80 | 33 | 2 | Correct BLOCKED stride/offset |
-| After fixes 5-6 (TensixDM) | **94** | **19** | 2 | proc_bit + early DFB finalize |
+| After fixes 5-6 (TensixDM) | 94 | 19 | 2 | proc_bit + early DFB finalize |
+| After fix 7 (BLOCKED drain) | **109** | **4** | 2 | BLOCKED consumer drain_per_tc + per-slot limits |
 
-The 19 remaining failures are all pre-existing (before the rebase).
+The 4 remaining failures are all pre-existing (DFBEmuleDMTest, DFBEmuleBridgeTest, DmLoopbackPacketSizes, ttnn_add_int_silicon).
 
 ---
 
@@ -37,7 +38,7 @@ The DFB L1 allocation path was using an independent bump allocator, producing ad
 
 ---
 
-## Uncommitted Fixes
+## Committed Fixes (round 2)
 
 ### Fix 4: BLOCKED mode stride and initial offset
 
@@ -113,6 +114,27 @@ if (producer_type == DFBPorCType::TENSIX || consumer_type == DFBPorCType::TENSIX
 }
 ```
 
+### Fix 7: BLOCKED consumer drain behavior and per-slot memory layout
+**Commit:** `b342581` (tt-emule), `5d3617c0b2` (tt-metal)
+
+**Root cause:** Two bugs in BLOCKED consumer emulation:
+1. `pop_front()` advanced `tc_idx` on every call (round-robin), but BLOCKED consumers must drain each TC slot fully before moving to the next. The hardware reads all `capacity` entries from TC0 before TC1.
+2. All TC slots shared the entire buffer range. Each slot must have its own sub-range: `base_addr = alloc_base + p * capacity * entry_size`, `limit = base_addr + capacity * entry_size`.
+
+**Impact:** All 16 multi-P/C BLOCKED tests recovered (8 DM-DM + 8 TensixDM). Regression: 94 → 109 passed.
+
+**Files changed:**
+
+| File | Repo | Change |
+|------|------|--------|
+| `include/tt_emule/dfb_sync_state.hpp` | tt-emule | Added `drain_per_tc` field to `EmuleDFBInterface` |
+| `include/jit_hw/api/dfb_api.h` | tt-emule | `dfb_pop_front`: conditional tc_idx advancement |
+| `include/tt_emule/dataflow_buffer.hpp` | tt-emule | Same drain logic for standalone path |
+| `src/kernel_runner.cpp` | tt-emule | Per-slot base_addr/limit for BLOCKED |
+| `tt_metal/impl/emulation/emulated_program_runner.cpp` | tt-metal | Per-slot base_addr/limit + drain_per_tc |
+
+**Important:** Changing `EmuleDFBInterface` struct layout invalidates JIT cache. Clear `/tmp/tt_emule_jit_cache_*/` after this fix to avoid stale `.so` files that read the wrong field offsets.
+
 ### Other: TensorAccessor null-pointer diagnostic
 
 **File:** `include/jit_hw/experimental/tensor.h` (tt-emule)
@@ -121,31 +143,33 @@ Added a diagnostic `fprintf` in `noc_traits_t<TensorAccessor>::dst_addr` that fi
 
 ---
 
-## Remaining Failures (19, all pre-existing)
+## Remaining Failures (4, all pre-existing)
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| DM-DM BLOCKED multi-P/C | 8 | `DMTest1xDFB{4Sx1B,4Sx4B,4Sx2B,2Sx4B}` x2 IS variants. Multi-producer/consumer BLOCKED on Quasar descriptor. |
-| TensixDM BLOCKED multi-P/C | 8 | Same pattern as DM-DM but with Tensix producer. Quasar-only tests that pass through but have pre-existing BLOCKED issues with multi-P/C. |
-| DFBEmuleDMTest | 1 | Pre-existing standalone DFB emulation test failure. |
-| DFBEmuleBridgeTest | 1 | Pre-existing bridge test failure. |
-| ttnn_add_int_silicon | 1 | Pre-existing silicon toggle test (always fails in emulation). |
+| DFBEmuleDMTest | 1 | Pre-existing standalone DFB emulation test failure (host-side verification mismatch). |
+| DFBEmuleBridgeTest | 1 | Pre-existing bridge test failure (same root cause). |
+| DmLoopbackPacketSizes | 1 | Pre-existing data movement test failure. |
+| ttnn_add_int_silicon | 1 | Requires real hardware (always fails in emulation). |
 
 ---
 
 ## File Change Summary
 
-### tt-metal (uncommitted)
+### tt-metal
 
 ```
  tests/tt_metal/tt_metal/api/dataflow_buffer/test_dataflow_buffer.cpp  | +6
- tt_metal/impl/emulation/emulated_program_runner.cpp                   | +25 -13
+ tt_metal/impl/emulation/emulated_program_runner.cpp                   | +39 -24
 ```
 
-### tt-emule (uncommitted)
+### tt-emule
 
 ```
- docs/DFB_EMULATION.md                 | +5 -5
- include/jit_hw/experimental/tensor.h  | +7
- src/kernel_runner.cpp                 | +24 -6
+ docs/DFB_EMULATION.md                    | updated
+ include/tt_emule/dfb_sync_state.hpp      | +2 -1  (drain_per_tc field)
+ include/jit_hw/api/dfb_api.h             | +8 -1  (conditional tc_idx)
+ include/tt_emule/dataflow_buffer.hpp     | +7 -1  (same for standalone)
+ include/jit_hw/experimental/tensor.h     | +7
+ src/kernel_runner.cpp                    | +24 -6  (per-slot limits)
 ```
