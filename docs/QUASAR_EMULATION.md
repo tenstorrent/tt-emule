@@ -248,7 +248,7 @@ Every feature listed here is verified by at least one passing test.
 | RISC-V fence patch | `__sync_synchronize()` | All JIT tests (compilation succeeds) |
 | `GenericMeshDeviceFixture` | Allows slow dispatch in emulated mode | All JIT-path tests |
 
-**Regression total:** 116 passing, 1 failure (ttnn_add_int_silicon — requires real hardware), 2 skipped.
+**Regression total:** 126 passing, 1 failure (ttnn_add_int_silicon — requires real hardware), 2 skipped.
 
 ---
 

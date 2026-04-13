@@ -2,7 +2,7 @@
 
 ## Overview
 
-After rebasing tt-metal onto upstream commit `3fa4d75355` (1,669 commits newer), the DFB emulation regression went from **83 passed / 30 failed / 2 skipped** to **24 passed / 89 failed / 2 skipped**. A series of fixes recovered to the current state of **116 passed / 1 failed / 2 skipped**.
+After rebasing tt-metal onto upstream commit `3fa4d75355` (1,669 commits newer), the DFB emulation regression went from **83 passed / 30 failed / 2 skipped** to **24 passed / 89 failed / 2 skipped**. A series of fixes recovered to the current state of **126 passed / 1 failed / 2 skipped**.
 
 ### Progression
 
