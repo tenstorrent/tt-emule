@@ -61,7 +61,7 @@ cd <ROOT>/tt-emule
 ./run_regression.sh
 ```
 
-**Success:** Output ends with `Results: 110 passed, 1 failed, 2 skipped` and exit code 1. The 2 skips are `test_emulation_toggle` (not yet in CMakeLists). Known failure: ttnn_add_int_silicon (requires real hardware).
+**Success:** Output ends with `Results: 116 passed, 1 failed, 2 skipped` and exit code 1. The 2 skips are `test_emulation_toggle` (not yet in CMakeLists). Known failure: ttnn_add_int_silicon (requires real hardware).
 
 ## Step 5: Set Up tt-mlir
 
