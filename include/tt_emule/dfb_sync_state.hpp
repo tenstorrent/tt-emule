@@ -36,7 +36,8 @@ struct EmuleDFBInterface {
     uint32_t rd_entry_idx   = 0;   // logical read entry index
     uint32_t wr_entry_idx   = 0;   // logical write entry index
     uint32_t num_entries    = 0;   // total entries in the DFB
-    bool     broadcast_tc   = false; // BLOCKED mode: post to all TCs
+    bool     broadcast_tc   = false; // BLOCKED producer: post to all TCs
+    bool     drain_per_tc   = false; // BLOCKED consumer: drain each TC fully before advancing
     bool     active         = false; // whether this thread participates in this DFB
 };
 

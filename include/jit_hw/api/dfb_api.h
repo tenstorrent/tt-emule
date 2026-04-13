@@ -129,7 +129,14 @@ inline void dfb_pop_front(uint32_t dfb_id, uint16_t n) {
     if (slot.rd_ptr >= slot.limit)
         slot.rd_ptr = slot.base_addr + (slot.rd_ptr - slot.limit);
     iface.rd_entry_idx += n;
-    iface.tc_idx = (iface.tc_idx + 1) % iface.num_tcs_to_rr;
+    if (iface.drain_per_tc) {
+        // BLOCKED consumer: advance to next TC only when current slot is drained.
+        // The hardware reads all capacity entries from TC0 before moving to TC1.
+        if (slot.rd_ptr == slot.base_addr)
+            iface.tc_idx = (iface.tc_idx + 1) % iface.num_tcs_to_rr;
+    } else {
+        iface.tc_idx = (iface.tc_idx + 1) % iface.num_tcs_to_rr;
+    }
 }
 
 inline void dfb_finish(uint32_t dfb_id) {
