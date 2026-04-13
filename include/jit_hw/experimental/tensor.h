@@ -37,6 +37,13 @@ struct noc_traits_t<TensorAccessor> {
     static uintptr_t dst_addr(const TensorAccessor& dst, const Noc& noc, const dst_args_type& args) {
         uint64_t noc_addr = dst.get_noc_addr(args.page_id, args.offset_bytes, noc.get_noc_id());
         uint8_t* ptr = __emule_resolve_noc_addr(noc_addr);
+        if (!ptr) {
+            uint32_t noc_x = static_cast<uint32_t>((noc_addr >> 32) & 0x3F);
+            uint32_t noc_y = static_cast<uint32_t>((noc_addr >> 38) & 0x3F);
+            uint32_t offset = static_cast<uint32_t>(noc_addr & 0xFFFFFFFF);
+            fprintf(stderr, "[EMULE TA] dst_addr NULL: page_id=%u noc_addr=0x%lx noc_xy=(%u,%u) offset=0x%x\n",
+                    args.page_id, (unsigned long)noc_addr, noc_x, noc_y, offset);
+        }
         return reinterpret_cast<uintptr_t>(ptr);
     }
 };
