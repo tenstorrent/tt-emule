@@ -370,6 +370,8 @@ export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/blackhole_P100.yaml"
 
 run_test "ttnn_relational" "$TEST_DIR/test_ttnn_relational_int"
 run_test "ttnn_add_int_emulated" "$TEST_DIR/test_ttnn_add_int"
+run_test "ttnn_sub_int" "$TEST_DIR/test_ttnn_sub_int"
+run_test "ttnn_matmul" "$TEST_DIR/test_ttnn_matmul"
 
 # Tier 5: TTNN Matmul Sweep (wormhole — multi-core matmul with semaphore sync)
 echo ""
