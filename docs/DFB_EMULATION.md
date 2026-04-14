@@ -317,7 +317,7 @@ experimental::dfb::BindDataflowBufferToProducerConsumerKernels(
 
 The runner applies the same STRIDED TC assignment algorithm as the standalone `build_dfb_interfaces()`: `M = max(P, C)`, `stride_size = M * entry_size`, producer p owns TC slots `{p + k*P}`, consumer c owns `{c + k*C}`. Key implementation details:
 
-1. **NUM_DRAM_BANKS=1**: Flat DRAM emulation — always 1 bank regardless of architecture (Quasar=2, WH=6, BH=8). Multi-bank interleaving generates NOC addresses not in the core map, causing zeros.
+1. **Multi-bank DRAM**: `NUM_DRAM_BANKS` is set to the real architecture channel count (Quasar=2, WH=6, BH=8). All bank NOC coordinates are registered in `__emule_core_map` so multi-bank interleaving works correctly.
 2. **Multi-thread spawning**: `QuasarDataMovementKernel` — one thread per DM processor via `get_dm_processors()`. `QuasarComputeKernel` — one thread per compute engine (groups of 4 TRISCs into 1 thread via `get_compute_processors()`).
 3. **dfb_index bounds**: Assertion that `dfb_index < TILE_COUNTERS_PER_NEO / MAX_TC_SLOTS_PER_DFB` (max 8 DFBs with neo_id=0).
 

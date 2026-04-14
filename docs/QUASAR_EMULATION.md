@@ -68,12 +68,13 @@ Both `__emule_neo_id` and `__emule_trisc_id` are set by the program runner befor
 ### 4.2 DRAM
 
 - Emulated as a flat host buffer (single contiguous allocation per device)
-- `NUM_DRAM_BANKS` is forced to **1** in the JIT defines, regardless of the real architecture count (Quasar=2, WH=6, BH=8)
-- **Why:** `InterleavedAddrGen` with N>1 banks maps page IDs to bank-specific NOC addresses. Banks 1+ generate NOC (x,y) coordinates not registered in `__emule_core_map`. `__emule_resolve_noc_addr()` returns null for unmapped cores, causing `noc_async_read` to skip the memcpy and produce zeros.
+- `NUM_DRAM_BANKS` is set to the **real architecture channel count** (Quasar=2, WH=6, BH=8) at `emulated_program_runner.cpp:700`
+- All bank-to-NOC-coordinate arrays (`dram_bank_to_noc_xy`, `bank_to_dram_offset`) are populated for every channel at lines 531-541
+- DRAM cores are registered in `__emule_core_map` at lines 1012-1031, so `__emule_resolve_noc_addr()` resolves all bank addresses correctly
 - `noc_async_read` / `noc_async_write` are synchronous `memcpy` — no actual NOC transfer
 - `__emule_dram_ptr(offset)` returns a host pointer into the flat DRAM buffer
 
-**Test evidence:** `test_dm_loopback.cpp:DmLoopback` exercises DM semaphore + DRAM NOC read/write. `test_single_dm_l1_write.cpp:SingleDmL1Write` tests named CT args and common RT args via DRAM.
+**Test evidence:** `test_dm_loopback.cpp:DmLoopback` exercises DM semaphore + DRAM NOC read/write. `test_single_dm_l1_write.cpp:SingleDmL1Write` tests named CT args and common RT args via DRAM. `test_dm_unary_dram.cpp:DRAMChannels` exercises multi-bank DRAM read/write across all architecture channels.
 
 ### 4.3 NOC
 
@@ -81,6 +82,8 @@ NOC operations (`noc_async_read`, `noc_async_write`) are synchronous memcpy in e
 
 - **Loopback**: Single-core L1→L1 write via NOC — tested by `test_loopback.cpp:LoopbackPacketSizes, LoopbackDirectedIdeal`
 - **One-from-one**: Two-core L1 read — tested by `test_one_from_one.cpp:OneFromOnePacketSizes, OneFromOneDirectedIdeal`
+- **Inline direct write**: `noc_inline_dw_write` (unicast 32-bit write), `noc_inline_mcast_dw_write` (multicast), `noc_inline_dw_write_set_state`/`noc_inline_dw_write_with_state` (stateful cached address/value pattern). Byte-enable masking supported. Tested by `test_dm_direct_write.cpp:PerformanceComparison, AddressPatterns, Multicast`
+- **DRAM read/write**: Multi-bank `noc_async_read`/`noc_async_write` to DRAM via `get_noc_addr_from_bank_id<dram>()`. All architecture bank counts supported. Tested by `test_dm_unary_dram.cpp:PacketSizes, CoreLocations, DRAMChannels, DirectedIdeal`
 - **Virtual channels**: Optional parameter accepted and ignored
 - **RISC-V fence**: `asm volatile("fence")` patched to `__sync_synchronize()` at JIT time
 
@@ -227,11 +230,15 @@ Every feature listed here is verified by at least one passing test.
 | Compute threading (1 thread per engine) | `emulated_program_runner.cpp` | `test_quasar_compute_kernels.cpp:QuasarComputeKernelSingleThread` |
 | NEO_ID / TRISC_ID CSR | `__emule_neo_id`, `__emule_trisc_id` TLS | `test_globals_tls.cpp:QuasarComputeKernelTLS` |
 | mhartid CSR patch | Regex in `emulated_program_runner.cpp` | `test_quasar_compute_kernels.cpp` (all 3 tests) |
-| DRAM read/write (flat, 1 bank) | `noc_async_read/write` as memcpy | `test_dm_loopback.cpp:DmLoopback` |
+| DRAM read/write (multi-bank) | `noc_async_read/write` as memcpy, all architecture bank counts | `test_dm_loopback.cpp:DmLoopback`, `test_dm_unary_dram.cpp:DRAMChannels` |
 | L1 shared memory (bump alloc) | `Core::l1_alloc()` | All DFB tests (72+ tests allocate L1) |
 | L1 address translation | `__emule_local_l1_to_ptr()` | `test_single_dm_l1_write.cpp:SingleDmL1Write` |
 | NOC loopback (single-core) | Synchronous memcpy | `test_loopback.cpp:LoopbackPacketSizes, LoopbackDirectedIdeal` |
 | NOC one-from-one (two-core) | Synchronous memcpy | `test_one_from_one.cpp:OneFromOnePacketSizes, OneFromOneDirectedIdeal` |
+| NOC inline direct write (unicast) | `noc_inline_dw_write` with byte-enable | `test_dm_direct_write.cpp:PerformanceComparison, AddressPatterns` |
+| NOC inline direct write (stateful) | `set_state`/`with_state` TLS-cached | `test_dm_direct_write.cpp:PerformanceComparison, AddressPatterns` |
+| NOC inline direct write (multicast) | `noc_inline_mcast_dw_write` rectangle decode | `test_dm_direct_write.cpp:Multicast` |
+| DRAM unary read/write (multi-bank) | `get_noc_addr_from_bank_id<dram>()` + `noc_async_read/write` | `test_dm_unary_dram.cpp:PacketSizes, CoreLocations, DRAMChannels, DirectedIdeal` |
 | Semaphores (compute + DM) | Atomic spin-wait | `test_quasar_semaphores.cpp:QuasarComputeKernelSemaphores, QuasarDmAndComputeKernelSemaphores` |
 | RISC-V atomics on L1 | GCC builtins | `test_riscv_atomics.cpp:TestAtomicLoadStoreRISCV, TestAtomicAddFetchRISCV, TestAtomicCASRISCV` |
 | DFB STRIDED (1P-1C through 4P-4C) | `EmuleDFBInterface` + `TileCounterArray` | 42 tests in `test_dataflow_buffer.cpp` |
@@ -256,10 +263,8 @@ Every feature listed here is verified by at least one passing test.
 
 | Feature | Blocking Gap | Tests Affected |
 |---------|-------------|----------------|
-| NOC 2.0 API (`NocSendDescriptor`) | Stateful NOC API (`requestor_2_0.cpp`, `noc_inline_dw_write`) not implemented | `OneFromOnePacketSizes2_0`, `DirectWrite*` (3 tests), `NocApiLatency*` (7 tests), `OnePacket*_2_0` (2 tests), `DRAMPacketSizes2_0` |
-| Multi-bank DRAM interleaving | Flat 1-bank by design; higher banks' NOC addresses unmapped | No test affected (by design) |
+| NOC 2.0 API (`NocSendDescriptor`) | Stateful NOC API (`requestor_2_0.cpp`) not implemented | `OneFromOnePacketSizes2_0`, `NocApiLatency*` (7 tests), `OnePacket*_2_0` (2 tests), `DRAMPacketSizes2_0` |
 | Multi-cluster semaphore pipeline | Cross-cluster semaphore coordination not implemented | `QuasarMultiSemaphorePipeline`, `QuasarMultipleClustersMultiSemaphorePipeline` |
-| Firmware internal headers | `noc/noc_parameters.h` and internal firmware structs not available | `test_unary_dram.cpp:DRAM*` (5 tests) |
 | SFPU operations | All SFPU ops are no-op stubs | Any test requiring SFPU math |
 | Broadcast (COL/ROW/SCALAR) | `bcast` variants are no-op stubs | Tests requiring broadcast compute |
 | Transpose WH | `transpose_wh` is a no-op stub | Tests requiring tile transpose |
