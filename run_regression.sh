@@ -7,7 +7,6 @@ BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule_clang}"
 TEST_DIR="$BUILD_DIR/test/tt_emule"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"
 
-LOG_FILE="${LOG_FILE:-$SCRIPT_DIR/regression_$(date +%Y%m%d_%H%M%S).log}"
 PASS=0; FAIL=0; SKIP=0
 
 run_test() {

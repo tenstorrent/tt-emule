@@ -1,7 +1,11 @@
 #pragma once
 // Stub debug print for JIT-compiled kernels.
 // On the real device, DPRINT streams to a ring buffer read by the host.
-// In the emulator, we send to stdout (or discard).
+// In the emulator, we discard all output (sink object).
+//
+// NOTE: hw/inc/api/debug/dprint.h has a different DPRINT definition ((void)0 &&).
+// Both guard with #ifndef DPRINT, so whichever is included first wins.
+// This JIT version should always be included first by JIT-compiled kernels.
 
 #include <cstdio>
 

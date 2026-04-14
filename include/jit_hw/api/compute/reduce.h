@@ -10,7 +10,7 @@
 // The scaler CB contains a tile where every element = 1.0 (for SUM) or 1/N (for AVG).
 // Results ACCUMULATE into DST (+=) to support multi-tile reductions.
 
-#include "api/compute/common.h"
+#include "jit_hw/api/compute/common.h"
 #include "jit_hw/api/compute/nfaces.h"
 #include "jit_hw/llk_defs.h"
 #include <algorithm>
@@ -58,6 +58,7 @@ inline void reduce_revert_delta(uint32_t ocb = 0) {}
 template <PoolType reduce_type = REDUCE_OP, ReduceDim reduce_dim = REDUCE_DIM, bool enforce_fp32_accumulation = false>
 inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
                         uint32_t itile, uint32_t itile_scaler, uint32_t idst) {
+    __emule_dst_check(idst, "reduce_tile");
     // UNPACK source tile: nfaces→row-major + format conversion
     float src[1024];
     {
@@ -154,7 +155,7 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
     }
 }
 
-// reduce_tile_math: math-only variant (assumes source already in registers)
+// reduce_tile_math: intentional no-op — emulation performs math in reduce_tile directly.
 template <PoolType reduce_type = REDUCE_OP, ReduceDim reduce_dim = REDUCE_DIM, bool enforce_fp32_accumulation = false>
 inline void reduce_tile_math(uint32_t idst, uint32_t num_faces = 4) {}
 
