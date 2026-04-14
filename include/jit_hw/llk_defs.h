@@ -296,28 +296,31 @@ inline void untilize_init_short(uint32_t) {
     __llk_pack_is_untilize = true;
 }
 
-// ---- Experimental pack_untilize_block ----
-// Matches real tt-metal signature: (icb, block_rt_dim, ocb, block_c_index).
+// ---- Experimental pack_untilize_block (used by D2M-generated untilize kernels) ----
 // Uses copy_tile (CB→DST) + __llk_pack_untilize (DST→CB row-major).
+// __llk_pack_untilize needs __llk_pack_block_c (row stride in tiles) and
+// __llk_pack_offset (linear tile position) to compute scatter coordinates.
 namespace experimental {
 
-template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim>
-inline void pack_untilize_block(uint32_t icb, uint32_t block_rt_dim,
-                                uint32_t ocb, uint32_t block_c_index = 0) {
-    __llk_pack_block_c = full_ct_dim;
+template <uint32_t cols_per_dst_pass, uint32_t total_col_tiles>
+inline void pack_untilize_block(uint32_t icb, uint32_t ocb,
+                                uint32_t block_row_tiles,
+                                uint32_t block_col_tiles) {
+    __llk_pack_block_c = total_col_tiles;
+    __llk_pack_offset = 0;
 
-    for (uint32_t r = 0; r < block_rt_dim; ++r) {
-        // Copy block_ct_dim tiles from CB into DST
-        for (uint32_t c = 0; c < block_ct_dim; ++c) {
-            copy_tile(icb, c, c);
-        }
+    const uint32_t num_col_blocks = block_col_tiles / cols_per_dst_pass;
+    for (uint32_t r = 0; r < block_row_tiles; ++r) {
+        for (uint32_t b = 0; b < num_col_blocks; ++b) {
+            for (uint32_t c = 0; c < cols_per_dst_pass; ++c) {
+                uint32_t src_tile = r * block_col_tiles + b * cols_per_dst_pass + c;
+                copy_tile(icb, src_tile, c);
+            }
 
-        // Pack from DST to output CB in row-major order
-        __llk_pack_offset = r * (full_ct_dim / block_ct_dim) + block_c_index;
-        __llk_pack_offset *= block_ct_dim;
-        for (uint32_t c = 0; c < block_ct_dim; ++c) {
-            __llk_pack_untilize(c, ocb);
-            __llk_pack_offset++;
+            for (uint32_t c = 0; c < cols_per_dst_pass; ++c) {
+                __llk_pack_untilize(c, ocb);
+                __llk_pack_offset++;
+            }
         }
     }
 }
