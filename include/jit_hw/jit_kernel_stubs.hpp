@@ -90,6 +90,11 @@ static inline uintptr_t get_common_arg_addr(int arg_idx) {
 template<typename T = uint32_t>
 inline T get_arg_val(int arg_idx) {
     static_assert(sizeof(T) <= sizeof(uint32_t));
+    if (arg_idx < 0 || static_cast<size_t>(arg_idx) >= __rt_args.size()) {
+        fprintf(stderr, "EMULE BUG: get_arg_val(%d) out of bounds (size=%zu)\n",
+                arg_idx, __rt_args.size());
+        std::abort();
+    }
     T val;
     std::memcpy(&val, &__rt_args[arg_idx], sizeof(T));
     return val;
@@ -98,6 +103,11 @@ inline T get_arg_val(int arg_idx) {
 template<typename T = uint32_t>
 inline T get_common_arg_val(int arg_idx) {
     static_assert(sizeof(T) <= sizeof(uint32_t));
+    if (arg_idx < 0 || static_cast<size_t>(arg_idx) >= __common_rt_args.size()) {
+        fprintf(stderr, "EMULE BUG: get_common_arg_val(%d) out of bounds (size=%zu)\n",
+                arg_idx, __common_rt_args.size());
+        std::abort();
+    }
     T val;
     std::memcpy(&val, &__common_rt_args[arg_idx], sizeof(T));
     return val;
@@ -141,7 +151,7 @@ struct CBIndex {
 };
 } // namespace tt
 
-// No-op assertion macro used in some kernel headers.
+// No-op assertion macro — kernel asserts reference hardware state not available in emulation.
 #define ASSERT(...) ((void)0)
 
 // Semaphore address helper — returns a uint32_t L1 address for the given

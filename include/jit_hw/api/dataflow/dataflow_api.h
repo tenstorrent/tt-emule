@@ -228,18 +228,6 @@ FORCE_INLINE void noc_async_write_tile(
     noc_async_write_page(id, addrgen, src_local_l1_addr, size, offset, noc);
 }
 
-// ---- NOC address fixup for OR-constructed addresses ----
-// Some kernels construct NOC addresses by ORing a host pointer (L1 address)
-// into a pre-computed base: `noc_base | l1_host_ptr`. This embeds the host
-// pointer in the address bits instead of an L1 offset. Fix it by masking
-// the lower bits to extract just the L1 offset.
-inline uint64_t __emule_fixup_noc_addr(uint64_t noc_addr) {
-    constexpr uint64_t addr_mask = (1ULL << NOC_ADDR_LOCAL_BITS) - 1;
-    uint32_t addr = static_cast<uint32_t>(noc_addr & addr_mask);
-    uint32_t fixed = __emule_addr_to_offset(addr);
-    return (noc_addr & ~addr_mask) | fixed;
-}
-
 // ---- Raw NOC read/write ----
 
 inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
@@ -288,11 +276,11 @@ inline void noc_async_write_multicast(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
     uint32_t size, uint32_t num_dests, bool linked = false, uint8_t noc = 0) {
     if (__emule_debug_multicast()) {
-        uint32_t x_end   = (dst_mcast_noc_addr >> 36) & 0x3F;
-        uint32_t y_end   = (dst_mcast_noc_addr >> 42) & 0x3F;
-        uint32_t x_start = (dst_mcast_noc_addr >> 48) & 0x3F;
-        uint32_t y_start = (dst_mcast_noc_addr >> 54) & 0x3F;
-        uint32_t off     = static_cast<uint32_t>(dst_mcast_noc_addr & ((1ULL << 36) - 1));
+        uint32_t x_end   = (dst_mcast_noc_addr >> NOC_ADDR_LOCAL_BITS) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t y_end   = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t x_start = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + 2 * NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t y_start = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + 3 * NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t off     = static_cast<uint32_t>(dst_mcast_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
         fprintf(stderr, "EMULE DBG: noc_async_write_multicast (%u,%u)->(%u,%u) offset=0x%x size=%u num_dests=%u "
                 "[from logical (%u,%u)]\n",
                 x_start, y_start, x_end, y_end, off, size, num_dests,
@@ -404,9 +392,9 @@ inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32
 // Atomically increment a remote semaphore.
 // noc_addr is a 64-bit encoded NOC address pointing to the semaphore.
 inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc = 0) {
-    uint32_t noc_x = (noc_addr >> 36) & 0x3F;
-    uint32_t noc_y = (noc_addr >> 42) & 0x3F;
-    uint32_t offset = static_cast<uint32_t>(noc_addr & ((1ULL << 36) - 1));
+    uint32_t noc_x = (noc_addr >> NOC_ADDR_LOCAL_BITS) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+    uint32_t noc_y = (noc_addr >> (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+    uint32_t offset = static_cast<uint32_t>(noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
     uint8_t* ptr = __emule_resolve_noc_addr(noc_addr);
     if (__emule_debug_multicast()) {
         fprintf(stderr, "EMULE DBG: noc_semaphore_inc target_core=(%u,%u) offset=0x%x incr=%u resolved=%p "
@@ -429,12 +417,13 @@ inline void noc_semaphore_set_multicast(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
     uint32_t num_dests, bool linked = false, uint8_t noc = 0) {
     if (__emule_debug_multicast()) {
-        uint32_t x_end   = (dst_mcast_noc_addr >> 36) & 0x3F;
-        uint32_t y_end   = (dst_mcast_noc_addr >> 42) & 0x3F;
-        uint32_t x_start = (dst_mcast_noc_addr >> 48) & 0x3F;
-        uint32_t y_start = (dst_mcast_noc_addr >> 54) & 0x3F;
-        uint32_t off     = static_cast<uint32_t>(dst_mcast_noc_addr & ((1ULL << 36) - 1));
-        uint32_t sem_val = *reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(src_local_l1_addr));
+        uint32_t x_end   = (dst_mcast_noc_addr >> NOC_ADDR_LOCAL_BITS) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t y_end   = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t x_start = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + 2 * NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t y_start = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + 3 * NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t off     = static_cast<uint32_t>(dst_mcast_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
+        uint32_t sem_val;
+        std::memcpy(&sem_val, __emule_local_l1_to_ptr(src_local_l1_addr), sizeof(uint32_t));
         fprintf(stderr, "EMULE DBG: noc_semaphore_set_multicast (%u,%u)->(%u,%u) offset=0x%x val=%u num_dests=%u "
                 "[from logical (%u,%u)]\n",
                 x_start, y_start, x_end, y_end, off, sem_val, num_dests,

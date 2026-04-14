@@ -15,11 +15,10 @@ thread_local tt_emule::Core*       __core   = nullptr;
 thread_local tt_emule::Device*     __device = nullptr;
 thread_local uint8_t               __processor_id = 0;
 
-// DFB thread-locals (standalone path uses __dfb_ifaces; JIT path uses __emule_dfbs)
+// DFB thread-locals: both paths (__dfb_ifaces for standalone, __emule_dfbs for JIT)
+// are always set to the same value in the thread setup below.
 thread_local tt_emule::EmuleDFBInterface* __dfb_ifaces = nullptr;
 thread_local tt_emule::TileCounterArray*  __emule_tc_array = nullptr;
-
-// JIT path also uses __emule_dfbs (same as __dfb_ifaces, aliased in emule_dfb_state.h)
 thread_local tt_emule::EmuleDFBInterface* __emule_dfbs = nullptr;
 
 extern "C" uint8_t* __emule_dram_ptr(uint64_t offset) {
@@ -70,15 +69,16 @@ std::vector<std::vector<EmuleDFBInterface>> build_dfb_interfaces(
 
             // WH/BH ComputeKernel sets bit 2 in risc_mask; Quasar uses bits 8+.
             bool is_tensix = (kd.type == KernelType::Compute || kd.type == KernelType::QuasarCompute);
-            uint16_t proc_bit;
+            uint8_t my_bit;  // bit position in the risc_mask for this kernel
             if (is_tensix) {
                 bool quasar_masks = ((cfg.producer_risc_mask | cfg.consumer_risc_mask) & 0xFF00u) != 0;
-                proc_bit = quasar_masks
-                    ? static_cast<uint16_t>(1u << (kd.processor_id + 8))
-                    : static_cast<uint16_t>(1u << 2);  // WH/BH convention
+                my_bit = quasar_masks
+                    ? static_cast<uint8_t>(kd.processor_id + 8)
+                    : 2;  // WH/BH convention
             } else {
-                proc_bit = static_cast<uint16_t>(1u << kd.processor_id);
+                my_bit = kd.processor_id;
             }
+            uint16_t proc_bit = static_cast<uint16_t>(1u << my_bit);
             bool is_producer  = (cfg.producer_risc_mask & proc_bit) != 0;
             bool is_consumer  = (cfg.consumer_risc_mask & proc_bit) != 0;
 
@@ -94,7 +94,7 @@ std::vector<std::vector<EmuleDFBInterface>> build_dfb_interfaces(
                 uint8_t p = 0;
                 for (uint8_t b = 0; b < 16; ++b) {
                     if (!(cfg.producer_risc_mask & (1u << b))) continue;
-                    if (b == kd.processor_id) break;
+                    if (b == my_bit) break;
                     ++p;
                 }
                 if (is_blocked) {
@@ -136,7 +136,7 @@ std::vector<std::vector<EmuleDFBInterface>> build_dfb_interfaces(
                 uint8_t c = 0;
                 for (uint8_t b = 0; b < 16; ++b) {
                     if (!(cfg.consumer_risc_mask & (1u << b))) continue;
-                    if (b == kd.processor_id) break;
+                    if (b == my_bit) break;
                     ++c;
                 }
                 if (is_blocked) {
@@ -239,6 +239,7 @@ void EnqueueProgram(Device& device, Program& program, bool /*blocking*/) {
     size_t num_threads = program.kernels().size();
     std::vector<std::thread> threads;
     threads.reserve(num_threads);
+    std::vector<std::exception_ptr> thread_exceptions(num_threads);
 
     // Init barrier: all threads wait until context is set up before running kernels
     std::barrier init_barrier(static_cast<ptrdiff_t>(num_threads));
@@ -246,7 +247,8 @@ void EnqueueProgram(Device& device, Program& program, bool /*blocking*/) {
     for (size_t i = 0; i < num_threads; ++i) {
         KernelDescriptor& kd = program.kernels()[i];
         threads.emplace_back([&kd, &core, &device, &init_barrier,
-                              has_dfbs, i, &dfb_iface_per_thread]() {
+                              has_dfbs, i, &dfb_iface_per_thread,
+                              &thread_exceptions]() {
             __rt_args      = kd.rt_args;
             __core         = &core;
             __device       = &device;
@@ -259,13 +261,24 @@ void EnqueueProgram(Device& device, Program& program, bool /*blocking*/) {
             }
 
             init_barrier.arrive_and_wait();
-            kd.fn();
+            try {
+                kd.fn();
+            } catch (...) {
+                thread_exceptions[i] = std::current_exception();
+            }
         });
     }
 
     // 4. Join all threads
     for (auto& t : threads) {
         t.join();
+    }
+
+    // 4b. Rethrow first kernel exception
+    for (size_t i = 0; i < num_threads; ++i) {
+        if (thread_exceptions[i]) {
+            std::rethrow_exception(thread_exceptions[i]);
+        }
     }
 
     // 5. Tear down CBs so next EnqueueProgram starts fresh

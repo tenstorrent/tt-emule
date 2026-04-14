@@ -105,22 +105,24 @@ public:
     template <typename M = void>
     void set_multicast(const Noc&, uint32_t x_start, uint32_t y_start,
                        uint32_t x_end, uint32_t y_end,
-                       uint32_t num_cores, bool linked = false) {
+                       [[maybe_unused]] uint32_t num_cores, bool linked = false) {
         uint64_t mcast_addr =
             (static_cast<uint64_t>(y_start) << 54) |
             (static_cast<uint64_t>(x_start) << 48) |
             (static_cast<uint64_t>(y_end) << 42) |
             (static_cast<uint64_t>(x_end) << 36) |
             l1_offset_;
+        // Load atomic value before passing to multicast to avoid data race.
+        uint32_t val = atom()->load(std::memory_order_acquire);
         __emule_multicast_write(mcast_addr,
-                                reinterpret_cast<const uint8_t*>(atom()),
+                                reinterpret_cast<const uint8_t*>(&val),
                                 sizeof(uint32_t));
     }
 
     // Multicast increment: atomically add value to semaphore on all cores.
     void inc_multicast(const Noc&, uint32_t x_start, uint32_t y_start,
                        uint32_t x_end, uint32_t y_end,
-                       uint32_t num_cores, uint32_t value) {
+                       [[maybe_unused]] uint32_t num_cores, uint32_t value) {
         // Iterate rectangle and atomic-add to each core's semaphore.
         for (uint32_t x = std::min(x_start, x_end); x <= std::max(x_start, x_end); x++) {
             for (uint32_t y = std::min(y_start, y_end); y <= std::max(y_start, y_end); y++) {
@@ -131,6 +133,9 @@ public:
                 if (ptr) {
                     reinterpret_cast<std::atomic<uint32_t>*>(ptr)->fetch_add(
                         value, std::memory_order_release);
+                } else {
+                    fprintf(stderr, "EMULE WARN: Semaphore::inc_multicast (%u,%u) "
+                            "offset=0x%x failed to resolve\n", x, y, l1_offset_);
                 }
             }
         }

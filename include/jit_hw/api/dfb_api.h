@@ -155,17 +155,20 @@ inline void dfb_finish(uint32_t dfb_id) {
 }
 
 inline uint32_t dfb_get_write_ptr(uint32_t dfb_id) {
+    __emule_dfb_check_id(dfb_id, "dfb_get_write_ptr");
     auto& iface = __emule_dfbs[dfb_id];
     auto& slot = iface.tc_slots[iface.broadcast_tc ? 0 : iface.tc_idx];
     return slot.wr_ptr;
 }
 
 inline uint32_t dfb_get_read_ptr(uint32_t dfb_id) {
+    __emule_dfb_check_id(dfb_id, "dfb_get_read_ptr");
     auto& iface = __emule_dfbs[dfb_id];
     auto& slot = iface.tc_slots[iface.tc_idx];
     return slot.rd_ptr;
 }
 
 inline uint32_t dfb_get_entry_size(uint32_t dfb_id) {
+    __emule_dfb_check_id(dfb_id, "dfb_get_entry_size");
     return __emule_dfbs[dfb_id].entry_size;
 }
