@@ -25,6 +25,14 @@
 #include <cstdint>
 #include <thread>
 
+// ---- NOC virtual channel constants (values are unused in emulation) ----
+#ifndef NOC_UNICAST_WRITE_VC
+#define NOC_UNICAST_WRITE_VC 2
+#endif
+#ifndef NOC_MULTICAST_WRITE_VC
+#define NOC_MULTICAST_WRITE_VC 8
+#endif
+
 // ---- Bridge function declarations for cross-core access ----
 extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
 extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src, uint32_t size);
@@ -482,6 +490,127 @@ inline uint64_t get_l1_noc_addr(
                     bank_to_l1_offset[bank_index];
     uint32_t noc_xy = interleaved_addr_gen::get_noc_xy<false>(bank_index, noc);
     return get_noc_addr_helper(noc_xy, addr);
+}
+
+// ---- Barriers (DRAM) ----
+
+inline void dram_barrier() {}  // No-op in emulation
+
+// ---- NOC inline direct-write (32-bit value to remote L1) ----
+
+// Thread-local state for the set_state / with_state API pair.
+struct __emule_dw_state {
+    uint64_t addr = 0;
+    uint32_t val = 0;
+};
+inline thread_local __emule_dw_state __emule_dw_st;
+
+// Apply byte-enable mask and write 32-bit value to a resolved host pointer.
+inline void __emule_dw_write_be(uint8_t* dst, uint32_t val, uint8_t be) {
+    if (be == 0xF) {
+        std::memcpy(dst, &val, 4);
+    } else {
+        uint32_t existing;
+        std::memcpy(&existing, dst, 4);
+        uint8_t* vb = reinterpret_cast<uint8_t*>(&val);
+        uint8_t* eb = reinterpret_cast<uint8_t*>(&existing);
+        for (int i = 0; i < 4; i++) {
+            if (be & (1 << i)) eb[i] = vb[i];
+        }
+        std::memcpy(dst, &existing, 4);
+    }
+}
+
+// Unicast inline direct write — write a 32-bit value to a remote L1 address.
+template <InlineWriteDst dst_type = InlineWriteDst::DEFAULT, bool posted = false, bool flush = true>
+inline void noc_inline_dw_write(
+    uint64_t addr,
+    uint32_t val,
+    uint8_t be = 0xF,
+    uint8_t noc = noc_index,
+    uint8_t vc = NOC_UNICAST_WRITE_VC,
+    uint32_t customized_src_addr = 0) {
+    uint8_t* dst = __emule_resolve_noc_addr(addr);
+    if (dst) {
+        __emule_dw_write_be(dst, val, be);
+    }
+}
+
+// Multicast inline direct write — write a 32-bit value to a rectangular core range.
+template <InlineWriteDst dst_type = InlineWriteDst::DEFAULT, bool posted = false, bool flush = true>
+inline void noc_inline_mcast_dw_write(
+    uint64_t addr,
+    uint32_t val,
+    uint8_t be = 0xF,
+    uint8_t noc = noc_index,
+    uint8_t vc = NOC_MULTICAST_WRITE_VC,
+    uint32_t customized_src_addr = 0,
+    uint32_t num_dest = 1) {
+    // Decode the multicast rectangle from the encoded address.
+    constexpr uint32_t node_mask = (1u << NOC_ADDR_NODE_ID_BITS) - 1;
+    constexpr uint64_t local_mask = (1ULL << NOC_ADDR_LOCAL_BITS) - 1;
+    uint32_t x_end   = (addr >> NOC_ADDR_LOCAL_BITS) & node_mask;
+    uint32_t y_end   = (addr >> (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) & node_mask;
+    uint32_t x_start = (addr >> (NOC_ADDR_LOCAL_BITS + 2 * NOC_ADDR_NODE_ID_BITS)) & node_mask;
+    uint32_t y_start = (addr >> (NOC_ADDR_LOCAL_BITS + 3 * NOC_ADDR_NODE_ID_BITS)) & node_mask;
+    uint32_t l1_off  = static_cast<uint32_t>(addr & local_mask);
+
+    // Iterate over the rectangle and write to each core.
+    uint32_t lo_x = (x_start < x_end) ? x_start : x_end;
+    uint32_t hi_x = (x_start < x_end) ? x_end : x_start;
+    uint32_t lo_y = (y_start < y_end) ? y_start : y_end;
+    uint32_t hi_y = (y_start < y_end) ? y_end : y_start;
+    for (uint32_t y = lo_y; y <= hi_y; y++) {
+        for (uint32_t x = lo_x; x <= hi_x; x++) {
+            // Build unicast NOC addr directly (l1_off is already a raw offset).
+            uint64_t unicast_addr =
+                (uint64_t(y & 0x3F) << (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) |
+                (uint64_t(x & 0x3F) << NOC_ADDR_LOCAL_BITS) |
+                uint64_t(l1_off);
+            uint8_t* dst = __emule_resolve_noc_addr(unicast_addr);
+            if (dst) {
+                __emule_dw_write_be(dst, val, be);
+            }
+        }
+    }
+}
+
+// Set state for stateful inline direct write.
+template <bool posted = false, bool set_val = false>
+inline void noc_inline_dw_write_set_state(
+    uint64_t addr,
+    uint32_t val = 0,
+    uint8_t be = 0xF,
+    uint8_t cmd_buf = write_at_cmd_buf,
+    uint8_t noc = noc_index,
+    uint8_t vc = NOC_UNICAST_WRITE_VC) {
+    __emule_dw_st.addr = addr;
+    if constexpr (set_val) {
+        __emule_dw_st.val = val;
+    }
+}
+
+// Issue write using previously set state, optionally updating address/value.
+template <
+    bool update_addr_lo = false,
+    bool update_counter = true,
+    bool posted = false,
+    bool update_addr_hi = false,
+    bool update_val = false,
+    InlineWriteDst dst_type = InlineWriteDst::DEFAULT>
+inline void noc_inline_dw_write_with_state(
+    uint32_t val, uint32_t addr = 0, uint8_t cmd_buf = write_at_cmd_buf, uint8_t noc = noc_index) {
+    if constexpr (update_addr_lo) {
+        // Replace the lower 32 bits of the address (the L1 offset).
+        __emule_dw_st.addr = (__emule_dw_st.addr & ~uint64_t(0xFFFFFFFF)) | addr;
+    }
+    if constexpr (update_val) {
+        __emule_dw_st.val = val;
+    }
+    uint8_t* dst = __emule_resolve_noc_addr(__emule_dw_st.addr);
+    if (dst) {
+        __emule_dw_write_be(dst, __emule_dw_st.val, 0xF);
+    }
 }
 
 // ---- Preempt tt-mlir verbatim injection of experimental_dataflow_api ----

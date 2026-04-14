@@ -336,6 +336,33 @@ run_test "DmOneFromOnePacketSizes" "$TEST_DIR/test_dm_one_from_one" \
 run_test "DmOneFromOneDirectedIdeal" "$TEST_DIR/test_dm_one_from_one" \
     --gtest_filter="*OneFromOneDirectedIdeal*"
 
+echo ""
+echo "== Tier 3l: DM Direct Write & DRAM Unary =="
+
+# These tests use GenericMeshDeviceFixture which needs TT_METAL_SIMULATOR
+EMULE_SIM_DIR_WH="$(mktemp -d /tmp/tt_emule_sim.XXXXXX)"
+ln -sf "$TT_METAL_DIR/tt_metal/soc_descriptors/wormhole_b0_80_arch.yaml" "$EMULE_SIM_DIR_WH/soc_descriptor.yaml"
+export TT_METAL_SIMULATOR="$EMULE_SIM_DIR_WH"
+
+run_test "DmDirectWritePerformance" "$TEST_DIR/test_dm_direct_write" \
+    --gtest_filter="*PerformanceComparison*"
+run_test "DmDirectWriteAddressPatterns" "$TEST_DIR/test_dm_direct_write" \
+    --gtest_filter="*AddressPatterns*"
+run_test "DmDirectWriteMulticast" "$TEST_DIR/test_dm_direct_write" \
+    --gtest_filter="*Multicast*"
+
+run_test "DramUnaryPacketSizes" "$TEST_DIR/test_dm_unary_dram" \
+    --gtest_filter="*PacketSizes" --gtest_also_run_disabled_tests
+run_test "DramUnaryCoreLocations" "$TEST_DIR/test_dm_unary_dram" \
+    --gtest_filter="*CoreLocations*"
+run_test "DramUnaryDRAMChannels" "$TEST_DIR/test_dm_unary_dram" \
+    --gtest_filter="*DRAMChannels*"
+run_test "DramUnaryDirectedIdeal" "$TEST_DIR/test_dm_unary_dram" \
+    --gtest_filter="*DirectedIdeal*"
+
+unset TT_METAL_SIMULATOR
+rm -rf "$EMULE_SIM_DIR_WH"
+
 # Tier 4: TTNN (blackhole — larger worker grid, no wormhole mmap exhaustion for ttnn)
 echo ""
 echo "== Tier 4: TTNN Relational INT32 =="

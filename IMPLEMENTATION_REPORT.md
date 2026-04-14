@@ -81,7 +81,7 @@ Quasar Neos have larger L1 and a different DRAM model than WH/BH:
 
 - **L1**: 4 MB shared across all 12 cores in a Neo (8 DM + 4 compute). Emulated as a bump allocator on the host heap (`Core::l1_alloc()`). The JIT path reads the L1 size from the SOC YAML via `SWEmulatedChip`.
 - **Firmware L1 address translation**: Device kernels reference L1 via firmware-range offsets (e.g., `0x1000`). `__emule_local_l1_to_ptr()` distinguishes these from host pointers and translates via `__emule_bridge_l1`. NOC operations and JIT-patched `reinterpret_cast<T*>(get_arg_val(N))` patterns use this translation.
-- **DRAM**: Forced to 1 bank (`NUM_DRAM_BANKS=1`) regardless of architecture (Quasar=2, WH=6, BH=8). Reason: `InterleavedAddrGen` with N>1 banks generates NOC addresses not registered in `__emule_core_map`, causing `noc_async_read` to produce zeros.
+- **DRAM**: `NUM_DRAM_BANKS` is set to the real architecture channel count (Quasar=2, WH=6, BH=8) at `emulated_program_runner.cpp:700`. All bank NOC coordinates are registered in `__emule_core_map` (lines 1012-1031), enabling multi-bank interleaving via `InterleavedAddrGen`.
 - **Bridge DFBs**: When a compute kernel bridges two DFBs with the same `(entry_size, num_entries)`, the runner allocates L1 once and reuses the base address for both, modeling the hardware register file passthrough.
 
 ### Address Translation
@@ -213,7 +213,7 @@ The `jit_hw/` directory provides stub implementations for 75 header files coveri
 |----------|-------|----------|
 | Compute | 55 | `matmul_tiles`, `matmul_block`, `add/sub/mul_tiles`, `pack_tile`, `copy_tile`, `reduce_tile` (row/col/scalar × sum/max), `bcast`, `tilize/untilize`, `pack_untilize` (with `experimental::pack_untilize_block`), `transpose_wh`, `quantization`, 23 eltwise_unary SFPU ops (`abs_tile`, `exp_tile`, `negative_tile`, `typecast_tile`, etc.), binary bitwise/shift/comp/fmod/max_min, `gcd/lcm`, `xlogy`, `copy_dest_values` |
 | Compute nfaces | 1 | `__emule_nfaces::rowmajor_to_nfaces` constexpr LUT — UNPACK/PACK engine layout conversion between nfaces (L1) and row-major (DST) |
-| Dataflow | 2 | `noc_async_read/write`, `noc_async_write_multicast`, semaphore ops, `InterleavedAddrGen<DRAM/L1>`, banking arrays |
+| Dataflow | 2 | `noc_async_read/write`, `noc_async_write_multicast`, `noc_inline_dw_write` (unicast/multicast/stateful), semaphore ops, `InterleavedAddrGen<DRAM/L1>`, banking arrays |
 | CB sync | 1 | `cb_reserve_back`, `cb_push_back`, `cb_wait_front`, `cb_pop_front` (uint32_t and int32_t overloads), DFB↔CB bridge |
 | DFB sync | 1 | `dfb_reserve_back`, `dfb_push_back`, `dfb_wait_front`, `dfb_pop_front`, `dfb_finish`, `dfb_get_write_ptr`/`dfb_get_read_ptr`, timeout detection |
 | CSR emulation | 1 | `csr_read<CSR::NEO_ID>()`, `csr_read<CSR::TRISC_ID>()` via TLS `__emule_neo_id`, `__emule_trisc_id` |
@@ -221,7 +221,7 @@ The `jit_hw/` directory provides stub implementations for 75 header files coveri
 | Tensor | 1 | `TensorAccessor`, `TensorAccessorArgs` |
 | Infrastructure | 8 | compile-time args, bfloat16, dprint, assert stubs, DataFormat enum, tile constants |
 | Experimental | 5 | `Noc`, `CircularBuffer`, `AllocatorBank`, `Lock`, `CoreLocalMem` |
-| Compatibility | 4 | `ckernel.h`, `ckernel_defs.h`, `common_values.hpp`, `risc_attribs.h` |
+| Compatibility | 5 | `ckernel.h`, `ckernel_defs.h`, `common_values.hpp`, `risc_attribs.h` (`InlineWriteDst`, `write_at_cmd_buf`), `dprint.h` (debug print stubs) |
 
 ### Dual API Paths
 
@@ -241,7 +241,7 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 
 **Standalone tests** (5/5 pass): dfb_passthrough, dfb_multi_consumer, eltwise_add, matmul, tilize
 
-**tt-metal emulated regression** (126 passing, 1 failure, 2 skipped):
+**tt-metal emulated regression** (133 passing, 1 failure, 2 skipped):
 
 | Tier | Tests | Count | Description | Cluster |
 |------|-------|-------|-------------|---------|
@@ -259,6 +259,7 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 | 3i | Quasar Semaphores | 3 | ComputeKernelSemaphores, DmAndComputeSemaphores, DmLoopback | Quasar |
 | 3j | Simple DM + Atomics | 4 | SingleDmL1Write, 3× RISC-V atomic tests | Quasar |
 | 3k | Data Movement | 4 | LoopbackPacketSizes, LoopbackDirectedIdeal, OneFromOnePacketSizes, OneFromOneDirectedIdeal | WH N150 |
+| 3l | DM Direct Write + DRAM | 7 | 3 direct write (unicast, stateful, multicast) + 4 DRAM unary (packet sizes, core locations, channels, directed) | WH N150 |
 | 4 | TTNN INT32 | 2 | ttnn_relational_int (66 sub-cases), ttnn_add_int | BH P100 |
 | 5 | TTNN Matmul Sweep | 1 | 14 sub-cases: multi-core matmul 32² through 2048² | WH N150 |
 | 5b | Quasar Matmul PCC | 2 | TensixMatmulBlock, TensixMatmulBlockInitShort | Quasar |
@@ -266,17 +267,17 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 
 See [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) section 8 for a feature-by-feature table with test evidence.
 
-**D2M golden test regression** (1624 pass / 112 fail / 142 skip-xfail):
+**D2M golden test regression** (1694 pass / 164 fail / 224 skip-xfail):
 
 | Test File | Total | Passed | Failed | Skip/XFail | Status |
 |-----------|-------|--------|--------|------------|--------|
 | test_metal_layout | 94 | 94 | 0 | 0 | **PASS** |
-| test_metal_matmul | 127 | 113 | 0 | 14 xfail | **PASS** |
+| test_metal_matmul | 127 | 112 | 1 | 14 xfail | FAIL (1 regression) |
 | test_metal_matmul_higher_rank | 10 | 10 | 0 | 0 | **PASS** |
 | test_metal_allocate | 6 | 6 | 0 | 0 | **PASS** |
 | test_metal_tms | 339 | 332 | 4 | 3 skip | PASS (arange only) |
-| test_metal_reductions | 1096 | 929 | 71 | 96 skip | FAIL (unaligned) |
-| test_metal_dma | 49 | 40 | 9 | 0 | FAIL (DMA crashes) |
+| test_metal_reductions | 1300 | 991 | 131 | 178 | FAIL (unaligned) |
+| test_metal_dma | 49 | 49 | 0 | 0 | **PASS** |
 | test_metal_tilize | 44 | 44 | 0 | 0 | **PASS** |
 | test_metal_tensor_collapsing | 14 | 12 | 0 | 2 skip | **PASS** |
 | test_metal_virtual_grids | 39 | 39 | 0 | 0 | **PASS** |
@@ -559,11 +560,11 @@ cmake -B build_emule \
 
 Tests in `tt_emule/` are organized in tiers and use standard tt-metal fixtures — no custom test infrastructure:
 
-The tier table above in Test Results reflects the full `run_regression.sh` structure (84 test invocations across 10+ tiers). Additional ttnn tests built but not in regression: `test_ttnn_add`, `test_ttnn_sub_int`, `test_ttnn_rsub_int`, `test_ttnn_matmul`.
+The tier table above in Test Results reflects the full `run_regression.sh` structure (91 test invocations across 12 tiers). Additional ttnn tests built but not in regression: `test_ttnn_add`, `test_ttnn_sub_int`, `test_ttnn_rsub_int`, `test_ttnn_matmul`.
 
-D2M golden test regression: `run_d2m_regression.sh` — runs 13 tt-mlir test files (1878 tests) against the emulated backend. 1624 pass, 112 fail, 142 skip. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
+D2M golden test regression: `run_d2m_regression.sh` — runs 13 tt-mlir test files (2082 tests) against the emulated backend. 1694 pass, 164 fail, 224 skip/xfail. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
 
-Regression scripts: `run_regression.sh` (126 passing tests) + `run_d2m_regression.sh` (13 D2M test files, 1878 tests).
+Regression scripts: `run_regression.sh` (133 passing tests) + `run_d2m_regression.sh` (13 D2M test files, 2082 tests).
 
 ### tt-metal Files Modified
 
@@ -634,7 +635,7 @@ Tests that pass in emulation may fail on silicon due to timing, precision, or re
 
 **Nfaces conversion not exercised in isolation.** The UNPACK and PACK engines are tested only indirectly via compute operations (matmul, add_tiles, etc.) that happen to exercise them. No dedicated UNPACK-only or PACK-only test exists. A bug in the nfaces LUT for a specific face/element combination might not be caught if no existing compute test triggers that access pattern. See `docs/TEST_COVERAGE_TODO.md`.
 
-**D2M coverage gaps.** 1 test file fails entirely: bfp8_typecast (13 PCC mismatches). 3 files have partial failures: reductions (71/1096 fail on unaligned shapes), masking (15/20 fail on partial tiles), and DMA (9/49 fail on DRAM paths). The remaining 9 files pass fully. The primary gaps are unaligned tensor reductions, partial tile masking, BFP8 format precision, and DRAM DMA address resolution.
+**D2M coverage gaps.** 1 test file fails entirely: bfp8_typecast (13 PCC mismatches). 2 files have partial failures: reductions (131/1300 fail on unaligned shapes) and masking (15/20 fail on partial tiles). DMA tests now pass fully (49/49). The remaining 10 files pass fully. The primary gaps are unaligned tensor reductions, partial tile masking, and BFP8 format precision.
 
 ### Maintainability
 
