@@ -80,8 +80,8 @@ Both `__emule_neo_id` and `__emule_trisc_id` are set by the program runner befor
 
 NOC operations (`noc_async_read`, `noc_async_write`) are synchronous memcpy in emulation. Supported features:
 
-- **Loopback**: Single-core L1→L1 write via NOC — tested by `test_loopback.cpp:LoopbackPacketSizes, LoopbackDirectedIdeal`
-- **One-from-one**: Two-core L1 read — tested by `test_one_from_one.cpp:OneFromOnePacketSizes, OneFromOneDirectedIdeal`
+- **Loopback**: Single-core L1→L1 write via NOC — tested by `test_dm_loopback_noc.cpp:LoopbackPacketSizes, LoopbackDirectedIdeal`
+- **One-from-one**: Two-core L1 read — tested by `test_dm_one_from_one.cpp:OneFromOnePacketSizes, OneFromOneDirectedIdeal`
 - **Inline direct write**: `noc_inline_dw_write` (unicast 32-bit write), `noc_inline_mcast_dw_write` (multicast), `noc_inline_dw_write_set_state`/`noc_inline_dw_write_with_state` (stateful cached address/value pattern). Byte-enable masking supported. Tested by `test_dm_direct_write.cpp:PerformanceComparison, AddressPatterns, Multicast`
 - **DRAM read/write**: Multi-bank `noc_async_read`/`noc_async_write` to DRAM via `get_noc_addr_from_bank_id<dram>()`. All architecture bank counts supported. Tested by `test_dm_unary_dram.cpp:PacketSizes, CoreLocations, DRAMChannels, DirectedIdeal`
 - **Virtual channels**: Optional parameter accepted and ignored
@@ -233,8 +233,8 @@ Every feature listed here is verified by at least one passing test.
 | DRAM read/write (multi-bank) | `noc_async_read/write` as memcpy, all architecture bank counts | `test_dm_loopback.cpp:DmLoopback`, `test_dm_unary_dram.cpp:DRAMChannels` |
 | L1 shared memory (bump alloc) | `Core::l1_alloc()` | All DFB tests (72+ tests allocate L1) |
 | L1 address translation | `__emule_local_l1_to_ptr()` | `test_single_dm_l1_write.cpp:SingleDmL1Write` |
-| NOC loopback (single-core) | Synchronous memcpy | `test_loopback.cpp:LoopbackPacketSizes, LoopbackDirectedIdeal` |
-| NOC one-from-one (two-core) | Synchronous memcpy | `test_one_from_one.cpp:OneFromOnePacketSizes, OneFromOneDirectedIdeal` |
+| NOC loopback (single-core) | Synchronous memcpy | `test_dm_loopback_noc.cpp:LoopbackPacketSizes, LoopbackDirectedIdeal` |
+| NOC one-from-one (two-core) | Synchronous memcpy | `test_dm_one_from_one.cpp:OneFromOnePacketSizes, OneFromOneDirectedIdeal` |
 | NOC inline direct write (unicast) | `noc_inline_dw_write` with byte-enable | `test_dm_direct_write.cpp:PerformanceComparison, AddressPatterns` |
 | NOC inline direct write (stateful) | `set_state`/`with_state` TLS-cached | `test_dm_direct_write.cpp:PerformanceComparison, AddressPatterns` |
 | NOC inline direct write (multicast) | `noc_inline_mcast_dw_write` rectangle decode | `test_dm_direct_write.cpp:Multicast` |
@@ -243,7 +243,7 @@ Every feature listed here is verified by at least one passing test.
 | RISC-V atomics on L1 | GCC builtins | `test_riscv_atomics.cpp:TestAtomicLoadStoreRISCV, TestAtomicAddFetchRISCV, TestAtomicCASRISCV` |
 | DFB STRIDED (1P-1C through 4P-4C) | `EmuleDFBInterface` + `TileCounterArray` | 42 tests in `test_dataflow_buffer.cpp` |
 | DFB BLOCKED | `broadcast_tc` path | 30 tests in `test_dataflow_buffer.cpp` |
-| DFB↔CB bridge | `cb_sync_push/pop` in dfb_api.h / cb_api.h | `test_dfb_emulation.cpp:DFBEmuleBridgeTest` |
+| DFB↔CB bridge | `cb_sync_push/pop` in dfb_api.h / cb_api.h | DFB compute bridge tests in `test_dataflow_buffer.cpp` |
 | DFB timeout detection | `wait_for` with `TT_EMULE_DFB_TIMEOUT` | Triggered by hang scenarios in regression |
 | DST register file (16/8 slots) | `__emule_dst[16][1024]` + mode-aware bounds | `test_matmul_X_tile.cpp` (uses 16 slots) |
 | UNPACK nfaces→rowmajor | `__emule_nfaces::rowmajor_to_nfaces` LUT | `test_matmul_X_tile.cpp:TensixMatmulBlock, TensixMatmulBlockInitShort` |
@@ -255,7 +255,7 @@ Every feature listed here is verified by at least one passing test.
 | RISC-V fence patch | `__sync_synchronize()` | All JIT tests (compilation succeeds) |
 | `GenericMeshDeviceFixture` | Allows slow dispatch in emulated mode | All JIT-path tests |
 
-**Regression total:** 126 passing, 1 failure (ttnn_add_int_silicon — requires real hardware), 2 skipped.
+**Regression total:** 135 passing, 1 failure (ttnn_add_int_silicon — requires real hardware), 2 skipped.
 
 ---
 
@@ -304,6 +304,5 @@ Every feature listed here is verified by at least one passing test.
 | `run_regression.sh` | C++ regression (6 tiers) |
 | `run_d2m_regression.sh` | D2M Python golden test regression |
 | *(tt-metal)* `emulated_program_runner.cpp` | JIT path: DFB setup, thread spawning, CSR/fence/L1 patches |
-| *(tt-metal)* `test_dfb_emulation.cpp` | JIT integration: `DFBEmuleDMTest`, `DFBEmuleBridgeTest` |
 | *(tt-metal)* `test_dataflow_buffer.cpp` | 72 STRIDED + BLOCKED DFB tests |
 | *(tt-metal)* `test_matmul_X_tile.cpp` | Quasar matmul PCC tests |
