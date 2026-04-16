@@ -49,6 +49,13 @@ echo "========================================"
 echo "tt-metal: $TT_METAL_DIR"
 echo "build:    $BUILD_DIR"
 
+# Always wipe the JIT kernel cache so tests compile from source each run.
+JIT_CACHE_DIR="/tmp/tt_emule_jit_cache_$(id -u)"
+if [ -d "$JIT_CACHE_DIR" ]; then
+    echo "Clearing JIT cache: $JIT_CACHE_DIR"
+    rm -rf "$JIT_CACHE_DIR"
+fi
+
 # Tier 0: Standalone tt-emule tests (built in standalone CMake)
 echo ""
 echo "== Tier 0: Standalone =="
@@ -105,7 +112,7 @@ echo "== Tier 3: JIT Kernel Execution =="
 run_test "TensixL1Tile"     "$TEST_DIR/test_simple_l1_buffer" --gtest_filter="*Tensix*"
 
 echo ""
-export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/quasar_1chip.yaml"
+export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/quasar_Q1.yaml"
 export ARCH_NAME=QUASAR
 
 echo ""
