@@ -9,7 +9,7 @@ A complete, step-by-step guide to building tt-emule and all its dependencies fro
 | Repo | Branch | Purpose |
 |------|--------|---------|
 | tt-emule | `master` | Software emulator library and regression scripts |
-| tt-metal | `xchin/tt-emule` | Metal runtime with emulation support |
+| tt-metal | `arminale/quasar` (or `xchin/tt-emule`) | Metal runtime with emulation support |
 | tt-mlir | `arminale/tt-metal-local-build` (or `main`) | MLIR compiler, needed for D2M regression tests |
 
 ### Required Tools
@@ -74,14 +74,18 @@ cd /localdev/<user>/tt-metal
 git config submodule.tt_metal/third_party/umd.url git@github.com:xanderchin/tt-umd.git
 git config submodule.tt_metal/third_party/tracy.url git@github.com:tenstorrent-metal/tracy.git
 git config submodule.tt_metal/third_party/tt_llk.url git@github.com:tenstorrent/tt-llk.git
-git config submodule.models/demos/t3000/llama2_70b/reference/llama.url git@github.com:tenstorrent-metal/llama.git
+git config submodule."models/demos/t3000/llama2_70b/reference/llama".url git@github.com:tenstorrent-metal/llama.git
 ```
 
-Then initialize:
+Then initialize the three submodules required for the build (UMD for cluster descriptors, tracy for the CMake build system, tt_llk for firmware headers):
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init tt_metal/third_party/umd
+git submodule update --init tt_metal/third_party/tracy
+git submodule update --init tt_metal/third_party/tt_llk
 ```
+
+**Note:** `--recursive` is not needed; the full recursive init also clones large/unrelated submodules. Only the three above are required for the emulation build.
 
 Verify the critical file exists:
 ```bash
@@ -130,9 +134,21 @@ cmake --build build_emule_clang -j$(nproc)
 ### Build Outputs
 
 After a successful build, you should see:
-- Test binaries in `build_emule_clang/test/tt_emule/` (22 executables)
+- Test binaries in `build_emule_clang/test/tt_emule/` (39 executables as of 2026-04-16)
 - `_ttnn.so` in `build_emule_clang/ttnn/`
 - `libtt_metal.so` in `build_emule_clang/tt_metal/`
+
+### Known Build Issue: tracy Submodule Required Even with ENABLE_TRACY=OFF
+
+`cmake/tracy.cmake` calls `add_subdirectory(${TRACY_HOME})` unconditionally. Even with `-DENABLE_TRACY=OFF`, the tracy submodule must be initialized or configure will fail with:
+
+```
+CMake Error at cmake/tracy.cmake:20 (add_subdirectory): The source directory .../tracy does not contain a CMakeLists.txt file.
+```
+
+Similarly, the `tt_llk` submodule must be initialized because the firmware headers (`ckernel_structs.h` etc.) come from it.
+
+---
 
 ### Known Build Issue: Unused Lambda Capture
 
@@ -167,7 +183,7 @@ This runs 5 tiers of tests:
 4. **Tier 4 (TTNN Relational):** ttnn_relational
 5. **Tier 5 (TTNN Matmul):** ttnn_matmul_sweep
 
-**Expected result:** 126 passed, 1 failed, 2 skipped. The 1 failure is ttnn_add_int_silicon (requires real hardware). The 2 skips are `test_emulation_toggle` (not yet in CMakeLists).
+**Expected result:** 136 passed, 0 failed, 2 skipped (as of 2026-04-16). The 2 skips are `test_emulation_toggle` (binary not built by CMakeLists). On machines with real Tenstorrent hardware, `ttnn_add_int_silicon` (Tier 6) also passes.
 
 ---
 
@@ -223,6 +239,8 @@ cmake -G Ninja -B build \
 cmake --build build -j$(nproc)
 ```
 
+**Note:** `-DTT_METAL_LOCAL_BUILD=ON` is listed here but is not recognized by the current tt-mlir CMake. It can be omitted; tt-mlir automatically detects the local tt-metal build via the `third_party/tt-metal/src/tt-metal/build_Release` symlink.
+
 **Important:** `TTMLIR_ENABLE_STABLEHLO=ON` is required. The D2M test builder unconditionally imports `stablehlo` from `ttmlir.dialects`. Without it, all 13 test files fail with `ImportError`.
 
 **Important:** `-DLLVM_USE_LINKER=lld-20` is required when using clang-20. Without it, GNU ld is used and fails on the `--color-diagnostics` flag.
@@ -239,10 +257,11 @@ export TT_METAL_MOCK_CLUSTER_DESC_PATH="/localdev/<user>/tt-metal/tt_metal/third
 export TT_METAL_EMULATED_MODE=1
 export TT_METAL_SLOW_DISPATCH_MODE=1
 export TT_METAL_RUNTIME_ROOT="/localdev/<user>/tt-metal"
-export LD_LIBRARY_PATH="/localdev/<user>/tt-metal/build_emule_clang/lib:${LD_LIBRARY_PATH:-}"
 
 ttrt query --save-artifacts
 ```
+
+**Important:** Do NOT set `LD_LIBRARY_PATH` when running `ttrt query`. Setting it to the emulation build's lib directory causes the wrong `_ttnncpp.so` to load (the emulation build has a newer API incompatible with `libTTMLIRRuntime.so`). The RPATH baked into `libTTMLIRRuntime.so` already points to the correct `_ttnncpp.so` in `build_Release/lib`.
 
 This creates `ttrt-artifacts/system_desc.ttsys` in the tt-mlir directory.
 
@@ -327,4 +346,4 @@ GNU ld doesn't support this LLD flag. Add `-DLLVM_USE_LINKER=lld-20` to the tt-m
 | `TT_METAL_SLOW_DISPATCH_MODE` | `1` | Always (emulation uses slow dispatch) |
 | `TT_METAL_RUNTIME_ROOT` | `<tt-metal>` | Running emulated tests |
 | `SYSTEM_DESC_PATH` | `<tt-mlir>/ttrt-artifacts/system_desc.ttsys` | D2M regression tests |
-| `LD_LIBRARY_PATH` | `<tt-metal>/build_emule_clang/lib` | When running ttrt or D2M tests |
+| `LD_LIBRARY_PATH` | `<tt-metal>/build_emule_clang/lib` | D2M regression tests only (NOT for `ttrt query`) |
