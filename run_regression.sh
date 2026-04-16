@@ -302,6 +302,9 @@ run_test "QuasarMatmulBlock" "$TEST_DIR/test_matmul_X_tile" \
 run_test "QuasarMatmulBlockInitShort" "$TEST_DIR/test_matmul_X_tile" \
     --gtest_filter="*TensixMatmulBlockInitShort" --gtest_also_run_disabled_tests
 
+run_test "QuasarMatmulBlockDemo" "$TEST_DIR/test_matmul_block" \
+    --gtest_filter="*QuasarMatmulBlock"
+
 echo ""
 echo "== Tier 3i: Quasar Semaphore Tests =="
 
