@@ -44,7 +44,8 @@ A Quasar "Neo" core has:
 | `tests/tt_metal/tt_metal/test_kernels/dataflow/reader_matmul_with_bias_blocked.cpp` | **Reader DM kernel** — reads DRAM tiles into DFB src0/src1 |
 | `tt_metal/kernels/dataflow/writer_unary.cpp` | **Writer DM kernel** — reads DFB dst, writes tiles to DRAM |
 | `tt_metal/impl/emulation/emulated_program_runner.cpp` | **Program runner** — spawns threads for each DM/compute processor, manages JIT compilation |
-| `tt-emule/src/dfb_sync.cpp` | **DFB synchronization** — tile counter logic (posted/acked atomics, condition variables) |
+| `tt-emule/include/tt_emule/tile_counter.hpp` | **Tile counter primitives** — `posted`/`acked` atomics and `data_cv`/`space_cv` condition variables (`TileCounter`, `TileCounterArray`) |
+| `tt-emule/include/tt_emule/dataflow_buffer.hpp` | **DFB kernel API** — `reserve_back` / `push_back` / `wait_front` / `pop_front` / `finish` on top of `TileCounterArray` |
 
 ### Code Path: Host Test to Kernel Execution
 
@@ -63,11 +64,11 @@ A Quasar "Neo" core has:
    - **Compute** calls `dfb0.wait_front(N)` (blocks until reader has pushed enough tiles), runs `matmul_block()`, then `dfb_out.push_back(N)` to signal writer
    - **Writer** calls `dfb_out.wait_front(N)` and writes tiles to DRAM
 
-4. **Synchronization** (tile counters in `dfb_sync.cpp`):
-   - Each DFB has per-consumer `posted`/`acked` atomic counters
-   - `push_back` increments `posted`; `pop_front` increments `acked`
-   - `wait_front` blocks on `data_cv` until `posted - acked >= requested_tiles`
-   - `reserve_back` blocks on `space_cv` until `capacity - (posted - acked) >= requested_tiles`
+4. **Synchronization** (tile counters in `include/tt_emule/tile_counter.hpp`, DFB API in `include/tt_emule/dataflow_buffer.hpp`):
+   - Each DFB has per-consumer `posted`/`acked` atomic counters (`TileCounter`)
+   - `push_back` calls `TileCounterArray::inc_posted` and notifies `data_cv`; `pop_front` calls `inc_acked` and notifies `space_cv`
+   - `wait_front` calls `wait_occupancy` — blocks on `data_cv` until `posted - acked >= requested_tiles`
+   - `reserve_back` calls `wait_free_space` — blocks on `space_cv` until `capacity - (posted - acked) >= requested_tiles`
 
 ---
 
