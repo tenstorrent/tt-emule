@@ -31,6 +31,8 @@ public:
 
     void finish() { dfb_finish(logical_dfb_id_); }
 
+    void write_barrier(const Noc& noc) const { noc.async_write_barrier(); }
+
     uint32_t get_write_ptr() const { return dfb_get_write_ptr(logical_dfb_id_); }
 
     uint32_t get_read_ptr() const { return dfb_get_read_ptr(logical_dfb_id_); }
@@ -101,5 +103,43 @@ struct noc_traits_t<DataflowBuffer> {
         return static_cast<uintptr_t>(dst.get_write_ptr() + args.offset_bytes);
     }
 };
+
+// Implicit-sync overloads: single-entry read/write that folds the DFB
+// reserve_back/push_back (producer) or wait_front/pop_front (consumer) into
+// the noc call itself.  In emulation the transfer is a synchronous memcpy,
+// so the bookkeeping happens inline here.
+template <Noc::TxnIdMode txn_id_mode, typename Src>
+inline std::enable_if_t<txn_id_mode == Noc::TxnIdMode::ENABLED>
+Noc::async_read(
+    const Src& src,
+    DataflowBuffer& dst,
+    const typename noc_traits_t<Src>::src_args_type& src_args,
+    const DataflowBufferArgs& dst_args) const {
+    const uint32_t size_bytes = dst.get_entry_size();
+    dst.reserve_back(1);
+    uintptr_t s = noc_traits_t<Src>::template src_addr<AddressType::NOC>(src, *this, src_args);
+    uintptr_t d = static_cast<uintptr_t>(dst.get_write_ptr() + dst_args.offset_bytes);
+    if (s && d) {
+        std::memcpy(reinterpret_cast<uint8_t*>(d), reinterpret_cast<uint8_t*>(s), size_bytes);
+    }
+    dst.push_back(1);
+}
+
+template <Noc::TxnIdMode txn_id_mode, typename Dst>
+inline std::enable_if_t<txn_id_mode == Noc::TxnIdMode::ENABLED>
+Noc::async_write(
+    DataflowBuffer& src,
+    const Dst& dst,
+    const DataflowBufferArgs& src_args,
+    const typename noc_traits_t<Dst>::dst_args_type& dst_args) const {
+    const uint32_t size_bytes = src.get_entry_size();
+    src.wait_front(1);
+    uintptr_t s = static_cast<uintptr_t>(src.get_read_ptr() + src_args.offset_bytes);
+    uintptr_t d = noc_traits_t<Dst>::template dst_addr<AddressType::NOC>(dst, *this, dst_args);
+    if (s && d) {
+        std::memcpy(reinterpret_cast<uint8_t*>(d), reinterpret_cast<uint8_t*>(s), size_bytes);
+    }
+    src.pop_front(1);
+}
 
 }  // namespace experimental
