@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.16)
 project(tt_emule CXX)
 
+if(NOT DEFINED PROJECT_IS_TOP_LEVEL)
+    if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+        set(PROJECT_IS_TOP_LEVEL TRUE)
+    else()
+        set(PROJECT_IS_TOP_LEVEL FALSE)
+    endif()
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -11,7 +19,7 @@ option(TT_EMULE_COMPAT_HEADERS
     OFF)
 
 # Optionally enable ThreadSanitizer in Debug builds
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+if(PROJECT_IS_TOP_LEVEL AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-fsanitize=thread -g -O1)
     add_link_options(-fsanitize=thread)
 endif()
@@ -34,10 +42,24 @@ target_compile_definitions(tt_emule_lib PRIVATE
 
 target_link_libraries(tt_emule_lib PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 
+# ---- INTERFACE header-only target (for consumers that only need includes) ----
+add_library(tt_emule_headers INTERFACE)
+add_library(tt-emule::headers ALIAS tt_emule_headers)
+
+target_include_directories(tt_emule_headers INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+
+set_target_properties(tt_emule_headers PROPERTIES
+    TT_EMULE_JIT_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/jit_hw"
+    TT_EMULE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+
 # ---- Install rules ----
 include(GNUInstallDirs)
 
-install(TARGETS tt_emule_lib
+install(TARGETS tt_emule_lib tt_emule_headers
     EXPORT tt-emule-targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
@@ -58,5 +80,7 @@ install(EXPORT tt-emule-targets
 )
 
 # ---- Tests ----
-enable_testing()
-add_subdirectory(tests)
+if(PROJECT_IS_TOP_LEVEL)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
