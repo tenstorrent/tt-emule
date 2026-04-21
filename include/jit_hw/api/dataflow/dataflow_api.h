@@ -70,6 +70,8 @@ inline uint32_t __emule_addr_to_offset(uint32_t addr) {
 // l1_alloc() returns l1_base_ + bump  (>= l1_base, always a valid host ptr).
 // Firmware HAL addresses (e.g. 0x19520) are offsets into the L1 buffer.
 // We distinguish by comparing against __emule_bridge_l1's numeric address.
+#ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED
+#define __EMULE_LOCAL_L1_TO_PTR_DEFINED
 inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
     uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
     if (l1_addr >= l1_base) {
@@ -79,6 +81,7 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
     // Firmware L1 offset — translate via bridge pointer.
     return __emule_bridge_l1 + l1_addr;
 }
+#endif
 
 // ---- Coordinate translation tables ----
 // On real hardware, these are L1-resident lookup tables populated by firmware.

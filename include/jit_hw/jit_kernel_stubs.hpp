@@ -38,6 +38,20 @@ extern "C" uint8_t* __emule_noc_resolve(uint32_t x, uint32_t y, uint64_t addr);
 // from mmap'd-below-4GB L1) and real host pointers.
 extern thread_local uint8_t* __emule_bridge_l1;
 
+// Translate a raw L1 firmware offset (or already-absolute host pointer) to a
+// host uint8_t*.  Available to ALL JIT kernels so the l1_arg_ptr regex patch in
+// emulated_program_runner can inject calls without requiring dataflow_api.h.
+#ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED
+#define __EMULE_LOCAL_L1_TO_PTR_DEFINED
+inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
+    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
+    if (l1_addr >= l1_base) {
+        return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
+    }
+    return __emule_bridge_l1 + l1_addr;
+}
+#endif
+
 // Bank mapping arrays — populated by emulated_program_runner, resolved at dlopen.
 // Match firmware declarations from dataflow_api_common.h / firmware_common.h.
 extern uint16_t dram_bank_to_noc_xy[2][32];
