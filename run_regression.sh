@@ -1,18 +1,42 @@
 #!/bin/bash
 set -euo pipefail
 
+# Regression runner for tt-emule against the upstream-rebased tt-metal.
+#
+# Upstream tt-metal consolidated per-test binaries into four gtest binaries:
+#   unit_tests_api             — core api/DFB/simple buffer/dst tests
+#   unit_tests_integration     — matmul / sfpu integration tests
+#   unit_tests_legacy          — private Quasar compute / DM tests
+#   unit_tests_data_movement   — phase-8 DM (loopback, one_from_one, direct_write, dram_unary)
+#   unit_tests_per_core_allocation — per-core allocator mode (separate because
+#                                    TT_METAL_ALLOCATOR_MODE_HYBRID must be set
+#                                    before RunTimeOptions caches it)
+#   unit_tests_ttnn            — ttnn op tests (add/sub/matmul/relational/sweep)
+#
+# Each Tier-N run_test invocation below points at one of those binaries with
+# a --gtest_filter that isolates the intended test.
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TT_METAL_DIR="${TT_METAL_DIR:-/localdev/arminale/tt-metal}"
-BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule_clang}"
-TEST_DIR="$BUILD_DIR/test/tt_emule"
+BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule}"
+TEST_DIR="$BUILD_DIR/test/tt_metal"
+TTNN_TEST_DIR="$BUILD_DIR/test/ttnn"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"
+
+# Consolidated gtest binaries
+API_BIN="$TEST_DIR/unit_tests_api"
+INTEGRATION_BIN="$TEST_DIR/unit_tests_integration"
+LEGACY_BIN="$TEST_DIR/unit_tests_legacy"
+DM_BIN="$TEST_DIR/unit_tests_data_movement"
+PER_CORE_ALLOC_BIN="$TEST_DIR/unit_tests_per_core_allocation"
+TTNN_BIN="$TTNN_TEST_DIR/unit_tests_ttnn"
 
 PASS=0; FAIL=0; SKIP=0
 
 run_test() {
     local name="$1"; shift
     if [ ! -f "$1" ]; then
-        echo "  SKIP: $name (binary not found)"
+        echo "  SKIP: $name (binary not found: $1)"
         SKIP=$((SKIP + 1))
         return
     fi
@@ -29,7 +53,7 @@ run_test() {
 run_test_verbose() {
     local name="$1"; shift
     if [ ! -f "$1" ]; then
-        echo "  SKIP: $name (binary not found)"
+        echo "  SKIP: $name (binary not found: $1)"
         SKIP=$((SKIP + 1))
         return
     fi
@@ -74,168 +98,184 @@ fi
 # Tier 1: Host-only (no env vars needed)
 echo ""
 echo "== Tier 1: Host-only =="
-unset TT_METAL_MOCK_CLUSTER_DESC_PATH TT_METAL_EMULATED_MODE TT_METAL_SLOW_DISPATCH_MODE 2>/dev/null || true
+unset TT_METAL_MOCK_CLUSTER_DESC_PATH TT_METAL_EMULE_MODE TT_METAL_SLOW_DISPATCH_MODE 2>/dev/null || true
 
-run_test "bit_utils"          "$TEST_DIR/test_bit_utils"
-run_test "host_buffer"        "$TEST_DIR/test_host_buffer"
-run_test "tilize_untilize"    "$TEST_DIR/test_tilize_untilize"
-run_test "blockfloat_common"  "$TEST_DIR/test_blockfloat_common"
-run_test "emulation_toggle_default" "$TEST_DIR/test_emulation_toggle" --gtest_filter="EmulationToggle.*"
+run_test "bit_utils"          "$API_BIN" \
+    --gtest_filter="Host.ExtractBitArray:Host.PackBitArray:Host.PackExtractBitArray:Host.ExtractPackBitArray"
+run_test "host_buffer"        "$API_BIN" --gtest_filter="HostBufferTest.*"
+run_test "tilize_untilize"    "$API_BIN" --gtest_filter="TilizeUntilizeTests/*"
+run_test "blockfloat_common"  "$API_BIN" --gtest_filter="BlockfloatCommonTests/*"
 
 for t in adjacent contains intersects merge iterator; do
-    run_test "CoreRange_$t" "$TEST_DIR/test_CoreRange_$t"
+    # CoreCoordFixture.TestCoreRange{Adjacent,NotAdjacent,Contains,NotContains,...}
+    tcap="$(echo "$t" | sed 's/.*/\u&/')"
+    run_test "CoreRange_$t" "$API_BIN" \
+        --gtest_filter="CoreCoordFixture.TestCoreRange${tcap}*:CoreCoordFixture.TestCoreRangeNot${tcap}*"
 done
 
 for t in construct contains intersects merge; do
-    run_test "CoreRangeSet_$t" "$TEST_DIR/test_CoreRangeSet_$t"
+    tcap="$(echo "$t" | sed 's/.*/\u&/')"
+    if [ "$t" = "construct" ]; then
+        run_test "CoreRangeSet_$t" "$API_BIN" \
+            --gtest_filter="CoreCoordFixture.TestCoreRangeSetValidConstruct*:CoreCoordFixture.TestCoreRangeSetInvalidConstruct*"
+    else
+        run_test "CoreRangeSet_$t" "$API_BIN" \
+            --gtest_filter="CoreCoordFixture.TestCoreRangeSet${tcap}*:CoreCoordFixture.TestCoreRangeSetNot${tcap}*:CoreCoordFixture.TestCoreRangeSet${tcap}CoreCoord:CoreCoordFixture.TestCoreRangeSet${tcap}CoreRange:CoreCoordFixture.TestCoreRangeSet${tcap}NoSolution"
+    fi
 done
 
-run_test "dst_capacity_bf16"  "$TEST_DIR/test_dst_capacity_bf16"
-run_test "dst_capacity_fp32"  "$TEST_DIR/test_dst_capacity_fp32"
+# test_dst_capacity (bf16 + fp32) → unit_tests_api has DstStandalone.* (host-side)
+# and DstJitBF16.* (JIT-compiled BF16 variant). DstJitFP32 is not in the binary:
+# upstream only compiles the BF16 jit variant. Keep the original two entries so
+# the fp32 case surfaces as FAIL (missing) until the fp32 variant is wired up.
+run_test "dst_capacity_bf16"  "$API_BIN" --gtest_filter="DstStandalone.*:DstJitBF16.*"
+run_test "dst_capacity_fp32"  "$API_BIN" --gtest_filter="DstJitFP32.*"
 
 # Tier 2+3: Buffer I/O + JIT (wormhole for buffer tests)
 echo ""
 echo "== Tier 2: Buffer I/O =="
 
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
-export TT_METAL_EMULATED_MODE=1
+export TT_METAL_EMULE_MODE=1
 export TT_METAL_SLOW_DISPATCH_MODE=1
 export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
 
-run_test "SimpleL1Buffer"   "$TEST_DIR/test_simple_l1_buffer" --gtest_filter="MeshDeviceFixture.TestSimpleL1Buffer*"
-run_test "SimpleDramBuffer" "$TEST_DIR/test_simple_dram_buffer"
-run_test "emulation_toggle_active" "$TEST_DIR/test_emulation_toggle"
+run_test "SimpleL1Buffer"   "$API_BIN" --gtest_filter="MeshDeviceFixture.TestSimpleL1Buffer*"
+run_test "SimpleDramBuffer" "$API_BIN" --gtest_filter="MeshDeviceFixture.TestSimpleDram*"
 
 echo ""
 echo "== Tier 3: JIT Kernel Execution =="
 
-run_test "TensixL1Tile"     "$TEST_DIR/test_simple_l1_buffer" --gtest_filter="*Tensix*"
+run_test "TensixL1Tile"     "$API_BIN" --gtest_filter="MeshDeviceFixture.TensixTestSimpleL1ReadWrite*"
 
 echo ""
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/quasar_Q1.yaml"
 export ARCH_NAME=QUASAR
 
+# Upstream tt-metal asserts on an empty dispatch_cores list unless
+# get_simulator_enabled() is true (llrt/core_descriptor.cpp:260). The Quasar
+# core descriptor has dispatch_cores: [], so every Quasar test needs a fake
+# simulator dir so get_simulator_enabled() returns true while the device
+# stays emulated (ChipType::EMULATED).
+EMULE_SIM_DIR="$(mktemp -d /tmp/tt_emule_sim.XXXXXX)"
+ln -sf "$TT_METAL_DIR/tt_metal/soc_descriptors/quasar_32_arch.yaml" "$EMULE_SIM_DIR/soc_descriptor.yaml"
+export TT_METAL_SIMULATOR="$EMULE_SIM_DIR"
+
 echo ""
-echo "== Tier 3b: DFB Multi-P/C STRIDED (test_dataflow_buffer) =="
+echo "== Tier 3b: DFB Multi-P/C STRIDED =="
 
-DFB_TEST="$TEST_DIR/test_dataflow_buffer"
-
-# Group A: DM-DM multi-P/C explicit sync (exact filters avoid matching Tensix variants)
-run_test "DMTest1xDFB1Sx1S" "$DFB_TEST" \
+# Group A: DM-DM multi-P/C explicit/implicit sync
+run_test "DMTest1xDFB1Sx1S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB1Sx1S/ImplicitSyncFalse"
-run_test "DMTest1xDFB1Sx1S_IS" "$DFB_TEST" \
+run_test "DMTest1xDFB1Sx1S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB1Sx1S/ImplicitSyncTrue"
-run_test "DMTest1xDFB1Sx4S" "$DFB_TEST" \
+run_test "DMTest1xDFB1Sx4S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB1Sx4S/ImplicitSyncFalse"
-run_test "DMTest1xDFB1Sx4S_IS" "$DFB_TEST" \
+run_test "DMTest1xDFB1Sx4S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB1Sx4S/ImplicitSyncTrue"
-run_test "DMTest1xDFB4Sx1S" "$DFB_TEST" \
+run_test "DMTest1xDFB4Sx1S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx1S/ImplicitSyncFalse"
-run_test "DMTest1xDFB4Sx1S_IS" "$DFB_TEST" \
+run_test "DMTest1xDFB4Sx1S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx1S/ImplicitSyncTrue"
-run_test "DMTest1xDFB4Sx4S" "$DFB_TEST" \
+run_test "DMTest1xDFB4Sx4S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx4S/ImplicitSyncFalse"
-run_test "DMTest1xDFB4Sx4S_IS" "$DFB_TEST" \
+run_test "DMTest1xDFB4Sx4S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx4S/ImplicitSyncTrue"
-run_test "DMTest1xDFB2Sx4S" "$DFB_TEST" \
+run_test "DMTest1xDFB2Sx4S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB2Sx4S/ImplicitSyncFalse"
-run_test "DMTest1xDFB2Sx4S_IS" "$DFB_TEST" \
+run_test "DMTest1xDFB2Sx4S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB2Sx4S/ImplicitSyncTrue"
-run_test "DMTest1xDFB4Sx2S" "$DFB_TEST" \
+run_test "DMTest1xDFB4Sx2S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx2S/ImplicitSyncFalse"
-run_test "DMTest1xDFB4Sx2S_IS" "$DFB_TEST" \
+run_test "DMTest1xDFB4Sx2S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx2S/ImplicitSyncTrue"
 
 echo ""
 echo "== Tier 3c: DFB Compute Bridge Tests (Groups B/C) =="
 
 # Group B: DM producer → Tensix consumer
-run_test "DMTensixTest1xDFB1Sx1S" "$DFB_TEST" \
+run_test "DMTensixTest1xDFB1Sx1S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB1Sx1S/ImplicitSyncFalse"
-run_test "DMTensixTest1xDFB1Sx1S_IS" "$DFB_TEST" \
+run_test "DMTensixTest1xDFB1Sx1S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB1Sx1S/ImplicitSyncTrue"
-run_test "DMTensixTest1xDFB1Sx4S" "$DFB_TEST" \
+run_test "DMTensixTest1xDFB1Sx4S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB1Sx4S/ImplicitSyncFalse"
-run_test "DMTensixTest1xDFB1Sx4S_IS" "$DFB_TEST" \
+run_test "DMTensixTest1xDFB1Sx4S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB1Sx4S/ImplicitSyncTrue"
-run_test "DMTensixTest1xDFB4Sx1S" "$DFB_TEST" \
+run_test "DMTensixTest1xDFB4Sx1S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx1S/ImplicitSyncFalse"
-run_test "DMTensixTest1xDFB4Sx1S_IS" "$DFB_TEST" \
+run_test "DMTensixTest1xDFB4Sx1S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx1S/ImplicitSyncTrue"
-run_test "DMTensixTest1xDFB4Sx4S" "$DFB_TEST" \
+run_test "DMTensixTest1xDFB4Sx4S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx4S/ImplicitSyncFalse"
-run_test "DMTensixTest1xDFB4Sx4S_IS" "$DFB_TEST" \
+run_test "DMTensixTest1xDFB4Sx4S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx4S/ImplicitSyncTrue"
-run_test "DMTensixTest1xDFB2Sx4S" "$DFB_TEST" \
+run_test "DMTensixTest1xDFB2Sx4S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB2Sx4S/ImplicitSyncFalse"
-run_test "DMTensixTest1xDFB2Sx4S_IS" "$DFB_TEST" \
+run_test "DMTensixTest1xDFB2Sx4S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB2Sx4S/ImplicitSyncTrue"
-run_test "DMTensixTest1xDFB4Sx2S" "$DFB_TEST" \
+run_test "DMTensixTest1xDFB4Sx2S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx2S/ImplicitSyncFalse"
-run_test "DMTensixTest1xDFB4Sx2S_IS" "$DFB_TEST" \
+run_test "DMTensixTest1xDFB4Sx2S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx2S/ImplicitSyncTrue"
 
 # Group C: Tensix producer → DM consumer
-run_test "TensixDMTest1xDFB1Sx1S" "$DFB_TEST" \
+run_test "TensixDMTest1xDFB1Sx1S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB1Sx1S/ImplicitSyncFalse"
-run_test "TensixDMTest1xDFB1Sx1S_IS" "$DFB_TEST" \
+run_test "TensixDMTest1xDFB1Sx1S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB1Sx1S/ImplicitSyncTrue"
-run_test "TensixDMTest1xDFB1Sx4S" "$DFB_TEST" \
+run_test "TensixDMTest1xDFB1Sx4S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB1Sx4S/ImplicitSyncFalse"
-run_test "TensixDMTest1xDFB1Sx4S_IS" "$DFB_TEST" \
+run_test "TensixDMTest1xDFB1Sx4S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB1Sx4S/ImplicitSyncTrue"
-run_test "TensixDMTest1xDFB4Sx1S" "$DFB_TEST" \
+run_test "TensixDMTest1xDFB4Sx1S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx1S/ImplicitSyncFalse"
-run_test "TensixDMTest1xDFB4Sx1S_IS" "$DFB_TEST" \
+run_test "TensixDMTest1xDFB4Sx1S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx1S/ImplicitSyncTrue"
-run_test "TensixDMTest1xDFB4Sx4S" "$DFB_TEST" \
+run_test "TensixDMTest1xDFB4Sx4S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx4S/ImplicitSyncFalse"
-run_test "TensixDMTest1xDFB4Sx4S_IS" "$DFB_TEST" \
+run_test "TensixDMTest1xDFB4Sx4S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx4S/ImplicitSyncTrue"
-run_test "TensixDMTest1xDFB2Sx4S" "$DFB_TEST" \
+run_test "TensixDMTest1xDFB2Sx4S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB2Sx4S/ImplicitSyncFalse"
-run_test "TensixDMTest1xDFB2Sx4S_IS" "$DFB_TEST" \
+run_test "TensixDMTest1xDFB2Sx4S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB2Sx4S/ImplicitSyncTrue"
-run_test "TensixDMTest1xDFB4Sx2S" "$DFB_TEST" \
+run_test "TensixDMTest1xDFB4Sx2S" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx2S/ImplicitSyncFalse"
-run_test "TensixDMTest1xDFB4Sx2S_IS" "$DFB_TEST" \
+run_test "TensixDMTest1xDFB4Sx2S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx2S/ImplicitSyncTrue"
 
 echo ""
 echo "== Tier 3d: DFB Multi-DFB Pipeline (Group D) =="
 
-# Group D: DM→Tensix→DM multi-DFB pipeline
-run_test "DMTensixDMTest2xDFB1Sx1S" "$DFB_TEST" \
+run_test "DMTensixDMTest2xDFB1Sx1S" "$API_BIN" \
     --gtest_filter="MeshDeviceFixture.DMTensixDMTest2xDFB1Sx1S"
-run_test "DMTensixDMTest1xDFB2Sx1S1xDFB1Sx2S" "$DFB_TEST" \
+run_test "DMTensixDMTest1xDFB2Sx1S1xDFB1Sx2S" "$API_BIN" \
     --gtest_filter="MeshDeviceFixture.DMTensixDMTest1xDFB2Sx1S1xDFB1Sx2S"
-run_test "DMTensixDMTest1xDFB4Sx1S1xDFB1Sx4S" "$DFB_TEST" \
+run_test "DMTensixDMTest1xDFB4Sx1S1xDFB1Sx4S" "$API_BIN" \
     --gtest_filter="MeshDeviceFixture.DMTensixDMTest1xDFB4Sx1S1xDFB1Sx4S"
 
 echo ""
 echo "== Tier 3e: DFB BLOCKED Consumer =="
 
-# BLOCKED DM-DM
 for test in DMTest1xDFB1Sx4B DMTest1xDFB4Sx1B DMTest1xDFB4Sx4B DMTest1xDFB4Sx2B DMTest1xDFB2Sx4B; do
-    run_test "${test}" "$DFB_TEST" \
+    run_test "${test}" "$API_BIN" \
         --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncFalse"
-    run_test "${test}_IS" "$DFB_TEST" \
+    run_test "${test}_IS" "$API_BIN" \
         --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
 done
 
-# BLOCKED DM→Tensix
 for test in DMTensixTest1xDFB1Sx4B DMTensixTest1xDFB4Sx1B DMTensixTest1xDFB4Sx4B DMTensixTest1xDFB4Sx2B DMTensixTest1xDFB2Sx4B; do
-    run_test "${test}" "$DFB_TEST" \
+    run_test "${test}" "$API_BIN" \
         --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncFalse"
-    run_test "${test}_IS" "$DFB_TEST" \
+    run_test "${test}_IS" "$API_BIN" \
         --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
 done
 
-# BLOCKED Tensix→DM
 for test in TensixDMTest1xDFB1Sx4B TensixDMTest1xDFB4Sx1B TensixDMTest1xDFB4Sx4B TensixDMTest1xDFB4Sx2B TensixDMTest1xDFB2Sx4B; do
-    run_test "${test}" "$DFB_TEST" \
+    run_test "${test}" "$API_BIN" \
         --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncFalse"
-    run_test "${test}_IS" "$DFB_TEST" \
+    run_test "${test}_IS" "$API_BIN" \
         --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
 done
 
@@ -243,89 +283,77 @@ echo ""
 echo "== Tier 3f: DFB Multi-Core =="
 
 for test in MultiCoreDMTest2Core_1Sx1S MultiCoreDMTest2Core_2Sx2S; do
-    run_test "${test}" "$DFB_TEST" \
+    run_test "${test}" "$API_BIN" \
         --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncFalse"
-    run_test "${test}_IS" "$DFB_TEST" \
+    run_test "${test}_IS" "$API_BIN" \
         --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
 done
 
-# BLOCKED multi-core
 for test in MultiCoreDMTest2Core_1Sx4B; do
-    run_test "${test}" "$DFB_TEST" \
+    run_test "${test}" "$API_BIN" \
         --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncFalse"
-    run_test "${test}_IS" "$DFB_TEST" \
+    run_test "${test}_IS" "$API_BIN" \
         --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
 done
 
 echo ""
 echo "== Tier 3g: DFB Config Validation =="
 
-DFB_CFG_TEST="$TEST_DIR/test_dataflow_buffer_configs"
-
-# STRIDED config tests (7 passing)
 for test in DMTest1xDFB1Sx4SConfig DMTensixTest1xDFB4Sx1SConfig DMTest1xDFB4Sx1SConfig \
             DMTest1xDFB4Sx4SConfig DMTest1xDFB2Sx4SConfig DMTest1xDFB4Sx2SConfig \
             DMTest1xDFB1Sx1BConfig; do
-    run_test "${test}" "$DFB_CFG_TEST" \
+    run_test "${test}" "$API_BIN" \
         --gtest_filter="MeshDeviceFixture.${test}"
 done
 
-# Multi-core config tests (3 passing)
 for test in MultiCoreDFB_1P1C_Strided_NoImplicitSync MultiCoreDFB_1P1C_Strided_ImplicitSync \
             MultiCoreDFB_HomogeneousGrid_SingleGroup; do
-    run_test "${test}" "$DFB_CFG_TEST" \
+    run_test "${test}" "$API_BIN" \
         --gtest_filter="MeshDeviceFixture.${test}"
 done
 
 echo ""
 echo "== Tier 3h: Quasar Compute Kernel Tests =="
 
-# Create a fake simulator directory with a valid soc_descriptor.yaml so that
-# get_simulator_enabled() returns true (the env var is set and the path is non-
-# empty) while the actual device is still emulated (ChipType::EMULATED).
-EMULE_SIM_DIR="$(mktemp -d /tmp/tt_emule_sim.XXXXXX)"
-ln -sf "$TT_METAL_DIR/tt_metal/soc_descriptors/quasar_32_arch.yaml" "$EMULE_SIM_DIR/soc_descriptor.yaml"
-export TT_METAL_SIMULATOR="$EMULE_SIM_DIR"
+run_test "QuasarComputeKernelMultipleThreads" "$LEGACY_BIN" \
+    --gtest_filter="MeshDeviceSingleCardFixture.QuasarComputeKernelMultipleThreads"
+run_test "QuasarComputeKernelSingleThread" "$LEGACY_BIN" \
+    --gtest_filter="MeshDeviceSingleCardFixture.QuasarComputeKernelSingleThread"
+run_test "QuasarCreateMultipleComputeKernelsSingleCluster" "$LEGACY_BIN" \
+    --gtest_filter="MeshDeviceSingleCardFixture.QuasarCreateMultipleComputeKernelsSingleCluster"
 
-run_test "QuasarComputeKernelMultipleThreads" "$TEST_DIR/test_quasar_compute_kernels" \
-    --gtest_filter="*QuasarComputeKernelMultipleThreads*"
-run_test "QuasarComputeKernelSingleThread" "$TEST_DIR/test_quasar_compute_kernels" \
-    --gtest_filter="*QuasarComputeKernelSingleThread*"
-run_test "QuasarCreateMultipleComputeKernelsSingleCluster" "$TEST_DIR/test_quasar_compute_kernels" \
-    --gtest_filter="*QuasarCreateMultipleComputeKernelsSingleCluster*"
+run_test "QuasarComputeKernelTLS" "$LEGACY_BIN" \
+    --gtest_filter="MeshDeviceSingleCardFixture.QuasarComputeKernelTLS"
 
-run_test "QuasarComputeKernelTLS" "$TEST_DIR/test_globals_tls" \
-    --gtest_filter="*QuasarComputeKernelTLS*"
+run_test "QuasarMatmulBlock" "$INTEGRATION_BIN" \
+    --gtest_filter="MeshDispatchFixture.TensixMatmulBlock"
+run_test "QuasarMatmulBlockInitShort" "$INTEGRATION_BIN" \
+    --gtest_filter="MeshDispatchFixture.TensixMatmulBlockInitShort" --gtest_also_run_disabled_tests
 
-run_test "QuasarMatmulBlock" "$TEST_DIR/test_matmul_X_tile" \
-    --gtest_filter="*TensixMatmulBlock"
-run_test "QuasarMatmulBlockInitShort" "$TEST_DIR/test_matmul_X_tile" \
-    --gtest_filter="*TensixMatmulBlockInitShort" --gtest_also_run_disabled_tests
-
-run_test "QuasarMatmulBlockDemo" "$TEST_DIR/test_matmul_block" \
-    --gtest_filter="*QuasarMatmulBlock"
+run_test "QuasarMatmulBlockDemo" "$INTEGRATION_BIN" \
+    --gtest_filter="MeshDispatchFixture.QuasarMatmulBlock"
 
 echo ""
 echo "== Tier 3i: Quasar Semaphore Tests =="
 
-run_test "QuasarComputeKernelSemaphores" "$TEST_DIR/test_quasar_semaphores" \
-    --gtest_filter="*QuasarComputeKernelSemaphores*"
-run_test "QuasarDmAndComputeKernelSemaphores" "$TEST_DIR/test_quasar_semaphores" \
-    --gtest_filter="*QuasarDmAndComputeKernelSemaphores*"
-run_test "DmLoopback" "$TEST_DIR/test_dm_loopback" \
-    --gtest_filter="*DmLoopback*"
+run_test "QuasarComputeKernelSemaphores" "$LEGACY_BIN" \
+    --gtest_filter="MeshDeviceSingleCardFixture.QuasarComputeKernelSemaphores"
+run_test "QuasarDmAndComputeKernelSemaphores" "$LEGACY_BIN" \
+    --gtest_filter="MeshDeviceSingleCardFixture.QuasarDmAndComputeKernelSemaphores"
+run_test "DmLoopback" "$LEGACY_BIN" \
+    --gtest_filter="MeshDeviceSingleCardFixture.DmLoopback"
 
 echo ""
 echo "== Tier 3j: Simple DM + RISCV Atomics =="
 
-run_test "SingleDmL1Write" "$TEST_DIR/test_single_dm_l1_write" \
-    --gtest_filter="*SingleDmL1Write*"
-run_test "TestAtomicLoadStoreRISCV" "$TEST_DIR/test_riscv_atomics" \
-    --gtest_filter="*TestAtomicLoadStoreRISCV*"
-run_test "TestAtomicAddFetchRISCV" "$TEST_DIR/test_riscv_atomics" \
-    --gtest_filter="*TestAtomicAddFetchRISCV*"
-run_test "TestAtomicCASRISCV" "$TEST_DIR/test_riscv_atomics" \
-    --gtest_filter="*TestAtomicCASRISCV*"
+run_test "SingleDmL1Write" "$LEGACY_BIN" \
+    --gtest_filter="MeshDeviceSingleCardFixture.SingleDmL1Write"
+run_test "TestAtomicLoadStoreRISCV" "$LEGACY_BIN" \
+    --gtest_filter="RISCVAtomicsFixture.TestAtomicLoadStoreRISCV"
+run_test "TestAtomicAddFetchRISCV" "$LEGACY_BIN" \
+    --gtest_filter="RISCVAtomicsFixture.TestAtomicAddFetchRISCV"
+run_test "TestAtomicCASRISCV" "$LEGACY_BIN" \
+    --gtest_filter="RISCVAtomicsFixture.TestAtomicCASRISCV"
 
 unset TT_METAL_SIMULATOR
 rm -rf "$EMULE_SIM_DIR"
@@ -336,68 +364,71 @@ echo "== Tier 3k: Data Movement Tests (Phase 8) =="
 unset ARCH_NAME
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
 
-run_test "DmLoopbackPacketSizes" "$TEST_DIR/test_dm_loopback_noc" \
-    --gtest_filter="*LoopbackPacketSizes*"
-run_test "DmLoopbackDirectedIdeal" "$TEST_DIR/test_dm_loopback_noc" \
-    --gtest_filter="*LoopbackDirectedIdeal*"
-run_test "DmOneFromOnePacketSizes" "$TEST_DIR/test_dm_one_from_one" \
-    --gtest_filter="*OneFromOnePacketSizes" --gtest_also_run_disabled_tests
-run_test "DmOneFromOneDirectedIdeal" "$TEST_DIR/test_dm_one_from_one" \
-    --gtest_filter="*OneFromOneDirectedIdeal*"
-
-echo ""
-echo "== Tier 3l: DM Direct Write & DRAM Unary =="
-
-# These tests use GenericMeshDeviceFixture which needs TT_METAL_SIMULATOR
+# Phase-8 DM tests use GenericMeshDeviceFixture and need TT_METAL_SIMULATOR.
 EMULE_SIM_DIR_WH="$(mktemp -d /tmp/tt_emule_sim.XXXXXX)"
 ln -sf "$TT_METAL_DIR/tt_metal/soc_descriptors/wormhole_b0_80_arch.yaml" "$EMULE_SIM_DIR_WH/soc_descriptor.yaml"
 export TT_METAL_SIMULATOR="$EMULE_SIM_DIR_WH"
 
-run_test "DmDirectWritePerformance" "$TEST_DIR/test_dm_direct_write" \
-    --gtest_filter="*PerformanceComparison*"
-run_test "DmDirectWriteAddressPatterns" "$TEST_DIR/test_dm_direct_write" \
-    --gtest_filter="*AddressPatterns*"
-run_test "DmDirectWriteMulticast" "$TEST_DIR/test_dm_direct_write" \
-    --gtest_filter="*Multicast*"
+run_test "DmLoopbackPacketSizes" "$DM_BIN" \
+    --gtest_filter="GenericMeshDeviceFixture.TensixDataMovementLoopbackPacketSizes"
+run_test "DmLoopbackDirectedIdeal" "$DM_BIN" \
+    --gtest_filter="GenericMeshDeviceFixture.TensixDataMovementLoopbackDirectedIdeal"
+run_test "DmOneFromOnePacketSizes" "$DM_BIN" \
+    --gtest_filter="GenericMeshDeviceFixture.TensixDataMovementOneFromOnePacketSizes" \
+    --gtest_also_run_disabled_tests
+run_test "DmOneFromOneDirectedIdeal" "$DM_BIN" \
+    --gtest_filter="GenericMeshDeviceFixture.TensixDataMovementOneFromOneDirectedIdeal"
 
-run_test "DramUnaryPacketSizes" "$TEST_DIR/test_dm_unary_dram" \
-    --gtest_filter="*PacketSizes" --gtest_also_run_disabled_tests
-run_test "DramUnaryCoreLocations" "$TEST_DIR/test_dm_unary_dram" \
-    --gtest_filter="*CoreLocations*"
-run_test "DramUnaryDRAMChannels" "$TEST_DIR/test_dm_unary_dram" \
-    --gtest_filter="*DRAMChannels*"
-run_test "DramUnaryDirectedIdeal" "$TEST_DIR/test_dm_unary_dram" \
-    --gtest_filter="*DirectedIdeal*"
+echo ""
+echo "== Tier 3l: DM Direct Write & DRAM Unary =="
+
+run_test "DmDirectWritePerformance" "$DM_BIN" \
+    --gtest_filter="GenericMeshDeviceFixture.TensixDirectWritePerformanceComparison"
+run_test "DmDirectWriteAddressPatterns" "$DM_BIN" \
+    --gtest_filter="GenericMeshDeviceFixture.TensixDirectWriteAddressPatterns"
+run_test "DmDirectWriteMulticast" "$DM_BIN" \
+    --gtest_filter="GenericMeshDeviceFixture.TensixDirectWriteMulticast"
+
+run_test "DramUnaryPacketSizes" "$DM_BIN" \
+    --gtest_filter="GenericMeshDeviceFixture.TensixDataMovementDRAMPacketSizes" \
+    --gtest_also_run_disabled_tests
+run_test "DramUnaryCoreLocations" "$DM_BIN" \
+    --gtest_filter="GenericMeshDeviceFixture.TensixDataMovementDRAMCoreLocations"
+run_test "DramUnaryDRAMChannels" "$DM_BIN" \
+    --gtest_filter="GenericMeshDeviceFixture.TensixDataMovementDRAMChannels"
+run_test "DramUnaryDirectedIdeal" "$DM_BIN" \
+    --gtest_filter="GenericMeshDeviceFixture.TensixDataMovementDRAMDirectedIdeal"
 
 unset TT_METAL_SIMULATOR
 rm -rf "$EMULE_SIM_DIR_WH"
 
-# Tier 4: TTNN (blackhole — larger worker grid, no wormhole mmap exhaustion for ttnn)
+# Tier 4: TTNN (blackhole — larger worker grid)
 echo ""
 echo "== Tier 4: TTNN Relational INT32 =="
 
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/blackhole_P100.yaml"
 
-run_test "ttnn_relational" "$TEST_DIR/test_ttnn_relational_int"
-run_test "ttnn_add_int_emulated" "$TEST_DIR/test_ttnn_add_int"
-run_test "ttnn_sub_int" "$TEST_DIR/test_ttnn_sub_int"
-run_test "ttnn_matmul" "$TEST_DIR/test_ttnn_matmul"
+run_test "ttnn_relational"        "$TTNN_BIN" --gtest_filter="RelationalUnaryTests/*"
+run_test "ttnn_add_int_emulated"  "$TTNN_BIN" --gtest_filter="AddUnaryTests/*"
+run_test "ttnn_sub_int"           "$TTNN_BIN" --gtest_filter="SubUnaryTests/*"
+run_test "ttnn_matmul"            "$TTNN_BIN" \
+    --gtest_filter="SingleTileMatmulFixture.*:MultiTileMatmulFixture.*"
 
-# Tier 5: TTNN Matmul Sweep (wormhole — multi-core matmul with semaphore sync)
+# Tier 5: TTNN Matmul Sweep (wormhole)
 echo ""
 echo "== Tier 5: TTNN Matmul Sweep =="
 
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
 
-run_test_verbose "ttnn_matmul_sweep" "$TEST_DIR/test_ttnn_matmul_sweep"
+run_test_verbose "ttnn_matmul_sweep" "$TTNN_BIN" --gtest_filter="MatmulSweep/MatmulSweepFixture.*"
 
 # Tier 6: Silicon toggle proof (requires real hardware)
 echo ""
 echo "== Tier 6: Silicon (toggle proof) =="
 
-unset TT_METAL_MOCK_CLUSTER_DESC_PATH TT_METAL_EMULATED_MODE TT_METAL_SLOW_DISPATCH_MODE 2>/dev/null || true
+unset TT_METAL_MOCK_CLUSTER_DESC_PATH TT_METAL_EMULE_MODE TT_METAL_SLOW_DISPATCH_MODE 2>/dev/null || true
 
-run_test "ttnn_add_int_silicon" "$TEST_DIR/test_ttnn_add_int"
+run_test "ttnn_add_int_silicon" "$TTNN_BIN" --gtest_filter="AddUnaryTests/*"
 
 echo ""
 echo "========================================"
