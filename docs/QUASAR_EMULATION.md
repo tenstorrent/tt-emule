@@ -213,7 +213,7 @@ See `docs/DFB_EMULATION.md` for the full deep dive. Key points:
 - Process: `emulated_program_runner` writes patched kernel source to temp file → `g++ -std=c++17 -fPIC -shared -O1` → `dlopen` the resulting `.so` → call `kernel_main` symbol
 - `mhartid` CSR patch: regex replaces `asm volatile("csrr %0, mhartid" ...)` with `var = __processor_id;`
 - `fence` instruction patch: `asm volatile("fence")` → `__sync_synchronize()`
-- Raw L1 pointer cast patch: `reinterpret_cast<T*>(get_arg_val(N))` → adds `__emule_bridge_l1` offset
+- Raw L1 pointer cast patch: `reinterpret_cast<T*>(get_arg_val<uint32_t>(N))` → `reinterpret_cast<T*>((uintptr_t)__emule_local_l1_to_ptr(get_arg_val<uint32_t>(N)))` — translates raw L1 firmware offsets to valid host pointers via the per-thread `__emule_bridge_l1` base
 - TLS variables set per thread before kernel launch: `__emule_dfbs`, `__emule_tc_array`, `__processor_id`, `__emule_neo_id`, `__emule_trisc_id`
 - JIT cache: compiled `.so` files cached in `/tmp/tt_emule_jit_*`
 - Profiler macros (`DeviceZoneScopedN`, `DeviceTimestampedData`) stubbed as no-ops
@@ -232,7 +232,7 @@ Every feature listed here is verified by at least one passing test.
 | mhartid CSR patch | Regex in `emulated_program_runner.cpp` | `test_quasar_compute_kernels.cpp` (all 3 tests) |
 | DRAM read/write (multi-bank) | `noc_async_read/write` as memcpy, all architecture bank counts | `test_dm_loopback.cpp:DmLoopback`, `test_dm_unary_dram.cpp:DRAMChannels` |
 | L1 shared memory (bump alloc) | `Core::l1_alloc()` | All DFB tests (72+ tests allocate L1) |
-| L1 address translation | `__emule_local_l1_to_ptr()` | `test_single_dm_l1_write.cpp:SingleDmL1Write` |
+| L1 address translation | `__emule_local_l1_to_ptr()` in `jit_kernel_stubs.hpp`; JIT regex auto-patches `reinterpret_cast<T*>(get_arg_val<uint32_t>(N))` | `test_single_dm_l1_write.cpp:SingleDmL1Write`, `test_riscv_atomics.cpp` |
 | NOC loopback (single-core) | Synchronous memcpy | `test_dm_loopback_noc.cpp:LoopbackPacketSizes, LoopbackDirectedIdeal` |
 | NOC one-from-one (two-core) | Synchronous memcpy | `test_dm_one_from_one.cpp:OneFromOnePacketSizes, OneFromOneDirectedIdeal` |
 | NOC inline direct write (unicast) | `noc_inline_dw_write` with byte-enable | `test_dm_direct_write.cpp:PerformanceComparison, AddressPatterns` |
@@ -255,7 +255,7 @@ Every feature listed here is verified by at least one passing test.
 | RISC-V fence patch | `__sync_synchronize()` | All JIT tests (compilation succeeds) |
 | `GenericMeshDeviceFixture` | Allows slow dispatch in emulated mode | All JIT-path tests |
 
-**Regression total:** 135 passing, 1 failure (ttnn_add_int_silicon — requires real hardware), 2 skipped.
+**Regression total:** 137 passing, 0 failures, 0 skipped.
 
 ---
 
