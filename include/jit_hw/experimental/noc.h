@@ -5,10 +5,19 @@
 
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 
 extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src, uint32_t size);
 
 namespace experimental {
+
+class DataflowBuffer;
+
+// Matches upstream tt_metal/hw/inc/experimental/noc.h: concrete arg struct
+// used by the DFB implicit-sync Noc overloads.
+struct DataflowBufferArgs {
+    uint32_t offset_bytes{};
+};
 
 template <typename T>
 struct noc_traits_t {
@@ -18,6 +27,9 @@ struct noc_traits_t {
 class Noc {
 public:
     enum class AddressType { NOC, LOCAL_L1 };
+    // Matches upstream tt-metal: TxnIdMode::ENABLED selects the DFB implicit-sync
+    // overloads that internally manage reserve_back/wait_front and omit size_bytes.
+    enum class TxnIdMode { ENABLED, DISABLED };
 
     Noc() : noc_id_(0) {}
     explicit Noc(uint8_t noc_id) : noc_id_(noc_id) {}
@@ -25,7 +37,7 @@ public:
 
     // async_read: NOC src → LOCAL_L1 dst.
     // In emulation, traits resolve to host pointers directly (uintptr_t).
-    template <typename Src, typename Dst>
+    template <TxnIdMode txn_id_mode = TxnIdMode::DISABLED, typename Src, typename Dst>
     void async_read(
         const Src& src,
         const Dst& dst,
@@ -40,7 +52,7 @@ public:
     }
 
     // async_write: LOCAL_L1 src → NOC dst.
-    template <typename Src, typename Dst>
+    template <TxnIdMode txn_id_mode = TxnIdMode::DISABLED, typename Src, typename Dst>
     void async_write(
         const Src& src,
         const Dst& dst,
@@ -53,6 +65,27 @@ public:
             std::memcpy(reinterpret_cast<uint8_t*>(d), reinterpret_cast<uint8_t*>(s), size_bytes);
         }
     }
+
+    // Implicit-sync overloads (Quasar only in real HW, always available here).
+    // When TxnIdMode::ENABLED is used with a DataflowBuffer side, the size is
+    // inferred from dfb.get_entry_size() and the push/pop bookkeeping is folded
+    // in so the kernel does not call reserve_back/wait_front explicitly.
+    // Defined out-of-line below because DataflowBuffer is incomplete here.
+    template <TxnIdMode txn_id_mode, typename Src>
+    std::enable_if_t<txn_id_mode == TxnIdMode::ENABLED>
+    async_read(
+        const Src& src,
+        DataflowBuffer& dst,
+        const typename noc_traits_t<Src>::src_args_type& src_args,
+        const DataflowBufferArgs& dst_args = {}) const;
+
+    template <TxnIdMode txn_id_mode, typename Dst>
+    std::enable_if_t<txn_id_mode == TxnIdMode::ENABLED>
+    async_write(
+        DataflowBuffer& src,
+        const Dst& dst,
+        const DataflowBufferArgs& src_args,
+        const typename noc_traits_t<Dst>::dst_args_type& dst_args) const;
 
     // async_write_multicast: Delegates to __emule_multicast_write which
     // iterates over the rectangle of target cores and copies data to each.
