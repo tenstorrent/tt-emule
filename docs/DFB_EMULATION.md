@@ -221,6 +221,8 @@ The `stride_size` field = `M * entry_size` for all participants. Initial pointer
 
 **Test evidence (STRIDED):** 42 tests in `test_dataflow_buffer.cpp` cover 1P-1C through 4P-4C STRIDED topologies across DM-DM, DM→Tensix, Tensix→DM, and multi-DFB pipeline topologies. Each runs with both `ImplicitSyncFalse` and `ImplicitSyncTrue`. Example filters: `DMTest1xDFB4Sx4S`, `DMTensixTest1xDFB1Sx4S`, `TensixDMTest1xDFB4Sx2S`.
 
+**Constraint:** `num_entries_in_buffer` must be a multiple of `max(P, C)` for all entries to be processed. `capacity = floor(num_entries_in_buffer / M)`, so `capacity * M < num_entries_in_buffer` when `M` does not divide evenly — the trailing entries are never assigned to any TC slot and are never read, causing output buffer trailing zeros.
+
 ### 4.2 BLOCKED
 
 All consumers see all data. Each producer owns a **contiguous block** of `capacity = num_entries / num_producers` entries starting at `base + p * capacity * entry_size`. The `broadcast_tc` flag on `EmuleDFBInterface` enables the producer broadcast path. `stride_size = entry_size` (`stride_in_entries = 1`).

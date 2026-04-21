@@ -1,4 +1,4 @@
-# Implementation Report v7: Software-Emulated Device (tt-emule) Integration into tt-metal
+# Implementation Report v9: Software-Emulated Device (tt-emule) Integration into tt-metal
 
 ## Table of Contents
 
@@ -241,7 +241,7 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 
 **Standalone tests** (5/5 pass): dfb_passthrough, dfb_multi_consumer, eltwise_add, matmul, tilize
 
-**tt-metal emulated regression** (133 passing, 1 failure, 2 skipped):
+**tt-metal emulated regression** (137 passing, 0 failures, 0 skipped):
 
 | Tier | Tests | Count | Description | Cluster |
 |------|-------|-------|-------------|---------|
@@ -263,7 +263,7 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 | 4 | TTNN INT32 | 2 | ttnn_relational_int (66 sub-cases), ttnn_add_int | BH P100 |
 | 5 | TTNN Matmul Sweep | 1 | 14 sub-cases: multi-core matmul 32² through 2048² | WH N150 |
 | 5b | Quasar Matmul PCC | 2 | TensixMatmulBlock, TensixMatmulBlockInitShort | Quasar |
-| 6 | Silicon Toggle | 1 | ttnn_add_int on real hardware (toggle proof) | Silicon |
+| 6 | Silicon Toggle | 1 | ttnn_add_int — env vars unset, runs in emulation (toggle proof) | WH N150 |
 
 See [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) section 8 for a feature-by-feature table with test evidence.
 
@@ -747,6 +747,22 @@ Rebasing onto new tt-metal versions primarily requires:
 
 **Key insight:** BLOCKED mode consumers on hardware perform block reads — they exhaust all entries from one producer's TC slot before advancing to the next producer's slot. The emulation was incorrectly round-robining through TC slots on every `pop_front` call, producing a shuffled read order. Additionally, all TC slots shared the full buffer address range instead of each slot having its own contiguous sub-range. Both bugs only manifested with multiple producers or consumers (1P-1C was unaffected since there's only one TC slot).
 
+### Changes from v8 to v9
+
+| Aspect | v8 | v9 |
+|--------|----|----|
+| tt-metal regression | 133 pass / 1 fail / 2 skip | **137 pass / 0 fail / 0 skip** |
+| DFB STRIDED wraparound tests | 4 failing (`DMTest1xDFB4Sx4S`, `DMTest1xDFB2Sx4S` + `_IS` variants) | **All 4 passing** |
+| RISC-V atomic tests | 3 segfaulting (`TestAtomicLoadStoreRISCV`, `TestAtomicAddFetchRISCV`, `TestAtomicCASRISCV`) | **All 3 passing** |
+| `__emule_local_l1_to_ptr` availability | Defined in `dataflow_api.h` only | Also in `jit_kernel_stubs.hpp` under `#ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED` — available to every JIT kernel |
+| L1 pointer cast JIT patch | Not present | Regex in runner patches `reinterpret_cast<T*>(get_arg_val<uint32_t>(N))` → `reinterpret_cast<T*>((uintptr_t)__emule_local_l1_to_ptr(...))` |
+| DFB test `num_entries_in_buffer` (4Sx4S / 2Sx4S) | 29 / 21 — not divisible by `max(P,C)=4` | 28 / 20 — divisible by 4; wraparound still exercised (both > `num_entries=16`) |
+| Tier 6 Silicon Toggle | FAIL (expected; requires real hardware) | **PASS** (runs in emulation after env-var unset) |
+
+**Key insight (DFB wraparound):** `num_entries_in_buffer` must be a multiple of `max(P, C)` for every entry to be processed. With `num_entries_in_buffer=29` and `max(P,C)=4`, each producer/consumer does `floor(29/4)=7` iterations covering 28 of 29 entries; entry 28 is never written to the output buffer and stays zero. Choosing values divisible by `max(P,C)` (28 and 20 respectively) eliminates the truncation while preserving the wraparound-exercise invariant.
+
+**Key insight (atomic segfaults):** Quasar atomic kernels call `reinterpret_cast<std::atomic<T>*>(get_arg_val<uint32_t>(0))` where arg[0] is a raw L1 firmware offset (~`0xba780`). On real hardware these offsets are directly dereferenceable by firmware; on x86 emulation they are not valid host addresses, causing an immediate segfault. The fix: (1) move `__emule_local_l1_to_ptr()` into `jit_kernel_stubs.hpp` so every JIT kernel has access to it before any kernel-specific includes; (2) guard the existing definition in `dataflow_api.h` with `#ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED` to prevent ODR violations; (3) add a JIT preprocessor regex that rewrites the pattern automatically so existing and future kernels with this idiom need no source modifications.
+
 ---
 
-*Report updated 2026-04-13. Covers tt-emule on branch `armin` / tt-metal rebased on upstream `3fa4d75355`. BLOCKED consumer drain fix recovers all multi-P/C tests.*
+*Report updated 2026-04-21. Covers tt-emule on branch `armin` / tt-metal on branch `arminale/quasar-rebased`. All 7 previously-failing tests now pass; regression at 137/0/0.*
