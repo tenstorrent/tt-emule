@@ -17,7 +17,7 @@ set -euo pipefail
 # a --gtest_filter that isolates the intended test.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TT_METAL_DIR="${TT_METAL_DIR:-/localdev/arminale/tt-metal}"
+TT_METAL_DIR="${TT_METAL_DIR:-/localdev/arminale/tt-metal-main}"
 BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule}"
 TEST_DIR="$BUILD_DIR/test/tt_metal"
 TTNN_TEST_DIR="$BUILD_DIR/test/ttnn"
@@ -151,15 +151,6 @@ run_test "TensixL1Tile"     "$API_BIN" --gtest_filter="MeshDeviceFixture.TensixT
 echo ""
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/quasar_Q1.yaml"
 export ARCH_NAME=QUASAR
-
-# Upstream tt-metal asserts on an empty dispatch_cores list unless
-# get_simulator_enabled() is true (llrt/core_descriptor.cpp:260). The Quasar
-# core descriptor has dispatch_cores: [], so every Quasar test needs a fake
-# simulator dir so get_simulator_enabled() returns true while the device
-# stays emulated (ChipType::EMULATED).
-EMULE_SIM_DIR="$(mktemp -d /tmp/tt_emule_sim.XXXXXX)"
-ln -sf "$TT_METAL_DIR/tt_metal/soc_descriptors/quasar_32_arch.yaml" "$EMULE_SIM_DIR/soc_descriptor.yaml"
-export TT_METAL_SIMULATOR="$EMULE_SIM_DIR"
 
 echo ""
 echo "== Tier 3b: DFB Multi-P/C STRIDED =="
@@ -355,19 +346,11 @@ run_test "TestAtomicAddFetchRISCV" "$LEGACY_BIN" \
 run_test "TestAtomicCASRISCV" "$LEGACY_BIN" \
     --gtest_filter="RISCVAtomicsFixture.TestAtomicCASRISCV"
 
-unset TT_METAL_SIMULATOR
-rm -rf "$EMULE_SIM_DIR"
-
 echo ""
 echo "== Tier 3k: Data Movement Tests (Phase 8) =="
 
 unset ARCH_NAME
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
-
-# Phase-8 DM tests use GenericMeshDeviceFixture and need TT_METAL_SIMULATOR.
-EMULE_SIM_DIR_WH="$(mktemp -d /tmp/tt_emule_sim.XXXXXX)"
-ln -sf "$TT_METAL_DIR/tt_metal/soc_descriptors/wormhole_b0_80_arch.yaml" "$EMULE_SIM_DIR_WH/soc_descriptor.yaml"
-export TT_METAL_SIMULATOR="$EMULE_SIM_DIR_WH"
 
 run_test "DmLoopbackPacketSizes" "$DM_BIN" \
     --gtest_filter="GenericMeshDeviceFixture.TensixDataMovementLoopbackPacketSizes"
@@ -398,9 +381,6 @@ run_test "DramUnaryDRAMChannels" "$DM_BIN" \
     --gtest_filter="GenericMeshDeviceFixture.TensixDataMovementDRAMChannels"
 run_test "DramUnaryDirectedIdeal" "$DM_BIN" \
     --gtest_filter="GenericMeshDeviceFixture.TensixDataMovementDRAMDirectedIdeal"
-
-unset TT_METAL_SIMULATOR
-rm -rf "$EMULE_SIM_DIR_WH"
 
 # Tier 4: TTNN (blackhole — larger worker grid)
 echo ""
