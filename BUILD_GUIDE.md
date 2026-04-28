@@ -108,8 +108,7 @@ cmake -B build_emule_clang \
     -DCMAKE_AR=/usr/bin/llvm-ar-20 \
     -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
     -DCMAKE_BUILD_TYPE=Release \
-    -DTT_METAL_USE_TT_EMULE=ON \
-    -DTT_METAL_EMULATION=ON \
+    -DTT_METAL_USE_EMULE=ON \
     -DTT_EMULE_PATH=/localdev/<user>/tt-emule \
     -DWITH_PYTHON_BINDINGS=ON \
     -DENABLE_TRACY=OFF \
@@ -124,8 +123,7 @@ cmake --build build_emule_clang -j$(nproc)
 |--------|-------|---------|
 | `CMAKE_C/CXX_COMPILER` | `clang-20`/`clang++-20` | Must use clang-20 as specified by project conventions |
 | `CMAKE_BUILD_TYPE` | `Release` | Release mode avoids ThreadSanitizer overhead and unused-variable warnings in debug macros |
-| `TT_METAL_USE_TT_EMULE` | `ON` | Adds `tt_emule/` test subdirectory to the build |
-| `TT_METAL_EMULATION` | `ON` | Compiles `emulated_program_runner.cpp`, defines `TT_METAL_EMULATION=1`, adds tt-emule include paths |
+| `TT_METAL_USE_EMULE` | `ON` | Compiles `emulated_program_runner.cpp`, enables `SWEmuleChip`, adds tt-emule include paths, propagates the `TT_METAL_USE_EMULE=1` compile define |
 | `WITH_PYTHON_BINDINGS` | `ON` | Builds `_ttnn.so` needed by D2M Python tests |
 | `TT_EMULE_PATH` | Path to tt-emule | Points to tt-emule source tree |
 | `ENABLE_TRACY` | `OFF` | Profiling not needed for emulation |
@@ -147,6 +145,50 @@ CMake Error at cmake/tracy.cmake:20 (add_subdirectory): The source directory ...
 ```
 
 Similarly, the `tt_llk` submodule must be initialized because the firmware headers (`ckernel_structs.h` etc.) come from it.
+
+---
+
+### Optional: Build with AddressSanitizer
+
+A separate Debug build with `TT_EMULE_ASAN=ON` enables AddressSanitizer over the entire emulation path: host code, the JIT'd kernel `.so`s, and the L1Pool slot-tail / per-buffer poisoning that catches kernel-side memory bugs.
+
+```bash
+cd /localdev/<user>/tt-metal-main
+
+cmake -B build_emule_asan \
+    -G Ninja \
+    -DCMAKE_C_COMPILER=clang-20 \
+    -DCMAKE_CXX_COMPILER=clang++-20 \
+    -DCMAKE_AR=/usr/bin/llvm-ar-20 \
+    -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DTT_METAL_USE_EMULE=ON \
+    -DTT_EMULE_ASAN=ON \
+    -DTT_EMULE_PATH=/localdev/<user>/tt-emule \
+    -DWITH_PYTHON_BINDINGS=OFF \
+    -DENABLE_TRACY=OFF \
+    -DTT_INSTALL=OFF
+
+# ASan-instrumented build tools (e.g. flatc) need libclang_rt.asan-x86_64.so
+# at runtime. JIT kernel .so's get -Wl,-rpath,<TT_EMULE_ASAN_RT_DIR> baked in
+# via the runner, so they don't need this — but build tools that exec during
+# CMake do.
+export LD_LIBRARY_PATH=/usr/lib/llvm-20/lib/clang/20/lib/linux:${LD_LIBRARY_PATH:-}
+cmake --build build_emule_asan -j$(nproc)
+```
+
+`TT_EMULE_ASAN=ON` requires `TT_METAL_USE_EMULE=ON`; configure will FATAL_ERROR otherwise. See `docs/ASAN.md` (in tt-emule) for what gets caught and how to triage.
+
+#### Running tests under ASan
+
+The `LD_LIBRARY_PATH` workaround is not needed for tests once they're linked — they pick up libasan via their own `-shared-libasan` runtime. Just point the regression script at the ASan build:
+
+```bash
+cd /localdev/<user>/tt-emule
+BUILD_DIR=/localdev/<user>/tt-metal-main/build_emule_asan ./run_regression.sh
+```
+
+The standalone tt-emule negative tests live in a separate Debug build at `/localdev/<user>/tt-emule/build_asan` (configured with `-DTT_EMULE_ASAN=ON` directly on tt-emule); run via `ctest --test-dir build_asan -L asan`.
 
 ---
 
@@ -347,3 +389,4 @@ GNU ld doesn't support this LLD flag. Add `-DLLVM_USE_LINKER=lld-20` to the tt-m
 | `TT_METAL_RUNTIME_ROOT` | `<tt-metal>` | Running emulated tests |
 | `SYSTEM_DESC_PATH` | `<tt-mlir>/ttrt-artifacts/system_desc.ttsys` | D2M regression tests |
 | `LD_LIBRARY_PATH` | `<tt-metal>/build_emule_clang/lib` | D2M regression tests only (NOT for `ttrt query`) |
+| `LD_LIBRARY_PATH` | `/usr/lib/llvm-20/lib/clang/20/lib/linux` | Building tt-metal with `TT_EMULE_ASAN=ON` (build tools like `flatc` are ASan-instrumented and dlopen libasan); not needed at test runtime |
