@@ -31,3 +31,11 @@ add_test(NAME asan_oob_dram COMMAND test_asan_oob_dram)
 set_tests_properties(asan_oob_dram PROPERTIES
     LABELS "asan"
     WILL_FAIL TRUE)
+
+add_executable(test_asan_oob_noc_read oob_noc_read_test.cpp)
+target_include_directories(test_asan_oob_noc_read PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(test_asan_oob_noc_read PRIVATE tt_emule_lib Threads::Threads)
+add_test(NAME asan_oob_noc_read COMMAND test_asan_oob_noc_read)
+set_tests_properties(asan_oob_noc_read PROPERTIES
+    LABELS "asan"
+    WILL_FAIL TRUE)
