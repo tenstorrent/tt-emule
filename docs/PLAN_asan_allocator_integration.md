@@ -131,24 +131,24 @@ git commit -m "feat(emul/asan): define __emule_resolve_noc_addr_sized bounds-che
 ### Task 2: Add `TT_EMULE_ASAN` to tt-metal CMake
 
 **Files:**
-- Modify: `tt-metal:CMakeLists.txt` (top-level — find the `TT_METAL_EMULATION` option and place the new option next to it)
+- Modify: `tt-metal:CMakeLists.txt` (top-level — find the `TT_METAL_USE_EMULE` option and place the new option next to it)
 
-- [ ] **Step 1: Locate the `TT_METAL_EMULATION` option**
+- [ ] **Step 1: Locate the `TT_METAL_USE_EMULE` option**
 
-Run: `grep -n "TT_METAL_EMULATION\|TT_METAL_USE_TT_EMULE" /localdev/arminale/tt-metal/CMakeLists.txt | head -10`
+Run: `grep -n "TT_METAL_USE_EMULE\|" /localdev/arminale/tt-metal/CMakeLists.txt | head -10`
 
-Note the line number where `TT_METAL_EMULATION` is declared.
+Note the line number where `TT_METAL_USE_EMULE` is declared.
 
 - [ ] **Step 2: Add the option and the global compile/link flag block**
 
-Add immediately after the `TT_METAL_EMULATION` option:
+Add immediately after the `TT_METAL_USE_EMULE` option:
 
 ```cmake
-option(TT_EMULE_ASAN "Build emulation paths with AddressSanitizer (requires TT_METAL_EMULATION=ON)" OFF)
+option(TT_EMULE_ASAN "Build emulation paths with AddressSanitizer (requires TT_METAL_USE_EMULE=ON)" OFF)
 
 if(TT_EMULE_ASAN)
-    if(NOT TT_METAL_EMULATION)
-        message(FATAL_ERROR "TT_EMULE_ASAN requires TT_METAL_EMULATION=ON")
+    if(NOT TT_METAL_USE_EMULE)
+        message(FATAL_ERROR "TT_EMULE_ASAN requires TT_METAL_USE_EMULE=ON")
     endif()
     add_compile_options(-fsanitize=address -fno-omit-frame-pointer -shared-libasan -g)
     add_link_options(-fsanitize=address -shared-libasan)
@@ -163,7 +163,7 @@ The `-shared-libasan` flag is required because dlopen'd JIT kernel `.so`s must s
 cd /localdev/arminale/tt-metal
 cmake -B build_emule_asan \
   -DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20 \
-  -DTT_METAL_EMULATION=ON -DTT_METAL_USE_TT_EMULE=ON -DTT_EMULE_ASAN=ON \
+  -DTT_METAL_USE_EMULE=ON -D=ON -DTT_EMULE_ASAN=ON \
   -DTT_EMULE_PATH=/localdev/arminale/tt-emule \
   -DWITH_PYTHON_BINDINGS=OFF -DENABLE_TRACY=OFF -DTT_INSTALL=OFF \
   -DTT_METAL_BUILD_TESTS=OFF -DTTNN_BUILD_TESTS=OFF \
@@ -728,7 +728,7 @@ git commit -m "feat(emul/asan): per-buffer poison hook with conservative shard h
 At the top of `allocator.cpp`, near the other includes, add:
 
 ```cpp
-#ifdef TT_METAL_EMULATION
+#ifdef TT_METAL_USE_EMULE
 #include "tt_metal/impl/emulation/asan_hooks.hpp"
 #endif
 ```
@@ -738,7 +738,7 @@ At the top of `allocator.cpp`, near the other includes, add:
 In `AllocatorImpl::allocate_buffer`, immediately before the early-return at line 148 (`return buffer->per_core_addresses_.at(cores[0]);`), insert:
 
 ```cpp
-#ifdef TT_METAL_EMULATION
+#ifdef TT_METAL_USE_EMULE
     emulation::on_buffer_allocated(buffer);
 #endif
 ```
@@ -748,7 +748,7 @@ In `AllocatorImpl::allocate_buffer`, immediately before the early-return at line
 In `AllocatorImpl::allocate_buffer`, after `allocated_buffers_.insert(buffer);` at line 191 and before `return address;`, insert:
 
 ```cpp
-#ifdef TT_METAL_EMULATION
+#ifdef TT_METAL_USE_EMULE
     emulation::on_buffer_allocated(buffer);
 #endif
 ```
@@ -758,7 +758,7 @@ In `AllocatorImpl::allocate_buffer`, after `allocated_buffers_.insert(buffer);` 
 In `AllocatorImpl::deallocate_buffer`, at the very top (after the `mutex_` lock acquisition, before reading `address`), insert:
 
 ```cpp
-#ifdef TT_METAL_EMULATION
+#ifdef TT_METAL_USE_EMULE
     emulation::on_buffer_deallocated(buffer);
 #endif
 ```
@@ -770,7 +770,7 @@ The hook must run BEFORE the bank manager releases the address, since the hook r
 In `AllocatorImpl::deallocate_buffers` at line 225, before the `dram_manager_->deallocate_all()` call, insert:
 
 ```cpp
-#ifdef TT_METAL_EMULATION
+#ifdef TT_METAL_USE_EMULE
     for (Buffer* b : allocated_buffers_) {
         emulation::on_buffer_deallocated(b);
     }
@@ -1037,7 +1037,7 @@ Create `tt-emule:docs/ASAN.md`:
 ```bash
 cmake -B /localdev/arminale/tt-metal/build_emule_asan \
   -DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20 \
-  -DTT_METAL_EMULATION=ON -DTT_METAL_USE_TT_EMULE=ON -DTT_EMULE_ASAN=ON \
+  -DTT_METAL_USE_EMULE=ON -D=ON -DTT_EMULE_ASAN=ON \
   -DTT_EMULE_PATH=/localdev/arminale/tt-emule \
   -DCMAKE_BUILD_TYPE=Debug
 cmake --build /localdev/arminale/tt-metal/build_emule_asan -j 8
