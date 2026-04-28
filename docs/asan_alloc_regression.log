@@ -1,0 +1,1589 @@
+========================================
+ tt-emule Regression Tests
+========================================
+tt-metal: /localdev/arminale/tt-metal-main
+build:    /localdev/arminale/tt-metal-main/build_emule_asan
+Clearing JIT cache: /tmp/tt_emule_jit_cache_1211406112
+
+== Tier 0: Standalone ==
+--- dfb_passthrough ---
+PASSED: DFB passthrough 8 entries x 256 words
+  PASS
+--- dfb_multi_consumer ---
+PASSED: DFB multi-consumer 1P-4C, 8 total entries x 256 words
+  PASS
+--- eltwise_add ---
+PASSED: all 4 tiles == 3.0f
+  PASS
+
+== Tier 1: Host-only ==
+--- bit_utils ---
+[----------] 4 tests from Host (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 4 tests.
+  PASS
+--- host_buffer ---
+[----------] 5 tests from HostBufferTest (3 ms total)
+
+[----------] Global test environment tear-down
+[==========] 5 tests from 1 test suite ran. (3 ms total)
+[  PASSED  ] 5 tests.
+  PASS
+--- tilize_untilize ---
+[  SKIPPED ] TilizeUntilizeTests/TilizeUntilizeTestsFixture.ConvertLayout/274
+[  SKIPPED ] TilizeUntilizeTests/TilizeUntilizeTestsFixture.ConvertLayout/275
+[  SKIPPED ] TilizeUntilizeTests/TilizeUntilizeTestsFixture.ConvertLayout/277
+[  SKIPPED ] TilizeUntilizeTests/TilizeUntilizeTestsFixture.ConvertLayout/278
+[  SKIPPED ] TilizeUntilizeTests/TilizeUntilizeTestsFixture.ConvertLayout/279
+  PASS
+--- blockfloat_common ---
+[----------] 8 tests from BlockfloatCommonTests/ConvertU32ToBfpTests (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 8 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 8 tests.
+  PASS
+--- CoreRange_adjacent ---
+[----------] 2 tests from CoreCoordFixture (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 2 tests.
+  PASS
+--- CoreRange_contains ---
+[----------] 2 tests from CoreCoordFixture (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 2 tests.
+  PASS
+--- CoreRange_intersects ---
+[----------] 2 tests from CoreCoordFixture (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 2 tests.
+  PASS
+--- CoreRange_merge ---
+[----------] 2 tests from CoreCoordFixture (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 2 tests.
+  PASS
+--- CoreRange_iterator ---
+[----------] 1 test from CoreCoordFixture (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.
+  PASS
+--- CoreRangeSet_construct ---
+[----------] 2 tests from CoreCoordFixture (8 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (9 ms total)
+[  PASSED  ] 2 tests.
+  PASS
+--- CoreRangeSet_contains ---
+[----------] 2 tests from CoreCoordFixture (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 2 tests.
+  PASS
+--- CoreRangeSet_intersects ---
+[----------] 2 tests from CoreCoordFixture (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 2 tests.
+  PASS
+--- CoreRangeSet_merge ---
+[----------] 3 tests from CoreCoordFixture (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 3 tests from 1 test suite ran. (1 ms total)
+[  PASSED  ] 3 tests.
+  PASS
+--- dst_capacity_bf16 ---
+Running main() from gmock_main.cc
+Note: Google Test filter = DstStandalone.*:DstJitBF16.*
+[==========] Running 0 tests from 0 test suites.
+[==========] 0 tests from 0 test suites ran. (0 ms total)
+[  PASSED  ] 0 tests.
+  PASS
+--- dst_capacity_fp32 ---
+Running main() from gmock_main.cc
+Note: Google Test filter = DstJitFP32.*
+[==========] Running 0 tests from 0 test suites.
+[==========] 0 tests from 0 test suites ran. (0 ms total)
+[  PASSED  ] 0 tests.
+  PASS
+
+== Tier 2: Buffer I/O ==
+--- SimpleL1Buffer ---
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (1844 ms total)
+[  PASSED  ] 2 tests.
+2026-04-28 17:28:22.102 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:28:22.102 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- SimpleDramBuffer ---
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (1848 ms total)
+[  PASSED  ] 2 tests.
+2026-04-28 17:28:24.216 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:28:24.216 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+
+== Tier 3: JIT Kernel Execution ==
+--- TensixL1Tile ---
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (4388 ms total)
+[  PASSED  ] 4 tests.
+2026-04-28 17:28:28.861 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:28:28.861 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+
+
+== Tier 3b: DFB Multi-P/C STRIDED ==
+--- DMTest1xDFB1Sx1S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4796 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:28:33.908 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:28:33.908 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB1Sx1S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4233 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:28:38.373 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:28:38.373 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB1Sx4S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4218 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:28:42.815 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:28:42.815 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB1Sx4S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4284 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:28:47.336 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:28:47.336 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB4Sx1S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4293 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:28:51.863 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:28:51.863 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB4Sx1S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4319 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:28:56.418 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:28:56.418 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB4Sx4S ---
+[  FAILED  ] ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx4S/ImplicitSyncFalse, where GetParam() = false
+
+ 1 FAILED TEST
+2026-04-28 17:29:00.885 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:29:00.885 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  FAIL
+--- DMTest1xDFB4Sx4S_IS ---
+[  FAILED  ] ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx4S/ImplicitSyncTrue, where GetParam() = true
+
+ 1 FAILED TEST
+2026-04-28 17:29:05.378 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:29:05.378 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  FAIL
+--- DMTest1xDFB2Sx4S ---
+[  FAILED  ] ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB2Sx4S/ImplicitSyncFalse, where GetParam() = false
+
+ 1 FAILED TEST
+2026-04-28 17:29:09.823 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:29:09.823 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  FAIL
+--- DMTest1xDFB2Sx4S_IS ---
+[  FAILED  ] ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB2Sx4S/ImplicitSyncTrue, where GetParam() = true
+
+ 1 FAILED TEST
+2026-04-28 17:29:14.261 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:29:14.261 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  FAIL
+--- DMTest1xDFB4Sx2S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4192 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:29:18.678 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:29:18.678 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB4Sx2S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4181 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:29:23.086 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:29:23.086 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+
+== Tier 3c: DFB Compute Bridge Tests (Groups B/C) ==
+--- DMTensixTest1xDFB1Sx1S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4278 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:29:27.588 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:29:27.588 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB1Sx1S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4294 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:29:32.126 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:29:32.126 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB1Sx4S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4341 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:29:36.698 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:29:36.699 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB1Sx4S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4805 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:29:41.729 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:29:41.729 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB4Sx1S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2187 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:29:44.149 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:29:44.149 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB4Sx1S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2181 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:29:46.553 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:29:46.553 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB4Sx4S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2193 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:29:48.969 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:29:48.970 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB4Sx4S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2187 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:29:51.380 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:29:51.380 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB2Sx4S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4220 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:29:55.824 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:29:55.824 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB2Sx4S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4251 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:00.297 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:00.297 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB4Sx2S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4286 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:04.819 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:04.819 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB4Sx2S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4290 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:09.338 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:09.338 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB1Sx1S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4319 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:13.881 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:13.881 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB1Sx1S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4308 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:18.413 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:18.413 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB1Sx4S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2181 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:20.833 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:20.833 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB1Sx4S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2182 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:23.245 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:23.245 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB4Sx1S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4317 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:27.785 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:27.785 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB4Sx1S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4339 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:32.353 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:32.353 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB4Sx4S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2229 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:34.821 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:34.821 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB4Sx4S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2186 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:37.243 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:37.243 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB2Sx4S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4393 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:41.872 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:41.872 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB2Sx4S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4317 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:46.421 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:46.421 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB4Sx2S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2186 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:48.829 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:48.830 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB4Sx2S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2186 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:51.240 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:51.240 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+
+== Tier 3d: DFB Multi-DFB Pipeline (Group D) ==
+--- DMTensixDMTest2xDFB1Sx1S ---
+Running main() from gmock_main.cc
+Note: Google Test filter = MeshDeviceFixture.DMTensixDMTest2xDFB1Sx1S
+[==========] Running 0 tests from 0 test suites.
+[==========] 0 tests from 0 test suites ran. (0 ms total)
+[  PASSED  ] 0 tests.
+  PASS
+--- DMTensixDMTest1xDFB2Sx1S1xDFB1Sx2S ---
+Running main() from gmock_main.cc
+Note: Google Test filter = MeshDeviceFixture.DMTensixDMTest1xDFB2Sx1S1xDFB1Sx2S
+[==========] Running 0 tests from 0 test suites.
+[==========] 0 tests from 0 test suites ran. (0 ms total)
+[  PASSED  ] 0 tests.
+  PASS
+--- DMTensixDMTest1xDFB4Sx1S1xDFB1Sx4S ---
+Running main() from gmock_main.cc
+Note: Google Test filter = MeshDeviceFixture.DMTensixDMTest1xDFB4Sx1S1xDFB1Sx4S
+[==========] Running 0 tests from 0 test suites.
+[==========] 0 tests from 0 test suites ran. (0 ms total)
+[  PASSED  ] 0 tests.
+  PASS
+
+== Tier 3e: DFB BLOCKED Consumer ==
+--- DMTest1xDFB1Sx4B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4215 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:30:55.978 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:30:55.978 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB1Sx4B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4236 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:00.442 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:00.442 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB4Sx1B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4244 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:04.918 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:04.918 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB4Sx1B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4258 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:09.405 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:09.405 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB4Sx4B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2187 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:11.817 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:11.817 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB4Sx4B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2184 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:14.226 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:14.226 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB4Sx2B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2190 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:16.645 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:16.645 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB4Sx2B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2176 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:19.047 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:19.047 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB2Sx4B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4202 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:23.484 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:23.484 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTest1xDFB2Sx4B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4222 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:27.928 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:27.928 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB1Sx4B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4628 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:32.783 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:32.783 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB1Sx4B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4288 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:37.306 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:37.306 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB4Sx1B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2190 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:39.719 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:39.719 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB4Sx1B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2176 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:42.125 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:42.125 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB4Sx4B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2179 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:44.522 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:44.522 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB4Sx4B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2184 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:46.928 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:46.928 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB4Sx2B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2189 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:49.346 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:49.346 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB4Sx2B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2177 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:51.743 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:51.743 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB2Sx4B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2187 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:54.148 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:54.148 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DMTensixTest1xDFB2Sx4B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2171 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:31:56.547 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:31:56.547 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB1Sx4B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4373 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:32:01.143 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:32:01.143 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB1Sx4B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4295 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:32:05.665 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:32:05.665 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB4Sx1B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4332 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:32:10.230 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:32:10.230 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB4Sx1B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4357 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:32:14.812 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:32:14.812 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB4Sx4B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2172 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:32:17.217 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:32:17.217 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB4Sx4B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2189 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:32:19.626 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:32:19.626 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB4Sx2B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2186 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:32:22.029 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:32:22.029 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB4Sx2B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (2252 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:32:24.518 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:32:24.518 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB2Sx4B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4431 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:32:29.164 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:32:29.165 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TensixDMTest1xDFB2Sx4B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4296 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:32:33.698 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:32:33.698 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+
+== Tier 3f: DFB Multi-Core ==
+--- MultiCoreDMTest2Core_1Sx1S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4195 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:32:38.114 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:32:38.114 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- MultiCoreDMTest2Core_1Sx1S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4183 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:32:42.527 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:32:42.527 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- MultiCoreDMTest2Core_2Sx2S ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4205 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:32:46.956 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:32:46.956 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- MultiCoreDMTest2Core_2Sx2S_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4313 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:32:51.494 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:32:51.494 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- MultiCoreDMTest2Core_1Sx4B ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4175 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:32:55.899 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:32:55.899 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- MultiCoreDMTest2Core_1Sx4B_IS ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4180 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:33:00.307 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:00.307 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+
+== Tier 3g: DFB Config Validation ==
+--- DMTest1xDFB1Sx4SConfig ---
+[  FAILED  ] MeshDeviceFixture.DMTest1xDFB1Sx4SConfig
+
+ 1 FAILED TEST
+2026-04-28 17:33:02.155 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:02.155 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  FAIL
+--- DMTensixTest1xDFB4Sx1SConfig ---
+[  FAILED  ] MeshDeviceFixture.DMTensixTest1xDFB4Sx1SConfig
+
+ 1 FAILED TEST
+2026-04-28 17:33:03.992 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:03.992 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  FAIL
+--- DMTest1xDFB4Sx1SConfig ---
+[  FAILED  ] MeshDeviceFixture.DMTest1xDFB4Sx1SConfig
+
+ 1 FAILED TEST
+2026-04-28 17:33:05.843 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:05.843 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  FAIL
+--- DMTest1xDFB4Sx4SConfig ---
+[  FAILED  ] MeshDeviceFixture.DMTest1xDFB4Sx4SConfig
+
+ 1 FAILED TEST
+2026-04-28 17:33:07.694 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:07.694 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  FAIL
+--- DMTest1xDFB2Sx4SConfig ---
+[  FAILED  ] MeshDeviceFixture.DMTest1xDFB2Sx4SConfig
+
+ 1 FAILED TEST
+2026-04-28 17:33:09.626 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:09.626 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  FAIL
+--- DMTest1xDFB4Sx2SConfig ---
+[  FAILED  ] MeshDeviceFixture.DMTest1xDFB4Sx2SConfig
+
+ 1 FAILED TEST
+2026-04-28 17:33:11.477 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:11.477 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  FAIL
+--- DMTest1xDFB1Sx1BConfig ---
+[  FAILED  ] MeshDeviceFixture.DMTest1xDFB1Sx1BConfig
+
+ 1 FAILED TEST
+2026-04-28 17:33:13.345 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:13.345 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  FAIL
+--- MultiCoreDFB_1P1C_Strided_NoImplicitSync ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1628 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:33:15.201 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:15.201 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- MultiCoreDFB_1P1C_Strided_ImplicitSync ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1656 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:33:17.087 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:17.087 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- MultiCoreDFB_HomogeneousGrid_SingleGroup ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1642 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:33:18.954 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:18.954 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+
+== Tier 3h: Quasar Compute Kernel Tests ==
+--- QuasarComputeKernelMultipleThreads ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3696 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:33:22.837 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:22.837 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- QuasarComputeKernelSingleThread ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1640 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:33:24.661 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:24.661 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- QuasarCreateMultipleComputeKernelsSingleCluster ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (1640 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:33:26.480 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:26.480 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- QuasarComputeKernelTLS ---
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] MeshDeviceSingleCardFixture.QuasarComputeKernelTLS
+2026-04-28 17:33:28.283 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:28.283 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- QuasarMatmulBlock ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (7361 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:33:35.819 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:35.819 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- QuasarMatmulBlockInitShort ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (7344 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:33:43.346 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:43.346 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- QuasarMatmulBlockDemo ---
+Running main() from gmock_main.cc
+Note: Google Test filter = MeshDispatchFixture.QuasarMatmulBlock
+[==========] Running 0 tests from 0 test suites.
+[==========] 0 tests from 0 test suites ran. (0 ms total)
+[  PASSED  ] 0 tests.
+  PASS
+
+== Tier 3i: Quasar Semaphore Tests ==
+--- QuasarComputeKernelSemaphores ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3754 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:33:47.341 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:47.341 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- QuasarDmAndComputeKernelSemaphores ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3783 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:33:51.317 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:51.317 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DmLoopback ---
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] MeshDeviceSingleCardFixture.DmLoopback
+2026-04-28 17:33:53.147 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:53.147 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+
+== Tier 3j: Simple DM + RISCV Atomics ==
+--- SingleDmL1Write ---
+[  PASSED  ] 0 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] MeshDeviceSingleCardFixture.SingleDmL1Write
+2026-04-28 17:33:54.964 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:54.964 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TestAtomicLoadStoreRISCV ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3512 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:33:58.650 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:33:58.650 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TestAtomicAddFetchRISCV ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3585 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:34:02.414 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:34:02.414 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- TestAtomicCASRISCV ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4039 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:34:06.644 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:34:06.644 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+
+== Tier 3k: Data Movement Tests (Phase 8) ==
+--- DmLoopbackPacketSizes ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (117427 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:36:04.260 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:36:04.260 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DmLoopbackDirectedIdeal ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3793 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:36:08.286 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:36:08.286 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DmOneFromOnePacketSizes ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (116118 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:38:04.642 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:38:04.642 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DmOneFromOneDirectedIdeal ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (3776 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:38:08.650 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:38:08.650 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+
+== Tier 3l: DM Direct Write & DRAM Unary ==
+--- DmDirectWritePerformance ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (87250 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:39:36.144 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:39:36.144 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DmDirectWriteAddressPatterns ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (171926 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:42:28.297 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:42:28.297 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DmDirectWriteMulticast ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (5722 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:42:34.252 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:42:34.252 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DramUnaryPacketSizes ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (88950 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:44:03.439 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:44:03.439 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DramUnaryCoreLocations ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (7284 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:44:10.954 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:44:10.954 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DramUnaryDRAMChannels ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (96884 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:45:48.076 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:45:48.077 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- DramUnaryDirectedIdeal ---
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (4180 ms total)
+[  PASSED  ] 1 test.
+2026-04-28 17:45:52.493 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:45:52.493 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+
+== Tier 4: TTNN Relational INT32 ==
+--- ttnn_relational ---
+[----------] Global test environment tear-down
+[==========] 66 tests from 1 test suite ran. (196331 ms total)
+[  PASSED  ] 66 tests.
+2026-04-28 17:49:09.087 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:49:09.087 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- ttnn_add_int_emulated ---
+[----------] Global test environment tear-down
+[==========] 8 tests from 1 test suite ran. (23009 ms total)
+[  PASSED  ] 8 tests.
+2026-04-28 17:49:32.417 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:49:32.417 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- ttnn_sub_int ---
+[----------] Global test environment tear-down
+[==========] 8 tests from 1 test suite ran. (23043 ms total)
+[  PASSED  ] 8 tests.
+2026-04-28 17:49:55.773 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:49:55.773 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+--- ttnn_matmul ---
+[----------] Global test environment tear-down
+[==========] 2 tests from 2 test suites ran. (6966 ms total)
+[  PASSED  ] 2 tests.
+2026-04-28 17:50:03.051 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:50:03.051 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+
+== Tier 5: TTNN Matmul Sweep ==
+--- ttnn_matmul_sweep ---
++-------+-------+-------+--------+--------+----------+
+|     M |     K |     N |  tiles | status | time(ms) |
++-------+-------+-------+--------+--------+----------+
+Running main() from gmock_main.cc
+Note: Google Test filter = MatmulSweep/MatmulSweepFixture.*
+[==========] Running 14 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 14 tests from MatmulSweep/MatmulSweepFixture
+2026-04-28 17:50:03.347 | info     |           Metal | Disabling multi-erisc mode with simulator/mock target device (rtoptions.cpp:334)
+2026-04-28 17:50:03.358 | info     |          Device | Opening user mode device driver (tt_cluster.cpp:225)
+2026-04-28 17:50:03.361 | warning  |          Device | Using emulated device mode with memory-backed I/O (tt_cluster.cpp:250)
+2026-04-28 17:50:03.365 | info     |             UMD | Harvesting masks for Chip 0: Tensix: 0x40 DRAM: 0x0 ETH: 0x0 PCIe: 0x0 L2CPU: 0x0 (cluster.cpp:295)
+2026-04-28 17:50:03.609 | info     |             UMD | Starting devices in cluster (cluster.cpp:1042)
+2026-04-28 17:50:05.096 | info     |     Distributed | Using auto discovery to generate mesh graph. (metal_env.cpp:332)
+2026-04-28 17:50:05.096 | info     |     Distributed | Constructing control plane using auto-discovery (no mesh graph descriptor). (metal_env.cpp:394)
+2026-04-28 17:50:05.099 | info     |          Fabric | TopologyMapper: Logical Multi-Mesh Adjacency Map: (topology_mapper.cpp:1474)
+2026-04-28 17:50:05.099 | info     |          Fabric | 
+=== Logical Mesh-Level Graph Adjacency Map ===
+Total nodes: 1
+Degree histogram: {0:1}
+ (topology_solver.tpp:91)
+2026-04-28 17:50:05.099 | info     |          Fabric | 
+=== Logical Mesh 0 Internal Graph Adjacency Map ===
+Total nodes: 1
+Degree histogram: {0:1}
+ (topology_solver.tpp:91)
+2026-04-28 17:50:05.099 | info     |          Fabric | TopologyMapper: Physical Multi-Mesh Adjacency Map: (topology_mapper.cpp:1485)
+2026-04-28 17:50:05.099 | info     |          Fabric | 
+=== Physical Mesh-Level Graph Adjacency Map ===
+Total nodes: 1
+Degree histogram: {0:1}
+ (topology_solver.tpp:91)
+2026-04-28 17:50:05.099 | info     |          Fabric | 
+=== Physical Mesh 0 Internal Graph Adjacency Map ===
+Total nodes: 1
+Degree histogram: {0:1}
+ (topology_solver.tpp:91)
+2026-04-28 17:50:05.099 | info     |          Fabric | Starting multi-mesh mapping: 1 logical mesh(es) to 1 physical mesh(es) (topology_mapper_utils.cpp:1469)
+2026-04-28 17:50:05.099 | info     |          Fabric | Multi-mesh mapping attempt 1/2: Trying inter-mesh mapping (topology_mapper_utils.cpp:1510)
+2026-04-28 17:50:05.099 | info     |          Fabric | Attempt 1: Inter-mesh mapping succeeded, found 1 mesh pair(s) (topology_mapper_utils.cpp:1539)
+2026-04-28 17:50:05.099 | info     |          Fabric | Attempt 1: Mapping 1 mesh pair(s) (topology_mapper_utils.cpp:1547)
+2026-04-28 17:50:05.099 | info     |          Fabric | Attempt 1: Mapping mesh 0 -> 0 (topology_mapper_utils.cpp:1554)
+2026-04-28 17:50:05.100 | info     |          Fabric | Multi-mesh mapping succeeded after 1 attempt(s): 1 mesh pair(s) mapped (topology_mapper_utils.cpp:1686)
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/32x32x32
+2026-04-28 17:50:05.265 | info     |           Metal | JIT parallel compile: 3 unique kernels to compile (emulated_program_runner.cpp:1142)
+In file included from /tmp/tt_emule_jit_JYiHHx/wrapper.cpp:16:
+In file included from /tmp/tt_emule_jit_JYiHHx/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_bL7HRy/wrapper.cpp:16:
+In file included from /tmp/tt_emule_jit_bL7HRy/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+1 warning generated.
+1 warning generated.
+2026-04-28 17:50:07.567 | info     |           Metal | execute_program_emulated: 1 logical cores (emulated_program_runner.cpp:1738)
+|    32 |    32 |    32 |      1 |   PASS |   2320.7 |
+[       OK ] MatmulSweep/MatmulSweepFixture.MatmulSweep/32x32x32 (2432 ms)
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/32x64x32
+2026-04-28 17:50:07.693 | info     |           Metal | JIT parallel compile: 3 unique kernels to compile (emulated_program_runner.cpp:1142)
+In file included from /tmp/tt_emule_jit_MpB2zE/wrapper.cpp:16:
+In file included from /tmp/tt_emule_jit_MpB2zE/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_lxG85l/wrapper.cpp:16:
+In file included from /tmp/tt_emule_jit_lxG85l/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+1 warning generated.
+1 warning generated.
+2026-04-28 17:50:10.050 | info     |           Metal | execute_program_emulated: 1 logical cores (emulated_program_runner.cpp:1738)
+|    32 |    64 |    32 |      1 |   PASS |   2372.0 |
+[       OK ] MatmulSweep/MatmulSweepFixture.MatmulSweep/32x64x32 (2481 ms)
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/64x64x64
+2026-04-28 17:50:10.177 | info     |           Metal | JIT parallel compile: 5 unique kernels to compile (emulated_program_runner.cpp:1142)
+In file included from /tmp/tt_emule_jit_L9OnvP/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_L9OnvP/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_bRFI2O/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_bRFI2O/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_H2ISlP/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_H2ISlP/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+1 warning generated.
+1 warning generated.
+1 warning generated.
+2026-04-28 17:50:12.578 | info     |           Metal | execute_program_emulated: 4 logical cores (emulated_program_runner.cpp:1738)
+|    64 |    64 |    64 |      4 |   PASS |   2423.0 |
+[       OK ] MatmulSweep/MatmulSweepFixture.MatmulSweep/64x64x64 (2535 ms)
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/128x128x128
+2026-04-28 17:50:12.718 | info     |           Metal | JIT parallel compile: 7 unique kernels to compile (emulated_program_runner.cpp:1142)
+In file included from /tmp/tt_emule_jit_5c79Gu/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_5c79Gu/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_oA12KN/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_oA12KN/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_8iC3MS/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_8iC3MS/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_XVHK6M/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_XVHK6M/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+2026-04-28 17:50:15.289 | info     |           Metal | execute_program_emulated: 16 logical cores (emulated_program_runner.cpp:1738)
+|   128 |   128 |   128 |     16 |   PASS |   2619.2 |
+[       OK ] MatmulSweep/MatmulSweepFixture.MatmulSweep/128x128x128 (2732 ms)
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/256x256x256
+2026-04-28 17:50:15.463 | info     |           Metal | JIT parallel compile: 7 unique kernels to compile (emulated_program_runner.cpp:1142)
+In file included from /tmp/tt_emule_jit_wW7LrX/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_wW7LrX/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_OEdRs3/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_OEdRs3/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_tVUkZL/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_tVUkZL/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_wwb4Xq/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_wwb4Xq/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+2026-04-28 17:50:17.843 | info     |           Metal | execute_program_emulated: 64 logical cores (emulated_program_runner.cpp:1738)
+|   256 |   256 |   256 |     64 |   PASS |   2526.6 |
+[       OK ] MatmulSweep/MatmulSweepFixture.MatmulSweep/256x256x256 (2647 ms)
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/512x512x512
+2026-04-28 17:50:18.121 | info     |           Metal | JIT parallel compile: 7 unique kernels to compile (emulated_program_runner.cpp:1142)
+In file included from /tmp/tt_emule_jit_38Iif9/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_38Iif9/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_niHlyh/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_niHlyh/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_BzN6rX/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_BzN6rX/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(conditionIn file included from ,/tmp/tt_emule_jit_d357sr/wrapper.cpp :.15.:
+.In file included from )/tmp/tt_emule_jit_d357sr/patched_kernel.cpp
+:      9| :
+        ^In file included from 
+/localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp::8169:
+:/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h9::4 :note: 9previous definition is here:
+   warning: 169'ASSERT' macro redefined [-Wmacro-redefined] | 
+#defin    e4  | A#SdSeEfRiTn(e. .A.S)S E(R(Tv(ociodn)d0i)t
+i      o| n        ^,
+ ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+2026-04-28 17:50:20.539 | info     |           Metal | execute_program_emulated: 64 logical cores (emulated_program_runner.cpp:1738)
+|   512 |   512 |   512 |    256 |   PASS |   2570.4 |
+[       OK ] MatmulSweep/MatmulSweepFixture.MatmulSweep/512x512x512 (2718 ms)
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/1024x1024x1024
+2026-04-28 17:50:20.885 | info     |           Metal | JIT parallel compile: 7 unique kernels to compile (emulated_program_runner.cpp:1142)
+In file included from /tmp/tt_emule_jit_tjAKxL/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_tjAKxL/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_AttXqk/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_AttXqk/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_h8nipG/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_h8nipG/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_AMVdY7/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_AMVdY7/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+2026-04-28 17:50:23.298 | info     |           Metal | execute_program_emulated: 64 logical cores (emulated_program_runner.cpp:1738)
+|  1024 |  1024 |  1024 |   1024 |   PASS |   2583.9 |
+[       OK ] MatmulSweep/MatmulSweepFixture.MatmulSweep/1024x1024x1024 (2843 ms)
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/2048x2048x2048
+2026-04-28 17:50:23.883 | info     |           Metal | JIT parallel compile: 7 unique kernels to compile (emulated_program_runner.cpp:1142)
+In file included from /tmp/tt_emule_jit_YXmBnw/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_YXmBnw/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_Ue8lF1/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_Ue8lF1/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_VXVlh2/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_VXVlh2/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_yYd7Ve/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_yYd7Ve/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+2026-04-28 17:50:26.298 | info     |           Metal | execute_program_emulated: 64 logical cores (emulated_program_runner.cpp:1738)
+|  2048 |  2048 |  2048 |   4096 |   PASS |   2728.9 |
+[       OK ] MatmulSweep/MatmulSweepFixture.MatmulSweep/2048x2048x2048 (3412 ms)
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/64x1024x64
+2026-04-28 17:50:27.071 | info     |           Metal | JIT parallel compile: 4 unique kernels to compile (emulated_program_runner.cpp:1142)
+In file included from /tmp/tt_emule_jit_fhgDRK/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_fhgDRK/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_WYiY10/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_WYiY10/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_SFoONq/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_SFoONq/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+1 warning generated.
+1 warning generated.
+1 warning generated.
+2026-04-28 17:50:29.501 | info     |           Metal | execute_program_emulated: 4 logical cores (emulated_program_runner.cpp:1738)
+|    64 |  1024 |    64 |      4 |   PASS |   2452.7 |
+[       OK ] MatmulSweep/MatmulSweepFixture.MatmulSweep/64x1024x64 (2566 ms)
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/2048x32x2048
+2026-04-28 17:50:29.652 | info     |           Metal | JIT parallel compile: 7 unique kernels to compile (emulated_program_runner.cpp:1142)
+In file included from /tmp/tt_emule_jit_JcyiS5/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_JcyiS5/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_1rwlEV/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_1rwlEV/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_wUhqZk/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_wUhqZk/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_tuIAyL/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_tuIAyL/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+2026-04-28 17:50:32.018 | info     |           Metal | execute_program_emulated: 64 logical cores (emulated_program_runner.cpp:1738)
+|  2048 |    32 |  2048 |   4096 |   PASS |   2510.6 |
+[       OK ] MatmulSweep/MatmulSweepFixture.MatmulSweep/2048x32x2048 (2978 ms)
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/32x2048x32
+2026-04-28 17:50:32.614 | info     |           Metal | JIT parallel compile: 3 unique kernels to compile (emulated_program_runner.cpp:1142)
+In file included from /tmp/tt_emule_jit_wkXYjo/wrapper.cpp:16:
+In file included from /tmp/tt_emule_jit_wkXYjo/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_ksnWm0/wrapper.cpp:16:
+In file included from /tmp/tt_emule_jit_ksnWm0/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+1 warning generated.
+1 warning generated.
+2026-04-28 17:50:36.152 | info     |           Metal | execute_program_emulated: 1 logical cores (emulated_program_runner.cpp:1738)
+|    32 |  2048 |    32 |      1 |   PASS |   3555.9 |
+[       OK ] MatmulSweep/MatmulSweepFixture.MatmulSweep/32x2048x32 (3668 ms)
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/128x512x256
+2026-04-28 17:50:36.294 | info     |           Metal | JIT parallel compile: 7 unique kernels to compile (emulated_program_runner.cpp:1142)
+In file included from /tmp/tt_emule_jit_cp2ZmN/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_cp2ZmN/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_uJd3jz/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_uJd3jz/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_LgG7aY/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_LgG7aY/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_btUAag/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_btUAag/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+2026-04-28 17:50:38.710 | info     |           Metal | execute_program_emulated: 32 logical cores (emulated_program_runner.cpp:1738)
+|   128 |   512 |   256 |     32 |   PASS |   2491.3 |
+[       OK ] MatmulSweep/MatmulSweepFixture.MatmulSweep/128x512x256 (2609 ms)
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/320x384x320
+2026-04-28 17:50:38.904 | info     |           Metal | JIT parallel compile: 7 unique kernels to compile (emulated_program_runner.cpp:1142)
+In file included from /tmp/tt_emule_jit_qFjCM8/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_qFjCM8/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_uUFtOh/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_uUFtOh/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_eNE7N0/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_eNE7N0/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_uO3qNT/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_uO3qNT/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+2026-04-28 17:50:41.320 | info     |           Metal | execute_program_emulated: 25 logical cores (emulated_program_runner.cpp:1738)
+|   320 |   384 |   320 |    100 |   PASS |   2480.5 |
+[       OK ] MatmulSweep/MatmulSweepFixture.MatmulSweep/320x384x320 (2606 ms)
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/512x1024x512
+2026-04-28 17:50:41.538 | info     |           Metal | JIT parallel compile: 7 unique kernels to compile (emulated_program_runner.cpp:1142)
+In file included from /tmp/tt_emule_jit_9yOUJf/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_9yOUJf/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_VHEEqG/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_VHEEqG/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_PmjJxv/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_PmjJxv/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+In file included from /tmp/tt_emule_jit_cOBeCe/wrapper.cpp:15:
+In file included from /tmp/tt_emule_jit_cOBeCe/patched_kernel.cpp:9:
+In file included from /localdev/arminale/tt-metal-main/ttnn/cpp/ttnn/operations/ccl/kernel_common/worker_sync_utils.hpp:8:
+/localdev/arminale/tt-emule/include/jit_hw/api/debug/assert.h:4:9: warning: 'ASSERT' macro redefined [-Wmacro-redefined]
+    4 | #define ASSERT(condition, ...)
+      |         ^
+/localdev/arminale/tt-emule/include/jit_hw/jit_kernel_stubs.hpp:169:9: note: previous definition is here
+  169 | #define ASSERT(...) ((void)0)
+      |         ^
+1 warning generated.
+1 warning generated.
+1 warning generated.
+1 warning generated.
+2026-04-28 17:50:43.960 | info     |           Metal | execute_program_emulated: 64 logical cores (emulated_program_runner.cpp:1738)
+|   512 |  1024 |   512 |    256 |   PASS |   2581.1 |
+[       OK ] MatmulSweep/MatmulSweepFixture.MatmulSweep/512x1024x512 (2740 ms)
+[----------] 14 tests from MatmulSweep/MatmulSweepFixture (38972 ms total)
+
+[----------] Global test environment tear-down
+[==========] 14 tests from 1 test suite ran. (40862 ms total)
+[  PASSED  ] 14 tests.
+2026-04-28 17:50:44.227 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:50:44.227 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+
+== Tier 6: Silicon (toggle proof) ==
+--- ttnn_add_int_silicon ---
+2026-04-28 17:50:47.219 | info     |    BuildKernels | JIT telemetry [dependencies_up_to_date]: count=100, total=245.191ms, min=0.101ms, max=10.267ms, mean=2.452ms (build_cache_telemetry.cpp:246)
+2026-04-28 17:50:47.219 | info     |    BuildKernels | JIT telemetry [JitBuildState::build]: count=50, total=255.779ms, min=3.810ms, max=10.867ms, mean=5.116ms (build_cache_telemetry.cpp:246)
+2026-04-28 17:50:47.219 | info     |    BuildKernels | JIT telemetry [jit_build]: count=5, total=36.508ms, min=3.814ms, max=10.571ms, mean=7.302ms (build_cache_telemetry.cpp:246)
+2026-04-28 17:50:47.229 | info     |          Device | Closing user mode device drivers (tt_cluster.cpp:508)
+2026-04-28 17:50:47.229 | info     |             UMD | Closing devices in cluster (cluster.cpp:1054)
+  PASS
+
+========================================
+ Results: 126 passed, 11 failed, 0 skipped
+========================================
