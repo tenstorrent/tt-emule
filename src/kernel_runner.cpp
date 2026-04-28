@@ -5,6 +5,7 @@
 #include "tt_emule/dfb_sync_state.hpp"
 #include "tt_emule/tile_counter.hpp"
 #include "tt_emule/asan.h"
+#include "tt_emule/asan_bridge.h"
 #include <thread>
 #include <vector>
 #include <barrier>
@@ -31,6 +32,16 @@ extern "C" uint8_t* __emule_dram_ptr(uint64_t offset) {
         }
     }
     return __device->dram_ptr(offset);
+}
+
+extern "C" void __emule_buffer_alloc(uint8_t* base, std::size_t size) {
+    if (!base || size == 0) return;
+    EMULE_ASAN_UNPOISON(base, size);
+}
+
+extern "C" void __emule_buffer_free(uint8_t* base, std::size_t size) {
+    if (!base || size == 0) return;
+    EMULE_ASAN_POISON(base, size);
 }
 
 namespace tt_emule {
