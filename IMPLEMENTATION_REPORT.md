@@ -611,6 +611,8 @@ The complete set of tt-metal modifications for emulation support:
 
 **D2M golden test coverage.** 1624 of 1878 D2M golden tests pass (86% pass rate), covering layout transforms, buffer allocation, matmul (single-core, multi-core, double-buffered, 3D/4D batched up to 2048x2048x2048), reductions (sum, max, mean), DMA (L1-to-L1 and partial DRAM), TMS (reshape, permute, concatenate_heads), tilize/untilize, virtual grids, and tensor collapsing. This provides broad regression coverage for D2M-generated kernels.
 
+**ASan-instrumented memory-bug detection.** Building with `TT_EMULE_ASAN=ON` enables per-buffer L1/DRAM poisoning driven by tt-metal's `AllocatorImpl`. Kernels that write past their buffer end, into a neighbouring buffer, or into freed memory abort with an AddressSanitizer report — no silicon required. Bridge-level bounds checks (`__emule_dram_ptr`, `__emule_resolve_noc_addr_sized`, `__emule_local_l1_ptr`, `__emule_multicast_write`) are always on and catch coarse offset overruns even in non-ASan builds. See `docs/ASAN.md`.
+
 ### Cons
 
 **Behavioral fidelity gap.** The emulator approximates hardware behavior but does not replicate it:
@@ -636,6 +638,8 @@ Tests that pass in emulation may fail on silicon due to timing, precision, or re
 **Nfaces conversion not exercised in isolation.** The UNPACK and PACK engines are tested only indirectly via compute operations (matmul, add_tiles, etc.) that happen to exercise them. No dedicated UNPACK-only or PACK-only test exists. A bug in the nfaces LUT for a specific face/element combination might not be caught if no existing compute test triggers that access pattern. See `docs/TEST_COVERAGE_TODO.md`.
 
 **D2M coverage gaps.** 1 test file fails entirely: bfp8_typecast (13 PCC mismatches). 2 files have partial failures: reductions (131/1300 fail on unaligned shapes) and masking (15/20 fail on partial tiles). DMA tests now pass fully (49/49). The remaining 10 files pass fully. The primary gaps are unaligned tensor reductions, partial tile masking, and BFP8 format precision.
+
+**Sharded L1 poisoning is conservative.** ASan unpoisons an entire shard region per shard core even when the buffer fills only part of it; shard-tail overflows can escape detection. Tracked as a follow-up to switch to `Buffer::get_buffer_page_mapping()` for accurate sizing.
 
 ### Maintainability
 
@@ -663,6 +667,8 @@ Rebasing onto new tt-metal versions primarily requires:
 **Banking infrastructure is self-maintaining.** Bank mapping arrays are populated dynamically from the SOC descriptor at runtime, so adding support for new chip architectures requires no code changes — only a new cluster descriptor YAML file.
 
 **HAL-based semaphore placement is self-maintaining.** By reading `kernel_config_base` and `sem_offset` from the HAL and ProgramConfig respectively, the emulator automatically tracks any changes to the L1 memory map or semaphore layout in tt-metal. No hardcoded constants to update.
+
+**ASan integration adds two cross-cutting concerns to track on rebase.** (1) `AllocatorImpl::allocate_buffer/deallocate_buffer/deallocate_buffers` carry `#ifdef TT_METAL_USE_EMULE` hook calls; if upstream renames, splits, or otherwise restructures the allocator API, those hook sites must follow. (2) `~AllocatorImpl` and `AllocatorImpl::override_state` bypass the per-buffer dealloc hook by clearing `allocated_buffers_` directly — a known wart left as a follow-up.
 
 ### Changes from v3 to v4
 
