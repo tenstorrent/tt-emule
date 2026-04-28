@@ -18,10 +18,17 @@ option(TT_EMULE_COMPAT_HEADERS
     "Build with tt-metal-compatible header aliases (ttkernel/ and tt_metal_compat.hpp)"
     OFF)
 
-# Optionally enable ThreadSanitizer in Debug builds
-if(PROJECT_IS_TOP_LEVEL AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+option(TT_EMULE_ASAN "Build with AddressSanitizer (mutually exclusive with TSan)" OFF)
+
+# Optionally enable ThreadSanitizer in Debug builds (suppressed when ASan is on)
+if(PROJECT_IS_TOP_LEVEL AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT TT_EMULE_ASAN)
     add_compile_options(-fsanitize=thread -g -O1)
     add_link_options(-fsanitize=thread)
+endif()
+
+if(TT_EMULE_ASAN)
+    add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=address)
 endif()
 
 # ---- Core emulator library ----

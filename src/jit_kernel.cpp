@@ -74,6 +74,14 @@ KernelFn jit_compile_kernel(const std::string& kernel_src_path,
     std::string so_path = dir + "/kernel.so";
     std::ostringstream cmd;
     cmd << "g++ -std=c++17 -fPIC -shared -O1"
+#if defined(__has_feature)
+#  if __has_feature(address_sanitizer)
+        << " -fsanitize=address -shared-libasan -fno-omit-frame-pointer -g"
+#  endif
+#endif
+#if defined(__SANITIZE_ADDRESS__) && (!defined(__has_feature) || !__has_feature(address_sanitizer))
+        << " -fsanitize=address -shared-libasan -fno-omit-frame-pointer -g"
+#endif
         << " -I\"" << jit_inc << "\""
         << " -I\"" << parent_inc << "\""
         << " -o \"" << so_path << "\"";

@@ -1,4 +1,5 @@
 #pragma once
+#include "asan.h"
 #include "cb_sync_state.hpp"
 #include "circular_buffer.hpp"
 #include "dfb_sync_state.hpp"
@@ -100,6 +101,10 @@ public:
         if (l1_bump_ + bytes > l1_size_)
             throw std::runtime_error("L1 OOM");
         uint32_t addr = l1_base_ + static_cast<uint32_t>(l1_bump_);
+        // ASan: unpoison the new region. No-op when the L1 isn't pre-poisoned
+        // (e.g. external-memory cores backed by an L1Pool slot — the pool only
+        // poisons the slot tail past l1_size_, never the live region).
+        EMULE_ASAN_UNPOISON(l1_ + l1_bump_, bytes);
         l1_bump_ += bytes;
         return addr;
     }
@@ -181,6 +186,16 @@ private:
         l1_ = static_cast<uint8_t*>(p);
         l1_base_ = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(l1_));
         // MAP_ANONYMOUS guarantees zero-filled pages; no memset needed.
+        // ASan: pre-poison the entire WORKER L1 so any byte that hasn't been
+        // bump-allocated through l1_alloc() is treated as off-limits to kernels.
+        // l1_alloc unpoisons the new region as the bump pointer advances. DRAM
+        // cores aren't poisoned — the whole region is one logical bank, kernels
+        // are expected to read/write anywhere in it. (See l1_pool.hpp for the
+        // JIT/tt-metal path: there, slot tails are poisoned by the pool itself,
+        // not by mmap_region; external-memory Cores skip this constructor.)
+        if (role_ == CoreRole::WORKER) {
+            EMULE_ASAN_POISON(l1_, l1_size_);
+        }
     }
 
     CoreCoord coord_;
