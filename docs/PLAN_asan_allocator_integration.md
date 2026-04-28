@@ -12,18 +12,33 @@
 
 ## Pre-flight
 
-The following changes from Phase 1 are already on `armin-asan` and validated — do NOT redo them:
+**Updated 2026-04-28 — Phase 1 + bounds-check work complete in tt-metal-main, branch `armin-asan-allocator`.**
 
+Already done — DO NOT REDO:
+
+**In `/localdev/arminale/tt-emule` (branch `armin-asan`):**
 - `include/tt_emule/asan.h` (POISON/UNPOISON macros + `__emule_bounds_fail` helper)
 - `CMakeLists.txt`: `TT_EMULE_ASAN` option + flags
 - `include/tt_emule/l1_pool.hpp`: tail poisoning + `live_size_per_slot` ctor arg
 - `include/tt_emule/device.hpp`: standalone WORKER L1 pre-poison + `l1_alloc` unpoison
-- `src/kernel_runner.cpp`: `__emule_dram_ptr` always-on bounds check
+- `src/kernel_runner.cpp`: `__emule_dram_ptr` always-on bounds check; `__emule_buffer_alloc/free` bridge
 - `src/jit_kernel.cpp`: standalone JIT g++ ASan flag pass-through
 - `include/jit_hw/api/dataflow/dataflow_api.h`: declares `__emule_resolve_noc_addr_sized` and routes 4 NOC sites through it
-- `tests/asan/{CMakeLists.txt,oob_slot_tail_test.cpp,oob_l1_alloc_test.cpp,oob_dram_test.cpp}` (3/3 pass)
+- `include/tt_emule/asan_bridge.h`: `extern "C"` declarations for the allocator bridge
+- `tests/asan/{CMakeLists.txt,oob_slot_tail_test.cpp,oob_l1_alloc_test.cpp,oob_dram_test.cpp,oob_noc_read_test.cpp}` (4/4 pass)
 
-The blocking gap: `__emule_resolve_noc_addr_sized` is declared but never defined, so any tt-metal build with the new headers won't link. Phase 1 of this plan unblocks that.
+**In `/localdev/arminale/tt-metal-main` (branch `armin-asan-allocator`, commit `4e20b69a33`):**
+- `cmake/project_options.cmake`: `TT_EMULE_ASAN` option + ASan flags + `TT_EMULE_ASAN_RT_DIR` clang-rt resolution
+- `tt_metal/impl/CMakeLists.txt`: propagate `TT_EMULE_ASAN_RT_DIR` define
+- `tt_metal/impl/emulation/emulated_program_runner.cpp`: `__emule_resolve_noc_addr_sized` definition + bounds checks in `__emule_dram_ptr`, `__emule_local_l1_ptr`, `__emule_noc_resolve`, `__emule_multicast_write`; JIT g++ command appends ASan flags + `-Wl,-rpath,${TT_EMULE_ASAN_RT_DIR}` so kernel `.so` files resolve `libclang_rt.asan-x86_64.so` without `LD_LIBRARY_PATH`
+- `tt_metal/third_party/umd` submodule (branch `armin-asan-allocator`, commit `8803cd78`): `SWEmuleChip::active_dram_bank_size()` static accessor; `L1Pool` constructed with `live_size_per_slot=l1_size_` so the unused tail of each 2 MB slot is ASan-poisoned
+
+**Net effect:** the JIT/tt-metal-emulated path links and runs under ASan. Coarse bounds checks fire on out-of-range NOC / L1 / DRAM offsets. Per-buffer (in-region) overflow detection is the remaining work — this plan's Phase 3.
+
+**Plan corrections vs. original:**
+- Right tt-metal repo: `tt-metal-main`, not `tt-metal`. `BUILD_GUIDE.md` and `run_regression.sh` both default to it.
+- `core_for_logical` signature: `(CoreCoord, bool is_dram)` not `(IDevice&, CoreCoord, BufferType)`. The IDevice translation and BufferType→is_dram dispatch must happen in the caller (tt_metal-layer asan_hooks), because the UMD layer cannot include `<tt-metalium/...>` headers without breaking the link graph.
+- Class name in UMD: `SWEmuleChip`, not `SWEmulatedChip`.
 
 ---
 
@@ -54,7 +69,7 @@ The blocking gap: `__emule_resolve_noc_addr_sized` is declared but never defined
 ## Conventions used below
 
 - **`tt-emule:`** prefix means a path inside `/localdev/arminale/tt-emule`.
-- **`tt-metal:`** prefix means a path inside `/localdev/arminale/tt-metal`.
+- **`tt-metal-main:`** prefix means a path inside `/localdev/arminale/tt-metal-main` (the active tt-metal repo per `BUILD_GUIDE.md` and `run_regression.sh`).
 - Repo root for `cd` or relative paths is shown when ambiguous.
 
 ---
@@ -64,11 +79,11 @@ The blocking gap: `__emule_resolve_noc_addr_sized` is declared but never defined
 ### Task 1: Define `__emule_resolve_noc_addr_sized` in the runner
 
 **Files:**
-- Modify: `tt-metal:tt_metal/impl/emulation/emulated_program_runner.cpp` (next to `__emule_resolve_noc_addr` at line 161)
+- Modify: `tt-metal-main:tt_metal/impl/emulation/emulated_program_runner.cpp` (next to `__emule_resolve_noc_addr` at line 161)
 
 - [ ] **Step 1: Read the existing resolver to copy its decode pattern**
 
-Run: `grep -n -A 25 "__emule_resolve_noc_addr" /localdev/arminale/tt-metal/tt_metal/impl/emulation/emulated_program_runner.cpp | head -50`
+Run: `grep -n -A 25 "__emule_resolve_noc_addr" /localdev/arminale/tt-metal-main/tt_metal/impl/emulation/emulated_program_runner.cpp | head -50`
 
 Confirm the existing function decodes `(x, y, offset)` from `noc_addr` and looks up `(x,y)` in `__emule_core_map`. Note the bit layout (offset is the low 36 bits; x is bits 36-41; y is bits 42-47).
 
@@ -131,11 +146,11 @@ git commit -m "feat(emul/asan): define __emule_resolve_noc_addr_sized bounds-che
 ### Task 2: Add `TT_EMULE_ASAN` to tt-metal CMake
 
 **Files:**
-- Modify: `tt-metal:CMakeLists.txt` (top-level — find the `TT_METAL_USE_EMULE` option and place the new option next to it)
+- Modify: `tt-metal-main:CMakeLists.txt` (top-level — find the `TT_METAL_USE_EMULE` option and place the new option next to it)
 
 - [ ] **Step 1: Locate the `TT_METAL_USE_EMULE` option**
 
-Run: `grep -n "TT_METAL_USE_EMULE\|" /localdev/arminale/tt-metal/CMakeLists.txt | head -10`
+Run: `grep -n "TT_METAL_USE_EMULE\|" /localdev/arminale/tt-metal-main/CMakeLists.txt | head -10`
 
 Note the line number where `TT_METAL_USE_EMULE` is declared.
 
@@ -172,7 +187,7 @@ cmake -B build_emule_asan \
 
 Expected: configure succeeds; no FATAL_ERROR; cache contains `TT_EMULE_ASAN:BOOL=ON`.
 
-Verify: `grep TT_EMULE_ASAN /localdev/arminale/tt-metal/build_emule_asan/CMakeCache.txt`
+Verify: `grep TT_EMULE_ASAN /localdev/arminale/tt-metal-main/build_emule_asan/CMakeCache.txt`
 
 - [ ] **Step 4: Commit**
 
@@ -187,11 +202,11 @@ git commit -m "build(emul): add TT_EMULE_ASAN option propagating ASan flags"
 ### Task 3: Pass ASan flags through the runner's JIT g++ invocation
 
 **Files:**
-- Modify: `tt-metal:tt_metal/impl/emulation/emulated_program_runner.cpp` (the JIT compile command builder — search for `g++ -std=c++17`)
+- Modify: `tt-metal-main:tt_metal/impl/emulation/emulated_program_runner.cpp` (the JIT compile command builder — search for `g++ -std=c++17`)
 
 - [ ] **Step 1: Locate the JIT command builder**
 
-Run: `grep -n "g++ -std=c++17\|jit_compile\|kernel.so" /localdev/arminale/tt-metal/tt_metal/impl/emulation/emulated_program_runner.cpp | head -20`
+Run: `grep -n "g++ -std=c++17\|jit_compile\|kernel.so" /localdev/arminale/tt-metal-main/tt_metal/impl/emulation/emulated_program_runner.cpp | head -20`
 
 Find the function that constructs the `g++` invocation. It will look similar to `tt-emule:src/jit_kernel.cpp` (which already has the same pattern and can serve as a reference).
 
@@ -215,7 +230,7 @@ Inside the command-string builder, after the existing `-fPIC -shared -O…` flag
 - [ ] **Step 3: Build to confirm**
 
 ```bash
-cmake --build /localdev/arminale/tt-metal/build_emule_asan -j 8 --target tt_metal 2>&1 | tail -30
+cmake --build /localdev/arminale/tt-metal-main/build_emule_asan -j 8 --target tt_metal 2>&1 | tail -30
 ```
 
 Expected: builds clean. ASan-instrumented JIT compilation will be exercised at runtime in Task 4.
@@ -239,14 +254,14 @@ The standalone tt-emule plan said to capture a *non-ASan* baseline first; that s
 - [ ] **Step 1: Build the full target**
 
 ```bash
-cmake --build /localdev/arminale/tt-metal/build_emule_asan -j 8 2>&1 | tail -10
+cmake --build /localdev/arminale/tt-metal-main/build_emule_asan -j 8 2>&1 | tail -10
 ```
 
 - [ ] **Step 2: Run the regression with verbose output captured**
 
 ```bash
 cd /localdev/arminale/tt-emule
-BUILD_DIR=/localdev/arminale/tt-metal/build_emule_asan \
+BUILD_DIR=/localdev/arminale/tt-metal-main/build_emule_asan \
   ./run_regression.sh 2>&1 | tee /tmp/asan_baseline_regression.log
 ```
 
@@ -425,8 +440,8 @@ git commit -m "feat(asan): add __emule_buffer_alloc/free bridge for allocator ho
 ### Task 7: `SWEmulatedChip::core_for_logical` + initial poison
 
 **Files:**
-- Modify: `tt-metal:third_party/umd/device/api/umd/device/chip/sw_emulated_chip.hpp`
-- Modify: `tt-metal:third_party/umd/device/chip/sw_emulated_chip.cpp`
+- Modify: `tt-metal-main:third_party/umd/device/api/umd/device/chip/sw_emulated_chip.hpp`
+- Modify: `tt-metal-main:third_party/umd/device/chip/sw_emulated_chip.cpp`
 
 - [ ] **Step 1: Add the helper declaration**
 
@@ -508,7 +523,7 @@ In `sw_emulated_chip.cpp` near the top, add: `#include <tt_emule/asan_bridge.h>`
 - [ ] **Step 5: Build**
 
 ```bash
-cmake --build /localdev/arminale/tt-metal/build_emule_asan -j 8 2>&1 | tail -10
+cmake --build /localdev/arminale/tt-metal-main/build_emule_asan -j 8 2>&1 | tail -10
 ```
 
 Expected: clean build. No behavior change yet — the hooks aren't called by the allocator until Task 9.
@@ -527,13 +542,13 @@ git commit -m "feat(emul/asan): SWEmulatedChip initial poison + core_for_logical
 ### Task 8: `asan_hooks.{hpp,cpp}` — buffer-range enumerator
 
 **Files:**
-- Create: `tt-metal:tt_metal/impl/emulation/asan_hooks.hpp`
-- Create: `tt-metal:tt_metal/impl/emulation/asan_hooks.cpp`
-- Modify: `tt-metal:tt_metal/impl/emulation/CMakeLists.txt` (add `asan_hooks.cpp` to the runner library sources)
+- Create: `tt-metal-main:tt_metal/impl/emulation/asan_hooks.hpp`
+- Create: `tt-metal-main:tt_metal/impl/emulation/asan_hooks.cpp`
+- Modify: `tt-metal-main:tt_metal/impl/emulation/CMakeLists.txt` (add `asan_hooks.cpp` to the runner library sources)
 
 - [ ] **Step 1: Write the header**
 
-Create `tt-metal:tt_metal/impl/emulation/asan_hooks.hpp`:
+Create `tt-metal-main:tt_metal/impl/emulation/asan_hooks.hpp`:
 
 ```cpp
 // SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
@@ -564,7 +579,7 @@ void on_buffer_deallocated(const Buffer* buffer);
 
 - [ ] **Step 2: Write the implementation**
 
-Create `tt-metal:tt_metal/impl/emulation/asan_hooks.cpp`:
+Create `tt-metal-main:tt_metal/impl/emulation/asan_hooks.cpp`:
 
 ```cpp
 // SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
@@ -696,12 +711,12 @@ The `cluster.get_chip(device->id())` call site is illustrative — the engineer 
 
 - [ ] **Step 3: Wire the new file into the build**
 
-Modify `tt-metal:tt_metal/impl/emulation/CMakeLists.txt` to add `asan_hooks.cpp` next to `emulated_program_runner.cpp` in the source list. (Find the `add_library(...)` or equivalent and append.)
+Modify `tt-metal-main:tt_metal/impl/emulation/CMakeLists.txt` to add `asan_hooks.cpp` next to `emulated_program_runner.cpp` in the source list. (Find the `add_library(...)` or equivalent and append.)
 
 - [ ] **Step 4: Build**
 
 ```bash
-cmake --build /localdev/arminale/tt-metal/build_emule_asan -j 8 --target tt_metal 2>&1 | tail -20
+cmake --build /localdev/arminale/tt-metal-main/build_emule_asan -j 8 --target tt_metal 2>&1 | tail -20
 ```
 
 Expected: clean build. If you hit "private member" access errors, expose accessors as described above.
@@ -721,7 +736,7 @@ git commit -m "feat(emul/asan): per-buffer poison hook with conservative shard h
 ### Task 9: Wire hooks into `AllocatorImpl`
 
 **Files:**
-- Modify: `tt-metal:tt_metal/impl/allocator/allocator.cpp` (lines 113-194 for allocate, 196-223 for deallocate, 225-231 for deallocate_buffers)
+- Modify: `tt-metal-main:tt_metal/impl/allocator/allocator.cpp` (lines 113-194 for allocate, 196-223 for deallocate, 225-231 for deallocate_buffers)
 
 - [ ] **Step 1: Include the hook header**
 
@@ -780,7 +795,7 @@ In `AllocatorImpl::deallocate_buffers` at line 225, before the `dram_manager_->d
 - [ ] **Step 6: Build**
 
 ```bash
-cmake --build /localdev/arminale/tt-metal/build_emule_asan -j 8 2>&1 | tail -10
+cmake --build /localdev/arminale/tt-metal-main/build_emule_asan -j 8 2>&1 | tail -10
 ```
 
 Expected: clean build.
@@ -803,7 +818,7 @@ git commit -m "feat(emul/asan): hook AllocatorImpl alloc/dealloc into per-buffer
 
 ```bash
 cd /localdev/arminale/tt-emule
-BUILD_DIR=/localdev/arminale/tt-metal/build_emule_asan \
+BUILD_DIR=/localdev/arminale/tt-metal-main/build_emule_asan \
   ./run_regression.sh 2>&1 | tee /tmp/asan_alloc_regression.log
 ```
 
@@ -822,7 +837,7 @@ Expected: any new failures are real bugs the allocator-hook poisoning revealed (
 
 ```bash
 TT_EMULE_ASAN_WARN_ONLY=1 \
-  BUILD_DIR=/localdev/arminale/tt-metal/build_emule_asan \
+  BUILD_DIR=/localdev/arminale/tt-metal-main/build_emule_asan \
   ./run_regression.sh 2>&1 | tee /tmp/asan_alloc_warn_only.log
 grep "EMULE.*out-of-bounds" /tmp/asan_alloc_warn_only.log | sort -u
 ```
@@ -850,14 +865,14 @@ git commit -m "docs(asan): capture allocator-hook regression log + findings"
 ### Task 11: JIT overflow + UAF negative tests
 
 **Files:**
-- Create: `tt-metal:tt_emule/asan_tests/CMakeLists.txt`
-- Create: `tt-metal:tt_emule/asan_tests/test_buffer_oob.cpp`
-- Create: `tt-metal:tt_emule/asan_tests/test_buffer_uaf.cpp`
-- Modify: `tt-metal:tt_emule/CMakeLists.txt`
+- Create: `tt-metal-main:tt_emule/asan_tests/CMakeLists.txt`
+- Create: `tt-metal-main:tt_emule/asan_tests/test_buffer_oob.cpp`
+- Create: `tt-metal-main:tt_emule/asan_tests/test_buffer_uaf.cpp`
+- Modify: `tt-metal-main:tt_emule/CMakeLists.txt`
 
 - [ ] **Step 1: Write the overflow test**
 
-Create `tt-metal:tt_emule/asan_tests/test_buffer_oob.cpp`:
+Create `tt-metal-main:tt_emule/asan_tests/test_buffer_oob.cpp`:
 
 ```cpp
 // SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
@@ -900,7 +915,7 @@ int main() {
 }
 ```
 
-Then create `tt-metal:tt_emule/asan_tests/kernels/oob_writer.cpp`:
+Then create `tt-metal-main:tt_emule/asan_tests/kernels/oob_writer.cpp`:
 
 ```cpp
 #include "dataflow_api.h"
@@ -915,7 +930,7 @@ void kernel_main() {
 
 - [ ] **Step 2: Write the UAF test**
 
-Create `tt-metal:tt_emule/asan_tests/test_buffer_uaf.cpp`:
+Create `tt-metal-main:tt_emule/asan_tests/test_buffer_uaf.cpp`:
 
 ```cpp
 // Negative test: allocate a buffer, free it, then a kernel writes through
@@ -956,7 +971,7 @@ int main() {
 }
 ```
 
-Create `tt-metal:tt_emule/asan_tests/kernels/uaf_writer.cpp`:
+Create `tt-metal-main:tt_emule/asan_tests/kernels/uaf_writer.cpp`:
 
 ```cpp
 #include "dataflow_api.h"
@@ -969,7 +984,7 @@ void kernel_main() {
 
 - [ ] **Step 3: Wire into CMake**
 
-Create `tt-metal:tt_emule/asan_tests/CMakeLists.txt`:
+Create `tt-metal-main:tt_emule/asan_tests/CMakeLists.txt`:
 
 ```cmake
 add_executable(test_emule_asan_buffer_oob test_buffer_oob.cpp)
@@ -989,7 +1004,7 @@ set_tests_properties(emule_asan_buffer_uaf PROPERTIES
     ENVIRONMENT "TT_METAL_EMULATED_MODE=1;TT_METAL_SLOW_DISPATCH_MODE=1")
 ```
 
-Modify `tt-metal:tt_emule/CMakeLists.txt` to gate-add the subdir at the bottom:
+Modify `tt-metal-main:tt_emule/CMakeLists.txt` to gate-add the subdir at the bottom:
 
 ```cmake
 if(TT_EMULE_ASAN)
@@ -1002,9 +1017,9 @@ The `TT_METAL_MOCK_CLUSTER_DESC_PATH` env var must also be set when running thes
 - [ ] **Step 4: Build and run**
 
 ```bash
-cmake --build /localdev/arminale/tt-metal/build_emule_asan -j 8 \
+cmake --build /localdev/arminale/tt-metal-main/build_emule_asan -j 8 \
     --target test_emule_asan_buffer_oob test_emule_asan_buffer_uaf 2>&1 | tail -10
-ctest --test-dir /localdev/arminale/tt-metal/build_emule_asan -L emule_asan -V 2>&1 | tail -30
+ctest --test-dir /localdev/arminale/tt-metal-main/build_emule_asan -L emule_asan -V 2>&1 | tail -30
 ```
 
 Expected: 2/2 tests pass via `WILL_FAIL TRUE` (the binaries die with ASan output, exit non-zero).
@@ -1035,12 +1050,12 @@ Create `tt-emule:docs/ASAN.md`:
 ## Build
 
 ```bash
-cmake -B /localdev/arminale/tt-metal/build_emule_asan \
+cmake -B /localdev/arminale/tt-metal-main/build_emule_asan \
   -DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20 \
   -DTT_METAL_USE_EMULE=ON -D=ON -DTT_EMULE_ASAN=ON \
   -DTT_EMULE_PATH=/localdev/arminale/tt-emule \
   -DCMAKE_BUILD_TYPE=Debug
-cmake --build /localdev/arminale/tt-metal/build_emule_asan -j 8
+cmake --build /localdev/arminale/tt-metal-main/build_emule_asan -j 8
 ```
 
 ## What gets caught
