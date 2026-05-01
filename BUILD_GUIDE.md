@@ -73,19 +73,17 @@ If your machine does not have HTTPS authentication configured for GitHub, overri
 ```bash
 git config submodule.tt_metal/third_party/umd.url git@github.com:tenstorrent/tt-umd.git
 git config submodule.tt_metal/third_party/tracy.url git@github.com:tenstorrent-metal/tracy.git
-git config submodule.tt_metal/third_party/tt_llk.url git@github.com:tenstorrent/tt-llk.git
 git config submodule."models/demos/t3000/llama2_70b/reference/llama".url git@github.com:tenstorrent-metal/llama.git
 ```
 
-Initialize the three submodules required for the build (UMD for cluster descriptors, tracy for the CMake build system, tt_llk for firmware headers):
+Initialize the two submodules required for the build (UMD for cluster descriptors, tracy for the CMake build system):
 
 ```bash
 git submodule update --init tt_metal/third_party/umd
 git submodule update --init tt_metal/third_party/tracy
-git submodule update --init tt_metal/third_party/tt_llk
 ```
 
-**Note:** `--recursive` is not needed; the full recursive init also clones large/unrelated submodules. Only the three above are required for the emulation build.
+**Note:** `--recursive` is not needed; the full recursive init also clones large/unrelated submodules. Only the two above are required for the emulation build. (Earlier commits required a third submodule `tt_metal/third_party/tt_llk` for firmware headers; that source has since been promoted into the main tree at `tt_metal/tt-llk/` and no longer needs separate initialization.)
 
 Verify the critical file exists:
 ```bash
@@ -146,7 +144,7 @@ After a successful build, you should see:
 CMake Error at cmake/tracy.cmake:20 (add_subdirectory): The source directory .../tracy does not contain a CMakeLists.txt file.
 ```
 
-Similarly, the `tt_llk` submodule must be initialized because the firmware headers (`ckernel_structs.h` etc.) come from it.
+(On commits prior to `8711ac3d0b`, a third submodule `tt_metal/third_party/tt_llk` was also required for firmware headers; on the current base it is part of the main tree at `tt_metal/tt-llk/`.)
 
 ---
 
@@ -183,7 +181,9 @@ This runs 5 tiers of tests:
 4. **Tier 4 (TTNN Relational):** ttnn_relational
 5. **Tier 5 (TTNN Matmul):** ttnn_matmul_sweep
 
-**Expected result:** 126 passed, 11 failed, 0 skipped (against tt-metal `arminale/emule-metal-base` @ `c812fbb1cc`, baseline 2026-05-01). The 11 failures are 4 DFB STRIDED wraparound (Tier 3b) + 7 DFB Config Validation (Tier 3g) tests; see `IMPLEMENTATION_REPORT.md` § "Changes from v9 to v10" for the list and the upstream-merge follow-up they depend on.
+**Expected result:** 127 passed, 11 failed, 0 skipped (against tt-metal `arminale/emule-metal-base` @ `8711ac3d0b`, baseline 2026-05-01). The 11 failures are 4 DFB STRIDED wraparound (Tier 3b) + 7 DFB Config Validation (Tier 3g) tests; see `IMPLEMENTATION_REPORT.md` § "Changes from v9 to v10" for the list and the upstream-merge follow-up they depend on.
+
+(Without the Phase B reduce-test stubs added on `armin/quasar-reduction`, the Tier 5b sum-reduction test fails at JIT compile time, giving a baseline of 126/12/0. With the stubs landed, the Wormhole variant passes, restoring 127/11/0. A Quasar variant was attempted but blocked upstream — the W-reduce factory uses non-Quasar `DataMovementKernel`.)
 
 ---
 

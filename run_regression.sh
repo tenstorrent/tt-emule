@@ -402,6 +402,20 @@ export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
 
 run_test_verbose "ttnn_matmul_sweep" "$TTNN_BIN" --gtest_filter="MatmulSweep/MatmulSweepFixture.*"
 
+# Tier 5b: TTNN Reduction (wormhole) — sum on last dim, tile-aligned 3200×64 BF16
+echo ""
+echo "== Tier 5b: TTNN Reduction =="
+
+run_test "ttnn_sum_last_dim_wh" "$TTNN_BIN" \
+    --gtest_filter="SumTensorLastDimTests/SumTensorLastDimFixture.SumTensorCorrectly/1"
+
+# Note: a Quasar variant of this test is not exercised because the upstream
+# W-reduce host factory uses CreateKernel (non-Quasar DataMovementKernel),
+# which Metal rejects on Quasar with "DataMovementKernel is not supported on
+# Quasar. Use QuasarDataMovementKernel instead."  This is an upstream factory
+# limitation, not an emulator stub gap; revisit when the W-reduce factory
+# gains a Quasar code path.
+
 # Tier 6: Silicon toggle proof (requires real hardware)
 echo ""
 echo "== Tier 6: Silicon (toggle proof) =="

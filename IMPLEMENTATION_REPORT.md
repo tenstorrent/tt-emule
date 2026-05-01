@@ -241,7 +241,7 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 
 **Standalone tests** (5/5 pass): dfb_passthrough, dfb_multi_consumer, eltwise_add, matmul, tilize
 
-**tt-metal emulated regression** (126 passing, 11 failing, 0 skipped, against tt-metal `arminale/emule-metal-base` @ `c812fbb1cc`):
+**tt-metal emulated regression** (127 passing, 11 failing, 0 skipped, against tt-metal `arminale/emule-metal-base` @ `8711ac3d0b`):
 
 | Tier | Tests | Pass | Fail | Description | Cluster |
 |------|-------|------|------|-------------|---------|
@@ -262,8 +262,11 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 | 3l | DM Direct Write + DRAM | 7 | 0 | 3 direct write (unicast, stateful, multicast) + 4 DRAM unary (packet sizes, core locations, channels, directed) | WH N150 |
 | 4 | TTNN INT32 | 4 | 0 | ttnn_relational_int (66 sub-cases), ttnn_add_int + variants | BH P100 |
 | 5 | TTNN Matmul Sweep | 1 | 0 | 14 sub-cases: multi-core matmul 32² through 2048² | WH N150 |
+| 5b | TTNN Reduction (WH) | 1 | 0 | `ttnn_sum_last_dim_wh` — sum on last dim, BF16 3200×64 → 3200×1 | WH N150 |
 | 6 | Silicon Toggle | 1 | 0 | ttnn_add_int — env vars unset, runs in emulation (toggle proof) | WH N150 |
-| **Total** | | **126** | **11** | | |
+| **Total** | | **127** | **11** | | |
+
+(A Quasar variant of the sum-last-dim test is not run: the upstream W-reduce host factory uses `CreateKernel`, which tt-metal rejects on Quasar with "DataMovementKernel is not supported on Quasar. Use QuasarDataMovementKernel instead." — an upstream factory limitation, not an emulator stub gap.)
 
 See [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) section 8 for a feature-by-feature table with test evidence.
 
@@ -564,7 +567,7 @@ The tier table above in Test Results reflects the full `run_regression.sh` struc
 
 D2M golden test regression: `run_d2m_regression.sh` — runs 13 tt-mlir test files (2082 tests) against the emulated backend. 1694 pass, 164 fail, 224 skip/xfail. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
 
-Regression scripts: `run_regression.sh` (126 passing, 11 failing — see Test Results above) + `run_d2m_regression.sh` (13 D2M test files, 2082 tests).
+Regression scripts: `run_regression.sh` (127 passing, 11 failing — see Test Results above) + `run_d2m_regression.sh` (13 D2M test files, 2082 tests; counts not re-run on the new merge-base, treat as stale).
 
 ### tt-metal Files Modified
 
@@ -774,6 +777,18 @@ Rebasing onto new tt-metal versions primarily requires:
 
 **Key insight:** v9 measured the emulator against the in-flight branch that contained the wraparound and BLOCKED-config fixes. The new `arminale/emule-metal-base` is intentionally pinned to the upstream merge commit (which predates those fixes), so the 11 failures are the known set of follow-up work that has not yet landed back in `main`. They are not regressions in the emulator itself; they will resolve once the upstream commits are merged and the base pointer is bumped (see "Deferred Follow-up" in `~/.claude/plans/floofy-tickling-otter.md` for the bbradel-merge-base bump option).
 
+### Changes from v10 to v11
+
+| Aspect | v10 | v11 |
+|--------|-----|-----|
+| tt-metal base | `arminale/emule-metal-base` @ `c812fbb1cc` (first frozen pointer) | `arminale/emule-metal-base` @ `8711ac3d0b` ("Implement warmup flow in demo (#43109)", merge-base of `origin/main` and `origin/bbradel-41067_generic_reduce_host20`, +40 commits) |
+| `tt_llk` source | submodule at `tt_metal/third_party/tt_llk` | promoted into the main tree at `tt_metal/tt-llk/` (submodule no longer initialized) |
+| Regression baseline | 126 / 11 / 0 | **126 / 13 / 0** pre-stub-fix; **127 / 11 / 0** post-stub-fix |
+| New test tiers | — | Tier 5b `ttnn_sum_last_dim_wh` (W-axis reduction, BF16, 3200×64 → 3200×1). A Quasar variant was attempted but the upstream W-reduce factory rejects the Quasar arch (`DataMovementKernel is not supported on Quasar`) — out of emule's scope. |
+| Reduce kernel JIT stubs | implicit | added: `ckernel::PoolType` / `ckernel::ReduceDim` namespace alias, `MEM_ZEROS_SIZE`, `experimental::Noc::VcSelection`, `set_async_read_state`, `async_read_with_state` (consumed by `ttnn/cpp/ttnn/kernel_lib/{l1_helpers.hpp, reduce_helpers_*.hpp}`) |
+
+**Key insight:** the merge-base reduce kernels at `8711ac3d0b` reference a layered helper library (`ttnn/cpp/ttnn/kernel_lib/`) that wraps NOC state-cache primitives. The static stub-coverage check missed these because they live behind transitive `#include`s. With the stubs added, the same kernels compile under the emulator JIT and the (already-functional) `reduce_tile<SUM, REDUCE_ROW>` math produces correct PCC. The 11 DFB failures are unchanged; they need upstream fixes to reach `main`.
+
 ---
 
-*Report updated 2026-05-01. Covers tt-emule on branch `armin-pr` / tt-metal on branch `arminale/emule-metal-base` @ `c812fbb1cc`. Regression baseline: **126 / 11 / 0**.*
+*Report updated 2026-05-01. Covers tt-emule on branch `armin/quasar-reduction` / tt-metal on branch `arminale/emule-metal-base` @ `8711ac3d0b`. Regression baseline: **127 / 11 / 0** (pre-stub-fix: 126 / 13 / 0).*

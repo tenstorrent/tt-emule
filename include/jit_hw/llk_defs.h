@@ -33,6 +33,29 @@ enum class ReduceDim : uint8_t {
     REDUCE_SCALAR = 2,
 };
 
+// Upstream ttnn/cpp/ttnn/kernel_lib/reduce_helpers_common.hpp uses
+// ckernel::PoolType / ckernel::ReduceDim. Real tt-metal defines them in the
+// ckernel namespace; the JIT here keeps them at global scope, so re-export.
+namespace ckernel {
+using ::PoolType;
+using ::ReduceDim;
+
+// MathFidelity / DstSync — referenced by ttnn/cpp/ttnn/kernel_lib/
+// reduce_helpers_compute.inl matmul wrappers and by dest_helpers.hpp's
+// SyncFull/SyncHalf comparisons.  Mirrored from upstream
+// tt_metal/tt-llk/tt_llk_quasar/llk_lib/llk_defs.h.
+enum class MathFidelity : std::uint8_t {
+    LoFi  = 0,
+    HiFi2 = 2,
+    HiFi3 = 3,
+    HiFi4 = 4,
+};
+enum class DstSync : std::uint8_t {
+    SyncHalf,
+    SyncFull,
+};
+}  // namespace ckernel
+
 // Operand CB interface stub
 struct CbInterface {
     uint32_t fifo_page_size = 0;

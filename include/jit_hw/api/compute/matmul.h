@@ -5,6 +5,7 @@
 
 #include "jit_hw/api/compute/common.h"
 #include "jit_hw/api/compute/nfaces.h"
+#include "jit_hw/llk/llk_reduce_primitives.h"
 
 #if defined(__AVX2__) && defined(__FMA__)
 #include <immintrin.h>

@@ -8,15 +8,22 @@ enum class DataFormat : uint8_t {
     Float16   = 1,
     Bfp8      = 2,
     Bfp4      = 3,
+    Tf32      = 4,
     Float16_b = 5,
     Bfp8_b    = 6,
     Bfp4_b    = 7,
     Int32     = 8,
     UInt16    = 9,
     Lf8       = 10,
+    Bfp2      = 11,
     Int8      = 14,
+    Bfp2_b    = 15,
     UInt32    = 24,
     UInt8     = 30,
+    Fp8_e4m3  = 0x1A,
+    RawUInt8  = 0xF0,
+    RawUInt16 = 0xF1,
+    RawUInt32 = 0xF2,
     Invalid   = 0xff
 };
 

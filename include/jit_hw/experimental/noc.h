@@ -30,6 +30,8 @@ public:
     // Matches upstream tt-metal: TxnIdMode::ENABLED selects the DFB implicit-sync
     // overloads that internally manage reserve_back/wait_front and omit size_bytes.
     enum class TxnIdMode { ENABLED, DISABLED };
+    // VC selection ignored in emulation; only present so template args resolve.
+    enum class VcSelection { DEFAULT, CUSTOM };
 
     Noc() : noc_id_(0) {}
     explicit Noc(uint8_t noc_id) : noc_id_(noc_id) {}
@@ -113,8 +115,47 @@ public:
     void async_atomic_barrier() const {}
     void async_full_barrier() const {}
 
+    // Stages a NOC read once (caching src+size) and consumes it via
+    // async_read_with_state(size_bytes=0). Used by l1_helpers.hpp::zero_tile.
+    template <VcSelection vc_selection = VcSelection::DEFAULT,
+              uint32_t max_page_size = 0,
+              typename Src>
+    void set_async_read_state(
+        const Src& src,
+        uint32_t size_bytes,
+        const typename noc_traits_t<Src>::src_args_type& src_args,
+        uint8_t /*vc*/ = 0) const {
+        cached_src_addr_ = noc_traits_t<Src>::template src_addr<AddressType::NOC>(src, *this, src_args);
+        cached_size_ = size_bytes;
+    }
+
+    template <VcSelection vc_selection = VcSelection::DEFAULT,
+              uint32_t max_page_size = 0,
+              typename Src,
+              typename Dst>
+    void async_read_with_state(
+        const Src& src,
+        const Dst& dst,
+        uint32_t size_bytes,
+        const typename noc_traits_t<Src>::src_args_type& src_args,
+        const typename noc_traits_t<Dst>::dst_args_type& dst_args,
+        uint8_t /*vc*/ = 0) const {
+        // size_bytes == 0 means "use the staged size".
+        const uint32_t bytes = size_bytes ? size_bytes : cached_size_;
+        const uintptr_t s = size_bytes
+            ? noc_traits_t<Src>::template src_addr<AddressType::NOC>(src, *this, src_args)
+            : cached_src_addr_;
+        const uintptr_t d = noc_traits_t<Dst>::template dst_addr<AddressType::LOCAL_L1>(dst, *this, dst_args);
+        if (s && d && bytes) {
+            std::memcpy(reinterpret_cast<uint8_t*>(d), reinterpret_cast<uint8_t*>(s), bytes);
+        }
+    }
+
 private:
     uint8_t noc_id_;
+    // Mutable so the const-qualified state APIs above can write the cache.
+    mutable uintptr_t cached_src_addr_ = 0;
+    mutable uint32_t  cached_size_     = 0;
 };
 
 }  // namespace experimental

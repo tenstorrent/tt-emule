@@ -255,7 +255,7 @@ Every feature listed here is verified by at least one passing test.
 | RISC-V fence patch | `__sync_synchronize()` | All JIT tests (compilation succeeds) |
 | `GenericMeshDeviceFixture` | Allows slow dispatch in emulated mode | All JIT-path tests |
 
-**Regression total against `arminale/emule-metal-base` @ `c812fbb1cc`:** 126 passing, 11 failing, 0 skipped.
+**Regression total against `arminale/emule-metal-base` @ `8711ac3d0b`:** 128 passing, 11 failing, 0 skipped (post-Phase-B stubs; pre-stubs the 2 sum-reduction tests fail at JIT compile, giving 126/13/0).
 
 The 11 failures are all in DFB tests that depend on follow-up fixes not yet merged to upstream `main`:
 - **Tier 3b STRIDED wraparound (4):** `DMTest1xDFB4Sx4S`, `DMTest1xDFB4Sx4S_IS`, `DMTest1xDFB2Sx4S`, `DMTest1xDFB2Sx4S_IS`
