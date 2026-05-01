@@ -241,7 +241,7 @@ Every feature listed here is verified by at least one passing test.
 | DRAM unary read/write (multi-bank) | `get_noc_addr_from_bank_id<dram>()` + `noc_async_read/write` | `test_dm_unary_dram.cpp:PacketSizes, CoreLocations, DRAMChannels, DirectedIdeal` |
 | Semaphores (compute + DM) | Atomic spin-wait | `test_quasar_semaphores.cpp:QuasarComputeKernelSemaphores, QuasarDmAndComputeKernelSemaphores` |
 | RISC-V atomics on L1 | GCC builtins | `test_riscv_atomics.cpp:TestAtomicLoadStoreRISCV, TestAtomicAddFetchRISCV, TestAtomicCASRISCV` |
-| DFB STRIDED (1P-1C through 4P-4C) | `EmuleDFBInterface` + `TileCounterArray` | 42 tests in `test_dataflow_buffer.cpp` |
+| DFB STRIDED (1P-1C through 4P-4C) | `EmuleDFBInterface` + `TileCounterArray` | 42 tests in `test_dataflow_buffer.cpp` (38 pass / 4 fail on `arminale/emule-metal-base`: 4Sx4S and 2Sx4S wraparound — fix not yet upstream) |
 | DFB BLOCKED | `broadcast_tc` path | 30 tests in `test_dataflow_buffer.cpp` |
 | DFB↔CB bridge | `cb_sync_push/pop` in dfb_api.h / cb_api.h | DFB compute bridge tests in `test_dataflow_buffer.cpp` |
 | DFB timeout detection | `wait_for` with `TT_EMULE_DFB_TIMEOUT` | Triggered by hang scenarios in regression |
@@ -255,7 +255,13 @@ Every feature listed here is verified by at least one passing test.
 | RISC-V fence patch | `__sync_synchronize()` | All JIT tests (compilation succeeds) |
 | `GenericMeshDeviceFixture` | Allows slow dispatch in emulated mode | All JIT-path tests |
 
-**Regression total:** 137 passing, 0 failures, 0 skipped.
+**Regression total against `arminale/emule-metal-base` @ `c812fbb1cc`:** 126 passing, 11 failing, 0 skipped.
+
+The 11 failures are all in DFB tests that depend on follow-up fixes not yet merged to upstream `main`:
+- **Tier 3b STRIDED wraparound (4):** `DMTest1xDFB4Sx4S`, `DMTest1xDFB4Sx4S_IS`, `DMTest1xDFB2Sx4S`, `DMTest1xDFB2Sx4S_IS`
+- **Tier 3g DFB Config Validation (7):** `DMTest1xDFB1Sx4SConfig`, `DMTensixTest1xDFB4Sx1SConfig`, `DMTest1xDFB4Sx1SConfig`, `DMTest1xDFB4Sx4SConfig`, `DMTest1xDFB2Sx4SConfig`, `DMTest1xDFB4Sx2SConfig`, `DMTest1xDFB1Sx1BConfig`
+
+See `IMPLEMENTATION_REPORT.md` § "Changes from v9 to v10" for context — these failures will resolve once the wraparound + DFB-config fixes upstream and the base pointer is bumped.
 
 ---
 

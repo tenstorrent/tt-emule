@@ -68,16 +68,16 @@ tt-metal has several git submodules that must be initialized before building. Th
 cd /localdev/<user>/tt-metal
 ```
 
-**Important:** The UMD submodule points to a fork (`xanderchin/tt-umd.git`) via HTTPS. If your machine does not have HTTPS authentication configured for GitHub, you need to override the submodule URLs to use SSH:
+If your machine does not have HTTPS authentication configured for GitHub, override the submodule URLs to use SSH:
 
 ```bash
-git config submodule.tt_metal/third_party/umd.url git@github.com:xanderchin/tt-umd.git
+git config submodule.tt_metal/third_party/umd.url git@github.com:tenstorrent/tt-umd.git
 git config submodule.tt_metal/third_party/tracy.url git@github.com:tenstorrent-metal/tracy.git
 git config submodule.tt_metal/third_party/tt_llk.url git@github.com:tenstorrent/tt-llk.git
 git config submodule."models/demos/t3000/llama2_70b/reference/llama".url git@github.com:tenstorrent-metal/llama.git
 ```
 
-Then initialize the three submodules required for the build (UMD for cluster descriptors, tracy for the CMake build system, tt_llk for firmware headers):
+Initialize the three submodules required for the build (UMD for cluster descriptors, tracy for the CMake build system, tt_llk for firmware headers):
 
 ```bash
 git submodule update --init tt_metal/third_party/umd
@@ -183,7 +183,7 @@ This runs 5 tiers of tests:
 4. **Tier 4 (TTNN Relational):** ttnn_relational
 5. **Tier 5 (TTNN Matmul):** ttnn_matmul_sweep
 
-**Expected result:** 136 passed, 0 failed, 2 skipped (as of 2026-04-16). The 2 skips are `test_emulation_toggle` (binary not built by CMakeLists). On machines with real Tenstorrent hardware, `ttnn_add_int_silicon` (Tier 6) also passes.
+**Expected result:** 126 passed, 11 failed, 0 skipped (against tt-metal `arminale/emule-metal-base` @ `c812fbb1cc`, baseline 2026-05-01). The 11 failures are 4 DFB STRIDED wraparound (Tier 3b) + 7 DFB Config Validation (Tier 3g) tests; see `IMPLEMENTATION_REPORT.md` § "Changes from v9 to v10" for the list and the upstream-merge follow-up they depend on.
 
 ---
 
@@ -318,7 +318,7 @@ TIMEOUT=600 ./run_d2m_regression.sh --serial
 Rebuild tt-mlir with `-DTTMLIR_ENABLE_STABLEHLO=ON`.
 
 ### UMD submodule clone fails
-The UMD submodule (`xanderchin/tt-umd`) may require SSH access. Override the URL with `git config submodule.tt_metal/third_party/umd.url git@github.com:xanderchin/tt-umd.git`.
+The UMD submodule may require SSH access. Override the URL with `git config submodule.tt_metal/third_party/umd.url git@github.com:tenstorrent/tt-umd.git`.
 
 ### "lambda capture 'kidx' is not required"
 Add `(void)kidx;` at the start of the lambda in `tt_metal/impl/emulation/emulated_program_runner.cpp`.

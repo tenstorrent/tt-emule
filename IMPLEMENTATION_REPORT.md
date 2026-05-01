@@ -241,29 +241,29 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 
 **Standalone tests** (5/5 pass): dfb_passthrough, dfb_multi_consumer, eltwise_add, matmul, tilize
 
-**tt-metal emulated regression** (137 passing, 0 failures, 0 skipped):
+**tt-metal emulated regression** (126 passing, 11 failing, 0 skipped, against tt-metal `arminale/emule-metal-base` @ `c812fbb1cc`):
 
-| Tier | Tests | Count | Description | Cluster |
-|------|-------|-------|-------------|---------|
-| 0 | Standalone | 3 | dfb_passthrough, dfb_multi_consumer, eltwise_add | None |
-| 1 | Host-only | 16 | bit_utils, host_buffer, tilize_untilize, blockfloat, emulation_toggle, dst_capacity, 9 CoreRange/Set | None |
-| 2 | Buffer I/O | 3 | SimpleL1Buffer, SimpleDramBuffer, emulation_toggle_active | WH N150 |
-| 3a | JIT Kernel | 1 | TensixL1Tile — experimental CB/Noc API | WH N150 |
-| 3b | DFB STRIDED (Group A) | 20 | DM-DM multi-P/C, ImplicitSyncFalse + ImplicitSyncTrue | Quasar |
-| 3d | DFB Bridge (Groups B+C) | 20 | DM→Tensix + Tensix→DM STRIDED topologies | Quasar |
-| 3e | DFB Pipeline (Group D) | 3 | DM→Tensix→DM multi-DFB pipeline | Quasar |
-| 3e | DFB BLOCKED | 30 | DM-DM + DM→Tensix + Tensix→DM BLOCKED, both ImplicitSync | Quasar |
-| 3f | DFB Multi-Core | 6 | 2-core STRIDED (1Sx1S, 2Sx2S) + BLOCKED (1Sx4B), both ImplicitSync | Quasar |
-| 3g | DFB Config Validation | 10 | TC pairing, risc_mask, remapper validation (7 STRIDED + 3 multi-core) | Quasar |
-| 3h | Quasar Compute | 4 | MultipleThreads, SingleThread, MultipleKernels, TLS | Quasar |
-| 3i | Quasar Semaphores | 3 | ComputeKernelSemaphores, DmAndComputeSemaphores, DmLoopback | Quasar |
-| 3j | Simple DM + Atomics | 4 | SingleDmL1Write, 3× RISC-V atomic tests | Quasar |
-| 3k | Data Movement | 4 | LoopbackPacketSizes, LoopbackDirectedIdeal, OneFromOnePacketSizes, OneFromOneDirectedIdeal | WH N150 |
-| 3l | DM Direct Write + DRAM | 7 | 3 direct write (unicast, stateful, multicast) + 4 DRAM unary (packet sizes, core locations, channels, directed) | WH N150 |
-| 4 | TTNN INT32 | 2 | ttnn_relational_int (66 sub-cases), ttnn_add_int | BH P100 |
-| 5 | TTNN Matmul Sweep | 1 | 14 sub-cases: multi-core matmul 32² through 2048² | WH N150 |
-| 5b | Quasar Matmul PCC | 2 | TensixMatmulBlock, TensixMatmulBlockInitShort | Quasar |
-| 6 | Silicon Toggle | 1 | ttnn_add_int — env vars unset, runs in emulation (toggle proof) | WH N150 |
+| Tier | Tests | Pass | Fail | Description | Cluster |
+|------|-------|------|------|-------------|---------|
+| 0 | Standalone | 3 | 0 | dfb_passthrough, dfb_multi_consumer, eltwise_add | None |
+| 1 | Host-only | 15 | 0 | bit_utils, host_buffer, tilize_untilize, blockfloat, dst_capacity, 9 CoreRange/Set | None |
+| 2 | Buffer I/O | 2 | 0 | SimpleL1Buffer, SimpleDramBuffer | WH N150 |
+| 3a | JIT Kernel | 1 | 0 | TensixL1Tile — experimental CB/Noc API | WH N150 |
+| 3b | DFB STRIDED (Group A) | 8 | **4** | DM-DM multi-P/C; failures in 4Sx4S / 2Sx4S wraparound (both ImplicitSync variants) | Quasar |
+| 3c | DFB Bridge (Groups B+C) | 24 | 0 | DM→Tensix + Tensix→DM STRIDED topologies | Quasar |
+| 3d | DFB Pipeline (Group D) | 3 | 0 | DM→Tensix→DM multi-DFB pipeline | Quasar |
+| 3e | DFB BLOCKED | 30 | 0 | DM-DM + DM→Tensix + Tensix→DM BLOCKED, both ImplicitSync | Quasar |
+| 3f | DFB Multi-Core | 6 | 0 | 2-core STRIDED (1Sx1S, 2Sx2S) + BLOCKED (1Sx4B), both ImplicitSync | Quasar |
+| 3g | DFB Config Validation | 3 | **7** | TC pairing, risc_mask, remapper validation; 7 fail (1Sx4S, 4Sx1S × {DM,Tensix}, 4Sx4S, 2Sx4S, 4Sx2S, 1Sx1B Configs) | Quasar |
+| 3h | Quasar Compute + Matmul PCC | 7 | 0 | MultipleThreads, SingleThread, MultipleKernels, TLS, MatmulBlock, MatmulBlockInitShort, MatmulBlockDemo | Quasar |
+| 3i | Quasar Semaphores | 3 | 0 | ComputeKernelSemaphores, DmAndComputeSemaphores, DmLoopback | Quasar |
+| 3j | Simple DM + Atomics | 4 | 0 | SingleDmL1Write, 3× RISC-V atomic tests | Quasar |
+| 3k | Data Movement | 4 | 0 | LoopbackPacketSizes, LoopbackDirectedIdeal, OneFromOnePacketSizes, OneFromOneDirectedIdeal | WH N150 |
+| 3l | DM Direct Write + DRAM | 7 | 0 | 3 direct write (unicast, stateful, multicast) + 4 DRAM unary (packet sizes, core locations, channels, directed) | WH N150 |
+| 4 | TTNN INT32 | 4 | 0 | ttnn_relational_int (66 sub-cases), ttnn_add_int + variants | BH P100 |
+| 5 | TTNN Matmul Sweep | 1 | 0 | 14 sub-cases: multi-core matmul 32² through 2048² | WH N150 |
+| 6 | Silicon Toggle | 1 | 0 | ttnn_add_int — env vars unset, runs in emulation (toggle proof) | WH N150 |
+| **Total** | | **126** | **11** | | |
 
 See [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) section 8 for a feature-by-feature table with test evidence.
 
@@ -564,7 +564,7 @@ The tier table above in Test Results reflects the full `run_regression.sh` struc
 
 D2M golden test regression: `run_d2m_regression.sh` — runs 13 tt-mlir test files (2082 tests) against the emulated backend. 1694 pass, 164 fail, 224 skip/xfail. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
 
-Regression scripts: `run_regression.sh` (133 passing tests) + `run_d2m_regression.sh` (13 D2M test files, 2082 tests).
+Regression scripts: `run_regression.sh` (126 passing, 11 failing — see Test Results above) + `run_d2m_regression.sh` (13 D2M test files, 2082 tests).
 
 ### tt-metal Files Modified
 
@@ -763,6 +763,17 @@ Rebasing onto new tt-metal versions primarily requires:
 
 **Key insight (atomic segfaults):** Quasar atomic kernels call `reinterpret_cast<std::atomic<T>*>(get_arg_val<uint32_t>(0))` where arg[0] is a raw L1 firmware offset (~`0xba780`). On real hardware these offsets are directly dereferenceable by firmware; on x86 emulation they are not valid host addresses, causing an immediate segfault. The fix: (1) move `__emule_local_l1_to_ptr()` into `jit_kernel_stubs.hpp` so every JIT kernel has access to it before any kernel-specific includes; (2) guard the existing definition in `dataflow_api.h` with `#ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED` to prevent ODR violations; (3) add a JIT preprocessor regex that rewrites the pattern automatically so existing and future kernels with this idiom need no source modifications.
 
+### Changes from v9 to v10
+
+| Aspect | v9 | v10 |
+|--------|----|-----|
+| tt-metal base | `arminale/quasar-rebased` (in-flight working branch) | `arminale/emule-metal-base` @ `c812fbb1cc` (frozen pointer at upstream merge commit `tt-emule support for Quasar (#43091)`) |
+| tt-metal regression | 137 pass / 0 fail / 0 skip (against in-flight branch with v8/v9 fixes layered on top) | **126 pass / 11 fail / 0 skip** (against the upstream merge commit, before the wraparound + DFB-config fixes from v8/v9 land in main) |
+| Failures | 0 | 4 DFB STRIDED wraparound (Tier 3b: `DMTest1xDFB4Sx4S`, `DMTest1xDFB4Sx4S_IS`, `DMTest1xDFB2Sx4S`, `DMTest1xDFB2Sx4S_IS`) + 7 DFB Config Validation (Tier 3g: `DMTest1xDFB1Sx4SConfig`, `DMTensixTest1xDFB4Sx1SConfig`, `DMTest1xDFB4Sx1SConfig`, `DMTest1xDFB4Sx4SConfig`, `DMTest1xDFB2Sx4SConfig`, `DMTest1xDFB4Sx2SConfig`, `DMTest1xDFB1Sx1BConfig`) |
+| Branch policy | Working branch could be force-pushed | `arminale/emule-metal-base` is a stable pointer at an upstream main commit; downstream consumers can pin against it |
+
+**Key insight:** v9 measured the emulator against the in-flight branch that contained the wraparound and BLOCKED-config fixes. The new `arminale/emule-metal-base` is intentionally pinned to the upstream merge commit (which predates those fixes), so the 11 failures are the known set of follow-up work that has not yet landed back in `main`. They are not regressions in the emulator itself; they will resolve once the upstream commits are merged and the base pointer is bumped (see "Deferred Follow-up" in `~/.claude/plans/floofy-tickling-otter.md` for the bbradel-merge-base bump option).
+
 ---
 
-*Report updated 2026-04-21. Covers tt-emule on branch `armin` / tt-metal on branch `arminale/emule-metal-base`. All 7 previously-failing tests now pass; regression at 137/0/0.*
+*Report updated 2026-05-01. Covers tt-emule on branch `armin-pr` / tt-metal on branch `arminale/emule-metal-base` @ `c812fbb1cc`. Regression baseline: **126 / 11 / 0**.*
