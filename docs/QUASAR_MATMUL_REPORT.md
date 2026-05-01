@@ -162,7 +162,7 @@ This demonstrates the emulator can run full TTNN-level matmul operations through
 ```bash
 # Check out repositories
 cd /localdev/$USER
-git clone git@github.com:tenstorrent/tt-metal.git -b arminale/quasar
+git clone git@github.com:tenstorrent/tt-metal.git -b arminale/emule-metal-base
 git clone git@github.com:tenstorrent/tt-emule.git
 
 # Initialize required submodules

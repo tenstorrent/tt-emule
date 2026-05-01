@@ -765,4 +765,4 @@ Rebasing onto new tt-metal versions primarily requires:
 
 ---
 
-*Report updated 2026-04-21. Covers tt-emule on branch `armin` / tt-metal on branch `arminale/quasar-rebased`. All 7 previously-failing tests now pass; regression at 137/0/0.*
+*Report updated 2026-04-21. Covers tt-emule on branch `armin` / tt-metal on branch `arminale/emule-metal-base`. All 7 previously-failing tests now pass; regression at 137/0/0.*

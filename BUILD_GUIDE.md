@@ -9,7 +9,7 @@ A complete, step-by-step guide to building tt-emule and all its dependencies fro
 | Repo | Branch | Purpose |
 |------|--------|---------|
 | tt-emule | `master` | Software emulator library and regression scripts |
-| tt-metal | `arminale/quasar` (or `xchin/tt-emule`) | Metal runtime with emulation support |
+| tt-metal | `arminale/emule-metal-base` | Metal runtime with emulation support |
 | tt-mlir | `arminale/tt-metal-local-build` (or `main`) | MLIR compiler, needed for D2M regression tests |
 
 ### Required Tools
@@ -33,7 +33,7 @@ All three repositories should be siblings under the same parent directory:
 ```
 /localdev/<user>/
 ├── tt-emule/      # This project
-├── tt-metal/      # Metal runtime (xchin/tt-emule branch)
+├── tt-metal/      # Metal runtime (arminale/emule-metal-base branch)
 └── tt-mlir/       # MLIR compiler
 ```
 

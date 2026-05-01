@@ -3,7 +3,7 @@
 #
 # Assumes:
 #   - tt-emule and tt-metal are sibling directories under the same parent
-#   - tt-metal is on the arminale/quasar branch (or compatible)
+#   - tt-metal is on the arminale/emule-metal-base branch (or compatible)
 #   - tt-metal submodules (umd, tracy, tt_llk) are initialized
 #   - clang-20, cmake, ninja are installed
 #
