@@ -2,8 +2,8 @@
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TT_METAL_DIR="${TT_METAL_DIR:-/localdev/xchin/project_emule/tt-metal}"
-TT_MLIR_DIR="${TT_MLIR_DIR:-/localdev/xchin/project_emule/tt-mlir}"
+TT_METAL_DIR="${TT_METAL_DIR:-/localdev/arminale/tt-metal}"
+TT_MLIR_DIR="${TT_MLIR_DIR:-/localdev/arminale/tt-mlir}"
 BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule_clang}"
 TEST_DIR="$TT_MLIR_DIR/test/python/golden"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"
@@ -56,8 +56,14 @@ fi
 
 # Set PYTHONPATH for ttnn (from tt-metal build) and ttmlir_runtime (from tt-mlir build)
 export PYTHONPATH="$TT_METAL_DIR/ttnn:$BUILD_DIR/lib:$TT_MLIR_DIR/build/python_packages:$TT_MLIR_DIR/build/runtime/python:${PYTHONPATH:-}"
+export LD_LIBRARY_PATH="$BUILD_DIR/lib:${LD_LIBRARY_PATH:-}"
 export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
 export TT_MLIR_HOME="$TT_MLIR_DIR"
+
+# Ensure the emule-built _ttnn.so is used (source tree may have stale copy from non-emule build)
+if [ -f "$BUILD_DIR/lib/_ttnn.so" ]; then
+    ln -sf "$BUILD_DIR/lib/_ttnn.so" "$TT_METAL_DIR/ttnn/ttnn/_ttnn.so"
+fi
 
 # Set emulation env vars
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"

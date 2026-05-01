@@ -10,7 +10,8 @@
 // The scaler CB contains a tile where every element = 1.0 (for SUM) or 1/N (for AVG).
 // Results ACCUMULATE into DST (+=) to support multi-tile reductions.
 
-#include "api/compute/common.h"
+#include "jit_hw/api/compute/common.h"
+#include "jit_hw/api/compute/nfaces.h"
 #include "jit_hw/llk_defs.h"
 #include <algorithm>
 #include <limits>
@@ -57,28 +58,32 @@ inline void reduce_revert_delta(uint32_t ocb = 0) {}
 template <PoolType reduce_type = REDUCE_OP, ReduceDim reduce_dim = REDUCE_DIM, bool enforce_fp32_accumulation = false>
 inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
                         uint32_t itile, uint32_t itile_scaler, uint32_t idst) {
-    // Read source tile into float32
+    __emule_dst_check(idst, "reduce_tile");
+    // UNPACK source tile: nfaces→row-major + format conversion
     float src[1024];
     {
         uint8_t* buf = __emule_compute::cb_read_ptr_at(icb, itile);
         if (__emule_compute::cb_is_32bit_format(icb)) {
-            std::memcpy(src, buf, sizeof(src));
+            const float* fbuf = reinterpret_cast<const float*>(buf);
+            for (uint32_t i = 0; i < 1024; i++)
+                src[i] = fbuf[__emule_nfaces::rowmajor_to_nfaces[i]];
         } else {
             uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
             for (uint32_t i = 0; i < 1024; i++)
-                src[i] = __emule_bf16::to_f32(bf[i]);
+                src[i] = __emule_bf16::to_f32(bf[__emule_nfaces::rowmajor_to_nfaces[i]]);
         }
     }
 
-    // Read scaler value — first element of the scaler tile
+    // UNPACK scaler tile: nfaces→row-major (scaler is uniform, but apply for correctness)
     float scaler = 1.0f;
     {
         uint8_t* sbuf = __emule_compute::cb_read_ptr_at(icb_scaler, itile_scaler);
         if (__emule_compute::cb_is_32bit_format(icb_scaler)) {
-            std::memcpy(&scaler, sbuf, sizeof(float));
+            const float* fsbuf = reinterpret_cast<const float*>(sbuf);
+            scaler = fsbuf[__emule_nfaces::rowmajor_to_nfaces[0]];
         } else {
             uint16_t* sbf = reinterpret_cast<uint16_t*>(sbuf);
-            scaler = __emule_bf16::to_f32(sbf[0]);
+            scaler = __emule_bf16::to_f32(sbf[__emule_nfaces::rowmajor_to_nfaces[0]]);
         }
     }
 
@@ -150,7 +155,7 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
     }
 }
 
-// reduce_tile_math: math-only variant (assumes source already in registers)
+// reduce_tile_math: intentional no-op — emulation performs math in reduce_tile directly.
 template <PoolType reduce_type = REDUCE_OP, ReduceDim reduce_dim = REDUCE_DIM, bool enforce_fp32_accumulation = false>
 inline void reduce_tile_math(uint32_t idst, uint32_t num_faces = 4) {}
 

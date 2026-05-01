@@ -19,3 +19,10 @@ enum class DataFormat : uint8_t {
     UInt8     = 30,
     Invalid   = 0xff
 };
+
+// PACK engine auto-advance: tracks the write offset within a reserve_back batch.
+// On real hardware the PACK engine auto-advances its L1 write pointer after each
+// pack_tile.  In emulation, cb_write_ptr is write_idx-based and only advances on
+// push_back.  This counter emulates the hardware auto-advance: reset to 0 on
+// reserve_back, incremented by pack_tile.
+static thread_local uint32_t __emule_pack_offset[32] = {};

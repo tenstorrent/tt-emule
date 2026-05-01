@@ -1,6 +1,8 @@
 #pragma once
 #include "cb_sync_state.hpp"
 #include "circular_buffer.hpp"
+#include "dfb_sync_state.hpp"
+#include "tile_counter.hpp"
 #include "dst_register_file.hpp"
 #include <array>
 #include <memory>
@@ -102,6 +104,9 @@ public:
         return addr;
     }
 
+    // Reset the L1 bump allocator (between program runs).
+    void reset_l1_bump() { l1_bump_ = 0; }
+
     // ---- CB sync state array (for JIT kernel threads) ----
 
     CBSyncState* cb_sync_array() { return cb_sync_states_; }
@@ -130,6 +135,38 @@ public:
         }
     }
 
+    // ---- DFB / Tile Counter infrastructure (Quasar) ----
+
+    void init_tile_counters(uint32_t num_neos) {
+        tile_counters_ = std::make_unique<TileCounterArray>(num_neos);
+    }
+
+    TileCounterArray* tile_counters() { return tile_counters_.get(); }
+
+    DFBSyncState* dfb_sync_array() { return dfb_sync_states_; }
+
+    void init_dfb_sync(uint32_t idx, uint8_t* base, uint32_t entry_size,
+                       uint32_t num_entries, uint32_t capacity) {
+        if (idx >= MAX_DFBS) return;
+        auto& s = dfb_sync_states_[idx];
+        s.base            = base;
+        s.entry_size      = entry_size;
+        s.num_entries     = num_entries;
+        s.capacity        = capacity;
+        s.stride_in_entries = 1;
+    }
+
+    void reset_dfb_sync() {
+        for (auto& s : dfb_sync_states_) {
+            s.base = nullptr;
+            s.entry_size = 0;
+            s.num_entries = 0;
+            s.capacity = 0;
+            s.stride_in_entries = 1;
+        }
+        if (tile_counters_) tile_counters_->reset_all();
+    }
+
 private:
     void mmap_region(size_t size) {
         l1_size_ = size;
@@ -156,6 +193,9 @@ private:
     std::array<std::shared_ptr<CircularBuffer>, MAX_CBS> cbs_;
     DstRegisterFile dst_;
     CBSyncState cb_sync_states_[MAX_CBS] = {};
+    // Quasar DFB state
+    std::unique_ptr<TileCounterArray> tile_counters_;
+    DFBSyncState dfb_sync_states_[MAX_DFBS] = {};
 };
 
 enum class BufferType { DRAM, L1, SYSTEM_MEMORY, L1_SMALL, TRACE };

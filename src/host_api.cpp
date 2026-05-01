@@ -72,6 +72,16 @@ uint32_t CreateKernel(Program& program, KernelFn fn, CoreCoord core,
     return program.add_kernel(KernelType::Compute, std::move(fn), core);
 }
 
+uint32_t CreateKernel(Program& program, KernelFn fn, CoreCoord core,
+                      QuasarDataMovementConfig /*config*/, uint8_t processor_id) {
+    return program.add_kernel(KernelType::QuasarDM, std::move(fn), core, processor_id);
+}
+
+uint32_t CreateKernel(Program& program, KernelFn fn, CoreCoord core,
+                      QuasarComputeConfig /*config*/, uint8_t processor_id) {
+    return program.add_kernel(KernelType::QuasarCompute, std::move(fn), core, processor_id);
+}
+
 void SetRuntimeArgs(Program& program, uint32_t kernel_id, CoreCoord /*core*/,
                     std::vector<uint32_t> args) {
     program.set_runtime_args(kernel_id, std::move(args));
@@ -80,6 +90,10 @@ void SetRuntimeArgs(Program& program, uint32_t kernel_id, CoreCoord /*core*/,
 CBHandle CreateCircularBuffer(Program& program, CoreCoord /*core*/,
                                CircularBufferConfig config) {
     return program.add_cb(config);
+}
+
+DFBHandle CreateDataflowBuffer(Program& program, DataflowBufferConfig config) {
+    return program.add_dfb(config);
 }
 
 std::shared_ptr<Buffer> CreateBuffer(Device& device, size_t size_bytes,

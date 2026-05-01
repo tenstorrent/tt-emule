@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include "jit_hw/experimental/noc.h"
+#include "jit_hw/api/dataflow/dataflow_api.h"
 
 extern "C" uint8_t* __emule_dram_ptr(uint64_t offset);
 extern "C" uint8_t* __emule_local_l1_ptr(uint32_t offset);

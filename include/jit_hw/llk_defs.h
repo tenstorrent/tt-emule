@@ -2,6 +2,7 @@
 // LLK definitions stub for emulated mode
 // Core enums come from api/compute/common.h; this adds LLK-level stubs.
 #include "api/compute/common.h"
+#include "jit_hw/api/compute/nfaces.h"
 #include "internal/firmware_common.h"
 
 // Data copy type constant (used as template parameter)
@@ -43,10 +44,15 @@ struct CbInterface {
 };
 
 // Global operand interface stubs
+// Guarded: dataflow_api.h provides a CB-backed version; if both headers are
+// included, the dataflow version (which reads real CB state) should win.
+#ifndef __EMULE_GET_LOCAL_CB_INTERFACE_DEFINED
+#define __EMULE_GET_LOCAL_CB_INTERFACE_DEFINED
 inline CbInterface& get_local_cb_interface(uint32_t) {
     static CbInterface dummy;
     return dummy;
 }
+#endif
 
 inline uint32_t get_operand_id(uint32_t operand) { return operand; }
 inline uint32_t get_output_id(uint32_t output) { return output; }
@@ -187,18 +193,24 @@ inline void llk_math_eltwise_unary_datacopy(uint32_t dst_idx) {
 
 // ---- Pack helpers ----
 
-// Tilize pack: write DST tile as individual page at pack_offset
+// Tilize pack: PACK row-major DST → nfaces CB at pack_offset
 inline void __llk_pack_tiled(uint32_t tile_idx, uint32_t ocb) {
     uint8_t* buf = __emule_compute::cb_write_ptr_at(ocb, __llk_pack_offset);
     if (__emule_compute::cb_is_32bit_format(ocb)) {
-        uint32_t sz = __emule_compute::cb_page_size(ocb);
-        if (sz > __EMULE_DST_BYTES) sz = __EMULE_DST_BYTES;
-        std::memcpy(buf, __emule_dst[tile_idx], sz);
+        uint32_t n = __emule_compute::cb_page_size(ocb) / sizeof(uint32_t);
+        if (n > __EMULE_TILE_ELEMS) n = __EMULE_TILE_ELEMS;
+        uint32_t* out = reinterpret_cast<uint32_t*>(buf);
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
+            std::memcpy(&out[ni], &__emule_dst[tile_idx][i], sizeof(uint32_t));
+        }
     } else {
         uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
         uint32_t n = __emule_compute::cb_tile_elems(ocb);
-        for (uint32_t i = 0; i < n; i++)
-            bf[i] = __emule_bf16::from_f32(__emule_dst[tile_idx][i]);
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
+            bf[ni] = __emule_bf16::from_f32(__emule_dst[tile_idx][i]);
+        }
     }
 }
 
@@ -259,6 +271,10 @@ inline void compute_kernel_hw_startup(uint32_t, uint32_t) {
     __llk_pack_offset = 0;
     __llk_pack_is_untilize = false;
     __llk_unpack_is_tilize = false;
+    // Reset PACK engine auto-advance offsets and L1 acc flag to prevent
+    // stale state from prior kernel invocations in the same thread.
+    std::memset(__emule_pack_offset, 0, sizeof(__emule_pack_offset));
+    __emule_l1_acc_enabled = false;
 }
 inline void compute_kernel_hw_startup(uint32_t a, uint32_t b, uint32_t) {
     compute_kernel_hw_startup(a, b);
