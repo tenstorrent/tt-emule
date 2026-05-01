@@ -4,6 +4,7 @@
 // but runs on x86 host using bank mapping arrays populated by emulated_program_runner.
 
 #include <cstdint>
+#include "jit_hw/api/compute/common_globals.h"  // DataFormat enum
 
 // Bank mapping arrays — populated by emulated_program_runner.cpp, resolved at dlopen.
 // Declared with C++ linkage (matching firmware declarations in dataflow_api_common.h).
@@ -170,7 +171,7 @@ struct InterleavedAddrGenFast {
     static constexpr bool is_dram = DRAM;
     uint32_t bank_base_address;
     uint32_t page_size;
-    uint32_t data_format;  // DataFormat enum value (unused in emulation)
+    DataFormat data_format;  // unused in emulation; matches upstream tag for kernel-side .data_format = get_dataformat(...) initializers
 
     inline uint64_t get_noc_addr(const uint32_t id, const uint32_t offset = 0, uint8_t noc = 0) const {
         uint32_t bank_offset_index = interleaved_addr_gen::get_bank_offset_index<DRAM>(id);
