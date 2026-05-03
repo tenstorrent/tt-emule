@@ -192,6 +192,7 @@ These operations exist as empty function bodies so device kernels compile. They 
 | Pack untilize | `pack_untilize_init`, `pack_untilize` | `pack_untilize.h` |
 | Eltwise binary SFPU | SFPU-accelerated binary ops | `eltwise_binary_sfpu.h` |
 | Quantization | Quantize/dequantize | `quantization.h` |
+| LLK reduce/matmul init | `state_configure`, `llk_math_matmul_init`, `llk_unpack_AB_matmul_init`, `llk_unpack_reconfig_data_format_srca`, `llk_math_reconfig_data_format_srca`, `llk_unpack_AB_reduce_init`, `llk_math_reduce_init` | `llk/llk_reduce_primitives.h` |
 
 ---
 

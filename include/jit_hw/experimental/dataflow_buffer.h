@@ -11,9 +11,6 @@
 
 namespace experimental {
 
-// Mirrors upstream's accessor type emitted by kernel_bindings_generated.h for
-// Metal 2.0 kernels (`constexpr DFBAccessor my_dfb_name{id};`).  Kept in sync
-// with tt_metal/hw/inc/experimental/dataflow_buffer.h.
 struct DFBAccessor {
     explicit constexpr DFBAccessor(uint16_t id) noexcept : id(id) {}
     uint16_t id;
