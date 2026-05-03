@@ -88,7 +88,7 @@ Tests live in tt-metal's existing gtest binaries — emulation runs them unchang
 
    **Adding a source to an existing binary:** add the `.cpp` to the relevant `target_sources(unit_tests_X PRIVATE ...)` block in the CMakeLists.txt above and rebuild.
 
-   **Adding a brand-new binary from tt-metal:** create an `add_executable(unit_tests_my_thing ...)` in the appropriate `tests/tt_metal/...` CMakeLists.txt, then expose it in `run_regression.sh` by adding a path variable next to the existing `*_BIN` declarations (around line 27) and a `run_test` line in the right tier.
+   **Adding a brand-new binary from tt-metal:** create an `add_executable(unit_tests_my_thing ...)` in the appropriate `tests/tt_metal/...` CMakeLists.txt, then expose it in `run_regression.sh` by adding a path variable next to the existing `*_BIN` declarations and a `run_test` line in the right tier.
 
 2. **Verify it runs in emulation** by invoking the binary directly with the right env vars (pick the cluster YAML that matches your test's target device — `wormhole_N150.yaml`, `quasar_Q1.yaml`, or `blackhole_P100.yaml`):
    ```bash
@@ -109,9 +109,7 @@ Tests live in tt-metal's existing gtest binaries — emulation runs them unchang
 
 ## Expected Regression Results
 
-Baseline against `arminale/emule-metal-base` @ `8711ac3d0b`: **128 passed, 11 failed, 0 skipped**. The 11 failures are 4 DFB STRIDED wraparound (Tier 3b) + 7 DFB Config Validation (Tier 3g) tests, all awaiting follow-up fixes that have not yet landed in upstream `main`.
-
-See `IMPLEMENTATION_REPORT.md` § "Test Results" for the authoritative per-tier breakdown and the failing test names.
+See `IMPLEMENTATION_REPORT.md` § "Test Results" for the authoritative per-tier breakdown, the current pass/fail counts, and the failing test names. The known-failing set is dominated by DFB STRIDED wraparound (Tier 3b) and DFB Config Validation (Tier 3g) tests that depend on upstream fixes.
 
 ## Common Pitfalls
 

@@ -17,7 +17,6 @@ set -euo pipefail
 # a --gtest_filter that isolates the intended test.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TT_METAL_DIR="${TT_METAL_DIR:-/localdev/arminale/tt-metal-main}"
 BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule}"
 TEST_DIR="$BUILD_DIR/test/tt_metal"
 TTNN_TEST_DIR="$BUILD_DIR/test/ttnn"
@@ -406,8 +405,27 @@ run_test_verbose "ttnn_matmul_sweep" "$TTNN_BIN" --gtest_filter="MatmulSweep/Mat
 echo ""
 echo "== Tier 5b: TTNN Reduction =="
 
-run_test "ttnn_sum_last_dim_wh" "$TTNN_BIN" \
+run_test "ttnn_sum_last_dim_unaligned" "$TTNN_BIN" \
+    --gtest_filter="SumTensorLastDimTests/SumTensorLastDimFixture.SumTensorCorrectly/0"
+
+run_test "ttnn_sum_last_dim_aligned" "$TTNN_BIN" \
     --gtest_filter="SumTensorLastDimTests/SumTensorLastDimFixture.SumTensorCorrectly/1"
+
+run_test "ttnn_sum_first_dim_unaligned" "$TTNN_BIN" \
+    --gtest_filter="SumTensorFirstDimTests/SumTensorFirstDimFixture.SumTensorCorrectly/0"
+
+run_test "ttnn_sum_first_dim_aligned" "$TTNN_BIN" \
+    --gtest_filter="SumTensorFirstDimTests/SumTensorFirstDimFixture.SumTensorCorrectly/1"
+
+run_test "ttnn_sum_both_dims_unaligned" "$TTNN_BIN" \
+    --gtest_filter="SumTensorBothDimsTests/SumTensorBothDimsFixture.SumTensorCorrectly/0"
+
+run_test "ttnn_sum_both_dims_aligned" "$TTNN_BIN" \
+    --gtest_filter="SumTensorBothDimsTests/SumTensorBothDimsFixture.SumTensorCorrectly/1"
+
+# MinMaxTensor* tests JIT-compile but currently fail with PCC mismatch
+# (e.g. "-0 != 4 @ 0").  The fill_pad writer + max/min reduce kernels run end
+# to end but produce wrong values.  Tracked separately; not in Tier 5b yet.
 
 # Note: a Quasar variant of this test is not exercised because the upstream
 # W-reduce host factory uses CreateKernel (non-Quasar DataMovementKernel),

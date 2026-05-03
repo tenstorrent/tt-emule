@@ -32,6 +32,21 @@ extern thread_local uint8_t my_y[2];
 #define NOC_ADDR_COORD_SHIFT NOC_ADDR_LOCAL_BITS
 #endif
 
+// NOC coordinate-translation macros consumed by sharded address generators.
+// In emulation we don't model NOC0/NOC1 mirroring so both nocs return the
+// raw (x,y) the kernel passed in; the host-side __emule_resolve_noc_addr
+// decodes the encoded address regardless of which noc was used.
+#ifndef DYNAMIC_NOC_X
+#define DYNAMIC_NOC_X(noc, x) (x)
+#endif
+#ifndef DYNAMIC_NOC_Y
+#define DYNAMIC_NOC_Y(noc, y) (y)
+#endif
+#ifndef NOC_XY_ADDR
+#define NOC_XY_ADDR(x, y, addr) \
+    (((((uint64_t)(y) << 6) | (uint64_t)(x)) << NOC_ADDR_COORD_SHIFT) | (uint64_t)(addr))
+#endif
+
 // Alignment helper (matches firmware api/alignment.h)
 inline constexpr uint32_t align_power_of_2(uint32_t addr, uint32_t alignment) {
     return ((addr - 1) | (alignment - 1)) + 1;
