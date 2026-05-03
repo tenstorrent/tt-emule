@@ -87,6 +87,21 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
         }
     }
 
+    // Real HW leaves DST undefined after tile_regs_acquire and the kernel is
+    // responsible for staging multi-tile accumulation (e.g. via copy_tile from
+    // a cb_acc CB).  emule zeroes DST in tile_regs_acquire (so other ops can
+    // safely += into it), which breaks reduce_tile<MAX> when all input values
+    // are negative — max(0, neg) clamps to 0.  Examples that hit this:
+    // ttnn::min lowers to `min(x) = -max(-x)` via reduce_w_neg.cpp /
+    // reduce_h_neg.cpp; the inner max sees only negative values.
+    //
+    // Fix: on the first reduce_tile call after tile_regs_acquire (slot is
+    // "fresh"), overwrite DST at the result positions with the per-tile
+    // result.  Subsequent calls see the slot dirty and max-accumulate against
+    // the already-written value (or against the running accumulator the
+    // kernel staged via copy_tile).
+    const bool fresh = __emule_dst_take_fresh(idst);
+
     if constexpr (reduce_dim == ReduceDim::REDUCE_COL) {
         // Reduce columns: for each column c, sum/max across all rows → result in row 0
         for (uint32_t c = 0; c < 32; c++) {
@@ -103,12 +118,12 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
                 else
                     acc += val;  // SUM and AVG both sum; scaler handles the 1/N
             }
-            // Accumulate into DST (supports multi-tile reduction)
             float result = acc * scaler;
-            if constexpr (reduce_type == PoolType::MAX)
-                __emule_dst[idst][c] = std::max(__emule_dst[idst][c], result);
-            else
+            if constexpr (reduce_type == PoolType::MAX) {
+                __emule_dst[idst][c] = fresh ? result : std::max(__emule_dst[idst][c], result);
+            } else {
                 __emule_dst[idst][c] += result;
+            }
         }
     } else if constexpr (reduce_dim == ReduceDim::REDUCE_ROW) {
         // Reduce rows: for each row r, sum/max across all cols → result in col 0
@@ -128,10 +143,11 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
             }
             // Result goes in column 0 of each row
             float result = acc * scaler;
-            if constexpr (reduce_type == PoolType::MAX)
-                __emule_dst[idst][r * 32] = std::max(__emule_dst[idst][r * 32], result);
-            else
+            if constexpr (reduce_type == PoolType::MAX) {
+                __emule_dst[idst][r * 32] = fresh ? result : std::max(__emule_dst[idst][r * 32], result);
+            } else {
                 __emule_dst[idst][r * 32] += result;
+            }
         }
     } else {
         // REDUCE_SCALAR: reduce all 1024 elements to a single value
@@ -148,10 +164,11 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
                 acc += src[i];
         }
         float result = acc * scaler;
-        if constexpr (reduce_type == PoolType::MAX)
-            __emule_dst[idst][0] = std::max(__emule_dst[idst][0], result);
-        else
+        if constexpr (reduce_type == PoolType::MAX) {
+            __emule_dst[idst][0] = fresh ? result : std::max(__emule_dst[idst][0], result);
+        } else {
             __emule_dst[idst][0] += result;
+        }
     }
 }
 

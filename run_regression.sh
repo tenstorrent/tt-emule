@@ -423,9 +423,14 @@ run_test "ttnn_sum_both_dims_unaligned" "$TTNN_BIN" \
 run_test "ttnn_sum_both_dims_aligned" "$TTNN_BIN" \
     --gtest_filter="SumTensorBothDimsTests/SumTensorBothDimsFixture.SumTensorCorrectly/1"
 
-# MinMaxTensor* tests JIT-compile but currently fail with PCC mismatch
-# (e.g. "-0 != 4 @ 0").  The fill_pad writer + max/min reduce kernels run end
-# to end but produce wrong values.  Tracked separately; not in Tier 5b yet.
+run_test "ttnn_minmax_last_dim" "$TTNN_BIN" \
+    --gtest_filter="MinMaxTensorLastDimTests/MinMaxTensorLastDimFixture.MinMaxTensorCorrectly/*"
+
+run_test "ttnn_minmax_first_dim" "$TTNN_BIN" \
+    --gtest_filter="MinMaxTensorFirstDimTests/MinMaxTensorFirstDimFixture.MinMaxTensorCorrectly/*"
+
+run_test "ttnn_minmax_both_dims" "$TTNN_BIN" \
+    --gtest_filter="MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/*"
 
 # Note: a Quasar variant of this test is not exercised because the upstream
 # W-reduce host factory uses CreateKernel (non-Quasar DataMovementKernel),
