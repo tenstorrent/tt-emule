@@ -173,7 +173,7 @@ bf[rowmajor_to_nfaces[i]] = __emule_bf16::from_f32(__emule_dst[dst_slot][i]);
 | Multiply | `mul_tiles(icb0, icb1, it0, it1, idst)` | `common.h` | Element-wise mul with UNPACK |
 | Matmul | `matmul_tiles(in0, in1, it0, it1, idst)` | `matmul.h` | 32×32 tile GEMM, accumulates into DST |
 | Block matmul | `matmul_block(...)` | `matmul.h` | Block of rt_dim × ct_dim output tiles |
-| Reduce | `reduce_tile(icb, icb_scaler, ...)` | `reduce.h` | Row/col/scalar reduce with SUM/MAX |
+| Reduce | `reduce_tile(icb, icb_scaler, ...)` | `reduce.h` | Row/col/scalar reduce with SUM/MAX. MAX uses a per-DST-slot fresh flag (set by `tile_regs_acquire`, cleared by writers) to overwrite on first call rather than max-accumulate against the zero-init, so `min(x) = -max(-x)` works correctly when all values are negative. |
 | L1 acc toggle | `llk_pack_reconfig_l1_acc(enable)` | `common.h` | Enable/disable PACK L1 accumulation |
 
 The matmul implementation uses AVX2/FMA intrinsics when available (`-mavx2 -mfma`) for ~4-8x speedup over the scalar fallback.
@@ -192,6 +192,7 @@ These operations exist as empty function bodies so device kernels compile. They 
 | Pack untilize | `pack_untilize_init`, `pack_untilize` | `pack_untilize.h` |
 | Eltwise binary SFPU | SFPU-accelerated binary ops | `eltwise_binary_sfpu.h` |
 | Quantization | Quantize/dequantize | `quantization.h` |
+| LLK reduce/matmul init | `state_configure`, `llk_math_matmul_init`, `llk_unpack_AB_matmul_init`, `llk_unpack_reconfig_data_format_srca`, `llk_math_reconfig_data_format_srca`, `llk_unpack_AB_reduce_init`, `llk_math_reduce_init` | `llk/llk_reduce_primitives.h` |
 
 ---
 
@@ -250,18 +251,19 @@ Every feature listed here is verified by at least one passing test.
 | PACK rowmajor→nfaces + auto-advance | `pack_dst_to_buf()` + `__emule_pack_offset` | `test_matmul_X_tile.cpp:TensixMatmulBlock, TensixMatmulBlockInitShort` |
 | Matmul (tile GEMM, AVX2) | `matmul_tiles()` / `matmul_block()` | `test_matmul_X_tile.cpp:TensixMatmulBlock, TensixMatmulBlockInitShort` |
 | Element-wise add/sub/mul | `add_tiles()`, `sub_tiles()`, `mul_tiles()` | D2M `test_add_int` (add path) |
-| Reduce (row/col/scalar, sum/max) | `reduce_tile()` | D2M regression (reduce ops) |
+| Reduce (row/col/scalar, sum/max/min via -max(-x)) | `reduce_tile()` with per-DST fresh flag for first-call MAX overwrite | Tier 5b: all 16 `Sum*` + `MinMax*` cases in `test_reduction.cpp`; D2M regression (reduce ops) |
+| Metal 2.0 named-args | `experimental/kernel_args.h` (RtaArg, CrtaArg, CtaVal); emulator runner emits `kernel_bindings_generated.h` / `kernel_args_generated.h` per kernel | Tier 5b W-reduce on bbradel-tip via `SumTensorLastDimFixture.SumTensorCorrectly/1` |
 | L1 accumulation | `llk_pack_reconfig_l1_acc()` | `test_matmul_X_tile.cpp` (matmul accumulates partials) |
 | RISC-V fence patch | `__sync_synchronize()` | All JIT tests (compilation succeeds) |
 | `GenericMeshDeviceFixture` | Allows slow dispatch in emulated mode | All JIT-path tests |
 
-**Regression total against `arminale/emule-metal-base` @ `c812fbb1cc`:** 126 passing, 11 failing, 0 skipped.
+**Regression total against `arminale/emule-metal-20`:** 135 passing, 11 failing, 0 skipped. Tier 5b covers all 16 cases in `tests/ttnn/unit_tests/gtests/test_reduction.cpp` (6 `Sum*` and 10 `MinMax*`, both aligned and unaligned shapes).
 
 The 11 failures are all in DFB tests that depend on follow-up fixes not yet merged to upstream `main`:
 - **Tier 3b STRIDED wraparound (4):** `DMTest1xDFB4Sx4S`, `DMTest1xDFB4Sx4S_IS`, `DMTest1xDFB2Sx4S`, `DMTest1xDFB2Sx4S_IS`
 - **Tier 3g DFB Config Validation (7):** `DMTest1xDFB1Sx4SConfig`, `DMTensixTest1xDFB4Sx1SConfig`, `DMTest1xDFB4Sx1SConfig`, `DMTest1xDFB4Sx4SConfig`, `DMTest1xDFB2Sx4SConfig`, `DMTest1xDFB4Sx2SConfig`, `DMTest1xDFB1Sx1BConfig`
 
-See `IMPLEMENTATION_REPORT.md` § "Changes from v9 to v10" for context — these failures will resolve once the wraparound + DFB-config fixes upstream and the base pointer is bumped.
+See `IMPLEMENTATION_REPORT.md` § "Changes from v11 to v12" for context — these failures will resolve once the wraparound + DFB-config fixes upstream and the base pointer is bumped.
 
 ---
 

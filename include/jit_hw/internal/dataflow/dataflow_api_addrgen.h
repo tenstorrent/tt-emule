@@ -4,6 +4,7 @@
 // but runs on x86 host using bank mapping arrays populated by emulated_program_runner.
 
 #include <cstdint>
+#include "jit_hw/api/compute/common_globals.h"  // DataFormat enum
 
 // Bank mapping arrays — populated by emulated_program_runner.cpp, resolved at dlopen.
 // Declared with C++ linkage (matching firmware declarations in dataflow_api_common.h).
@@ -29,6 +30,21 @@ extern thread_local uint8_t my_y[2];
 // We use 36 (Blackhole-style) with noc_xy = (y << 6) | x.
 #ifndef NOC_ADDR_COORD_SHIFT
 #define NOC_ADDR_COORD_SHIFT NOC_ADDR_LOCAL_BITS
+#endif
+
+// NOC coordinate-translation macros consumed by sharded address generators.
+// In emulation we don't model NOC0/NOC1 mirroring so both nocs return the
+// raw (x,y) the kernel passed in; the host-side __emule_resolve_noc_addr
+// decodes the encoded address regardless of which noc was used.
+#ifndef DYNAMIC_NOC_X
+#define DYNAMIC_NOC_X(noc, x) (x)
+#endif
+#ifndef DYNAMIC_NOC_Y
+#define DYNAMIC_NOC_Y(noc, y) (y)
+#endif
+#ifndef NOC_XY_ADDR
+#define NOC_XY_ADDR(x, y, addr) \
+    (((((uint64_t)(y) << 6) | (uint64_t)(x)) << NOC_ADDR_COORD_SHIFT) | (uint64_t)(addr))
 #endif
 
 // Alignment helper (matches firmware api/alignment.h)
@@ -170,7 +186,7 @@ struct InterleavedAddrGenFast {
     static constexpr bool is_dram = DRAM;
     uint32_t bank_base_address;
     uint32_t page_size;
-    uint32_t data_format;  // DataFormat enum value (unused in emulation)
+    DataFormat data_format;  // unused in emulation; matches upstream tag for kernel-side .data_format = get_dataformat(...) initializers
 
     inline uint64_t get_noc_addr(const uint32_t id, const uint32_t offset = 0, uint8_t noc = 0) const {
         uint32_t bank_offset_index = interleaved_addr_gen::get_bank_offset_index<DRAM>(id);

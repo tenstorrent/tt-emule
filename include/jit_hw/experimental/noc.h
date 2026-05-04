@@ -9,6 +9,14 @@
 
 extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src, uint32_t size);
 
+// Wormhole N150 default; Quasar/Blackhole compute the same value via
+// NOC_MAX_BURST_WORDS * NOC_WORD_BYTES.  Used to select between the
+// stateful fits-in-one-packet branch and the multi-packet fallback in
+// async_read_with_state, mirroring upstream tt_metal/hw/inc/experimental/noc.h.
+#ifndef NOC_MAX_BURST_SIZE
+#define NOC_MAX_BURST_SIZE 8192
+#endif
+
 namespace experimental {
 
 class DataflowBuffer;
@@ -30,6 +38,8 @@ public:
     // Matches upstream tt-metal: TxnIdMode::ENABLED selects the DFB implicit-sync
     // overloads that internally manage reserve_back/wait_front and omit size_bytes.
     enum class TxnIdMode { ENABLED, DISABLED };
+    // VC selection ignored in emulation; only present so template args resolve.
+    enum class VcSelection { DEFAULT, CUSTOM };
 
     Noc() : noc_id_(0) {}
     explicit Noc(uint8_t noc_id) : noc_id_(noc_id) {}
@@ -113,8 +123,48 @@ public:
     void async_atomic_barrier() const {}
     void async_full_barrier() const {}
 
+    // Stages NOC read state for a subsequent async_read_with_state call.
+    // Mirrors upstream contract: stash size; src is recomputed on each
+    // async_read_with_state call from its `src` argument.
+    template <VcSelection vc_selection = VcSelection::DEFAULT,
+              uint32_t max_page_size = NOC_MAX_BURST_SIZE + 1,
+              typename Src>
+    void set_async_read_state(
+        const Src& /*src*/,
+        uint32_t size_bytes,
+        const typename noc_traits_t<Src>::src_args_type& /*src_args*/,
+        uint8_t /*vc*/ = 0) const {
+        cached_size_ = size_bytes;
+    }
+
+    // Upstream contract: when max_page_size <= NOC_MAX_BURST_SIZE the
+    // transfer fits in one packet and the size is taken from the cached
+    // state; otherwise the size_bytes argument is used.  In both cases the
+    // src is always recomputed from the `src` argument.
+    template <VcSelection vc_selection = VcSelection::DEFAULT,
+              uint32_t max_page_size = NOC_MAX_BURST_SIZE + 1,
+              typename Src,
+              typename Dst>
+    void async_read_with_state(
+        const Src& src,
+        const Dst& dst,
+        uint32_t size_bytes,
+        const typename noc_traits_t<Src>::src_args_type& src_args,
+        const typename noc_traits_t<Dst>::dst_args_type& dst_args,
+        uint8_t /*vc*/ = 0) const {
+        constexpr bool fits_in_one_packet = max_page_size <= NOC_MAX_BURST_SIZE;
+        const uint32_t bytes = fits_in_one_packet ? cached_size_ : size_bytes;
+        const uintptr_t s = noc_traits_t<Src>::template src_addr<AddressType::NOC>(src, *this, src_args);
+        const uintptr_t d = noc_traits_t<Dst>::template dst_addr<AddressType::LOCAL_L1>(dst, *this, dst_args);
+        if (s && d && bytes) {
+            std::memcpy(reinterpret_cast<uint8_t*>(d), reinterpret_cast<uint8_t*>(s), bytes);
+        }
+    }
+
 private:
     uint8_t noc_id_;
+    // Mutable so the const-qualified state APIs above can write the cache.
+    mutable uint32_t cached_size_ = 0;
 };
 
 }  // namespace experimental

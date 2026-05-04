@@ -5,6 +5,7 @@
 
 #include "jit_hw/api/compute/common.h"
 #include "jit_hw/api/compute/nfaces.h"
+#include "jit_hw/llk/llk_reduce_primitives.h"
 
 #if defined(__AVX2__) && defined(__FMA__)
 #include <immintrin.h>
@@ -29,6 +30,7 @@ ALWI void mm_init_short_with_dt(uint32_t in0_cb, uint32_t in1_cb,
 ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
                        uint32_t in0_tile, uint32_t in1_tile, uint32_t idst) {
     __emule_dst_check(idst, "matmul_tiles");
+    __emule_dst_mark_dirty(idst);
     // Standard 32x32 × 32x32 matrix multiply, accumulating into DST[idst].
     // Layout: row-major, 32 rows × 32 cols = 1024 elements per tile.
     constexpr uint32_t DIM = 32;

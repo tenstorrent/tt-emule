@@ -17,7 +17,6 @@ set -euo pipefail
 # a --gtest_filter that isolates the intended test.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TT_METAL_DIR="${TT_METAL_DIR:-/localdev/arminale/tt-metal-main}"
 BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule}"
 TEST_DIR="$BUILD_DIR/test/tt_metal"
 TTNN_TEST_DIR="$BUILD_DIR/test/ttnn"
@@ -401,6 +400,44 @@ echo "== Tier 5: TTNN Matmul Sweep =="
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
 
 run_test_verbose "ttnn_matmul_sweep" "$TTNN_BIN" --gtest_filter="MatmulSweep/MatmulSweepFixture.*"
+
+# Tier 5b: TTNN Reduction (wormhole) — sum on last dim, tile-aligned 3200×64 BF16
+echo ""
+echo "== Tier 5b: TTNN Reduction =="
+
+run_test "ttnn_sum_last_dim_unaligned" "$TTNN_BIN" \
+    --gtest_filter="SumTensorLastDimTests/SumTensorLastDimFixture.SumTensorCorrectly/0"
+
+run_test "ttnn_sum_last_dim_aligned" "$TTNN_BIN" \
+    --gtest_filter="SumTensorLastDimTests/SumTensorLastDimFixture.SumTensorCorrectly/1"
+
+run_test "ttnn_sum_first_dim_unaligned" "$TTNN_BIN" \
+    --gtest_filter="SumTensorFirstDimTests/SumTensorFirstDimFixture.SumTensorCorrectly/0"
+
+run_test "ttnn_sum_first_dim_aligned" "$TTNN_BIN" \
+    --gtest_filter="SumTensorFirstDimTests/SumTensorFirstDimFixture.SumTensorCorrectly/1"
+
+run_test "ttnn_sum_both_dims_unaligned" "$TTNN_BIN" \
+    --gtest_filter="SumTensorBothDimsTests/SumTensorBothDimsFixture.SumTensorCorrectly/0"
+
+run_test "ttnn_sum_both_dims_aligned" "$TTNN_BIN" \
+    --gtest_filter="SumTensorBothDimsTests/SumTensorBothDimsFixture.SumTensorCorrectly/1"
+
+run_test "ttnn_minmax_last_dim" "$TTNN_BIN" \
+    --gtest_filter="MinMaxTensorLastDimTests/MinMaxTensorLastDimFixture.MinMaxTensorCorrectly/*"
+
+run_test "ttnn_minmax_first_dim" "$TTNN_BIN" \
+    --gtest_filter="MinMaxTensorFirstDimTests/MinMaxTensorFirstDimFixture.MinMaxTensorCorrectly/*"
+
+run_test "ttnn_minmax_both_dims" "$TTNN_BIN" \
+    --gtest_filter="MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/*"
+
+# Note: a Quasar variant of this test is not exercised because the upstream
+# W-reduce host factory uses CreateKernel (non-Quasar DataMovementKernel),
+# which Metal rejects on Quasar with "DataMovementKernel is not supported on
+# Quasar. Use QuasarDataMovementKernel instead."  This is an upstream factory
+# limitation, not an emulator stub gap; revisit when the W-reduce factory
+# gains a Quasar code path.
 
 # Tier 6: Silicon toggle proof (requires real hardware)
 echo ""

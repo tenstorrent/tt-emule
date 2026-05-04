@@ -12,3 +12,20 @@ extern thread_local uint8_t* __emule_bridge_l1;
 // Quasar core counts used by compute/DM kernels.
 constexpr uint32_t NUM_TRISC_CORES = 4;
 constexpr uint32_t NUM_DM_CORES = 8;
+
+// L1 zeros block. Reads from MEM_ZEROS_BASE return MEM_ZEROS_SIZE bytes of
+// zero. Placed at the top of the 1 MiB L1 region (Core::L1_SIZE in
+// tt_emule/device.hpp) so it sits above the bump allocator's high-water mark
+// and never collides with kernel allocations. Core::reset_l1_bump() rezeros
+// the region between program runs; Core::l1_alloc() refuses allocations that
+// would cross MEM_ZEROS_BASE.
+//
+// constexpr (not #define) so we don't accidentally shadow the upstream
+// dev_mem_map.h declarations if jit_hw is ever linked into a target that also
+// pulls in the real headers.
+#ifndef MEM_ZEROS_SIZE
+constexpr uint32_t MEM_ZEROS_SIZE = 512;
+#endif
+#ifndef MEM_ZEROS_BASE
+constexpr uint32_t MEM_ZEROS_BASE = 0xFFE00;  // 1 MiB - 512 bytes
+#endif

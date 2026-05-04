@@ -8,15 +8,22 @@ enum class DataFormat : uint8_t {
     Float16   = 1,
     Bfp8      = 2,
     Bfp4      = 3,
+    Tf32      = 4,
     Float16_b = 5,
     Bfp8_b    = 6,
     Bfp4_b    = 7,
     Int32     = 8,
     UInt16    = 9,
     Lf8       = 10,
+    Bfp2      = 11,
     Int8      = 14,
+    Bfp2_b    = 15,
     UInt32    = 24,
     UInt8     = 30,
+    Fp8_e4m3  = 0x1A,
+    RawUInt8  = 0xF0,
+    RawUInt16 = 0xF1,
+    RawUInt32 = 0xF2,
     Invalid   = 0xff
 };
 
@@ -26,3 +33,34 @@ enum class DataFormat : uint8_t {
 // push_back.  This counter emulates the hardware auto-advance: reset to 0 on
 // reserve_back, incremented by pack_tile.
 static thread_local uint32_t __emule_pack_offset[32] = {};
+
+// Per-DST-slot "fresh since acquire" flag.  Set true by tile_regs_acquire,
+// cleared by any op that writes meaningful values into the slot (copy_tile,
+// add/sub/mul_tiles, matmul_tiles, etc.).  reduce_tile<MAX>/<MIN> uses it to
+// distinguish "first call after acquire" from "accumulating into a slot the
+// kernel pre-loaded via copy_tile".
+//
+// Why: emule's tile_regs_acquire zeroes DST (real HW leaves it undefined), so
+// for negative-valued reductions like `min(x) = -max(-x)`, the first
+// max-accumulation call would clamp to 0 instead of producing the negative
+// per-tile max.  When fresh, the reduce op overwrites DST instead of
+// max-accumulating; subsequent calls within the same acquire cycle (or after
+// a copy_tile load of a running accumulator) see fresh=false and use the
+// existing accumulator semantics.
+static thread_local bool __emule_dst_fresh[16] = {true, true, true, true, true, true, true, true,
+                                                  true, true, true, true, true, true, true, true};
+
+inline void __emule_dst_mark_dirty(uint32_t slot) {
+    if (slot < 16) {
+        __emule_dst_fresh[slot] = false;
+    }
+}
+
+inline bool __emule_dst_take_fresh(uint32_t slot) {
+    if (slot >= 16) {
+        return false;
+    }
+    bool was_fresh = __emule_dst_fresh[slot];
+    __emule_dst_fresh[slot] = false;
+    return was_fresh;
+}

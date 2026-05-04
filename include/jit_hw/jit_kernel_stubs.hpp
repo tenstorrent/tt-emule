@@ -127,43 +127,19 @@ inline T get_common_arg_val(int arg_idx) {
     return val;
 }
 
-// CBIndex — matches tt::CBIndex from tt-metal.
-namespace tt {
-struct CBIndex {
-    static constexpr uint32_t c_0  = 0;
-    static constexpr uint32_t c_1  = 1;
-    static constexpr uint32_t c_2  = 2;
-    static constexpr uint32_t c_3  = 3;
-    static constexpr uint32_t c_4  = 4;
-    static constexpr uint32_t c_5  = 5;
-    static constexpr uint32_t c_6  = 6;
-    static constexpr uint32_t c_7  = 7;
-    static constexpr uint32_t c_8  = 8;
-    static constexpr uint32_t c_9  = 9;
-    static constexpr uint32_t c_10 = 10;
-    static constexpr uint32_t c_11 = 11;
-    static constexpr uint32_t c_12 = 12;
-    static constexpr uint32_t c_13 = 13;
-    static constexpr uint32_t c_14 = 14;
-    static constexpr uint32_t c_15 = 15;
-    static constexpr uint32_t c_16 = 16;
-    static constexpr uint32_t c_17 = 17;
-    static constexpr uint32_t c_18 = 18;
-    static constexpr uint32_t c_19 = 19;
-    static constexpr uint32_t c_20 = 20;
-    static constexpr uint32_t c_21 = 21;
-    static constexpr uint32_t c_22 = 22;
-    static constexpr uint32_t c_23 = 23;
-    static constexpr uint32_t c_24 = 24;
-    static constexpr uint32_t c_25 = 25;
-    static constexpr uint32_t c_26 = 26;
-    static constexpr uint32_t c_27 = 27;
-    static constexpr uint32_t c_28 = 28;
-    static constexpr uint32_t c_29 = 29;
-    static constexpr uint32_t c_30 = 30;
-    static constexpr uint32_t c_31 = 31;
-};
-} // namespace tt
+// Upstream tt::CBIndex (enum). Kernels that also include the upstream chain
+// would otherwise hit a struct-vs-enum tag mismatch against an emule struct.
+#include "hostdevcommon/kernel_structs.h"
+
+// Routes ttnn/cpp/ttnn/kernel_lib/dest_helpers.hpp through its DM-kernel
+// fallback path. Emule executes UNPACK/MATH/PACK serially in one thread, so
+// half-sync optimization is moot.
+#ifndef ENABLE_FP32_DEST_ACC
+#  define ENABLE_FP32_DEST_ACC 0
+#endif
+#ifndef DST_SYNC_FULL
+#  define DST_SYNC_FULL 1
+#endif
 
 // No-op assertion macro — kernel asserts reference hardware state not available in emulation.
 #define ASSERT(...) ((void)0)

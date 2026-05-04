@@ -103,10 +103,14 @@ inline void __emule_dst_store_i32(uint32_t slot, uint32_t idx, int32_t v) {
 // ---- DST state machine (no-ops in single-thread-per-compute emulation) ----
 
 ALWI void tile_regs_acquire() {
-    // Zero DST on acquire (matches device behavior: acquire gives clean regs)
+    // Zero DST on acquire (matches device behavior: acquire gives clean regs).
+    // Mark all slots fresh so reduce_tile<MAX>/<MIN> knows to overwrite on
+    // first use rather than max-accumulate against the zero-init.
     uint32_t active = __emule_dst_active_tiles();
-    for (uint32_t s = 0; s < active; s++)
+    for (uint32_t s = 0; s < active; s++) {
         std::memset(__emule_dst[s], 0, sizeof(__emule_dst[s]));
+        __emule_dst_fresh[s] = true;
+    }
 }
 ALWI void tile_regs_commit()  {}
 ALWI void tile_regs_wait()    {}
@@ -212,6 +216,7 @@ ALWI void binary_tiles_init(uint32_t, uint32_t, bool = false) {}
 ALWI void add_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
     __emule_dst_check(idst, "add_tiles");
+    __emule_dst_mark_dirty(idst);
     if (__emule_compute::cb_is_32bit_format(icb0)) {
         const float* buf0 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
         const float* buf1 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
@@ -235,6 +240,7 @@ ALWI void add_tiles(uint32_t icb0, uint32_t icb1,
 ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
     __emule_dst_check(idst, "sub_tiles");
+    __emule_dst_mark_dirty(idst);
     if (__emule_compute::cb_is_32bit_format(icb0)) {
         const float* buf0 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
         const float* buf1 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
@@ -258,6 +264,7 @@ ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
 ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
     __emule_dst_check(idst, "mul_tiles");
+    __emule_dst_mark_dirty(idst);
     if (__emule_compute::cb_is_32bit_format(icb0)) {
         const float* buf0 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
         const float* buf1 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
@@ -312,6 +319,7 @@ ALWI void pack_tile_block(uint32_t ifrom_dst, uint32_t ocb, uint32_t ntiles) {
 // Format-aware: bf16 (page_size ≤ 2048) or raw 32-bit (page_size > 2048).
 ALWI void copy_tile(uint32_t icb, uint32_t itile, uint32_t idst) {
     __emule_dst_check(idst, "copy_tile");
+    __emule_dst_mark_dirty(idst);
     uint8_t* buf = __emule_compute::cb_read_ptr_at(icb, itile);
     if (__emule_compute::cb_is_32bit_format(icb)) {
         // 32-bit format: UNPACK nfaces→row-major.
@@ -355,8 +363,11 @@ ALWI void copy_tile_init(uint32_t = 0) {}
 ALWI void copy_tile_to_dst_init_short_with_dt(uint32_t, uint32_t, uint32_t = 0) {}
 
 // ---- Reconfig operations (no-ops) ----
+ALWI void reconfig_data_format(uint32_t) {}
 ALWI void reconfig_data_format(uint32_t, uint32_t) {}
+ALWI void reconfig_data_format_srca(uint32_t) {}
 ALWI void reconfig_data_format_srca(uint32_t, uint32_t) {}
+ALWI void reconfig_data_format_srcb(uint32_t) {}
 ALWI void reconfig_data_format_srcb(uint32_t, uint32_t) {}
 ALWI void pack_reconfig_data_format(uint32_t) {}
 ALWI void pack_reconfig_data_format(uint32_t, uint32_t) {}

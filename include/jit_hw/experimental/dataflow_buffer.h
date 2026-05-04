@@ -11,9 +11,15 @@
 
 namespace experimental {
 
+struct DFBAccessor {
+    explicit constexpr DFBAccessor(uint16_t id) noexcept : id(id) {}
+    uint16_t id;
+};
+
 class DataflowBuffer {
 public:
     DataflowBuffer(uint16_t logical_dfb_id) : logical_dfb_id_(logical_dfb_id) {}
+    DataflowBuffer(DFBAccessor accessor) : logical_dfb_id_(accessor.id) {}
 
     uint16_t get_id() const { return logical_dfb_id_; }
 

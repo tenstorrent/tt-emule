@@ -5,6 +5,7 @@
 #include "tile_counter.hpp"
 #include "dst_register_file.hpp"
 #include <array>
+#include <cstring>
 #include <memory>
 #include <vector>
 #include <cstdint>
@@ -95,17 +96,32 @@ public:
     // 32-bit absolute address of the L1 base (valid if mmap succeeded below 4 GB).
     uint32_t l1_base_addr() const { return l1_base_; }
 
+    // Top of L1 reserved for the MEM_ZEROS region consumed by JIT kernels via
+    // include/jit_hw/dev_mem_map.h::MEM_ZEROS_BASE.  Mirror that 512 here
+    // because including jit_hw headers from this host runtime header would be
+    // the wrong include direction.
+    static constexpr size_t L1_RESERVED_TOP = 512;
+
     // Bump allocate `bytes` from L1; returns absolute host address.
+    // Refuses allocations that would cross into the reserved zeros region at
+    // the top of L1.
     uint32_t l1_alloc(size_t bytes) {
-        if (l1_bump_ + bytes > l1_size_)
+        if (l1_bump_ + bytes > l1_size_ - L1_RESERVED_TOP)
             throw std::runtime_error("L1 OOM");
         uint32_t addr = l1_base_ + static_cast<uint32_t>(l1_bump_);
         l1_bump_ += bytes;
         return addr;
     }
 
-    // Reset the L1 bump allocator (between program runs).
-    void reset_l1_bump() { l1_bump_ = 0; }
+    // Reset the L1 bump allocator (between program runs) and rezero the
+    // reserved zeros region so a kernel that touched it in the previous run
+    // (e.g. via __emule_resolve_noc_addr -> l1_) doesn't leave stale data.
+    void reset_l1_bump() {
+        l1_bump_ = 0;
+        if (l1_ && l1_size_ >= L1_RESERVED_TOP) {
+            std::memset(l1_ + (l1_size_ - L1_RESERVED_TOP), 0, L1_RESERVED_TOP);
+        }
+    }
 
     // ---- CB sync state array (for JIT kernel threads) ----
 

@@ -20,5 +20,17 @@ inline DPrintSink make_dprint() { return DPrintSink{}; }
 #define DPRINT tt_emule_jit::make_dprint()
 #define ENDL() '\n'
 
+// Stream manipulators referenced by upstream kernel debug prints.  All discarded
+// by the sink, but they need to be valid expressions for the DPRINT chain to
+// parse.  Match upstream tt_metal/hw/inc/api/debug/dprint.h shape.
+struct HEX {};
+struct DEC {};
+struct OCT {};
+struct BIN {};
+struct FIXED {};
+struct DEFAULTFLOAT {};
+struct SETW { int v; constexpr SETW(int v_) : v(v_) {} };
+struct SETPRECISION { int v; constexpr SETPRECISION(int v_) : v(v_) {} };
+
 // Support for DEVICE_PRINT.
 #include "device_print.h"
