@@ -181,9 +181,9 @@ This runs 5 tiers of tests:
 4. **Tier 4 (TTNN Relational):** ttnn_relational
 5. **Tier 5 (TTNN Matmul):** ttnn_matmul_sweep
 
-**Expected result:** 127 passed, 11 failed, 0 skipped (against tt-metal `arminale/emule-metal-base` @ `8711ac3d0b`, baseline 2026-05-01). The 11 failures are 4 DFB STRIDED wraparound (Tier 3b) + 7 DFB Config Validation (Tier 3g) tests; see `IMPLEMENTATION_REPORT.md` § "Changes from v9 to v10" for the list and the upstream-merge follow-up they depend on.
+**Expected result:** 135 passed, 11 failed, 0 skipped (against tt-metal `arminale/emule-metal-20`, the `arminale/emule-metal-base` pointer plus the cherry-picked Metal 2.0 emule-JIT genfiles commit). The 11 failures are 4 DFB STRIDED wraparound (Tier 3b) + 7 DFB Config Validation (Tier 3g) tests; see `IMPLEMENTATION_REPORT.md` § "Changes from v11 to v12" for the list and the upstream-merge follow-up they depend on.
 
-(Without the Phase B reduce-test stubs added on `armin/quasar-reduction`, the Tier 5b sum-reduction test fails at JIT compile time, giving a baseline of 126/12/0. With the stubs landed, the Wormhole variant passes, restoring 127/11/0. A Quasar variant was attempted but blocked upstream — the W-reduce factory uses non-Quasar `DataMovementKernel`.)
+Tier 5b covers all 16 cases in `tests/ttnn/unit_tests/gtests/test_reduction.cpp` (6 `Sum*` aligned/unaligned + 10 `MinMax*` cases). A Quasar variant of the sum-reduction was attempted but blocked upstream — the W-reduce factory uses non-Quasar `DataMovementKernel`.
 
 ---
 

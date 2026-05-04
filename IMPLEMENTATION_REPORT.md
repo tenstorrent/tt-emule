@@ -241,7 +241,7 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 
 **Standalone tests** (5/5 pass): dfb_passthrough, dfb_multi_consumer, eltwise_add, matmul, tilize
 
-**tt-metal emulated regression** (127 passing, 11 failing, 0 skipped, against tt-metal `arminale/emule-metal-base` @ `8711ac3d0b`):
+**tt-metal emulated regression** (135 passing, 11 failing, 0 skipped, against tt-metal `arminale/emule-metal-20` — `arminale/emule-metal-base @ 8711ac3d0ba` plus the cherry-picked Metal 2.0 emule-JIT genfiles commit):
 
 | Tier | Tests | Pass | Fail | Description | Cluster |
 |------|-------|------|------|-------------|---------|
@@ -262,9 +262,9 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 | 3l | DM Direct Write + DRAM | 7 | 0 | 3 direct write (unicast, stateful, multicast) + 4 DRAM unary (packet sizes, core locations, channels, directed) | WH N150 |
 | 4 | TTNN INT32 | 4 | 0 | ttnn_relational_int (66 sub-cases), ttnn_add_int + variants | BH P100 |
 | 5 | TTNN Matmul Sweep | 1 | 0 | 14 sub-cases: multi-core matmul 32² through 2048² | WH N150 |
-| 5b | TTNN Reduction (WH) | 1 | 0 | `ttnn_sum_last_dim_wh` — sum on last dim, BF16 3200×64 → 3200×1 | WH N150 |
+| 5b | TTNN Reduction (WH) | 9 | 0 | All 16 cases in `tests/ttnn/unit_tests/gtests/test_reduction.cpp`: 6 `Sum*` (Last/First/Both × aligned/unaligned) + 10 `MinMax*` (Last/First/Both × 4/4/2 params) — BF16 reductions on `ttnn::sum`, `ttnn::max`, `ttnn::min` | WH N150 |
 | 6 | Silicon Toggle | 1 | 0 | ttnn_add_int — env vars unset, runs in emulation (toggle proof) | WH N150 |
-| **Total** | | **127** | **11** | | |
+| **Total** | | **135** | **11** | | |
 
 (A Quasar variant of the sum-last-dim test is not run: the upstream W-reduce host factory uses `CreateKernel`, which tt-metal rejects on Quasar with "DataMovementKernel is not supported on Quasar. Use QuasarDataMovementKernel instead." — an upstream factory limitation, not an emulator stub gap.)
 
@@ -789,6 +789,20 @@ Rebasing onto new tt-metal versions primarily requires:
 
 **Key insight:** the merge-base reduce kernels at `8711ac3d0b` reference a layered helper library (`ttnn/cpp/ttnn/kernel_lib/`) that wraps NOC state-cache primitives. The static stub-coverage check missed these because they live behind transitive `#include`s. With the stubs added, the same kernels compile under the emulator JIT and the (already-functional) `reduce_tile<SUM, REDUCE_ROW>` math produces correct PCC. The 11 DFB failures are unchanged; they need upstream fixes to reach `main`.
 
+### Changes from v11 to v12
+
+| Aspect | v11 | v12 |
+|--------|-----|-----|
+| tt-metal base | `arminale/emule-metal-base` @ `8711ac3d0ba` | `arminale/emule-metal-20` (`emule-metal-base` + cherry-picked Metal 2.0 emule-JIT genfiles commit `5c6ffaca751`) |
+| Regression baseline | 127 / 11 / 0 | **135 / 11 / 0** (+8 from new Tier 5b reduction entries; same 11 DFB failures) |
+| `test_reduction.cpp` coverage | 1 / 16 (W-aligned sum only) | **16 / 16** — all 6 `Sum*` (Last/First/Both × aligned/unaligned) and all 10 `MinMax*` (Last/First/Both × 4/4/2 params) |
+| Metal 2.0 named-args | not supported in emule JIT | `experimental/kernel_args.h` ported; emulator runner emits `kernel_bindings_generated.h` / `kernel_args_generated.h` per kernel via tt-metal's `genfiles.cpp` and adds `-I<dir>` to JIT compile; cache key incorporates DFB/sem/RTA/CRTA names |
+| New JIT stubs | — | `llk_math_eltwise_binary.h` (empty shim — dead include in `_neg` reduce kernels), `tt-metalium/buffer_types.hpp` (4 enums consumed via `sharded_tensor_addr_gen.hpp`), `DYNAMIC_NOC_X/Y` + `NOC_XY_ADDR` macros, single-arg `reconfig_data_format_*` overloads, DPRINT stream-manipulator stubs (`HEX`/`DEC`/`OCT`/`BIN`/`FIXED`/`DEFAULTFLOAT`/`SETW`/`SETPRECISION`) |
+| `reduce_tile<MAX>` | accumulated as `max(DST[i], result)`, which clamped to 0 when DST was zero-initialized and inputs were all negative — broke `ttnn::min` (lowers to `min(x) = -max(-x)`) | per-DST-slot fresh flag: `tile_regs_acquire` marks slots fresh; writers (`copy_tile`, `add/sub/mul_tiles`, `matmul_tiles`) clear it; `reduce_tile<MAX>` overwrites on fresh slots, max-accumulates on dirty ones |
+| Code review | — | second-pass review on Phase A + C: relocated `MEM_ZEROS_BASE` to top of L1 (was colliding with bump allocator), aligned `set_async_read_state`/`async_read_with_state` with upstream contract (size from cached state for fits-in-one-packet, src always recomputed), switched header-level macros to `constexpr`, refactored `__emule_matmul_state` from 6 TLS vars into one struct |
+
+**Key insight:** emule's `tile_regs_acquire()` zero-init of DST diverges from real HW (which leaves DST undefined). The previous `reduce_tile<MAX>` accumulation logic worked when the kernel pre-loaded a running max via `copy_tile(cb_acc)` but produced wrong results on the first call after acquire when all inputs were negative. The fresh-flag distinguishes "first call" from "accumulating into a kernel-staged running max" without changing behavior for `tile_regs_acquire`'s zero-init contract that other ops (notably `reduce_tile<SUM>`) rely on.
+
 ---
 
-*Report updated 2026-05-01. Covers tt-emule on branch `armin/quasar-reduction` / tt-metal on branch `arminale/emule-metal-base` @ `8711ac3d0b`. Regression baseline: **127 / 11 / 0** (pre-stub-fix: 126 / 13 / 0).*
+*Report updated 2026-05-04. Covers tt-emule on branch `armin/quasar-reduction` / tt-metal on branch `arminale/emule-metal-20` (cherry-pick of metal-2.0 emule-JIT genfiles commit on top of `arminale/emule-metal-base @ 8711ac3d0ba`). Regression baseline: **135 / 11 / 0**.*
