@@ -66,6 +66,33 @@ run_test_verbose() {
     fi
 }
 
+# Negative test: command is expected to fail (non-zero exit) AND emit a marker
+# string proving the failure mode is the intended one (e.g. ASan abort).
+run_negative_test() {
+    local name="$1"; shift
+    local marker="$1"; shift
+    if [ ! -f "$1" ]; then
+        echo "  SKIP: $name (binary not found: $1)"
+        SKIP=$((SKIP + 1))
+        return
+    fi
+    echo "--- $name (negative) ---"
+    local out rc
+    out=$("$@" 2>&1) && rc=0 || rc=$?
+    if [ "$rc" -eq 0 ]; then
+        echo "  FAIL ($name exited 0; expected non-zero)"
+        FAIL=$((FAIL + 1))
+        return
+    fi
+    if echo "$out" | grep -q -- "$marker"; then
+        echo "  PASS (exit=$rc, marker '$marker' present)"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL ($name exited $rc but did not emit '$marker')"
+        FAIL=$((FAIL + 1))
+    fi
+}
+
 echo "========================================"
 echo " tt-emule Regression Tests"
 echo "========================================"
@@ -446,6 +473,63 @@ echo "== Tier 6: Silicon (toggle proof) =="
 unset TT_METAL_MOCK_CLUSTER_DESC_PATH TT_METAL_EMULE_MODE TT_METAL_SLOW_DISPATCH_MODE 2>/dev/null || true
 
 run_test "ttnn_add_int_silicon" "$TTNN_BIN" --gtest_filter="AddUnaryTests/*"
+
+# Tier 7: ASan negative tests
+# Each entry below is expected to fail with a non-zero exit code AND emit a
+# specific marker string. The wrapper inverts both into a PASS. Tests are
+# automatically picked up when their binaries exist (standalone build_asan
+# for the tt-emule libemule tests; build_emule_asan/unit_tests_integration
+# for the JIT-path tests that exercise AllocatorImpl per-buffer poisoning).
+echo ""
+echo "== Tier 7: ASan Negative =="
+
+STANDALONE_ASAN_BUILD="${STANDALONE_ASAN_BUILD:-$SCRIPT_DIR/build_asan}"
+if [ -d "$STANDALONE_ASAN_BUILD/tests/asan" ]; then
+    # Positive control: writing inside an l1_alloc'd region must NOT fire
+    # ASan. If this test FAILS, the alloc-side hook regressed and the
+    # negative tests below would be passing on the initial blanket poison
+    # alone, not real per-buffer poisoning.
+    run_test "asan_inbounds_l1_alloc" \
+        "$STANDALONE_ASAN_BUILD/tests/asan/test_asan_inbounds_l1_alloc"
+    run_negative_test "asan_oob_slot_tail" "[EMULE]" \
+        "$STANDALONE_ASAN_BUILD/tests/asan/test_asan_oob_slot_tail"
+    run_negative_test "asan_oob_l1_alloc"  "[EMULE]" \
+        "$STANDALONE_ASAN_BUILD/tests/asan/test_asan_oob_l1_alloc"
+    run_negative_test "asan_oob_dram"      "[EMULE]" \
+        "$STANDALONE_ASAN_BUILD/tests/asan/test_asan_oob_dram"
+    run_negative_test "asan_oob_noc_read"  "[EMULE]" \
+        "$STANDALONE_ASAN_BUILD/tests/asan/test_asan_oob_noc_read"
+else
+    echo "  SKIP: standalone ASan tests (build dir not found: $STANDALONE_ASAN_BUILD)"
+    SKIP=$((SKIP + 5))
+fi
+
+# JIT-path tests live in unit_tests_integration; they require the wormhole
+# SOC env (Tier 6 unset some of it).
+if [ -f "$INTEGRATION_BIN" ]; then
+    export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
+    export TT_METAL_EMULE_MODE=1
+    export TT_METAL_SLOW_DISPATCH_MODE=1
+    export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
+    export TT_METAL_HOME="$TT_METAL_DIR"
+    export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}:halt_on_error=1:abort_on_error=0"
+    unset ARCH_NAME 2>/dev/null || true
+    rm -rf "/tmp/tt_emule_jit_cache_$(id -u)" 2>/dev/null || true
+    # Positive control: alloc-hook MUST unpoison the buffer's region. If this
+    # fails, the OOB negative below would be passing on the initial blanket
+    # poison alone — meaning per-buffer poisoning isn't actually working.
+    run_test "AsanL1BufferInBoundsWrite" "$INTEGRATION_BIN" \
+        --gtest_filter="MeshDispatchFixture.AsanL1BufferInBoundsWrite"
+    run_negative_test "AsanL1BufferOverflow" "AddressSanitizer:" "$INTEGRATION_BIN" \
+        --gtest_filter="MeshDispatchFixture.AsanL1BufferOverflow"
+    run_negative_test "AsanL1BufferUseAfterFree" "AddressSanitizer:" "$INTEGRATION_BIN" \
+        --gtest_filter="MeshDispatchFixture.AsanL1BufferUseAfterFree"
+    run_negative_test "AsanDramBufferUseAfterFree" "AddressSanitizer:" "$INTEGRATION_BIN" \
+        --gtest_filter="MeshDispatchFixture.AsanDramBufferUseAfterFree"
+else
+    echo "  SKIP: JIT ASan tests (binary not found: $INTEGRATION_BIN)"
+    SKIP=$((SKIP + 1))
+fi
 
 echo ""
 echo "========================================"
