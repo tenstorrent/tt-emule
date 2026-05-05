@@ -35,6 +35,7 @@
 
 // ---- Bridge function declarations for cross-core access ----
 extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
+extern "C" uint8_t* __emule_resolve_noc_addr_sized(uint64_t noc_addr, uint32_t size, const char* caller);
 extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src, uint32_t size);
 
 // ---- Debug logging (enabled by TT_EMULE_DEBUG_MULTICAST=1 env var) ----
@@ -177,7 +178,7 @@ FORCE_INLINE void noc_async_read_page(
     }
     uint64_t noc_addr = addrgen.get_noc_addr(id, offset, noc);
     uint8_t* dst = __emule_local_l1_to_ptr(dst_local_l1_addr);
-    uint8_t* src = __emule_resolve_noc_addr(noc_addr);
+    uint8_t* src = __emule_resolve_noc_addr_sized(noc_addr, page_size, "noc_async_read_page");
     if (src) {
         std::memcpy(dst, src, page_size);
     } else {
@@ -202,7 +203,7 @@ FORCE_INLINE void noc_async_write_page(
     uint32_t sz = size ? size : page_size;
     uint64_t noc_addr = addrgen.get_noc_addr(id, offset, noc);
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
-    uint8_t* dst = __emule_resolve_noc_addr(noc_addr);
+    uint8_t* dst = __emule_resolve_noc_addr_sized(noc_addr, sz, "noc_async_write_page");
     if (dst) {
         std::memcpy(dst, src, sz);
     } else {
@@ -239,7 +240,7 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
     // get_noc_addr_from_bank_id() — no fixup needed here.  Applying
     // __emule_fixup_noc_addr would destroy DRAM bank offsets (> 2MB).
     uint8_t* dst = __emule_local_l1_to_ptr(dst_local_l1_addr);
-    uint8_t* src = __emule_resolve_noc_addr(src_noc_addr);
+    uint8_t* src = __emule_resolve_noc_addr_sized(src_noc_addr, size, "noc_async_read");
     if (__emule_debug_multicast()) {
         uint32_t nx = (src_noc_addr >> 36) & 0x3F;
         uint32_t ny = (src_noc_addr >> 42) & 0x3F;
@@ -262,7 +263,7 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
 inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
                             uint32_t size, uint8_t noc = 0, uint32_t vc = 0) {
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
-    uint8_t* dst = __emule_resolve_noc_addr(dst_noc_addr);
+    uint8_t* dst = __emule_resolve_noc_addr_sized(dst_noc_addr, size, "noc_async_write");
     if (dst) {
         std::memcpy(dst, src, size);
     } else {

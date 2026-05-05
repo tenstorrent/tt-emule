@@ -4,6 +4,8 @@
 #include "tt_emule/circular_buffer.hpp"
 #include "tt_emule/dfb_sync_state.hpp"
 #include "tt_emule/tile_counter.hpp"
+#include "tt_emule/asan.h"
+#include "tt_emule/asan_bridge.h"
 #include <thread>
 #include <vector>
 #include <barrier>
@@ -22,6 +24,13 @@ thread_local tt_emule::TileCounterArray*  __emule_tc_array = nullptr;
 thread_local tt_emule::EmuleDFBInterface* __emule_dfbs = nullptr;
 
 extern "C" uint8_t* __emule_dram_ptr(uint64_t offset) {
+    if (__device != nullptr) {
+        size_t cap = __device->dram_size_per_channel();
+        if (offset >= cap) {
+            __emule_bounds_fail("__emule_dram_ptr", "DRAM offset past bank size",
+                                offset, /*size=*/0, cap);
+        }
+    }
     return __device->dram_ptr(offset);
 }
 

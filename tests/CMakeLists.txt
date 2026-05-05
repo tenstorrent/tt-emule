@@ -7,3 +7,7 @@ add_subdirectory(dfb_multi_consumer)
 if(TT_EMULE_COMPAT_HEADERS)
     add_subdirectory(compat)
 endif()
+
+if(TT_EMULE_ASAN)
+    add_subdirectory(asan)
+endif()
