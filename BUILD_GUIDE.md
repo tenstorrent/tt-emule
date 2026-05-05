@@ -128,6 +128,7 @@ cmake --build build_emule_clang -j$(nproc)
 | `TT_EMULE_PATH` | Path to tt-emule | Points to tt-emule source tree |
 | `ENABLE_TRACY` | `OFF` | Profiling not needed for emulation |
 | `TT_INSTALL` | `OFF` | Skip install rules |
+| `TT_EMULE_ASAN` | `OFF` (default) / `ON` | When `ON`, builds tt-emule + tt-metal with `-fsanitize=address -shared-libasan`; activates per-buffer L1/DRAM ASan poisoning via `AllocatorImpl` hooks and the always-on bridge bounds checks. See "Optional: Build with AddressSanitizer" below. Requires `TT_METAL_USE_EMULE=ON`. |
 
 ### Build Outputs
 
@@ -145,6 +146,68 @@ CMake Error at cmake/tracy.cmake:20 (add_subdirectory): The source directory ...
 ```
 
 (On commits prior to `8711ac3d0b`, a third submodule `tt_metal/third_party/tt_llk` was also required for firmware headers; on the current base it is part of the main tree at `tt_metal/tt-llk/`.)
+
+---
+
+### Optional: Build with AddressSanitizer
+
+A separate Debug build with `TT_EMULE_ASAN=ON` enables AddressSanitizer over the entire emulation path: host code, the JIT'd kernel `.so`s, and the L1Pool slot-tail / per-buffer poisoning that catches kernel-side memory bugs.
+
+```bash
+cd /localdev/<user>/tt-metal-main
+
+cmake -B build_emule_asan \
+    -G Ninja \
+    -DCMAKE_C_COMPILER=clang-20 \
+    -DCMAKE_CXX_COMPILER=clang++-20 \
+    -DCMAKE_AR=/usr/bin/llvm-ar-20 \
+    -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DTT_METAL_USE_EMULE=ON \
+    -DTT_EMULE_ASAN=ON \
+    -DTT_METAL_BUILD_TESTS=ON \
+    -DTTNN_BUILD_TESTS=ON \
+    -DTT_EMULE_PATH=/localdev/<user>/tt-emule \
+    -DWITH_PYTHON_BINDINGS=OFF \
+    -DENABLE_TRACY=OFF \
+    -DTT_INSTALL=OFF
+
+# ASan-instrumented build tools (e.g. flatc) need libclang_rt.asan-x86_64.so
+# at runtime. JIT kernel .so's get -Wl,-rpath,<TT_EMULE_ASAN_RT_DIR> baked in
+# via the runner, so they don't need this — but build tools that exec during
+# CMake do.
+export LD_LIBRARY_PATH=/usr/lib/llvm-20/lib/clang/20/lib/linux:${LD_LIBRARY_PATH:-}
+cmake --build build_emule_asan -j$(nproc)
+```
+
+`TT_EMULE_ASAN=ON` requires `TT_METAL_USE_EMULE=ON`; configure will FATAL_ERROR otherwise. See `docs/ASAN.md` for what gets caught and how to triage.
+
+#### Running tests under ASan
+
+```bash
+cd /localdev/<user>/tt-emule
+export ASAN_OPTIONS=detect_leaks=0:halt_on_error=1:abort_on_error=0
+export LD_LIBRARY_PATH=/usr/lib/llvm-20/lib/clang/20/lib/linux:${LD_LIBRARY_PATH:-}
+BUILD_DIR=/localdev/<user>/tt-metal-main/build_emule_asan \
+  STANDALONE_ASAN_BUILD=/localdev/<user>/tt-emule/build_asan \
+  ./run_regression.sh
+```
+
+`detect_leaks=0` suppresses an OpenMPI `ompi_group_allocate` leak (third-party noise). `abort_on_error=0` makes ASan exit non-zero instead of `abort()` so the regression's `set -euo pipefail` doesn't bail mid-tier.
+
+Tier 7 (`run_regression.sh`) auto-skips when both `STANDALONE_ASAN_BUILD/tests/asan/` and `BUILD_DIR/test/tt_metal/unit_tests_integration` are missing — non-ASan builds report the baseline 135/11/0; ASan builds add 7 extra Tier 7 entries. The 4 standalone tt-emule negative tests live in a separate Debug build at `<tt-emule>/build_asan` (configured with `-DTT_EMULE_ASAN=ON` directly on tt-emule); the regression script picks them up automatically when `$STANDALONE_ASAN_BUILD/tests/asan/` exists. To run only the standalone tests outside the regression: `ctest --test-dir build_asan -L asan`.
+
+| Test | Type | Marker | Detection |
+|------|------|--------|-----------|
+| `asan_inbounds_l1_alloc` | positive | (clean exit) | Asserts `Core::l1_alloc` unpoisons the bumped slice |
+| `asan_oob_slot_tail`     | negative | `[EMULE]`           | L1Pool 1 MB slot-tail poisoning |
+| `asan_oob_l1_alloc`      | negative | `[EMULE]`           | `Core::l1_alloc` bump-pointer poisoning (standalone) |
+| `asan_oob_dram`          | negative | `[EMULE]`           | `__emule_dram_ptr` bank-size bounds check |
+| `asan_oob_noc_read`      | negative | `[EMULE]`           | `__emule_resolve_noc_addr_sized` bounds check |
+| `AsanL1BufferInBoundsWrite` | positive | (clean exit) | Asserts the per-buffer alloc hook unpoisons the L1 mesh buffer |
+| `AsanL1BufferOverflow`   | negative | `AddressSanitizer:` | per-buffer poison + JIT-compiled .so under ASan |
+
+The two positive controls catch "ASan accidentally compiled out" or "alloc hook silently no-ops" regressions — without them, the negative tests would still pass on the initial blanket poison even if per-buffer poisoning broke.
 
 ---
 

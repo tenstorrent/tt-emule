@@ -264,7 +264,9 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 | 5 | TTNN Matmul Sweep | 1 | 0 | 14 sub-cases: multi-core matmul 32² through 2048² | WH N150 |
 | 5b | TTNN Reduction (WH) | 9 | 0 | All 16 cases in `tests/ttnn/unit_tests/gtests/test_reduction.cpp`: 6 `Sum*` (Last/First/Both × aligned/unaligned) + 10 `MinMax*` (Last/First/Both × 4/4/2 params) — BF16 reductions on `ttnn::sum`, `ttnn::max`, `ttnn::min` | WH N150 |
 | 6 | Silicon Toggle | 1 | 0 | ttnn_add_int — env vars unset, runs in emulation (toggle proof) | WH N150 |
-| **Total** | | **135** | **11** | | |
+| 7 | ASan (ASan build only) | 7 | 0 | 4 standalone negatives (`oob_slot_tail`, `oob_l1_alloc`, `oob_dram`, `oob_noc_read`) + 1 standalone positive control (`asan_inbounds_l1_alloc`) + 1 JIT negative (`AsanL1BufferOverflow`) + 1 JIT positive control (`AsanL1BufferInBoundsWrite`). Negatives are expected to die non-zero with `[EMULE]` or `AddressSanitizer:` markers (inverted to PASS by `run_negative_test`); positives must pass cleanly to assert the alloc hook actually unpoisons (catches "ASan accidentally compiled out" or "alloc hook silently no-ops"). Auto-skipped on non-ASan builds. | WH N150 |
+| **Total** (non-ASan) | | **135** | **11** | | |
+| **Total** (ASan, +Tier 7) | | **TBD** | **TBD** | | |
 
 (A Quasar variant of the sum-last-dim test is not run: the upstream W-reduce host factory uses `CreateKernel`, which tt-metal rejects on Quasar with "DataMovementKernel is not supported on Quasar. Use QuasarDataMovementKernel instead." — an upstream factory limitation, not an emulator stub gap.)
 
@@ -614,6 +616,8 @@ The complete set of tt-metal modifications for emulation support:
 
 **D2M golden test coverage.** 1624 of 1878 D2M golden tests pass (86% pass rate), covering layout transforms, buffer allocation, matmul (single-core, multi-core, double-buffered, 3D/4D batched up to 2048x2048x2048), reductions (sum, max, mean), DMA (L1-to-L1 and partial DRAM), TMS (reshape, permute, concatenate_heads), tilize/untilize, virtual grids, and tensor collapsing. This provides broad regression coverage for D2M-generated kernels.
 
+**ASan-instrumented memory-bug detection.** Building with `TT_EMULE_ASAN=ON` enables per-buffer L1/DRAM poisoning driven by tt-metal's `AllocatorImpl`. Kernels that write past their buffer end, into a neighbouring buffer, or into freed memory abort with an AddressSanitizer report — no silicon required. Bridge-level bounds checks (`__emule_dram_ptr`, `__emule_resolve_noc_addr_sized`, `__emule_local_l1_ptr`, `__emule_multicast_write`) are always on and catch coarse offset overruns even in non-ASan builds. See `docs/ASAN.md`.
+
 ### Cons
 
 **Behavioral fidelity gap.** The emulator approximates hardware behavior but does not replicate it:
@@ -639,6 +643,8 @@ Tests that pass in emulation may fail on silicon due to timing, precision, or re
 **Nfaces conversion not exercised in isolation.** The UNPACK and PACK engines are tested only indirectly via compute operations (matmul, add_tiles, etc.) that happen to exercise them. No dedicated UNPACK-only or PACK-only test exists. A bug in the nfaces LUT for a specific face/element combination might not be caught if no existing compute test triggers that access pattern. See `docs/TEST_COVERAGE_TODO.md`.
 
 **D2M coverage gaps.** 1 test file fails entirely: bfp8_typecast (13 PCC mismatches). 2 files have partial failures: reductions (131/1300 fail on unaligned shapes) and masking (15/20 fail on partial tiles). DMA tests now pass fully (49/49). The remaining 10 files pass fully. The primary gaps are unaligned tensor reductions, partial tile masking, and BFP8 format precision.
+
+**Sharded L1 ASan poisoning is conservative.** ASan unpoisons an entire shard region per shard core even when the buffer fills only part of it; shard-tail overflows can escape detection. Tracked as a follow-up to switch to `Buffer::get_buffer_page_mapping()` for accurate sizing.
 
 ### Maintainability
 
@@ -666,6 +672,8 @@ Rebasing onto new tt-metal versions primarily requires:
 **Banking infrastructure is self-maintaining.** Bank mapping arrays are populated dynamically from the SOC descriptor at runtime, so adding support for new chip architectures requires no code changes — only a new cluster descriptor YAML file.
 
 **HAL-based semaphore placement is self-maintaining.** By reading `kernel_config_base` and `sem_offset` from the HAL and ProgramConfig respectively, the emulator automatically tracks any changes to the L1 memory map or semaphore layout in tt-metal. No hardcoded constants to update.
+
+**ASan integration adds two cross-cutting concerns to track on rebase.** (1) `AllocatorImpl::allocate_buffer/deallocate_buffer/deallocate_buffers` carry `#ifdef TT_METAL_USE_EMULE` hook calls; if upstream renames, splits, or otherwise restructures the allocator API, those hook sites must follow. (2) `~AllocatorImpl` and `AllocatorImpl::override_state` bypass the per-buffer dealloc hook by clearing `allocated_buffers_` directly — a known wart left as a follow-up.
 
 ### Changes from v3 to v4
 
@@ -803,6 +811,22 @@ Rebasing onto new tt-metal versions primarily requires:
 
 **Key insight:** emule's `tile_regs_acquire()` zero-init of DST diverges from real HW (which leaves DST undefined). The previous `reduce_tile<MAX>` accumulation logic worked when the kernel pre-loaded a running max via `copy_tile(cb_acc)` but produced wrong results on the first call after acquire when all inputs were negative. The fresh-flag distinguishes "first call" from "accumulating into a kernel-staged running max" without changing behavior for `tile_regs_acquire`'s zero-init contract that other ops (notably `reduce_tile<SUM>`) rely on.
 
+### Changes from v12 to v13
+
+| Aspect | v12 | v13 |
+|--------|-----|-----|
+| tt-emule branch | `armin/quasar-reduction` (rebased onto current tip) | `armin-asan-rebased` — ASan integration grafted onto current `main` (tt-emule's history was re-imported from `xchin/tt-emule`, so the legacy `armin-asan` branch shares no commits with `main`; the work was transplanted as fresh commits) |
+| tt-metal branch | `arminale/emule-metal-20` | `armin-asan-allocator-rebased` — ASan additions onto `arminale/emule-metal-20` |
+| UMD pointer | `453a1a1a` (recorded by emule-metal-20) | UMD `armin-asan-rebased` — 5 ASan commits cherry-picked onto `453a1a1a` |
+| Regression — non-ASan | 135 / 11 / 0 | **TBD pass / TBD fail / 0 skip** (expect 135/11/0 — ASan additions are off by default and Tier 7 auto-skips when ASan build dirs aren't present) |
+| Regression — ASan (`TT_EMULE_ASAN=ON`) | not measured | **TBD pass / TBD fail / 0 skip** (expect ~142/11/0 — 135 baseline + 7 Tier 7) |
+| ASan integration | none | `TT_EMULE_ASAN` CMake option; clang-rt rpath plumbing for JIT `.so`s; sized resolver `__emule_resolve_noc_addr_sized`; bounds checks in `__emule_dram_ptr`, `__emule_local_l1_ptr`, `__emule_noc_resolve`, `__emule_multicast_write`; `SWEmuleChip::active_dram_bank_size` + `core_for_logical` + `initialize_asan_poison`; L1Pool 1 MB slot-tail poison |
+| Per-buffer poisoning | none | `tt_metal/impl/emulation/asan_hooks.{hpp,cpp}` enumerator + 4 hook call sites in `AllocatorImpl::allocate_buffer` / `deallocate_buffer` / `Device::initialize`; `__emule_buffer_alloc/free` static-inline bridge in tt-emule's `asan_bridge.h` |
+| Tier 7 negative-test coverage | none | 4 standalone tt-emule (`tests/asan/oob_*_test.cpp`) + 1 standalone positive control + JIT-path `MeshDispatchFixture.AsanL1BufferOverflow` + JIT positive control `AsanL1BufferInBoundsWrite` + DRAM UAF in-flight (`AsanDramBufferUseAfterFree` — see `docs/ASAN_UAF_STATUS.md`) |
+| Documentation | — | New: `docs/ASAN.md` (usage), `docs/PLAN_asan_allocator_integration.md` (engineering plan), `docs/ASAN_UAF_STATUS.md` (DRAM UAF triage), `docs/asan_alloc_regression.log` (full ASan-on regression log baseline), Pros/Cons/Maintainability bullets in this report, `BUILD_GUIDE.md` ASan subsection |
+
+**Key insight (rebase):** the tt-emule history rewrite from `arminale/quasar-rebased` → `xchin/tt-emule` left `armin-asan` orphaned — `git merge-base armin-asan main` returns nothing. A normal `git rebase` is impossible. The transplant works because the *files* the ASan branch touched were unchanged or near-identical between the asan-fork-point and current `main` (per pre-rebase measurement: `l1_pool.hpp`, `kernel_runner.cpp`, `jit_kernel.cpp`, `dataflow_api.h`, `CMakeLists.txt`, `tests/CMakeLists.txt` were all 0-byte different; `device.hpp` had 29 lines of orthogonal drift; `run_regression.sh` had 41 lines of orthogonal drift). For tt-metal-main, only one of the 31 commits on `armin-asan-allocator` (`4e20b69a339`) actually touched `emulated_program_runner.cpp` with ASan content, so the +982/-203 file-stat overstated reconciliation cost — the real graft is small enough to apply against emule-metal-20's evolved version.
+
 ---
 
-*Report updated 2026-05-04. Covers tt-emule on branch `armin/quasar-reduction` / tt-metal on branch `arminale/emule-metal-20` (cherry-pick of metal-2.0 emule-JIT genfiles commit on top of `arminale/emule-metal-base @ 8711ac3d0ba`). Regression baseline: **135 / 11 / 0**.*
+*Report updated 2026-05-05. Covers tt-emule on branch `armin-asan-rebased` (off `main` @ `21f78df`) / tt-metal-main on branch `armin-asan-allocator-rebased` (off `arminale/emule-metal-20` @ `5c6ffaca75`) / UMD on branch `armin-asan-rebased` (5 ASan commits onto `453a1a1a`). Regression: TBD/TBD/0 non-ASan + TBD/TBD/0 ASan — fill from `/tmp/regression_*.log` after Phase 6.*
