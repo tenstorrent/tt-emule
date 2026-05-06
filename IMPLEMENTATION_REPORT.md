@@ -266,7 +266,7 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 | 6 | Silicon Toggle | 1 | 0 | ttnn_add_int — env vars unset, runs in emulation (toggle proof) | WH N150 |
 | 7 | ASan (ASan build only) | 7 | 0 | 4 standalone negatives (`oob_slot_tail`, `oob_l1_alloc`, `oob_dram`, `oob_noc_read`) + 1 standalone positive control (`asan_inbounds_l1_alloc`) + 1 JIT negative (`AsanL1BufferOverflow`) + 1 JIT positive control (`AsanL1BufferInBoundsWrite`). Negatives are expected to die non-zero with `[EMULE]` or `AddressSanitizer:` markers (inverted to PASS by `run_negative_test`); positives must pass cleanly to assert the alloc hook actually unpoisons (catches "ASan accidentally compiled out" or "alloc hook silently no-ops"). Auto-skipped on non-ASan builds. | WH N150 |
 | **Total** (non-ASan) | | **135** | **11** | | |
-| **Total** (ASan, +Tier 7) | | **TBD** | **TBD** | | |
+| **Total** (ASan, +Tier 7) | | **143** | **12** | (8 / 9 Tier 7 pass; `AsanDramBufferUseAfterFree` fails — see `docs/ASAN_UAF_STATUS.md`) | |
 
 (A Quasar variant of the sum-last-dim test is not run: the upstream W-reduce host factory uses `CreateKernel`, which tt-metal rejects on Quasar with "DataMovementKernel is not supported on Quasar. Use QuasarDataMovementKernel instead." — an upstream factory limitation, not an emulator stub gap.)
 
@@ -818,8 +818,8 @@ Rebasing onto new tt-metal versions primarily requires:
 | tt-emule branch | `armin/quasar-reduction` (rebased onto current tip) | `armin-asan-rebased` — ASan integration grafted onto current `main` (tt-emule's history was re-imported from `xchin/tt-emule`, so the legacy `armin-asan` branch shares no commits with `main`; the work was transplanted as fresh commits) |
 | tt-metal branch | `arminale/emule-metal-20` | `armin-asan-allocator-rebased` — ASan additions onto `arminale/emule-metal-20` |
 | UMD pointer | `453a1a1a` (recorded by emule-metal-20) | UMD `armin-asan-rebased` — 5 ASan commits cherry-picked onto `453a1a1a` |
-| Regression — non-ASan | 135 / 11 / 0 | **TBD pass / TBD fail / 0 skip** (expect 135/11/0 — ASan additions are off by default and Tier 7 auto-skips when ASan build dirs aren't present) |
-| Regression — ASan (`TT_EMULE_ASAN=ON`) | not measured | **TBD pass / TBD fail / 0 skip** (expect ~142/11/0 — 135 baseline + 7 Tier 7) |
+| Regression — non-ASan | 135 / 11 / 0 | **141 / 14 / 0** when Tier 7 also runs (135 baseline + 6 Tier 7 pass — the 5 standalone negatives use a separate ASan-built `tests/asan/` so they fire even from a non-ASan tt-metal build, and the JIT positive control `AsanL1BufferInBoundsWrite` writes inside its buffer so it doesn't need ASan compiled in to pass; +3 Tier 7 fail because the 3 JIT-path ASan negatives need an ASan-compiled `unit_tests_integration` to emit `AddressSanitizer:`). Pre-Tier-7 baseline still 135/11/0. |
+| Regression — ASan (`TT_EMULE_ASAN=ON`) | not measured | **143 / 12 / 0** (135 baseline + 8 Tier 7 pass; the 12th failure is `AsanDramBufferUseAfterFree`, an in-flight issue tracked in `docs/ASAN_UAF_STATUS.md` — `SWEmuleChip::core_for_logical` treats coord.x as a DRAM channel id when the allocator passes a logical core (x,y), so dealloc-hook ranges are UNRESOLVED) |
 | ASan integration | none | `TT_EMULE_ASAN` CMake option; clang-rt rpath plumbing for JIT `.so`s; sized resolver `__emule_resolve_noc_addr_sized`; bounds checks in `__emule_dram_ptr`, `__emule_local_l1_ptr`, `__emule_noc_resolve`, `__emule_multicast_write`; `SWEmuleChip::active_dram_bank_size` + `core_for_logical` + `initialize_asan_poison`; L1Pool 1 MB slot-tail poison |
 | Per-buffer poisoning | none | `tt_metal/impl/emulation/asan_hooks.{hpp,cpp}` enumerator + 4 hook call sites in `AllocatorImpl::allocate_buffer` / `deallocate_buffer` / `Device::initialize`; `__emule_buffer_alloc/free` static-inline bridge in tt-emule's `asan_bridge.h` |
 | Tier 7 negative-test coverage | none | 4 standalone tt-emule (`tests/asan/oob_*_test.cpp`) + 1 standalone positive control + JIT-path `MeshDispatchFixture.AsanL1BufferOverflow` + JIT positive control `AsanL1BufferInBoundsWrite` + DRAM UAF in-flight (`AsanDramBufferUseAfterFree` — see `docs/ASAN_UAF_STATUS.md`) |
@@ -829,4 +829,4 @@ Rebasing onto new tt-metal versions primarily requires:
 
 ---
 
-*Report updated 2026-05-05. Covers tt-emule on branch `armin-asan-rebased` (off `main` @ `21f78df`) / tt-metal-main on branch `armin-asan-allocator-rebased` (off `arminale/emule-metal-20` @ `5c6ffaca75`) / UMD on branch `armin-asan-rebased` (5 ASan commits onto `453a1a1a`). Regression: TBD/TBD/0 non-ASan + TBD/TBD/0 ASan — fill from `/tmp/regression_*.log` after Phase 6.*
+*Report updated 2026-05-06. Covers tt-emule on branch `armin-asan-rebased` (off `main` @ `21f78df`) / tt-metal-main on branch `armin-asan-allocator-rebased` (off `arminale/emule-metal-20` @ `5c6ffaca75`) / UMD on branch `armin-asan-rebased` (5 ASan commits onto `453a1a1a`, tip `b10bea1d`). Regression: **141/14/0 non-ASan**, **143/12/0 ASan**. Pre-Tier-7 baseline 135/11/0 confirmed against v12. Tier 7 ASan fully working except `AsanDramBufferUseAfterFree` (known in-flight; see `docs/ASAN_UAF_STATUS.md`).*
