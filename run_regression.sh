@@ -141,6 +141,7 @@ export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
 
 run_test "SimpleL1Buffer"   "$API_BIN" --gtest_filter="MeshDeviceFixture.TestSimpleL1Buffer*"
 run_test "SimpleDramBuffer" "$API_BIN" --gtest_filter="MeshDeviceFixture.TestSimpleDram*"
+run_test "asan_l1_bounds_check" "$API_BIN" --gtest_filter="MeshDeviceFixture.IllegalWriteOutOfBounds"
 
 echo ""
 echo "== Tier 3: JIT Kernel Execution =="

@@ -55,6 +55,19 @@ inline void noc_async_read(NocAddr src, uint8_t* dst_l1, size_t size) {
 
 // Synchronous memcpy in prototype (emulates async DMA write: src L1 -> dst DRAM)
 inline void noc_async_write(const uint8_t* src_l1, NocAddr dst, size_t size) {
+    // Transfers must be 16 byte aligned
+    if (((uintptr_t)src_l1 % 16 != 0) || ((uintptr_t)dst % 16 != 0)) {
+        fprintf(stderr, "[ASAN ERROR] NOC DMA Write Alignment: Src(0x%p) and Dst(0x%p) must be 16-byte aligned\n", 
+                (void*)src_l1, (void*)dst);
+        abort();
+    }
+    
+    // Size must be a multiple of 16
+    if (size % 16 != 0) {
+        fprintf(stderr, "[ASAN ERROR] NOC DMA Write Size: Size (%zu) must be a multiple of 16\n", size);
+        abort();
+    }
+
     std::memcpy(dst, src_l1, size);
 }
 
