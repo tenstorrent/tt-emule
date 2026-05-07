@@ -11,6 +11,17 @@ using NocAddr = uint8_t*;
 // ---- Circular Buffer operations (delegate to shared CBSyncState logic) ----
 
 inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
+    // check if there are enough pages
+    auto& cb_ptr = __core->cb(cb_id);
+    uint32_t max_pages = cb_ptr->num_pages();
+    
+    if (n > max_pages) {
+        fprintf(stderr, "[ASAN ERROR] CB Reservation Overflow: CB %u has %u total pages, "
+                        "but kernel requested to reserve %u pages. This would hang on silicon!\n", 
+                cb_id, max_pages, n);
+        abort();
+    }
+
     tt_emule::cb_sync_reserve(__core->cb(cb_id)->sync_state(), n);
 }
 
