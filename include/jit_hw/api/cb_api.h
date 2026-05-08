@@ -21,6 +21,7 @@ extern thread_local uint8_t my_x[2];
 extern thread_local uint8_t my_y[2];
 extern thread_local uint32_t __emule_logical_x;
 extern thread_local uint32_t __emule_logical_y;
+extern thread_local uint32_t __emule_pending_noc_reads;
 
 // cb_addr_shift (16-byte fifo-pointer encoding) is defined in emule_cb_ptr.h.
 
@@ -179,6 +180,13 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
 }
 
 inline void cb_push_back(uint32_t cb_id, uint32_t n) {
+    if (__emule_pending_noc_reads > 0) {
+        fprintf(stderr,
+                "[ASAN ERROR] Race Condition: cb_push_back(cb_id=%u) called while a NoC read is still pending "
+                "(%u outstanding) — missing noc_async_read_barrier()\n",
+                cb_id, __emule_pending_noc_reads);
+        abort();
+    }
     // Advance this thread's own write pointer (mirrors the per-RISC write ptr on
     // silicon), then bump the shared occupied semaphore.
     __emule_cb_advance_wr(cb_id, n);
@@ -263,6 +271,36 @@ inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
             slot.rd_ptr = slot.base_addr + (slot.rd_ptr - slot.limit);
         iface.rd_entry_idx += n;
         iface.tc_idx = (iface.tc_idx + 1) % iface.num_tcs_to_rr;
+    }
+}
+
+// ---- Dirty-CB sanitizer (called by emulated_program_runner) ----
+//
+// On silicon, a kernel that finishes with pages still on a CB (push count >
+// pop count, i.e. occupied > 0) leaves the CB pointers offset for the next
+// program launch — which then immediately back-pressures on cb_reserve_back.
+// The emulator detects this by walking __emule_cbs at kernel exit and
+// aborting on any leftover pages, attributing the leak to the kernel that
+// just finished. The runner also performs a final whole-program sweep in
+// case multi-kernel programs cancel out per-kernel.
+inline void __emule_check_kernel_cb_dirty(uint32_t lx, uint32_t ly, uint8_t processor_id) {
+    if (__emule_cbs == nullptr) {
+        return;
+    }
+    for (uint32_t cb_id = 0; cb_id < 32; ++cb_id) {
+        auto& cb = __emule_cbs[cb_id];
+        if (cb.num_pages == 0) {
+            continue;  // CB not configured on this core
+        }
+        uint32_t occupied = cb.occupied.load(std::memory_order_acquire);
+        if (occupied > 0) {
+            fprintf(stderr,
+                    "[ASAN ERROR] Dirty CB Detected: Core (%u, %u) CB %u was not flushed! "
+                    "Kernel (processor %u) ended with %u/%u pages still on the CB "
+                    "(push > pop) — this back-pressures the next program launch on silicon.\n",
+                    lx, ly, cb_id, processor_id, occupied, cb.num_pages);
+            std::abort();
+        }
     }
 }
 
