@@ -73,6 +73,10 @@ inline uint32_t __emule_addr_to_offset(uint32_t addr) {
 #ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED
 #define __EMULE_LOCAL_L1_TO_PTR_DEFINED
 inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
+    if (l1_addr % 4 != 0) {
+        fprintf(stderr, "[ASAN ERROR] Local L1 Alignment: Offset 0x%x must be 4-byte aligned for scalar access\n", l1_addr);
+        abort();
+    }
     uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
     if (l1_addr >= l1_base) {
         // Already an absolute host pointer (from l1_alloc / CB / DFB).

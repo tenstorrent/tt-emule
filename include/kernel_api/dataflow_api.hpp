@@ -38,7 +38,15 @@ inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
 }
 
 inline uint8_t* get_write_ptr(uint32_t cb_id) {
-    return tt_emule::cb_sync_write_ptr(__core->cb(cb_id)->sync_state());
+    // Check if the resulting pointer is word-aligned
+    uint8_t* ptr = tt_emule::cb_sync_write_ptr(__core->cb(cb_id)->sync_state());
+    
+    // Check if the resulting pointer is word-aligned
+    if ((uintptr_t)ptr % 4 != 0) {
+        fprintf(stderr, "[ASAN ERROR] CB Write Ptr Misaligned: Ptr %p for CB %u is not 4-byte aligned!\n", (void*)ptr, cb_id);
+        abort();
+    }
+    return ptr;
 }
 
 inline const uint8_t* get_read_ptr(uint32_t cb_id) {

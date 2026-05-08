@@ -85,7 +85,13 @@ public:
 
     DstRegisterFile& dst() { return dst_; }
 
-    uint8_t* l1_ptr(uint32_t offset) { return l1_ + offset; }
+    uint8_t* l1_ptr(uint32_t offset) { 
+        if (offset % 4 != 0) {
+            fprintf(stderr, "[ASAN ERROR] Local L1 Alignment: Offset 0x%x must be 4-byte aligned for scalar access\n", offset);
+            abort();
+        }
+        return l1_ + offset; 
+    }
 
     // Raw pointer to start of memory region (L1 or DRAM backing).
     uint8_t* l1_data() { return l1_; }
