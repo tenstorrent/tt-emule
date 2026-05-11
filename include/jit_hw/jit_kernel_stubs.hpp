@@ -38,6 +38,13 @@ extern "C" uint8_t* __emule_noc_resolve(uint32_t x, uint32_t y, uint64_t addr);
 // from mmap'd-below-4GB L1) and real host pointers.
 extern thread_local uint8_t* __emule_bridge_l1;
 
+// Per-kernel-thread semaphore L1 range, populated by emulated_program_runner
+// before each kernel launch. Used by __emule_local_l1_to_ptr to abort on
+// direct scalar accesses into the reserved semaphore region — kernels must go
+// through the semaphore API instead.
+extern thread_local uint32_t __emule_sem_l1_range_start;
+extern thread_local uint32_t __emule_sem_l1_range_end;
+
 // Translate a raw L1 firmware offset (or already-absolute host pointer) to a
 // host uint8_t*.  Available to ALL JIT kernels so the l1_arg_ptr regex patch in
 // emulated_program_runner can inject calls without requiring dataflow_api.h.
@@ -46,6 +53,13 @@ extern thread_local uint8_t* __emule_bridge_l1;
 inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
     if (l1_addr % 4 != 0) {
         fprintf(stderr, "[ASAN ERROR] Local L1 Alignment: Offset 0x%x must be 4-byte aligned for scalar access\n", l1_addr);
+        abort();
+    }
+    if (__emule_sem_l1_range_end > 0 &&
+        l1_addr >= __emule_sem_l1_range_start && l1_addr < __emule_sem_l1_range_end) {
+        fprintf(stderr,
+                "[ASAN ERROR] Illegal Semaphore Access: Offset 0x%x is inside the reserved Semaphore region [0x%x, 0x%x)\n",
+                l1_addr, __emule_sem_l1_range_start, __emule_sem_l1_range_end);
         abort();
     }
     uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));

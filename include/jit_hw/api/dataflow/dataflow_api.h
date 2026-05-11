@@ -77,6 +77,13 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
         fprintf(stderr, "[ASAN ERROR] Local L1 Alignment: Offset 0x%x must be 4-byte aligned for scalar access\n", l1_addr);
         abort();
     }
+    if (__emule_sem_l1_range_end > 0 &&
+        l1_addr >= __emule_sem_l1_range_start && l1_addr < __emule_sem_l1_range_end) {
+        fprintf(stderr,
+                "[ASAN ERROR] Illegal Semaphore Access: Offset 0x%x is inside the reserved Semaphore region [0x%x, 0x%x)\n",
+                l1_addr, __emule_sem_l1_range_start, __emule_sem_l1_range_end);
+        abort();
+    }
     uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
     if (l1_addr >= l1_base) {
         // Already an absolute host pointer (from l1_alloc / CB / DFB).
