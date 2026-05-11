@@ -186,6 +186,7 @@ FORCE_INLINE void noc_async_read_page(
     } else {
         page_size = (1u << addrgen.log_base_2_of_page_size);
     }
+    ++__emule_pending_noc_reads;
     uint64_t noc_addr = addrgen.get_noc_addr(id, offset, noc);
     uint8_t* dst = __emule_local_l1_to_ptr(dst_local_l1_addr);
     uint8_t* src = __emule_resolve_noc_addr(noc_addr);
@@ -249,6 +250,7 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
     // NOC addresses are already properly constructed by get_noc_addr() or
     // get_noc_addr_from_bank_id() — no fixup needed here.  Applying
     // __emule_fixup_noc_addr would destroy DRAM bank offsets (> 2MB).
+    ++__emule_pending_noc_reads;
     uint8_t* dst = __emule_local_l1_to_ptr(dst_local_l1_addr);
     uint8_t* src = __emule_resolve_noc_addr(src_noc_addr);
     if (__emule_debug_multicast()) {
@@ -312,7 +314,11 @@ inline void noc_async_write_multicast_loopback_src(
 
 // ---- Barriers ----
 
-inline void noc_async_read_barrier() {}
+// Clears the pending-NOC-reads counter so subsequent publication points
+// (cb_push_back, semaphore inc) won't flag a missing-barrier race. In emule
+// the underlying reads are synchronous memcpys, so there's nothing to actually
+// wait for — but the contract must still be observed for parity with silicon.
+inline void noc_async_read_barrier() { __emule_pending_noc_reads = 0; }
 inline void noc_async_write_barrier() {}
 inline void noc_async_writes_flushed() {}
 

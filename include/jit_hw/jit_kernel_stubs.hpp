@@ -45,6 +45,12 @@ extern thread_local uint8_t* __emule_bridge_l1;
 extern thread_local uint32_t __emule_sem_l1_range_start;
 extern thread_local uint32_t __emule_sem_l1_range_end;
 
+// Per-kernel-thread outstanding-NOC-read counter. Incremented by noc_async_read /
+// noc_async_read_page, zeroed by noc_async_read_barrier. cb_push_back consults it
+// to flag missing-barrier race conditions: pushing a CB while a read into that
+// CB is still in-flight publishes garbage to the consumer on real silicon.
+extern thread_local uint32_t __emule_pending_noc_reads;
+
 // Translate a raw L1 firmware offset (or already-absolute host pointer) to a
 // host uint8_t*.  Available to ALL JIT kernels so the l1_arg_ptr regex patch in
 // emulated_program_runner can inject calls without requiring dataflow_api.h.

@@ -16,6 +16,7 @@ extern thread_local uint8_t my_x[2];
 extern thread_local uint8_t my_y[2];
 extern thread_local uint32_t __emule_logical_x;
 extern thread_local uint32_t __emule_logical_y;
+extern thread_local uint32_t __emule_pending_noc_reads;
 
 // ---- Constexpr tile metadata arrays (populated by JIT defines) ----
 // EMULE_TILE_SIZES is defined by the JIT compiler as a comma-separated list of
@@ -86,6 +87,13 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
 }
 
 inline void cb_push_back(uint32_t cb_id, uint32_t n) {
+    if (__emule_pending_noc_reads > 0) {
+        fprintf(stderr,
+                "[ASAN ERROR] Race Condition: cb_push_back(cb_id=%u) called while a NoC read is still pending "
+                "(%u outstanding) — missing noc_async_read_barrier()\n",
+                cb_id, __emule_pending_noc_reads);
+        abort();
+    }
     tt_emule::cb_sync_push(__emule_cbs[cb_id], n);
     // Bridge CB→DFB: update tile counters so DM's dfb_wait_front sees compute's output.
     // cb.mu already released; now safe to acquire tc.mu (consistent lock ordering).
