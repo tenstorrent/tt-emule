@@ -159,6 +159,36 @@ inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
     }
 }
 
+// ---- Dirty-CB sanitizer (called by emulated_program_runner) ----
+//
+// On silicon, a kernel that finishes with pages still on a CB (push count >
+// pop count, i.e. occupied > 0) leaves the CB pointers offset for the next
+// program launch — which then immediately back-pressures on cb_reserve_back.
+// The emulator detects this by walking __emule_cbs at kernel exit and
+// aborting on any leftover pages, attributing the leak to the kernel that
+// just finished. The runner also performs a final whole-program sweep in
+// case multi-kernel programs cancel out per-kernel.
+inline void __emule_check_kernel_cb_dirty(uint32_t lx, uint32_t ly, uint8_t processor_id) {
+    if (__emule_cbs == nullptr) {
+        return;
+    }
+    for (uint32_t cb_id = 0; cb_id < 32; ++cb_id) {
+        auto& cb = __emule_cbs[cb_id];
+        if (cb.num_pages == 0) {
+            continue;  // CB not configured on this core
+        }
+        uint32_t occupied = cb.occupied.load(std::memory_order_acquire);
+        if (occupied > 0) {
+            fprintf(stderr,
+                    "[ASAN ERROR] Dirty CB Detected: Core (%u, %u) CB %u was not flushed! "
+                    "Kernel (processor %u) ended with %u/%u pages still on the CB "
+                    "(push > pop) — this back-pressures the next program launch on silicon.\n",
+                    lx, ly, cb_id, processor_id, occupied, cb.num_pages);
+            std::abort();
+        }
+    }
+}
+
 // ---- int32_t overloads (D2M int32 support emits int32_t tile counts) ----
 inline void cb_reserve_back(uint32_t cb_id, int32_t n) { cb_reserve_back(cb_id, static_cast<uint32_t>(n)); }
 inline void cb_push_back(uint32_t cb_id, int32_t n)    { cb_push_back(cb_id, static_cast<uint32_t>(n)); }
