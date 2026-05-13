@@ -52,6 +52,7 @@ fi
 sudo apt-get install -y --no-install-recommends \
     ninja-build \
     ccache \
+    pkg-config \
     python3 \
     python3-yaml \
     libnuma-dev \
