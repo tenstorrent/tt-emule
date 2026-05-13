@@ -53,8 +53,8 @@ _gtest_xml_args() {
 run_test() {
     local name="$1"; shift
     if [ ! -f "$1" ]; then
-        echo "  SKIP: $name (binary not found: $1)"
-        SKIP=$((SKIP + 1))
+        echo "  FAIL: $name (binary not found: $1)"
+        FAIL=$((FAIL + 1))
         return
     fi
     echo "--- $name ---"
@@ -78,8 +78,8 @@ run_test() {
 run_test_verbose() {
     local name="$1"; shift
     if [ ! -f "$1" ]; then
-        echo "  SKIP: $name (binary not found: $1)"
-        SKIP=$((SKIP + 1))
+        echo "  FAIL: $name (binary not found: $1)"
+        FAIL=$((FAIL + 1))
         return
     fi
     echo "--- $name ---"
