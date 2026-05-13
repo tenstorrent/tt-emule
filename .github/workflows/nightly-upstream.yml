@@ -141,7 +141,7 @@ jobs:
             echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main" | sudo tee /etc/apt/sources.list.d/llvm-toolchain-jammy-20.list >/dev/null
           fi
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends python3 libc++-20-dev libc++abi-20-dev
+          sudo apt-get install -y --no-install-recommends python3 libc++-20-dev libc++abi-20-dev libnuma1 libhwloc15 libtbb12
 
       - name: Record tt-metal SHA for downstream steps
         run: echo "${{ needs.build.outputs.sha }}" > tt-metal-pin-resolved.txt
