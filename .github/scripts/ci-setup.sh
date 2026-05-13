@@ -24,7 +24,9 @@ http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main" \
         clang-tools-20 \
         llvm-20 \
         lld-20 \
-        libclang-rt-20-dev
+        libclang-rt-20-dev \
+        libc++-20-dev \
+        libc++abi-20-dev
 fi
 
 # cmake from Kitware apt repo — Ubuntu 22.04 default (3.22) is too old for
