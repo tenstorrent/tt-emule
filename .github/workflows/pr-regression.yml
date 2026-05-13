@@ -1,0 +1,157 @@
+# PR Regression — builds tt-metal at the pinned SHA against the PR's tt-emule
+# source, then runs the full tt-emule regression suite. Fails the PR if any
+# test fails outside of .github/known-failures.txt.
+
+name: PR Regression
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: pr-regression-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build tt-metal against PR's tt-emule
+    runs-on: tt-ubuntu-2204-large-stable
+    timeout-minutes: 180
+    outputs:
+      pin: ${{ steps.pin.outputs.sha }}
+    steps:
+      - name: Checkout tt-emule (PR)
+        uses: actions/checkout@v4
+        with:
+          path: tt-emule
+
+      - name: Resolve pinned tt-metal SHA
+        id: pin
+        run: |
+          SHA=$(grep -vE '^\s*(#|$)' tt-emule/tt-metal-pin.txt | head -1 | awk '{print $1}')
+          if [ -z "$SHA" ]; then
+            echo "::error::tt-metal-pin.txt has no SHA"
+            exit 1
+          fi
+          echo "Pinned tt-metal SHA: $SHA"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tt-metal at pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ steps.pin.outputs.sha }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Init required tt-metal submodules
+        run: |
+          cd tt-metal
+          git submodule update --init --depth=1 tt_metal/third_party/umd
+          git submodule update --init --depth=1 tt_metal/third_party/tracy
+
+      - name: Install toolchain
+        run: bash tt-emule/.github/scripts/ci-setup.sh
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: tt-metal-${{ steps.pin.outputs.sha }}-clang20-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            tt-metal-${{ steps.pin.outputs.sha }}-clang20-${{ runner.os }}-
+            tt-metal-${{ steps.pin.outputs.sha }}-clang20-
+
+      - name: Build
+        env:
+          TT_EMULE_DIR: ${{ github.workspace }}/tt-emule
+          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
+          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule_clang
+        run: bash tt-emule/.github/scripts/ci-build.sh
+
+      - name: Stage cluster descriptors with build artifact
+        run: |
+          mkdir -p tt-metal/build_emule_clang/_cluster_descs
+          cp -r tt-metal/tt_metal/third_party/umd/tests/cluster_descriptor_examples \
+                tt-metal/build_emule_clang/_cluster_descs/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tt-metal-build-${{ github.run_id }}
+          path: tt-metal/build_emule_clang/
+          retention-days: 1
+          if-no-files-found: error
+
+  test:
+    name: Run regression
+    needs: build
+    runs-on: tt-ubuntu-2204-xlarge-stable
+    timeout-minutes: 60
+    steps:
+      - name: Checkout tt-emule (PR)
+        uses: actions/checkout@v4
+        with:
+          path: tt-emule
+
+      - name: Checkout tt-metal at pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ needs.build.outputs.pin }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Restore cluster descriptors from artifact path
+        run: |
+          # The build job staged cluster descriptors inside the build artifact;
+          # restore them under tt-metal's expected path so run_regression.sh's
+          # TT_METAL_MOCK_CLUSTER_DESC_PATH resolves correctly.
+          true   # actual copy happens after download-artifact below
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tt-metal-build-${{ github.run_id }}
+          path: tt-metal/build_emule_clang/
+
+      - name: Place cluster descriptors
+        run: |
+          mkdir -p tt-metal/tt_metal/third_party/umd/tests
+          cp -r tt-metal/build_emule_clang/_cluster_descs/cluster_descriptor_examples \
+                tt-metal/tt_metal/third_party/umd/tests/
+
+      - name: Install Python (for classify-results.py)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3
+
+      - name: Run regression
+        env:
+          TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
+          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule_clang
+        run: bash tt-emule/.github/scripts/ci-regression.sh
+
+      - name: Classify results
+        env:
+          BUILD_DIR: ${{ github.workspace }}/tt-metal/build_emule_clang
+        run: |
+          python3 tt-emule/.github/scripts/classify-results.py \
+            --xml-dir "${RUNNER_TEMP}/gtest-xml" \
+            --allowlist tt-emule/.github/known-failures.txt \
+            --build-dir "$BUILD_DIR"
+
+      - name: Upload regression artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-results
+          path: |
+            ${{ runner.temp }}/regression.log
+            ${{ runner.temp }}/gtest-xml/*.xml
+          retention-days: 30
+          if-no-files-found: warn

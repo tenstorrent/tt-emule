@@ -1,0 +1,163 @@
+# Nightly Upstream Regression — builds tt-metal at main tip (NOT the pinned SHA)
+# against tt-emule main, then runs the full regression. Warning-only: failures
+# do not block anything. Two purposes:
+#   1. Detect tt-metal-induced breakage within 24h.
+#   2. Warm the GitHub Actions ccache against the current tt-metal main, so
+#      that PRs which later bump tt-metal-pin.txt to that SHA hit warm cache.
+#
+# Slack notification on failure is documented in .github/notify-stub.md.
+
+name: Nightly Upstream Regression
+
+on:
+  schedule:
+    - cron: '0 7 * * *'   # 07:00 UTC daily
+  workflow_dispatch: {}
+
+concurrency:
+  group: nightly-upstream
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build tt-metal (main tip) against tt-emule main
+    runs-on: tt-ubuntu-2204-large-stable
+    timeout-minutes: 240
+    continue-on-error: true
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - name: Checkout tt-emule (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: tt-emule
+
+      - name: Resolve tt-metal main tip
+        id: resolve
+        run: |
+          SHA=$(git ls-remote https://github.com/tenstorrent/tt-metal main | awk '{print $1}')
+          if [ -z "$SHA" ]; then
+            echo "::error::failed to resolve tt-metal main tip"
+            exit 1
+          fi
+          echo "tt-metal main tip: $SHA"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tt-metal
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ steps.resolve.outputs.sha }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Init required tt-metal submodules
+        run: |
+          cd tt-metal
+          git submodule update --init --depth=1 tt_metal/third_party/umd
+          git submodule update --init --depth=1 tt_metal/third_party/tracy
+
+      - name: Install toolchain
+        run: bash tt-emule/.github/scripts/ci-setup.sh
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: tt-metal-${{ steps.resolve.outputs.sha }}-clang20-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            tt-metal-${{ steps.resolve.outputs.sha }}-clang20-${{ runner.os }}-
+            tt-metal-${{ steps.resolve.outputs.sha }}-clang20-
+            tt-metal-
+
+      - name: Build
+        env:
+          TT_EMULE_DIR: ${{ github.workspace }}/tt-emule
+          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
+          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule_clang
+        run: bash tt-emule/.github/scripts/ci-build.sh
+
+      - name: Stage cluster descriptors with build artifact
+        run: |
+          mkdir -p tt-metal/build_emule_clang/_cluster_descs
+          cp -r tt-metal/tt_metal/third_party/umd/tests/cluster_descriptor_examples \
+                tt-metal/build_emule_clang/_cluster_descs/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-tt-metal-build-${{ github.run_id }}
+          path: tt-metal/build_emule_clang/
+          retention-days: 1
+          if-no-files-found: error
+
+  test:
+    name: Run regression
+    needs: build
+    runs-on: tt-ubuntu-2204-xlarge-stable
+    timeout-minutes: 60
+    continue-on-error: true
+    steps:
+      - name: Checkout tt-emule (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: tt-emule
+
+      - name: Checkout tt-metal at resolved SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ needs.build.outputs.sha }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nightly-tt-metal-build-${{ github.run_id }}
+          path: tt-metal/build_emule_clang/
+
+      - name: Place cluster descriptors
+        run: |
+          mkdir -p tt-metal/tt_metal/third_party/umd/tests
+          cp -r tt-metal/build_emule_clang/_cluster_descs/cluster_descriptor_examples \
+                tt-metal/tt_metal/third_party/umd/tests/
+
+      - name: Install Python
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3
+
+      - name: Record tt-metal SHA for downstream steps
+        run: echo "${{ needs.build.outputs.sha }}" > tt-metal-pin-resolved.txt
+
+      - name: Run regression
+        env:
+          TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
+          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule_clang
+        run: bash tt-emule/.github/scripts/ci-regression.sh
+
+      - name: Classify results
+        env:
+          BUILD_DIR: ${{ github.workspace }}/tt-metal/build_emule_clang
+        run: |
+          python3 tt-emule/.github/scripts/classify-results.py \
+            --xml-dir "${RUNNER_TEMP}/gtest-xml" \
+            --allowlist tt-emule/.github/known-failures.txt \
+            --build-dir "$BUILD_DIR"
+
+      - name: Upload regression artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-regression-results-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/regression.log
+            ${{ runner.temp }}/gtest-xml/*.xml
+            tt-metal-pin-resolved.txt
+          retention-days: 30
+          if-no-files-found: warn

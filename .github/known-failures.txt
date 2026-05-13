@@ -1,0 +1,38 @@
+# tt-emule known regression failures.
+#
+# Format: one gtest filter expression per line. Wildcards permitted
+# (e.g. `Fixture.*`). Comments start with `#`; blank lines are ignored.
+#
+# Stale entries (listed here but matching no test in the run) cause CI to fail.
+# Newly-passing entries (listed here but the test now passes) also cause CI to
+# fail, signalling that someone fixed something and this file should be updated.
+#
+# See KNOWN_ISSUES.md for the underlying root-cause analysis. Section numbers
+# below refer to that document.
+
+# §1 — Stream register tests: missing noc_overlay_parameters.h / stream_io_map.h stubs.
+MeshDeviceFixture.TensixDirectedStreamRegWriteRead
+MeshDeviceFixture.TensixIncrementStreamRegWrite
+MeshDeviceFixture.TensixTestNocStreamRegs
+MeshDeviceFixture.IdleEthTestNocStreamRegs
+
+# §2 — Inline write tests: missing experimental::Noc::inline_dw_write + noc_mode.
+MeshDeviceFixture.TensixInlineWrite4BAlignment
+MeshDeviceFixture.TensixInlineWriteDedicatedNoc
+MeshDeviceFixture.TensixInlineWriteDedicatedNocMisaligned
+MeshDeviceFixture.TensixInlineWriteDynamicNoc
+
+# §3 — Kernel dereferences L1 offset as raw pointer; SIGSEGV under emulation.
+MeshDeviceFixture.TensixLegallyModifyRTArgsDataMovement
+
+# §5 — TensorAccessor constructor signature drift in unary_ng kernels.
+Add1DTensorAndScalarFixture.*
+AddUnaryFixture.*
+SubUnaryFixture.*
+RsubUnaryFixture.*
+RelationalUnaryFixture.*
+
+# DstJitFP32 variant is not yet wired up upstream; the binary only exposes the
+# BF16 variant. Until the FP32 variant lands, run_regression.sh's dst_capacity_fp32
+# entry surfaces as a missing-test failure.
+DstJitFP32.*

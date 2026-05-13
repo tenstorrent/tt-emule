@@ -32,6 +32,24 @@ TTNN_BIN="$TTNN_TEST_DIR/unit_tests_ttnn"
 
 PASS=0; FAIL=0; SKIP=0
 
+# When GTEST_XML_DIR is non-empty, each run_test invocation passes
+# --gtest_output=xml:$GTEST_XML_DIR/<name>.xml to the gtest binary so CI can
+# classify per-test results. Default (env unset) preserves the existing
+# behavior for local developer runs.
+GTEST_XML_DIR="${GTEST_XML_DIR:-}"
+[ -n "$GTEST_XML_DIR" ] && mkdir -p "$GTEST_XML_DIR"
+
+_gtest_xml_args() {
+    # Echo --gtest_output=... if XML capture is on; nothing otherwise.
+    # Sanitize the test name to a safe filename.
+    local name="$1"
+    if [ -n "$GTEST_XML_DIR" ]; then
+        local safe
+        safe=$(echo "$name" | tr -c '[:alnum:]._-' '_')
+        echo "--gtest_output=xml:$GTEST_XML_DIR/${safe}.xml"
+    fi
+}
+
 run_test() {
     local name="$1"; shift
     if [ ! -f "$1" ]; then
@@ -40,12 +58,20 @@ run_test() {
         return
     fi
     echo "--- $name ---"
-    if "$@" 2>&1 | tail -5; then
-        echo "  PASS"
-        PASS=$((PASS + 1))
+    local xml_arg
+    xml_arg="$(_gtest_xml_args "$name")"
+    if [ -n "$xml_arg" ]; then
+        if "$@" "$xml_arg" 2>&1 | tail -5; then
+            echo "  PASS"; PASS=$((PASS + 1))
+        else
+            echo "  FAIL"; FAIL=$((FAIL + 1))
+        fi
     else
-        echo "  FAIL"
-        FAIL=$((FAIL + 1))
+        if "$@" 2>&1 | tail -5; then
+            echo "  PASS"; PASS=$((PASS + 1))
+        else
+            echo "  FAIL"; FAIL=$((FAIL + 1))
+        fi
     fi
 }
 
@@ -57,12 +83,20 @@ run_test_verbose() {
         return
     fi
     echo "--- $name ---"
-    if "$@" 2>&1; then
-        echo "  PASS"
-        PASS=$((PASS + 1))
+    local xml_arg
+    xml_arg="$(_gtest_xml_args "$name")"
+    if [ -n "$xml_arg" ]; then
+        if "$@" "$xml_arg" 2>&1; then
+            echo "  PASS"; PASS=$((PASS + 1))
+        else
+            echo "  FAIL"; FAIL=$((FAIL + 1))
+        fi
     else
-        echo "  FAIL"
-        FAIL=$((FAIL + 1))
+        if "$@" 2>&1; then
+            echo "  PASS"; PASS=$((PASS + 1))
+        else
+            echo "  FAIL"; FAIL=$((FAIL + 1))
+        fi
     fi
 }
 
