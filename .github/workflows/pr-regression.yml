@@ -119,6 +119,13 @@ jobs:
           name: tt-metal-build-${{ github.run_id }}
           path: tt-metal/build_emule_clang/
 
+      - name: Restore executable bits on test binaries
+        # actions/upload-artifact@v4 strips Unix mode bits — restore +x on the
+        # gtest binaries that run_regression.sh invokes.
+        run: |
+          chmod +x tt-metal/build_emule_clang/test/tt_metal/unit_tests_* 2>/dev/null || true
+          chmod +x tt-metal/build_emule_clang/test/ttnn/unit_tests_* 2>/dev/null || true
+
       - name: Place cluster descriptors
         run: |
           mkdir -p tt-metal/tt_metal/third_party/umd/tests
