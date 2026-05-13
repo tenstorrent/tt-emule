@@ -53,7 +53,17 @@ cmake -B "$BUILD_DIR" \
 
 echo ""
 echo "== Building tt-metal =="
-cmake --build "$BUILD_DIR" -j"$(nproc)"
+# Build only the specific gtest binaries that run_regression.sh exercises.
+# Building "all" pulls in tests like tests/ttnn/tracy/cpp/test_get_programs_perf_data
+# which links against the python-bindings ttnn target — that target doesn't exist
+# under WITH_PYTHON_BINDINGS=OFF, so the link step fails.
+cmake --build "$BUILD_DIR" -j"$(nproc)" --target \
+    unit_tests_api \
+    unit_tests_integration \
+    unit_tests_legacy \
+    unit_tests_data_movement \
+    unit_tests_per_core_allocation \
+    unit_tests_ttnn
 
 echo ""
 echo "== ccache stats =="
