@@ -14,10 +14,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Threads REQUIRED)
 
-option(TT_EMULE_COMPAT_HEADERS
-    "Build with tt-metal-compatible header aliases (ttkernel/ and tt_metal_compat.hpp)"
-    OFF)
-
 # Optionally enable ThreadSanitizer in Debug builds
 if(PROJECT_IS_TOP_LEVEL AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-fsanitize=thread -g -O1)
@@ -63,15 +59,9 @@ install(TARGETS tt_emule_lib tt_emule_headers
     EXPORT tt-emule-targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
-install(DIRECTORY include/tt_emule include/kernel_api
+install(DIRECTORY include/tt_emule
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
-
-if(TT_EMULE_COMPAT_HEADERS)
-    install(DIRECTORY include/ttkernel
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    )
-endif()
 
 install(EXPORT tt-emule-targets
     FILE tt-emule-config.cmake

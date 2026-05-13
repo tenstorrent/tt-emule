@@ -1,8 +1,8 @@
 #pragma once
 // Shared circular buffer synchronization state and operations.
-// Single source of truth for CB FIFO logic used by both:
-//   - kernel_api/ (standalone tt-emule tests via CircularBuffer)
-//   - jit_hw/ (JIT-compiled kernels via __emule_cb_state / __emule_cbs)
+// Source of truth for CB FIFO logic, consumed by JIT-compiled kernels via
+// jit_hw/emule_cb_state.h (__emule_cb_state / __emule_cbs) and by the host
+// CircularBuffer wrapper used by the tilize host-only test.
 
 #include <atomic>
 #include <cstdint>

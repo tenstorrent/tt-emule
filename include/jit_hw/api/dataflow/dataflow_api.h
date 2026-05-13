@@ -11,8 +11,8 @@
 // __emule_addr_to_offset.  Addresses from get_noc_addr_from_bank_id() contain
 // firmware-style DRAM offsets (possibly > 2MB) and must NOT be masked.
 //
-// Does NOT include kernel_api/dataflow_api.hpp — this file provides all needed
-// functions with signatures matching the real device API.
+// Self-contained — provides all needed functions with signatures matching the
+// real device API.
 
 #include "jit_hw/jit_kernel_stubs.hpp"
 #include "jit_hw/api/cb_api.h"

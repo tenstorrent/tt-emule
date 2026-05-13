@@ -55,33 +55,6 @@ Program CreateProgram() {
     return Program();
 }
 
-uint32_t CreateKernel(Program& program, KernelFn fn, CoreCoord core,
-                      DataMovementConfig config) {
-    // Derive type from processor if default type is still DataMovement0
-    // but processor is explicitly RISCV_1.
-    KernelType type = config.type;
-    if (config.processor == DataMovementProcessor::RISCV_1 &&
-        type == KernelType::DataMovement0) {
-        type = KernelType::DataMovement1;
-    }
-    return program.add_kernel(type, std::move(fn), core);
-}
-
-uint32_t CreateKernel(Program& program, KernelFn fn, CoreCoord core,
-                      ComputeConfig /*config*/) {
-    return program.add_kernel(KernelType::Compute, std::move(fn), core);
-}
-
-uint32_t CreateKernel(Program& program, KernelFn fn, CoreCoord core,
-                      QuasarDataMovementConfig /*config*/, uint8_t processor_id) {
-    return program.add_kernel(KernelType::QuasarDM, std::move(fn), core, processor_id);
-}
-
-uint32_t CreateKernel(Program& program, KernelFn fn, CoreCoord core,
-                      QuasarComputeConfig /*config*/, uint8_t processor_id) {
-    return program.add_kernel(KernelType::QuasarCompute, std::move(fn), core, processor_id);
-}
-
 void SetRuntimeArgs(Program& program, uint32_t kernel_id, CoreCoord /*core*/,
                     std::vector<uint32_t> args) {
     program.set_runtime_args(kernel_id, std::move(args));
