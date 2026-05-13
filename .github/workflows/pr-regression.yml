@@ -133,25 +133,17 @@ jobs:
                 tt-metal/tt_metal/third_party/umd/tests/
 
       - name: Install Python + libc++ runtime
-        # Build runner installed libc++-20-dev; test runner needs the runtime
-        # shared libraries (libc++.so.1, libc++abi.so.1) since test binaries
-        # are dynamically linked against them. Add the LLVM apt repo first.
+        # Test binaries are dynamically linked against libc++.so.1 / libc++abi.so.1
+        # (built with tt-metal's libc++ toolchain). Match the build runner's
+        # package install — apt.llvm.org provides libc++-20-dev / libc++abi-20-dev,
+        # which include the runtime .so files. No separate "libc++1-20" pkg exists.
         run: |
-          sudo apt-get update -qq
-          if ! dpkg -s libc++1-20 >/dev/null 2>&1; then
-            if [ ! -f /etc/apt/sources.list.d/llvm-toolchain-jammy-20.list ]; then
-              wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
-                | sudo gpg --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg
-              echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] \
-          http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main" \
-                | sudo tee /etc/apt/sources.list.d/llvm-toolchain-jammy-20.list >/dev/null
-              sudo apt-get update -qq
-            fi
+          if [ ! -f /etc/apt/sources.list.d/llvm-toolchain-jammy-20.list ]; then
+            wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg
+            echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main" | sudo tee /etc/apt/sources.list.d/llvm-toolchain-jammy-20.list >/dev/null
           fi
-          sudo apt-get install -y --no-install-recommends \
-            python3 \
-            libc++1-20 \
-            libc++abi1-20
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3 libc++-20-dev libc++abi-20-dev
 
       - name: Run regression
         env:
