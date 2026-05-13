@@ -45,12 +45,17 @@ https://apt.kitware.com/ubuntu/ jammy main" \
     sudo apt-get install -y --no-install-recommends cmake
 fi
 
-# Other build tools.
+# Other build tools and system libraries tt-metal requires unconditionally
+# (NUMA + hwloc are find_library'd in tt-metal/third_party/CMakeLists.txt
+# regardless of ENABLE_DISTRIBUTED — they're used by the runtime for topology
+# discovery and thread pinning, not just by the distributed/MPI path).
 sudo apt-get install -y --no-install-recommends \
     ninja-build \
     ccache \
     python3 \
-    python3-yaml
+    python3-yaml \
+    libnuma-dev \
+    libhwloc-dev
 
 echo ""
 echo "== Toolchain versions =="
