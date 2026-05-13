@@ -85,12 +85,32 @@ public:
 
     DstRegisterFile& dst() { return dst_; }
 
-    uint8_t* l1_ptr(uint32_t offset) { 
-        if (offset % 4 != 0) {
-            fprintf(stderr, "[ASAN ERROR] Local L1 Alignment: Offset 0x%x must be 4-byte aligned for scalar access\n", offset);
-            abort();
+    // Device-side / kernel-side alignment chokepoint: every NOC resolution
+    // (__emule_resolve_noc_addr → core->l1_ptr) and every kernel-issued L1
+    // access lands here. WORKER cores require 4-byte alignment (RISC-V scalar
+    // safety); DRAM cores require 32-byte alignment on Wormhole (NOC DMA
+    // granularity). Host→device writes/reads are validated separately at the
+    // tt-metal host API layer.
+    uint8_t* l1_ptr(uint32_t offset) {
+        if (role_ == CoreRole::DRAM) {
+            // Hardcoded for Wormhole (N150): 32-byte DRAM alignment.
+            // tt-emule does not currently expose arch() at this level and
+            // emulation always targets WH per project policy.
+            if (offset % 32 != 0) {
+                fprintf(stderr,
+                        "[ASAN ERROR] DRAM Alignment: Offset 0x%x must be 32-byte aligned\n",
+                        offset);
+                abort();
+            }
+        } else {
+            if (offset % 4 != 0) {
+                fprintf(stderr,
+                        "[ASAN ERROR] Local L1 Alignment: Offset 0x%x must be 4-byte aligned for scalar access\n",
+                        offset);
+                abort();
+            }
         }
-        return l1_ + offset; 
+        return l1_ + offset;
     }
 
     // Raw pointer to start of memory region (L1 or DRAM backing).
