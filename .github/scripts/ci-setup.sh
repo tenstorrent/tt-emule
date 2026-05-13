@@ -56,7 +56,9 @@ sudo apt-get install -y --no-install-recommends \
     python3 \
     python3-yaml \
     libnuma-dev \
-    libhwloc-dev
+    libhwloc-dev \
+    libcapstone-dev \
+    libtbb-dev
 
 echo ""
 echo "== Toolchain versions =="
