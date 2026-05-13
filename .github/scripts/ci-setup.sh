@@ -45,13 +45,12 @@ https://apt.kitware.com/ubuntu/ jammy main" \
     sudo apt-get install -y --no-install-recommends cmake
 fi
 
-# Other build tools and system libraries needed by tt-metal.
+# Other build tools.
 sudo apt-get install -y --no-install-recommends \
     ninja-build \
     ccache \
     python3 \
-    python3-yaml \
-    libnuma-dev
+    python3-yaml
 
 echo ""
 echo "== Toolchain versions =="
