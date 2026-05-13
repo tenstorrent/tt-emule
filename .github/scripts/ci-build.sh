@@ -27,11 +27,17 @@ echo "  CCACHE_DIR:   $CCACHE_DIR"
 echo ""
 
 echo "== Configuring tt-metal =="
+# Use tt-metal's libc++ toolchain file. ENABLE_LIBCXX=ON alone only verifies
+# libc++ is installed (cmake/compilers.cmake:5) — it does NOT pass
+# -stdlib=libc++ to the compiler. The toolchain file at
+# cmake/x86_64-linux-clang-20-libcpp-toolchain.cmake sets
+# CMAKE_CXX_FLAGS_INIT="-stdlib=libc++" and is what actually switches the
+# stdlib. Without it, tt-metal's C++20 ranges code fails to compile against
+# Ubuntu 22.04's libstdc++ (from gcc-11).
 cmake -B "$BUILD_DIR" \
     -S "$TT_METAL_DIR" \
     -G Ninja \
-    -DCMAKE_C_COMPILER=clang-20 \
-    -DCMAKE_CXX_COMPILER=clang++-20 \
+    -DCMAKE_TOOLCHAIN_FILE="$TT_METAL_DIR/cmake/x86_64-linux-clang-20-libcpp-toolchain.cmake" \
     -DCMAKE_AR=/usr/bin/llvm-ar-20 \
     -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
     -DCMAKE_BUILD_TYPE=Release \
@@ -41,7 +47,6 @@ cmake -B "$BUILD_DIR" \
     -DWITH_PYTHON_BINDINGS=OFF \
     -DENABLE_TRACY=OFF \
     -DENABLE_DISTRIBUTED=OFF \
-    -DENABLE_LIBCXX=ON \
     -DTT_INSTALL=OFF
 
 echo ""
