@@ -160,6 +160,13 @@ jobs:
           fetch-depth: 1
           submodules: false
 
+      - name: Init tt-metal umd submodule
+        # umd carries tests/cluster_descriptor_examples, which run_d2m_regression.sh
+        # and ci-d2m-prepare.sh both reference for the n150 yaml.
+        shell: bash
+        working-directory: tt-metal
+        run: git submodule update --init --depth=1 tt_metal/third_party/umd
+
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
