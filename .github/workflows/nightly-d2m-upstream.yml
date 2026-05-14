@@ -66,6 +66,15 @@ jobs:
           fetch-depth: 0
           submodules: false
 
+      - name: Checkout tt-metal at derived SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ steps.resolve.outputs.metal }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
       - name: Restore ccache
         uses: actions/cache@v4
         with:
@@ -80,25 +89,16 @@ jobs:
         env:
           TT_EMULE_DIR: ${{ github.workspace }}/tt-emule
           TT_MLIR_DIR:  ${{ github.workspace }}/tt-mlir
+          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
         shell: bash
         run: bash tt-emule/.github/scripts/ci-build-mlir.sh
-
-      - name: Stage cluster descriptors + build artifacts
-        shell: bash
-        run: |
-          TTMETAL=tt-mlir/third_party/tt-metal/src/tt-metal
-          mkdir -p $TTMETAL/build/_cluster_descs
-          cp -r $TTMETAL/tt_metal/third_party/umd/tests/cluster_descriptor_examples \
-                $TTMETAL/build/_cluster_descs/
 
       - name: Tar build trees
         shell: bash
         run: |
-          # --dereference follows the build -> build_Release symlink that
-          # tt-mlir's ExternalProject creates for tt-metal.
           tar --posix --dereference -czf d2m-build.tar.gz \
               tt-mlir/build \
-              tt-mlir/third_party/tt-metal/src/tt-metal/build
+              tt-metal/build
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -133,7 +133,7 @@ jobs:
           fetch-depth: 0
           submodules: false
 
-      - name: Checkout tt-metal source at resolved SHA
+      - name: Checkout tt-metal at resolved SHA
         uses: actions/checkout@v4
         with:
           repository: tenstorrent/tt-metal
@@ -153,21 +153,13 @@ jobs:
         run: |
           tar -xzf d2m-build.tar.gz
           ls -la tt-mlir/build/ | head -10
-          ls -la tt-mlir/third_party/tt-metal/src/tt-metal/build/lib/ | head -10
-
-      - name: Place cluster descriptors at expected path
-        shell: bash
-        run: |
-          mkdir -p tt-metal/tt_metal/third_party/umd/tests
-          cp -r tt-mlir/third_party/tt-metal/src/tt-metal/build/_cluster_descs/cluster_descriptor_examples \
-                tt-metal/tt_metal/third_party/umd/tests/
+          ls -la tt-metal/build/lib/ | head -10
 
       - name: Restore executable bits on test entry points
         shell: bash
         run: |
-          BUILD=tt-mlir/third_party/tt-metal/src/tt-metal/build
-          chmod +x $BUILD/test/tt_metal/unit_tests_* 2>/dev/null || true
-          chmod +x $BUILD/test/ttnn/unit_tests_* 2>/dev/null || true
+          chmod +x tt-metal/build/test/tt_metal/unit_tests_* 2>/dev/null || true
+          chmod +x tt-metal/build/test/ttnn/unit_tests_* 2>/dev/null || true
 
       - name: Record resolved SHAs for downstream steps
         shell: bash
@@ -179,7 +171,7 @@ jobs:
         env:
           TT_MLIR_DIR:  ${{ github.workspace }}/tt-mlir
           TT_METAL_DIR: ${{ github.workspace }}/tt-metal
-          BUILD_DIR:    ${{ github.workspace }}/tt-mlir/third_party/tt-metal/src/tt-metal/build
+          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build
         shell: bash
         run: bash tt-emule/.github/scripts/ci-d2m-prepare.sh
 
@@ -187,13 +179,13 @@ jobs:
         env:
           TT_MLIR_DIR:  ${{ github.workspace }}/tt-mlir
           TT_METAL_DIR: ${{ github.workspace }}/tt-metal
-          BUILD_DIR:    ${{ github.workspace }}/tt-mlir/third_party/tt-metal/src/tt-metal/build
+          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build
         shell: bash
         run: bash tt-emule/.github/scripts/ci-d2m-regression.sh
 
       - name: Classify results
         env:
-          BUILD_DIR: ${{ github.workspace }}/tt-mlir/third_party/tt-metal/src/tt-metal/build
+          BUILD_DIR: ${{ github.workspace }}/tt-metal/build
         shell: bash
         run: |
           python3 tt-emule/.github/scripts/classify-d2m-results.py \

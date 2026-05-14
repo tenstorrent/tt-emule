@@ -8,8 +8,7 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TT_METAL_DIR="${TT_METAL_DIR:-/localdev/arminale/tt-metal}"
 TT_MLIR_DIR="${TT_MLIR_DIR:-/localdev/arminale/tt-mlir}"
-BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule}"
-TEST_DIR="$TT_MLIR_DIR/test/python/golden/d2m"
+BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule_clang}"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"
 LOG_DIR="/tmp/tt_emule_d2m_logs_$$"
 TIMEOUT="${TIMEOUT:-1800}"
@@ -26,20 +25,19 @@ for arg in "$@"; do
     esac
 done
 
-# D2M test files
-TEST_FILES=(
-    test_matmul.py
-    test_tilize.py
-    test_dma.py
-    test_layout.py
-    test_allocate.py
-    test_masking.py
-    test_reductions.py
-    test_bfp8_typecast.py
-    test_tms.py
-    test_virtual_grid_rowmajor.py
-    test_virtual_grids.py
-)
+# Auto-detect D2M test layout. tt-mlir main puts the suite under
+# test/python/golden/d2m/test_*.py (33 files); older branches kept them at
+# test/python/golden/test_metal_*.py (13 files).
+if [ -d "$TT_MLIR_DIR/test/python/golden/d2m" ]; then
+    TEST_DIR="$TT_MLIR_DIR/test/python/golden/d2m"
+    mapfile -t TEST_FILES < <(cd "$TEST_DIR" && ls test_*.py 2>/dev/null | sort)
+elif [ -d "$TT_MLIR_DIR/test/python/golden" ]; then
+    TEST_DIR="$TT_MLIR_DIR/test/python/golden"
+    mapfile -t TEST_FILES < <(cd "$TEST_DIR" && ls test_metal_*.py 2>/dev/null | sort)
+else
+    echo "ERROR: no golden test directory under $TT_MLIR_DIR/test/python/" >&2
+    exit 1
+fi
 
 echo "========================================"
 echo " D2M Golden Test Regression"

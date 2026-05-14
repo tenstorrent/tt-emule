@@ -2,11 +2,13 @@
 # Configure and build tt-mlir (with embedded tt-metal build) against tt-emule.
 #
 # Required env:
-#   TT_EMULE_DIR   path to tt-emule workspace (the PR source)
-#   TT_MLIR_DIR    path to tt-mlir workspace (checked out at pinned SHA)
+#   TT_EMULE_DIR    path to tt-emule workspace (the PR source)
+#   TT_MLIR_DIR     path to tt-mlir workspace (checked out at pinned SHA)
+#   TT_METAL_DIR    path to tt-metal workspace at the SHA tt-mlir pins
+#                   (passed via -DTTMLIR_TTMETAL_SOURCE_DIR)
 #
 # Optional env:
-#   BUILD_DIR      tt-mlir build dir (default: $TT_MLIR_DIR/build)
+#   BUILD_DIR       tt-mlir build dir (default: $TT_MLIR_DIR/build)
 #
 # Designed to run inside the tt-mlir CI Docker image which has
 # /opt/ttmlir-toolchain pre-populated. Outside that image, env/activate
@@ -16,6 +18,7 @@ set -euo pipefail
 
 : "${TT_EMULE_DIR:?TT_EMULE_DIR must be set}"
 : "${TT_MLIR_DIR:?TT_MLIR_DIR must be set}"
+: "${TT_METAL_DIR:?TT_METAL_DIR must be set}"
 BUILD_DIR="${BUILD_DIR:-$TT_MLIR_DIR/build}"
 
 export CCACHE_DIR="${CCACHE_DIR:-$HOME/.ccache}"
@@ -30,6 +33,7 @@ ccache --zero-stats >/dev/null 2>&1 || true
 echo "== ci-build-mlir.sh =="
 echo "  TT_EMULE_DIR: $TT_EMULE_DIR"
 echo "  TT_MLIR_DIR:  $TT_MLIR_DIR"
+echo "  TT_METAL_DIR: $TT_METAL_DIR"
 echo "  BUILD_DIR:    $BUILD_DIR"
 echo "  CCACHE_DIR:   $CCACHE_DIR"
 echo ""
@@ -56,6 +60,9 @@ python --version
 echo ""
 
 echo "== Configuring tt-mlir =="
+# TTMLIR_TTMETAL_SOURCE_DIR points tt-mlir's ExternalProject at a pre-cloned
+# tt-metal tree (the one the workflow checked out at the SHA derived from
+# tt-mlir's TT_METAL_VERSION). This avoids tt-mlir cloning a second copy.
 cmake -B "$BUILD_DIR" -S "$TT_MLIR_DIR" -G Ninja \
     -DCMAKE_C_COMPILER=clang-17 \
     -DCMAKE_CXX_COMPILER=clang++-17 \
@@ -63,6 +70,7 @@ cmake -B "$BUILD_DIR" -S "$TT_MLIR_DIR" -G Ninja \
     -DTTMLIR_ENABLE_RUNTIME=ON \
     -DTT_RUNTIME_ENABLE_TTMETAL=ON \
     -DTTMLIR_ENABLE_STABLEHLO=ON \
+    -DTTMLIR_TTMETAL_SOURCE_DIR="$TT_METAL_DIR" \
     -DCMAKE_C_COMPILER_LAUNCHER=ccache \
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
@@ -81,4 +89,4 @@ echo ""
 echo "== Build artifacts =="
 ls -la "$BUILD_DIR/lib/" 2>/dev/null | head -20 || true
 echo "..."
-ls -la "$TT_MLIR_DIR/third_party/tt-metal/src/tt-metal/build/lib/" 2>/dev/null | head -20 || true
+ls -la "$TT_METAL_DIR/build/lib/" 2>/dev/null | head -20 || true
