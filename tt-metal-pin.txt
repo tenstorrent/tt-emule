@@ -4,5 +4,5 @@
 # To bump: edit this file in a PR; the regression must pass against the new pin
 # before the PR is mergeable.
 
-# Pinned to arminale/emule-metal-base branch tip.
-8711ac3d0ba835255058ce6c68a510b74915f43b
+# Pinned to tt-metal main tip.
+c63bb84731b86fc5656064a324511e83e06fe474
