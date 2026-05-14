@@ -78,6 +78,16 @@ jobs:
           fetch-depth: 1
           submodules: false
 
+      - name: Init tt-metal submodules
+        # tt-metal's CMakeLists.txt FATAL_ERRORs if umd isn't present. Init only
+        # what's needed (umd + tracy) at depth 1 — tt_llk is not pinned by all
+        # tt-metal revisions and the build doesn't need it under TT_METAL_USE_EMULE.
+        shell: bash
+        working-directory: tt-metal
+        run: |
+          git submodule update --init --depth=1 tt_metal/third_party/umd
+          git submodule update --init --depth=1 tt_metal/third_party/tracy
+
       - name: Restore ccache
         uses: actions/cache@v4
         with:

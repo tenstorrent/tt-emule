@@ -75,6 +75,13 @@ jobs:
           fetch-depth: 1
           submodules: false
 
+      - name: Init tt-metal submodules
+        shell: bash
+        working-directory: tt-metal
+        run: |
+          git submodule update --init --depth=1 tt_metal/third_party/umd
+          git submodule update --init --depth=1 tt_metal/third_party/tracy
+
       - name: Restore ccache
         uses: actions/cache@v4
         with:
