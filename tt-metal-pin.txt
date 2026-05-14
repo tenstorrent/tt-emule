@@ -1,0 +1,8 @@
+# Pinned tt-metal commit used by PR regression CI.
+#
+# The first non-comment, non-blank line is the SHA the CI will check out.
+# To bump: edit this file in a PR; the regression must pass against the new pin
+# before the PR is mergeable.
+
+# Pinned to tt-metal main tip.
+c63bb84731b86fc5656064a324511e83e06fe474
