@@ -84,6 +84,24 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                 l1_addr, __emule_sem_l1_range_start, __emule_sem_l1_range_end);
         abort();
     }
+    if (__emule_l1_tensor_ranges != nullptr && l1_addr >= __emule_l1_unreserved_base) {
+        bool in_tensor = false;
+        for (uint32_t i = 0; i < __emule_l1_tensor_ranges_count; ++i) {
+            uint64_t packed = __emule_l1_tensor_ranges[i];
+            uint32_t r_start = static_cast<uint32_t>(packed >> 32);
+            uint32_t r_end = static_cast<uint32_t>(packed);
+            if (l1_addr >= r_start && l1_addr < r_end) {
+                in_tensor = true;
+                break;
+            }
+        }
+        if (!in_tensor) {
+            fprintf(stderr,
+                    "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
+                    l1_addr);
+            abort();
+        }
+    }
     uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
     if (l1_addr >= l1_base) {
         // Already an absolute host pointer (from l1_alloc / CB / DFB).

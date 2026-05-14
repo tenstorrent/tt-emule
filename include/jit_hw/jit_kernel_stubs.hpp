@@ -51,6 +51,22 @@ extern thread_local uint32_t __emule_sem_l1_range_end;
 // CB is still in-flight publishes garbage to the consumer on real silicon.
 extern thread_local uint32_t __emule_pending_noc_reads;
 
+// Per-kernel-thread out-of-bounds-tensor sanitizer state. Populated by
+// emulated_program_runner before each kernel launch only when
+// TT_EMULE_STRICT_TENSOR is set; otherwise __emule_l1_tensor_ranges stays
+// null and the check inside __emule_local_l1_to_ptr is skipped.
+//
+//   __emule_l1_unreserved_base    — start of user-allocatable L1. Accesses
+//                                    below this are system regions (mailbox,
+//                                    KERNEL_CONFIG, etc.) and pass through.
+//   __emule_l1_tensor_ranges      — packed (start<<32)|end array. Accesses at
+//                                    or above l1_unreserved_base must fall
+//                                    inside one of these ranges.
+//   __emule_l1_tensor_ranges_count
+extern thread_local uint32_t __emule_l1_unreserved_base;
+extern thread_local const uint64_t* __emule_l1_tensor_ranges;
+extern thread_local uint32_t __emule_l1_tensor_ranges_count;
+
 // Translate a raw L1 firmware offset (or already-absolute host pointer) to a
 // host uint8_t*.  Available to ALL JIT kernels so the l1_arg_ptr regex patch in
 // emulated_program_runner can inject calls without requiring dataflow_api.h.
@@ -67,6 +83,28 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                 "[ASAN ERROR] Illegal Semaphore Access: Offset 0x%x is inside the reserved Semaphore region [0x%x, 0x%x)\n",
                 l1_addr, __emule_sem_l1_range_start, __emule_sem_l1_range_end);
         abort();
+    }
+    // Out-of-bounds-tensor sanitizer. Only active when emulated_program_runner
+    // populated the live ranges (i.e. TT_EMULE_STRICT_TENSOR is set). Accesses
+    // below l1_unreserved_base are system regions (mailbox, KERNEL_CONFIG, …)
+    // and pass through; at-or-above must hit a live tensor extent.
+    if (__emule_l1_tensor_ranges != nullptr && l1_addr >= __emule_l1_unreserved_base) {
+        bool in_tensor = false;
+        for (uint32_t i = 0; i < __emule_l1_tensor_ranges_count; ++i) {
+            uint64_t packed = __emule_l1_tensor_ranges[i];
+            uint32_t r_start = static_cast<uint32_t>(packed >> 32);
+            uint32_t r_end = static_cast<uint32_t>(packed);
+            if (l1_addr >= r_start && l1_addr < r_end) {
+                in_tensor = true;
+                break;
+            }
+        }
+        if (!in_tensor) {
+            fprintf(stderr,
+                    "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
+                    l1_addr);
+            abort();
+        }
     }
     uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
     if (l1_addr >= l1_base) {
