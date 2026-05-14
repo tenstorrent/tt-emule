@@ -63,7 +63,7 @@ jobs:
           repository: tenstorrent/tt-mlir
           ref: ${{ steps.resolve.outputs.mlir }}
           path: tt-mlir
-          fetch-depth: 1
+          fetch-depth: 0
           submodules: false
 
       - name: Restore ccache
@@ -128,7 +128,7 @@ jobs:
           repository: tenstorrent/tt-mlir
           ref: ${{ needs.build.outputs.mlir-sha }}
           path: tt-mlir
-          fetch-depth: 1
+          fetch-depth: 0
           submodules: false
 
       - name: Download build artifact
