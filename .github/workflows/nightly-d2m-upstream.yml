@@ -183,7 +183,7 @@ jobs:
           source env/activate
           set -u
           shopt -s nullglob
-          WHEELS=("${{ github.workspace }}/tt-mlir/build/tools/ttrt/build/"ttrt-*.whl)
+          WHEELS=("$GITHUB_WORKSPACE/tt-mlir/build/tools/ttrt/build/"ttrt-*.whl)
           if [ ${#WHEELS[@]} -eq 0 ]; then
             echo "::error::ttrt wheel not found under tt-mlir/build/tools/ttrt/build/"
             exit 1

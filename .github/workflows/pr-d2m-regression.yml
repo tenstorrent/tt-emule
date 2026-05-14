@@ -192,6 +192,11 @@ jobs:
         # wheel produced under tt-mlir/build/tools/ttrt/build/. Without this,
         # `python -m ttrt` runs but ttrt's importlib.metadata-based version
         # lookup raises StopIteration, so ttrt query never writes system_desc.
+        #
+        # NOTE: use $GITHUB_WORKSPACE (env), not ${{ github.workspace }}.
+        # The latter expands to the host path /opt/runner/_work/...; the
+        # container has the same workspace mounted at /__w/... and only the
+        # env var is translated correctly.
         shell: bash
         run: |
           set -xeo pipefail
@@ -202,7 +207,7 @@ jobs:
           source env/activate
           set -u
           shopt -s nullglob
-          WHEELS=("${{ github.workspace }}/tt-mlir/build/tools/ttrt/build/"ttrt-*.whl)
+          WHEELS=("$GITHUB_WORKSPACE/tt-mlir/build/tools/ttrt/build/"ttrt-*.whl)
           if [ ${#WHEELS[@]} -eq 0 ]; then
             echo "::error::ttrt wheel not found under tt-mlir/build/tools/ttrt/build/"
             exit 1
