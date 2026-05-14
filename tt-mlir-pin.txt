@@ -1,0 +1,4 @@
+# tt-mlir SHA pinned for D2M CI. Bump when adopting newer tt-mlir features.
+# The tt-metal SHA used by D2M is derived from this pin via
+# tt-mlir/third_party/CMakeLists.txt's TT_METAL_VERSION.
+f8e1738dd5f209d47359e5dc93f0803e98d861eb

@@ -13,6 +13,7 @@ TEST_DIR="$TT_MLIR_DIR/test/python/golden/d2m"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"
 LOG_DIR="/tmp/tt_emule_d2m_logs_$$"
 TIMEOUT="${TIMEOUT:-1800}"
+D2M_XML_DIR="${D2M_XML_DIR:-}"
 
 SERIAL=0
 PYTEST_EXTRA_ARGS=()
@@ -102,10 +103,16 @@ for tf in "${TEST_FILES[@]}"; do
 
     log_file="$LOG_DIR/${tf%.py}.log"
 
+    JUNIT_ARG=()
+    if [ -n "$D2M_XML_DIR" ]; then
+        mkdir -p "$D2M_XML_DIR"
+        JUNIT_ARG=("--junitxml=$D2M_XML_DIR/${tf%.py}.xml")
+    fi
+
     if [ $SERIAL -eq 1 ]; then
         echo "--- $tf ---"
         START=$(date +%s)
-        timeout "$TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider --forked "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1
+        timeout "$TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider --forked "${JUNIT_ARG[@]}" "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1
         RC=$?
         END=$(date +%s)
         ELAPSED=$((END - START))
@@ -124,7 +131,7 @@ for tf in "${TEST_FILES[@]}"; do
         # Clear JIT cache between test files
         rm -rf /tmp/tt_emule_jit_*
     else
-        timeout "$TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider --forked "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1 &
+        timeout "$TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider --forked "${JUNIT_ARG[@]}" "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1 &
         PIDS[$tf]=$!
     fi
 done

@@ -1,0 +1,188 @@
+# Nightly D2M Upstream — builds tt-mlir at main tip (NOT the pinned SHA) and
+# tt-metal at the SHA that main-tip tt-mlir itself pins, against tt-emule main.
+# Warning-only: failures don't block merges. Two purposes:
+#   1. Detect tt-mlir-induced D2M breakage within 24h.
+#   2. Warm the GitHub Actions ccache so PRs which later bump tt-mlir-pin.txt
+#      already hit warm cache.
+
+name: Nightly D2M Upstream
+
+on:
+  schedule:
+    - cron: '0 8 * * *'   # 08:00 UTC daily (one hour after pr-regression's nightly)
+  workflow_dispatch: {}
+
+concurrency:
+  group: nightly-d2m-upstream
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build tt-mlir (main tip) against tt-emule main
+    runs-on: tt-ubuntu-2204-large-stable
+    timeout-minutes: 240
+    continue-on-error: true
+    container:
+      image: harbor.ci.tenstorrent.net/ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+      options: --user root
+    outputs:
+      mlir-sha:  ${{ steps.resolve.outputs.mlir }}
+      metal-sha: ${{ steps.resolve.outputs.metal }}
+    steps:
+      - name: Checkout tt-emule (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: tt-emule
+
+      - name: Resolve tt-mlir main tip + derived tt-metal SHA
+        id: resolve
+        shell: bash
+        run: |
+          MLIR_SHA=$(git ls-remote https://github.com/tenstorrent/tt-mlir main | awk '{print $1}')
+          if [ -z "$MLIR_SHA" ]; then
+            echo "::error::failed to resolve tt-mlir main tip"
+            exit 1
+          fi
+          echo "tt-mlir main tip: $MLIR_SHA"
+          METAL_SHA=$(curl -fsSL "https://raw.githubusercontent.com/tenstorrent/tt-mlir/$MLIR_SHA/third_party/CMakeLists.txt" \
+              | grep 'set(TT_METAL_VERSION' \
+              | sed 's/.*"\(.*\)".*/\1/' \
+              | head -1)
+          if [ -z "$METAL_SHA" ]; then
+            echo "::error::could not extract TT_METAL_VERSION from tt-mlir@$MLIR_SHA"
+            exit 1
+          fi
+          echo "Derived tt-metal SHA: $METAL_SHA"
+          echo "mlir=$MLIR_SHA"   >> "$GITHUB_OUTPUT"
+          echo "metal=$METAL_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tt-mlir at resolved SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-mlir
+          ref: ${{ steps.resolve.outputs.mlir }}
+          path: tt-mlir
+          fetch-depth: 1
+          submodules: false
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: /root/.ccache
+          key: d2m-mlir-${{ steps.resolve.outputs.mlir }}-metal-${{ steps.resolve.outputs.metal }}-clang17-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            d2m-mlir-${{ steps.resolve.outputs.mlir }}-metal-${{ steps.resolve.outputs.metal }}-clang17-${{ runner.os }}-
+            d2m-mlir-${{ steps.resolve.outputs.mlir }}-
+            d2m-mlir-
+
+      - name: Build
+        env:
+          TT_EMULE_DIR: ${{ github.workspace }}/tt-emule
+          TT_MLIR_DIR:  ${{ github.workspace }}/tt-mlir
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-build-mlir.sh
+
+      - name: Stage cluster descriptors + build artifacts
+        shell: bash
+        run: |
+          TTMETAL=tt-mlir/third_party/tt-metal/src/tt-metal
+          mkdir -p $TTMETAL/build/_cluster_descs
+          cp -r $TTMETAL/tt_metal/third_party/umd/tests/cluster_descriptor_examples \
+                $TTMETAL/build/_cluster_descs/
+
+      - name: Tar build trees
+        shell: bash
+        run: |
+          tar --posix -czf d2m-build.tar.gz \
+              tt-mlir/build \
+              tt-mlir/third_party/tt-metal/src/tt-metal/build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-d2m-build-${{ github.run_id }}
+          path: d2m-build.tar.gz
+          retention-days: 1
+          if-no-files-found: error
+
+  test:
+    name: Run D2M regression
+    needs: build
+    runs-on: tt-ubuntu-2204-xlarge-stable
+    timeout-minutes: 120
+    continue-on-error: true
+    container:
+      image: harbor.ci.tenstorrent.net/ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+      options: --user root
+    steps:
+      - name: Checkout tt-emule (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: tt-emule
+
+      - name: Checkout tt-mlir at resolved SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-mlir
+          ref: ${{ needs.build.outputs.mlir-sha }}
+          path: tt-mlir
+          fetch-depth: 1
+          submodules: false
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nightly-d2m-build-${{ github.run_id }}
+          path: ${{ github.workspace }}
+
+      - name: Unpack build trees
+        shell: bash
+        run: |
+          tar -xzf d2m-build.tar.gz
+          ls -la tt-mlir/build/ | head -10
+          ls -la tt-mlir/third_party/tt-metal/src/tt-metal/build/lib/ | head -10
+
+      - name: Restore executable bits on test entry points
+        shell: bash
+        run: |
+          BUILD=tt-mlir/third_party/tt-metal/src/tt-metal/build
+          chmod +x $BUILD/test/tt_metal/unit_tests_* 2>/dev/null || true
+          chmod +x $BUILD/test/ttnn/unit_tests_* 2>/dev/null || true
+
+      - name: Record resolved SHAs for downstream steps
+        shell: bash
+        run: |
+          echo "${{ needs.build.outputs.mlir-sha }}"  > tt-mlir-pin-resolved.txt
+          echo "${{ needs.build.outputs.metal-sha }}" > tt-metal-pin-resolved.txt
+
+      - name: Run D2M regression
+        env:
+          TT_MLIR_DIR:  ${{ github.workspace }}/tt-mlir
+          TT_METAL_DIR: ${{ github.workspace }}/tt-mlir/third_party/tt-metal/src/tt-metal
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-d2m-regression.sh
+
+      - name: Classify results
+        env:
+          BUILD_DIR: ${{ github.workspace }}/tt-mlir/third_party/tt-metal/src/tt-metal/build
+        shell: bash
+        run: |
+          python3 tt-emule/.github/scripts/classify-d2m-results.py \
+            --xml-dir "${RUNNER_TEMP}/d2m-xml" \
+            --allowlist tt-emule/.github/known-failures-d2m.txt \
+            --build-dir "$BUILD_DIR"
+
+      - name: Upload regression artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-d2m-regression-results-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/d2m-regression.log
+            ${{ runner.temp }}/d2m-xml/*.xml
+            tt-mlir-pin-resolved.txt
+            tt-metal-pin-resolved.txt
+          retention-days: 30
+          if-no-files-found: warn

@@ -1,0 +1,14 @@
+# tt-mlir D2M known regression failures against tt-emule.
+#
+# Format: one pytest node-id per line, e.g.
+#   test_metal_reductions.py::test_reduce_dim_NN
+# Wildcards via fnmatch (* and ?) are supported, e.g.
+#   test_metal_reductions.py::test_reduce_unaligned_*
+#
+# The CI classifier (`classify-d2m-results.py`) fails the job on any of:
+#   - a test that failed in CI and is NOT covered by an entry here
+#   - an entry that matches a test which now PASSES (remove the entry)
+#   - an entry that matches no test (stale — update the file)
+#
+# This file is intentionally empty in the initial commit. After the first CI
+# run reports the observed failures, paste them here in a follow-up commit.
