@@ -176,13 +176,19 @@ jobs:
       - name: Install ttrt wheel
         shell: bash
         run: |
-          set -euo pipefail
-          set +u; cd tt-mlir && source env/activate; set -u
-          WHEEL=$(ls "${{ github.workspace }}/tt-mlir/build/tools/ttrt/build/"ttrt-*.whl 2>/dev/null | head -1)
-          if [ -z "$WHEEL" ]; then
+          set -xeo pipefail
+          ls -la tt-mlir/build/tools/ttrt/build/ 2>&1 | head -20 || true
+          set +u
+          cd tt-mlir
+          source env/activate
+          set -u
+          shopt -s nullglob
+          WHEELS=("${{ github.workspace }}/tt-mlir/build/tools/ttrt/build/"ttrt-*.whl)
+          if [ ${#WHEELS[@]} -eq 0 ]; then
             echo "::error::ttrt wheel not found under tt-mlir/build/tools/ttrt/build/"
             exit 1
           fi
+          WHEEL="${WHEELS[0]}"
           echo "Installing $WHEEL"
           pip show ttrt >/dev/null 2>&1 && pip uninstall -y ttrt || true
           pip install --force-reinstall --no-deps "$WHEEL"
