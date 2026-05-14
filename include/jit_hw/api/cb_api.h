@@ -156,6 +156,9 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
     // one trailing push_back(Wt)).
     // Lock-free fast path (safe for SPSC — only consumer decrements occupied)
     if ((cb.num_pages - cb.occupied.load(std::memory_order_acquire)) >= n) {
+        // CB-boundary sanitizer: record how many pages are now reservable
+        // starting at the current cb.write_idx. cb_push_back decrements this.
+        __emule_cb_reserved_pages[cb_id] += n;
         return;
     }
     // Self-recycled CB: this thread also consumes it (called cb_wait_front), so
@@ -163,6 +166,7 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
     // recycle (wait_front; pack_tile<true>; reserve_back; pop_front; push_back).
     // emule runs compute single-threaded; silicon overlaps UNPACK/PACK.
     if ((__emule_cb_self_consume_mask >> cb_id) & 1u) {
+        __emule_cb_reserved_pages[cb_id] += n;
         return;
     }
     std::unique_lock<std::mutex> lk(cb.mu);
@@ -177,6 +181,7 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
                 my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
         std::abort();
     }
+    __emule_cb_reserved_pages[cb_id] += n;
 }
 
 inline void cb_push_back(uint32_t cb_id, uint32_t n) {
@@ -186,6 +191,13 @@ inline void cb_push_back(uint32_t cb_id, uint32_t n) {
                 "(%u outstanding) — missing noc_async_read_barrier()\n",
                 cb_id, __emule_pending_noc_reads);
         abort();
+    }
+    // CB-boundary sanitizer: shrink the reserved window before the FIFO
+    // advance so any concurrent boundary check sees a consistent view.
+    if (n <= __emule_cb_reserved_pages[cb_id]) {
+        __emule_cb_reserved_pages[cb_id] -= n;
+    } else {
+        __emule_cb_reserved_pages[cb_id] = 0;
     }
     // Advance this thread's own write pointer (mirrors the per-RISC write ptr on
     // silicon), then bump the shared occupied semaphore.
@@ -233,7 +245,15 @@ inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
     // other consumer. See __emule_cb_self_consume_mask.
     __emule_cb_self_consume_mask |= (1u << cb_id);
     // Lock-free fast path (safe for SPSC — only producer increments occupied)
-    if (cb.occupied.load(std::memory_order_acquire) >= n) return;
+    if (cb.occupied.load(std::memory_order_acquire) >= n) {
+        // CB-boundary sanitizer: widen the read window to the largest count
+        // the kernel has waited on since the last pop. max(), not +=, because
+        // overlapping waits before a pop don't grow the consumable region.
+        if (n > __emule_cb_waited_pages[cb_id]) {
+            __emule_cb_waited_pages[cb_id] = n;
+        }
+        return;
+    }
     // Self-produced CB: this thread also fills it (called cb_reserve_back/
     // cb_push_back), so no other thread will add tiles — blocking would deadlock
     // the single-threaded compute kernel. The data this thread needs was already
@@ -254,9 +274,21 @@ inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
                 my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
         std::abort();
     }
+    if (n > __emule_cb_waited_pages[cb_id]) {
+        __emule_cb_waited_pages[cb_id] = n;
+    }
 }
 
 inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
+    // CB-boundary sanitizer: shrink the read window before the FIFO advance
+    // so any concurrent boundary check sees a consistent view. Saturate at 0
+    // — a kernel that pops more than it waited on is suspect but we don't
+    // want to underflow the sanitizer state.
+    if (n <= __emule_cb_waited_pages[cb_id]) {
+        __emule_cb_waited_pages[cb_id] -= n;
+    } else {
+        __emule_cb_waited_pages[cb_id] = 0;
+    }
     // Advance this thread's own read pointer (mirrors the per-RISC read ptr on
     // silicon), then drop the shared occupied semaphore.
     __emule_cb_advance_rd(cb_id, n);

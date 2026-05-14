@@ -120,6 +120,79 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                 l1_addr, __emule_sem_l1_range_start, __emule_sem_l1_range_end);
         abort();
     }
+    if (__emule_l1_tensor_ranges != nullptr && l1_addr >= __emule_l1_unreserved_base) {
+        bool in_tensor = false;
+        for (uint32_t i = 0; i < __emule_l1_tensor_ranges_count; ++i) {
+            uint64_t packed = __emule_l1_tensor_ranges[i];
+            uint32_t r_start = static_cast<uint32_t>(packed >> 32);
+            uint32_t r_end = static_cast<uint32_t>(packed);
+            if (l1_addr >= r_start && l1_addr < r_end) {
+                in_tensor = true;
+                break;
+            }
+        }
+        if (!in_tensor) {
+            fprintf(stderr,
+                    "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
+                    l1_addr);
+            abort();
+        }
+    }
+    // Tensor-padding sanitizer. Mirrors the check in jit_kernel_stubs.hpp:
+    // each packed (logical_end << 32) | physical_end describes one buffer's
+    // padded region. Accesses in [logical_end, physical_end) are inside the
+    // allocation (so they pass the OOB check above) but past the caller-
+    // declared logical extent — abort with a padding-violation diagnostic.
+    if (__emule_l1_padding_ranges != nullptr) {
+        for (uint32_t i = 0; i < __emule_l1_padding_ranges_count; ++i) {
+            uint64_t packed = __emule_l1_padding_ranges[i];
+            uint32_t logical_end = static_cast<uint32_t>(packed >> 32);
+            uint32_t physical_end = static_cast<uint32_t>(packed);
+            if (l1_addr >= logical_end && l1_addr < physical_end) {
+                fprintf(stderr,
+                        "[ASAN ERROR] Tensor Padding Violation: Attempted to write to a padded memory region at address 0x%x (logical_end=0x%x, physical_end=0x%x)\n",
+                        l1_addr, logical_end, physical_end);
+                abort();
+            }
+        }
+    }
+    // CB-boundary sanitizer. If the address lands inside a configured CB's
+    // byte range, it must also land inside an active page window — either
+    // the write reservation [write_idx, write_idx + reserved) (mod num_pages)
+    // or the read wait window [read_idx, read_idx + waited) (mod num_pages).
+    // Producer threads only populate `reserved`; consumer threads only
+    // populate `waited`; the unused window has count 0 and contributes
+    // nothing. Page-distance math is modular so wraparound (reservation
+    // spanning the num_pages boundary) is handled naturally.
+    if (__emule_cb_boundary_strict && __emule_cbs != nullptr) {
+        for (uint32_t cb_id = 0; cb_id < 32; ++cb_id) {
+            auto& cb = __emule_cbs[cb_id];
+            if (cb.num_pages == 0) continue;
+            uint32_t cb_start = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(cb.base));
+            uint32_t cb_size = cb.num_pages * cb.page_size;
+            if (l1_addr < cb_start || l1_addr >= cb_start + cb_size) continue;
+            uint32_t access_page = (l1_addr - cb_start) / cb.page_size;
+            uint32_t write_dist = (access_page + cb.num_pages - cb.write_idx) % cb.num_pages;
+            uint32_t read_dist  = (access_page + cb.num_pages - cb.read_idx)  % cb.num_pages;
+            uint32_t reserved = __emule_cb_reserved_pages[cb_id];
+            uint32_t waited   = __emule_cb_waited_pages[cb_id];
+            bool in_write_window = (write_dist < reserved);
+            bool in_read_window  = (read_dist  < waited);
+            if (!in_write_window && !in_read_window) {
+                fprintf(stderr,
+                        "[ASAN ERROR] CB Boundary Violation: Attempted to access CB %u at offset 0x%x "
+                        "(byte %u of %u, page %u of %u). "
+                        "Write window: write_idx=%u, %u page(s) reserved. "
+                        "Read window: read_idx=%u, %u page(s) waited.\n",
+                        cb_id, l1_addr, l1_addr - cb_start, cb_size,
+                        access_page, cb.num_pages,
+                        cb.write_idx, reserved,
+                        cb.read_idx, waited);
+                abort();
+            }
+            break;
+        }
+    }
     uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
     if (l1_addr >= l1_base) {
         // Already an absolute host pointer (from l1_alloc / CB / DFB).

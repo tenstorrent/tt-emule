@@ -163,6 +163,55 @@ extern thread_local uint32_t __emule_sem_l1_range_end;
 // CB is still in-flight publishes garbage to the consumer on real silicon.
 extern thread_local uint32_t __emule_pending_noc_reads;
 
+// Per-kernel-thread out-of-bounds-tensor sanitizer state. Populated by
+// emulated_program_runner before each kernel launch only when
+// TT_EMULE_STRICT_TENSOR is set; otherwise __emule_l1_tensor_ranges stays
+// null and the check inside __emule_local_l1_to_ptr is skipped.
+//
+//   __emule_l1_unreserved_base    — start of user-allocatable L1. Accesses
+//                                    below this are system regions (mailbox,
+//                                    KERNEL_CONFIG, etc.) and pass through.
+//   __emule_l1_tensor_ranges      — packed (start<<32)|end array. Accesses at
+//                                    or above l1_unreserved_base must fall
+//                                    inside one of these ranges.
+//   __emule_l1_tensor_ranges_count
+extern thread_local uint32_t __emule_l1_unreserved_base;
+extern thread_local const uint64_t* __emule_l1_tensor_ranges;
+extern thread_local uint32_t __emule_l1_tensor_ranges_count;
+
+// Per-kernel-thread tensor-padding sanitizer state. Populated by
+// emulated_program_runner before each kernel launch only when
+// TT_EMULE_STRICT_PADDING is set AND at least one buffer has declared a
+// logical size via Buffer::set_logical_size; otherwise the pointer is left
+// null and the inline check in __emule_local_l1_to_ptr is skipped.
+//
+// Each uint64_t entry packs (logical_end << 32) | physical_end of one L1
+// buffer's padding region. An access in [logical_end, physical_end) is a
+// padding violation. Independent of __emule_l1_tensor_ranges above: padding
+// can be checked without enabling the OOB-tensor sanitizer.
+extern thread_local const uint64_t* __emule_l1_padding_ranges;
+extern thread_local uint32_t __emule_l1_padding_ranges_count;
+
+// Per-kernel-thread CB-boundary sanitizer state. Populated by
+// emulated_program_runner before each kernel launch only when
+// TT_EMULE_STRICT_CB_BOUNDARY is set; otherwise __emule_cb_boundary_strict
+// stays false and the check inside __emule_local_l1_to_ptr is skipped.
+//
+//   __emule_cb_reserved_pages[i] — pages currently reserved on the write
+//                                   side of CB i (cb_reserve_back += n,
+//                                   cb_push_back -= n). The active write
+//                                   window is the page-modular range
+//                                   [cb.write_idx, cb.write_idx + reserved).
+//   __emule_cb_waited_pages[i]   — pages currently waited on the read side
+//                                   of CB i (cb_wait_front bumps to max,
+//                                   cb_pop_front -= n). The active read
+//                                   window is the page-modular range
+//                                   [cb.read_idx, cb.read_idx + waited).
+//   __emule_cb_boundary_strict   — gate flag; when false the check no-ops.
+extern thread_local uint32_t __emule_cb_reserved_pages[32];
+extern thread_local uint32_t __emule_cb_waited_pages[32];
+extern thread_local bool __emule_cb_boundary_strict;
+
 // Translate a raw L1 firmware offset (or already-absolute host pointer) to a
 // host uint8_t*.  Available to ALL JIT kernels so the l1_arg_ptr regex patch in
 // emulated_program_runner can inject calls without requiring dataflow_api.h.
@@ -179,6 +228,84 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                 "[ASAN ERROR] Illegal Semaphore Access: Offset 0x%x is inside the reserved Semaphore region [0x%x, 0x%x)\n",
                 l1_addr, __emule_sem_l1_range_start, __emule_sem_l1_range_end);
         abort();
+    }
+    // Out-of-bounds-tensor sanitizer. Only active when emulated_program_runner
+    // populated the live ranges (i.e. TT_EMULE_STRICT_TENSOR is set). Accesses
+    // below l1_unreserved_base are system regions (mailbox, KERNEL_CONFIG, …)
+    // and pass through; at-or-above must hit a live tensor extent.
+    if (__emule_l1_tensor_ranges != nullptr && l1_addr >= __emule_l1_unreserved_base) {
+        bool in_tensor = false;
+        for (uint32_t i = 0; i < __emule_l1_tensor_ranges_count; ++i) {
+            uint64_t packed = __emule_l1_tensor_ranges[i];
+            uint32_t r_start = static_cast<uint32_t>(packed >> 32);
+            uint32_t r_end = static_cast<uint32_t>(packed);
+            if (l1_addr >= r_start && l1_addr < r_end) {
+                in_tensor = true;
+                break;
+            }
+        }
+        if (!in_tensor) {
+            fprintf(stderr,
+                    "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
+                    l1_addr);
+            abort();
+        }
+    }
+    // Tensor-padding sanitizer. Only active when the host has registered at
+    // least one buffer with Buffer::set_logical_size AND TT_EMULE_STRICT_PADDING
+    // is on. Each entry packs (logical_end << 32) | physical_end — an access
+    // in [logical_end, physical_end) is inside a buffer's padded region and
+    // must never be touched by a kernel even though the underlying memory is
+    // allocated (and thus passes the OOB-tensor check above).
+    if (__emule_l1_padding_ranges != nullptr) {
+        for (uint32_t i = 0; i < __emule_l1_padding_ranges_count; ++i) {
+            uint64_t packed = __emule_l1_padding_ranges[i];
+            uint32_t logical_end = static_cast<uint32_t>(packed >> 32);
+            uint32_t physical_end = static_cast<uint32_t>(packed);
+            if (l1_addr >= logical_end && l1_addr < physical_end) {
+                fprintf(stderr,
+                        "[ASAN ERROR] Tensor Padding Violation: Attempted to write to a padded memory region at address 0x%x (logical_end=0x%x, physical_end=0x%x)\n",
+                        l1_addr, logical_end, physical_end);
+                abort();
+            }
+        }
+    }
+    // CB-boundary sanitizer. If the address lands inside a configured CB's
+    // byte range, it must also land inside an active page window — either
+    // the write reservation [write_idx, write_idx + reserved) (mod num_pages)
+    // or the read wait window [read_idx, read_idx + waited) (mod num_pages).
+    // Producer threads only populate `reserved`; consumer threads only
+    // populate `waited`; the unused window has count 0 and contributes
+    // nothing. Page-distance math is modular so wraparound (reservation
+    // spanning the num_pages boundary) is handled naturally.
+    if (__emule_cb_boundary_strict && __emule_cbs != nullptr) {
+        for (uint32_t cb_id = 0; cb_id < 32; ++cb_id) {
+            auto& cb = __emule_cbs[cb_id];
+            if (cb.num_pages == 0) continue;
+            uint32_t cb_start = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(cb.base));
+            uint32_t cb_size = cb.num_pages * cb.page_size;
+            if (l1_addr < cb_start || l1_addr >= cb_start + cb_size) continue;
+            uint32_t access_page = (l1_addr - cb_start) / cb.page_size;
+            uint32_t write_dist = (access_page + cb.num_pages - cb.write_idx) % cb.num_pages;
+            uint32_t read_dist  = (access_page + cb.num_pages - cb.read_idx)  % cb.num_pages;
+            uint32_t reserved = __emule_cb_reserved_pages[cb_id];
+            uint32_t waited   = __emule_cb_waited_pages[cb_id];
+            bool in_write_window = (write_dist < reserved);
+            bool in_read_window  = (read_dist  < waited);
+            if (!in_write_window && !in_read_window) {
+                fprintf(stderr,
+                        "[ASAN ERROR] CB Boundary Violation: Attempted to access CB %u at offset 0x%x "
+                        "(byte %u of %u, page %u of %u). "
+                        "Write window: write_idx=%u, %u page(s) reserved. "
+                        "Read window: read_idx=%u, %u page(s) waited.\n",
+                        cb_id, l1_addr, l1_addr - cb_start, cb_size,
+                        access_page, cb.num_pages,
+                        cb.write_idx, reserved,
+                        cb.read_idx, waited);
+                abort();
+            }
+            break;
+        }
     }
     uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
     if (l1_addr >= l1_base) {
