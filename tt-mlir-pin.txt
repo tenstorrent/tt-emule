@@ -1,4 +1,8 @@
 # tt-mlir SHA pinned for D2M CI. Bump when adopting newer tt-mlir features.
 # The tt-metal SHA used by D2M is derived from this pin via
 # tt-mlir/third_party/CMakeLists.txt's TT_METAL_VERSION.
-f8e1738dd5f209d47359e5dc93f0803e98d861eb
+#
+# Currently pinned to tip of xchin/d2m, the in-flight D2M branch that holds
+# tt-mlir/test/python/golden/test_metal_*.py. main does not yet have those
+# tests, so bumping this pin to main would silently produce a 0-test run.
+4a9521f83e73f2f3dd163d8f4ae684e9e010dace

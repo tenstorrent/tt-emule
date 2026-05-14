@@ -137,6 +137,18 @@ jobs:
           fetch-depth: 0
           submodules: false
 
+      - name: Checkout tt-metal source at derived SHA
+        # Needed because run_d2m_regression.sh references $TT_METAL_DIR/ttnn
+        # (python module source tree) and $TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples.
+        # The build artifact only carries the build/ tree, not the source.
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ needs.build.outputs.metal-pin }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
@@ -150,6 +162,13 @@ jobs:
           ls -la tt-mlir/build/ | head -10
           ls -la tt-mlir/third_party/tt-metal/src/tt-metal/build/lib/ | head -10
 
+      - name: Place cluster descriptors at expected path
+        shell: bash
+        run: |
+          mkdir -p tt-metal/tt_metal/third_party/umd/tests
+          cp -r tt-mlir/third_party/tt-metal/src/tt-metal/build/_cluster_descs/cluster_descriptor_examples \
+                tt-metal/tt_metal/third_party/umd/tests/
+
       - name: Restore executable bits on test entry points
         shell: bash
         run: |
@@ -157,10 +176,22 @@ jobs:
           chmod +x $BUILD/test/tt_metal/unit_tests_* 2>/dev/null || true
           chmod +x $BUILD/test/ttnn/unit_tests_* 2>/dev/null || true
 
+      - name: Generate ttrt system_desc.ttsys
+        # Tests use ttrt-artifacts/system_desc.ttsys relative to TT_MLIR_DIR/cwd.
+        # ttrt query --quiet --save-artifacts builds it from the cluster
+        # descriptor under TT_METAL_EMULATED_MODE.
+        env:
+          TT_MLIR_DIR:  ${{ github.workspace }}/tt-mlir
+          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
+          BUILD_DIR:    ${{ github.workspace }}/tt-mlir/third_party/tt-metal/src/tt-metal/build
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-d2m-prepare.sh
+
       - name: Run D2M regression
         env:
           TT_MLIR_DIR:  ${{ github.workspace }}/tt-mlir
-          TT_METAL_DIR: ${{ github.workspace }}/tt-mlir/third_party/tt-metal/src/tt-metal
+          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
+          BUILD_DIR:    ${{ github.workspace }}/tt-mlir/third_party/tt-metal/src/tt-metal/build
         shell: bash
         run: bash tt-emule/.github/scripts/ci-d2m-regression.sh
 

@@ -133,6 +133,15 @@ jobs:
           fetch-depth: 0
           submodules: false
 
+      - name: Checkout tt-metal source at resolved SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ needs.build.outputs.metal-sha }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
@@ -145,6 +154,13 @@ jobs:
           tar -xzf d2m-build.tar.gz
           ls -la tt-mlir/build/ | head -10
           ls -la tt-mlir/third_party/tt-metal/src/tt-metal/build/lib/ | head -10
+
+      - name: Place cluster descriptors at expected path
+        shell: bash
+        run: |
+          mkdir -p tt-metal/tt_metal/third_party/umd/tests
+          cp -r tt-mlir/third_party/tt-metal/src/tt-metal/build/_cluster_descs/cluster_descriptor_examples \
+                tt-metal/tt_metal/third_party/umd/tests/
 
       - name: Restore executable bits on test entry points
         shell: bash
@@ -159,10 +175,19 @@ jobs:
           echo "${{ needs.build.outputs.mlir-sha }}"  > tt-mlir-pin-resolved.txt
           echo "${{ needs.build.outputs.metal-sha }}" > tt-metal-pin-resolved.txt
 
+      - name: Generate ttrt system_desc.ttsys
+        env:
+          TT_MLIR_DIR:  ${{ github.workspace }}/tt-mlir
+          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
+          BUILD_DIR:    ${{ github.workspace }}/tt-mlir/third_party/tt-metal/src/tt-metal/build
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-d2m-prepare.sh
+
       - name: Run D2M regression
         env:
           TT_MLIR_DIR:  ${{ github.workspace }}/tt-mlir
-          TT_METAL_DIR: ${{ github.workspace }}/tt-mlir/third_party/tt-metal/src/tt-metal
+          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
+          BUILD_DIR:    ${{ github.workspace }}/tt-mlir/third_party/tt-metal/src/tt-metal/build
         shell: bash
         run: bash tt-emule/.github/scripts/ci-d2m-regression.sh
 
