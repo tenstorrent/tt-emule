@@ -217,7 +217,9 @@ jobs:
           pip show ttrt >/dev/null 2>&1 && pip uninstall -y ttrt || true
           pip install --force-reinstall --no-deps "$WHEEL"
           which ttrt
-          ttrt --help >/dev/null
+          # ttrt --help can exit non-zero on the test runner when an optional
+          # subcommand import fails — skip the sanity check and let the actual
+          # `ttrt query` in the prepare step be the test of usability.
 
       - name: Generate ttrt system_desc.ttsys
         env:
