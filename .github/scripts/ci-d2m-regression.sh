@@ -20,10 +20,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TT_EMULE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # run_d2m_regression.sh expects BUILD_DIR to be the tt-metal build that contains
-# the tt-emule libs (_ttnn.so etc.). When tt-mlir builds tt-metal as a
-# subproject, that build tree lives at:
-#   $TT_MLIR_DIR/third_party/tt-metal/src/tt-metal/build (symlink to build_$BUILD_TYPE)
-export BUILD_DIR="${BUILD_DIR:-$TT_MLIR_DIR/third_party/tt-metal/src/tt-metal/build}"
+# the tt-emule libs (_ttnn.so etc.).
+# Snapshot the caller's BUILD_DIR (absolute path) before sourcing env/activate.
+# env/activate's `$(pwd)/${BUILD_DIR:=build}/...` produces broken paths if
+# BUILD_DIR is already an absolute path.
+TT_EMULE_BUILD_DIR="${BUILD_DIR:-}"
+unset BUILD_DIR
 
 export D2M_XML_DIR="${D2M_XML_DIR:-${RUNNER_TEMP:-/tmp}/d2m-xml}"
 export D2M_LOG="${D2M_LOG:-${RUNNER_TEMP:-/tmp}/d2m-regression.log}"
@@ -35,7 +37,7 @@ echo "== ci-d2m-regression.sh =="
 echo "  TT_EMULE_DIR:   $TT_EMULE_DIR"
 echo "  TT_MLIR_DIR:    $TT_MLIR_DIR"
 echo "  TT_METAL_DIR:   $TT_METAL_DIR"
-echo "  BUILD_DIR:      $BUILD_DIR"
+echo "  BUILD_DIR:      $TT_EMULE_BUILD_DIR"
 echo "  D2M_XML_DIR:    $D2M_XML_DIR"
 echo "  D2M_LOG:        $D2M_LOG"
 echo ""
@@ -47,6 +49,9 @@ set +u
 # shellcheck disable=SC1091
 source env/activate
 set -u
+
+# Restore our absolute build dir under BUILD_DIR for run_d2m_regression.sh.
+export BUILD_DIR="$TT_EMULE_BUILD_DIR"
 echo "  PYTHONPATH=$PYTHONPATH" | head -c 300; echo
 echo ""
 
