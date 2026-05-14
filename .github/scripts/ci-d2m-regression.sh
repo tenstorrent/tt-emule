@@ -42,8 +42,11 @@ echo ""
 
 # Activate tt-mlir env so pytest + python_packages are on PATH/PYTHONPATH.
 cd "$TT_MLIR_DIR"
+# env/activate references unbound vars; disable `set -u` around the source.
+set +u
 # shellcheck disable=SC1091
 source env/activate
+set -u
 echo "  PYTHONPATH=$PYTHONPATH" | head -c 300; echo
 echo ""
 

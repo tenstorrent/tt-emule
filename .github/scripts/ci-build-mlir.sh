@@ -43,8 +43,12 @@ echo ""
 echo "== Sourcing tt-mlir env/activate =="
 # Must cd into TT_MLIR_DIR — activate uses $(pwd) for path setup.
 cd "$TT_MLIR_DIR"
+# env/activate references unbound vars (e.g. _ACTIVATE_ECHO_TOOLCHAIN_DIR_AND_EXIT);
+# disable `set -u` around the source.
+set +u
 # shellcheck disable=SC1091
 source env/activate
+set -u
 echo "  TTMLIR_TOOLCHAIN_DIR=${TTMLIR_TOOLCHAIN_DIR:-unset}"
 echo "  TTMLIR_VENV_DIR=${TTMLIR_VENV_DIR:-unset}"
 which python
