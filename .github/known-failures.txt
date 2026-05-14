@@ -3,12 +3,11 @@
 # Format: one gtest filter expression per line. Wildcards permitted.
 # Comments start with '#'; blank lines are ignored.
 #
-# Initial baseline auto-generated from CI run 25832055679 (first run
-# where tests actually executed end-to-end). 114 failures across 6
-# fixture groups. Stale or newly-passing entries cause CI to fail —
-# keep this file in sync.
+# Baseline auto-generated from CI run 25833883778 against tt-metal main
+# tip (pin c63bb84). Total 74 failures across 5 fixture groups.
+# Stale or newly-passing entries cause CI to fail — keep this file in sync.
 
-# Parameterized DFB implicit-sync fixture — all 72 param instances fail.
+# Parameterized DFB implicit-sync fixture — 40 param instances fail.
 ImplicitSync/DFBImplicitSyncParamFixture.*
 
 # RISC-V atomics — 3 tests, all fail under emulation.
@@ -46,16 +45,6 @@ MeshDeviceFixture.TestSimpleDramBufferHi
 MeshDeviceFixture.TestSimpleDramBufferLo
 MeshDeviceFixture.TestSimpleL1BufferHi
 MeshDeviceFixture.TestSimpleL1BufferLo
-
-# MeshDeviceSingleCardFixture — 8 tests.
-MeshDeviceSingleCardFixture.DmLoopback
-MeshDeviceSingleCardFixture.QuasarComputeKernelMultipleThreads
-MeshDeviceSingleCardFixture.QuasarComputeKernelSemaphores
-MeshDeviceSingleCardFixture.QuasarComputeKernelSingleThread
-MeshDeviceSingleCardFixture.QuasarComputeKernelTLS
-MeshDeviceSingleCardFixture.QuasarCreateMultipleComputeKernelsSingleCluster
-MeshDeviceSingleCardFixture.QuasarDmAndComputeKernelSemaphores
-MeshDeviceSingleCardFixture.SingleDmL1Write
 
 # MeshDispatchFixture — 2 tests.
 MeshDispatchFixture.TensixMatmulBlock
