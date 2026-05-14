@@ -100,7 +100,9 @@ jobs:
           # Two trees we need on the test runner:
           #   tt-mlir/build/                — python_packages, runtime/python, lib/
           #   tt-mlir/third_party/tt-metal/src/tt-metal/build  — tt-metal libs (+_ttnn.so)
-          tar --posix -czf d2m-build.tar.gz \
+          # --dereference follows the build -> build_Release symlink that
+          # tt-mlir's ExternalProject creates for tt-metal.
+          tar --posix --dereference -czf d2m-build.tar.gz \
               tt-mlir/build \
               tt-mlir/third_party/tt-metal/src/tt-metal/build
 

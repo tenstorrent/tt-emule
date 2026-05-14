@@ -94,7 +94,9 @@ jobs:
       - name: Tar build trees
         shell: bash
         run: |
-          tar --posix -czf d2m-build.tar.gz \
+          # --dereference follows the build -> build_Release symlink that
+          # tt-mlir's ExternalProject creates for tt-metal.
+          tar --posix --dereference -czf d2m-build.tar.gz \
               tt-mlir/build \
               tt-mlir/third_party/tt-metal/src/tt-metal/build
 
