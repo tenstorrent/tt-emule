@@ -186,6 +186,27 @@ jobs:
           chmod +x tt-metal/build/test/tt_metal/unit_tests_* 2>/dev/null || true
           chmod +x tt-metal/build/test/ttnn/unit_tests_* 2>/dev/null || true
 
+      - name: Install ttrt wheel
+        # The build job pip-installs ttrt into its venv, but venv state doesn't
+        # carry across job containers. Reinstall on the test runner from the
+        # wheel produced under tt-mlir/build/tools/ttrt/build/. Without this,
+        # `python -m ttrt` runs but ttrt's importlib.metadata-based version
+        # lookup raises StopIteration, so ttrt query never writes system_desc.
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          set +u; cd tt-mlir && source env/activate; set -u
+          WHEEL=$(ls "${{ github.workspace }}/tt-mlir/build/tools/ttrt/build/"ttrt-*.whl 2>/dev/null | head -1)
+          if [ -z "$WHEEL" ]; then
+            echo "::error::ttrt wheel not found under tt-mlir/build/tools/ttrt/build/"
+            exit 1
+          fi
+          echo "Installing $WHEEL"
+          pip show ttrt >/dev/null 2>&1 && pip uninstall -y ttrt || true
+          pip install --force-reinstall --no-deps "$WHEEL"
+          which ttrt && ttrt --help >/dev/null
+
       - name: Generate ttrt system_desc.ttsys
         env:
           TT_MLIR_DIR:  ${{ github.workspace }}/tt-mlir

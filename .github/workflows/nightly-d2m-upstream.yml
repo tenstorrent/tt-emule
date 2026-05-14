@@ -173,6 +173,20 @@ jobs:
           chmod +x tt-metal/build/test/tt_metal/unit_tests_* 2>/dev/null || true
           chmod +x tt-metal/build/test/ttnn/unit_tests_* 2>/dev/null || true
 
+      - name: Install ttrt wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u; cd tt-mlir && source env/activate; set -u
+          WHEEL=$(ls "${{ github.workspace }}/tt-mlir/build/tools/ttrt/build/"ttrt-*.whl 2>/dev/null | head -1)
+          if [ -z "$WHEEL" ]; then
+            echo "::error::ttrt wheel not found under tt-mlir/build/tools/ttrt/build/"
+            exit 1
+          fi
+          echo "Installing $WHEEL"
+          pip show ttrt >/dev/null 2>&1 && pip uninstall -y ttrt || true
+          pip install --force-reinstall --no-deps "$WHEEL"
+
       - name: Record resolved SHAs for downstream steps
         shell: bash
         run: |
