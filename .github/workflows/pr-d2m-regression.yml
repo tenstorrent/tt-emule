@@ -18,7 +18,7 @@ concurrency:
 env:
   # tt-mlir's CI image: ubuntu-22-04 + pre-built /opt/ttmlir-toolchain
   # (LLVM, StableHLO, Shardy, flatbuffers). Mirrored via harbor for shared runners.
-  TT_MLIR_CI_IMAGE: harbor.ci.tenstorrent.net/ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+  TT_MLIR_CI_IMAGE: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
 
 jobs:
   build:
@@ -26,7 +26,7 @@ jobs:
     runs-on: tt-ubuntu-2204-large-stable
     timeout-minutes: 240
     container:
-      image: harbor.ci.tenstorrent.net/ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
       options: --user root
     outputs:
       mlir-pin:  ${{ steps.pin.outputs.mlir }}
@@ -156,7 +156,7 @@ jobs:
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 120
     container:
-      image: harbor.ci.tenstorrent.net/ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
       options: --user root
     steps:
       - name: Checkout tt-emule (PR)

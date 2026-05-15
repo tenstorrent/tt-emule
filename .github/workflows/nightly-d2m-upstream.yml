@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 240
     continue-on-error: true
     container:
-      image: harbor.ci.tenstorrent.net/ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
       options: --user root
     outputs:
       mlir-sha:  ${{ steps.resolve.outputs.mlir }}
@@ -141,7 +141,7 @@ jobs:
     timeout-minutes: 120
     continue-on-error: true
     container:
-      image: harbor.ci.tenstorrent.net/ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
       options: --user root
     steps:
       - name: Checkout tt-emule (main)
