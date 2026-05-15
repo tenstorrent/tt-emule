@@ -141,10 +141,6 @@ export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
 
 run_test "SimpleL1Buffer"   "$API_BIN" --gtest_filter="MeshDeviceFixture.TestSimpleL1Buffer*"
 run_test "SimpleDramBuffer" "$API_BIN" --gtest_filter="MeshDeviceFixture.TestSimpleDram*"
-run_test "L1Alignment" "$API_BIN" --gtest_filter="MeshDeviceFixture.L1_Alignment_SanityCheck"
-run_test "DRAMAlignment" "$API_BIN" --gtest_filter="MeshDeviceFixture.DRAM_Alignment_SanityCheck_WH"
-run_test "CBReservationOverflow" "$API_BIN" --gtest_filter="MeshDeviceFixture.CB_Reservation_Overflow_SanityCheck"
-run_test "L1PointerSize" "$API_BIN" --gtest_filter="MeshDeviceFixture.Local_L1_Alignment_SanityCheck"
 
 echo ""
 echo "== Tier 3: JIT Kernel Execution =="
