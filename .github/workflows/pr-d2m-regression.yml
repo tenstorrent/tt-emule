@@ -211,6 +211,25 @@ jobs:
           chmod +x tt-metal/build/test/tt_metal/unit_tests_* 2>/dev/null || true
           chmod +x tt-metal/build/test/ttnn/unit_tests_* 2>/dev/null || true
 
+      - name: Install gcc-13 libstdc++ runtime
+        # The build job links libTTMLIRRuntime.so against libstdc++ from
+        # gcc-13 (GLIBCXX_3.4.32). The container ships libstdc++-12 by
+        # default; ttrt fails to import with:
+        #   ImportError: libstdc++.so.6: version 'GLIBCXX_3.4.32' not found
+        # Install gcc-13 from ppa:ubuntu-toolchain-r/test to upgrade
+        # libstdc++6 to a version that provides the required symbols.
+        shell: bash
+        run: |
+          set -e
+          apt-get update -qq
+          apt-get install -y -qq software-properties-common
+          if [ ! -d /usr/lib/gcc/x86_64-linux-gnu/13 ]; then
+            add-apt-repository -y ppa:ubuntu-toolchain-r/test
+            apt-get update -qq
+            apt-get install -y -qq libstdc++6 gcc-13 g++-13 libstdc++-13-dev
+          fi
+          strings /lib/x86_64-linux-gnu/libstdc++.so.6 | grep -E '^GLIBCXX_3\.4\.(3[0-9])' | sort -u | tail
+
       - name: Install ttrt wheel
         # The build job pip-installs ttrt into its venv, but venv state doesn't
         # carry across job containers. Reinstall on the test runner from the
