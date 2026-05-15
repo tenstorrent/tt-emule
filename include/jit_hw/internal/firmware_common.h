@@ -17,6 +17,9 @@ inline void flush_l1_cache() {}
 #define WAYPOINT(...)
 #endif
 
-// UnpackToDestEn lives in llk_types.h as `inline constexpr bool` (not a
-// macro). D2M-emitted kernels use it as a non-type template argument; the
-// constexpr form preserves type information at the template-arg site.
+// UnpackToDestEn moved from `#define UnpackToDestEn false` to the
+// `inline constexpr bool UnpackToDestEn = false;` declared in llk_defs.h.
+// D2M-emitted kernels use it as a template argument; constexpr form gives
+// proper type information while the macro form (any name expansion at template
+// arg position) prevented the enum-class `DataCopyType` declaration from
+// parsing.
