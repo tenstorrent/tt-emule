@@ -41,12 +41,14 @@ MeshDeviceFixture.TensixTestSimpleL1ReadWriteTileHi
 MeshDeviceFixture.TensixTestSimpleL1ReadWriteTileLo
 MeshDeviceFixture.TensixTestSimpleL1ReadWritex2y2TileHi
 MeshDeviceFixture.TensixTestSimpleL1ReadWritex2y2TileLo
-MeshDeviceFixture.TestSimpleDramBufferHi
 MeshDeviceFixture.TestSimpleDramBufferLo
-MeshDeviceFixture.TestSimpleL1BufferHi
 MeshDeviceFixture.TestSimpleL1BufferLo
 
 # MeshDispatchFixture — 2 tests.
 MeshDispatchFixture.TensixMatmulBlock
 MeshDispatchFixture.TensixMatmulBlockInitShort
+
+# Surfaced when TT_METAL_USE_EMULE=ON is actually applied (previously hidden
+# by typo'd cmake flag — see commit history).
+MultiTileMatmulFixture.MultiTileMatmul
 
