@@ -53,6 +53,17 @@ echo ""
 # ---------------------------------------------------------------------------
 # 1. Build tt-metal out-of-tree with tt-emule integration.
 # ---------------------------------------------------------------------------
+# Workaround for missing #include in tt-metal/umd at currently-pinned SHAs:
+# cluster.cpp references SWEmuleChip (under #ifdef TT_UMD_BUILD_EMULE) but
+# never includes umd/device/chip/sw_emule_chip.hpp. Idempotent in-place patch.
+UMD_CLUSTER="$TT_METAL_DIR/tt_metal/third_party/umd/device/cluster.cpp"
+if [ -f "$UMD_CLUSTER" ] && ! grep -q 'sw_emule_chip.hpp' "$UMD_CLUSTER"; then
+    echo "== Patching $UMD_CLUSTER to include sw_emule_chip.hpp =="
+    sed -i '/^#include "umd\/device\/chip\/mock_chip.hpp"$/a #include "umd/device/chip/sw_emule_chip.hpp"' \
+        "$UMD_CLUSTER"
+    grep -n 'sw_emule_chip.hpp\|mock_chip.hpp' "$UMD_CLUSTER" | head -3
+fi
+
 echo "== Configuring tt-metal (out-of-tree, with -DTT_METAL_USE_EMULE=ON) =="
 cmake -B "$TT_METAL_BUILD" -S "$TT_METAL_DIR" -G Ninja \
     -DCMAKE_C_COMPILER=clang-20 \
