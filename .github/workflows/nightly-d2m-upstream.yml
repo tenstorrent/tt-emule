@@ -82,19 +82,24 @@ jobs:
           git submodule update --init --depth=1 tt_metal/third_party/umd
           git submodule update --init --depth=1 tt_metal/third_party/tracy
 
-      - name: Install clang-20
+      - name: Install clang-20 + gcc-13 libstdc++
         shell: bash
         run: |
           set -e
+          apt-get update -qq
+          apt-get install -y -qq wget gnupg lsb-release software-properties-common
           if ! command -v clang-20 >/dev/null 2>&1; then
-            apt-get update -qq
-            apt-get install -y -qq wget gnupg lsb-release software-properties-common
             wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
             chmod +x /tmp/llvm.sh
             /tmp/llvm.sh 20 all
           fi
+          if [ ! -d /usr/lib/gcc/x86_64-linux-gnu/13 ]; then
+            add-apt-repository -y ppa:ubuntu-toolchain-r/test
+            apt-get update -qq
+            apt-get install -y -qq gcc-13 g++-13 libstdc++-13-dev
+          fi
           clang-20 --version
-          clang++-20 --version
+          ls /usr/lib/gcc/x86_64-linux-gnu/ | head
 
       - name: Restore ccache
         uses: actions/cache@v4
