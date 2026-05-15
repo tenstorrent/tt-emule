@@ -16,11 +16,26 @@ Usage:
 """
 
 import argparse
-import fnmatch
 import os
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+
+def _pattern_to_regex(pat: str) -> re.Pattern[str]:
+    """Compile an allowlist pattern. `*` and `?` are wildcards; everything
+    else (including `[` and `]`, common in pytest parametrize ids) is literal.
+    """
+    out = []
+    for ch in pat:
+        if ch == "*":
+            out.append(".*")
+        elif ch == "?":
+            out.append(".")
+        else:
+            out.append(re.escape(ch))
+    return re.compile("".join(out) + r"\Z")
 
 
 def _node_id(tc: ET.Element, xml_stem: str) -> str | None:
@@ -87,8 +102,9 @@ def expand_allowlist(
     matches: dict[str, set[str]] = {}
     stale: list[str] = []
     for pat in entries:
-        if any(c in pat for c in "*?[]"):
-            hits = {fq for fq in universe if fnmatch.fnmatchcase(fq, pat)}
+        if "*" in pat or "?" in pat:
+            regex = _pattern_to_regex(pat)
+            hits = {fq for fq in universe if regex.match(fq)}
         else:
             hits = {pat} if pat in universe else set()
         matches[pat] = hits
