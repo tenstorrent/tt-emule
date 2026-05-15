@@ -192,6 +192,19 @@ jobs:
           chmod +x tt-metal/build/test/tt_metal/unit_tests_* 2>/dev/null || true
           chmod +x tt-metal/build/test/ttnn/unit_tests_* 2>/dev/null || true
 
+      - name: Install gcc-13 libstdc++ runtime
+        shell: bash
+        run: |
+          set -e
+          apt-get update -qq
+          apt-get install -y -qq software-properties-common
+          if [ ! -d /usr/lib/gcc/x86_64-linux-gnu/13 ]; then
+            add-apt-repository -y ppa:ubuntu-toolchain-r/test
+            apt-get update -qq
+            apt-get install -y -qq libstdc++6 gcc-13 g++-13 libstdc++-13-dev
+          fi
+          strings /lib/x86_64-linux-gnu/libstdc++.so.6 | grep -E '^GLIBCXX_3\.4\.(3[0-9])' | sort -u | tail
+
       - name: Install ttrt wheel
         shell: bash
         run: |
