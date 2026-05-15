@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Configure and build tt-mlir (with embedded tt-metal build) against tt-emule.
+# Build tt-metal independently (with tt-emule integration) and then build
+# tt-mlir against that pre-built tree via TTMLIR_TTMETAL_SOURCE_DIR.
+#
+# Both projects compile with clang-20. tt-mlir's ExternalProject_Add steps for
+# tt-metal are pre-stamped so they don't re-configure / rebuild what we just
+# built.
 #
 # Required env:
 #   TT_EMULE_DIR    path to tt-emule workspace (the PR source)
 #   TT_MLIR_DIR     path to tt-mlir workspace (checked out at pinned SHA)
 #   TT_METAL_DIR    path to tt-metal workspace at the SHA tt-mlir pins
-#                   (passed via -DTTMLIR_TTMETAL_SOURCE_DIR)
 #
 # Optional env:
 #   BUILD_DIR       tt-mlir build dir (default: $TT_MLIR_DIR/build)
-#
-# Designed to run inside the tt-mlir CI Docker image which has
-# /opt/ttmlir-toolchain pre-populated. Outside that image, env/activate
-# will warn and the cmake configure will fail — that's expected.
 
 set -euo pipefail
 
@@ -20,6 +20,7 @@ set -euo pipefail
 : "${TT_MLIR_DIR:?TT_MLIR_DIR must be set}"
 : "${TT_METAL_DIR:?TT_METAL_DIR must be set}"
 BUILD_DIR="${BUILD_DIR:-$TT_MLIR_DIR/build}"
+TT_METAL_BUILD="$TT_METAL_DIR/build_Release"
 
 export CCACHE_DIR="${CCACHE_DIR:-$HOME/.ccache}"
 export CMAKE_C_COMPILER_LAUNCHER=ccache
@@ -31,41 +32,73 @@ ccache --set-config compression=true 2>/dev/null || true
 ccache --zero-stats >/dev/null 2>&1 || true
 
 echo "== ci-build-mlir.sh =="
-echo "  TT_EMULE_DIR: $TT_EMULE_DIR"
-echo "  TT_MLIR_DIR:  $TT_MLIR_DIR"
-echo "  TT_METAL_DIR: $TT_METAL_DIR"
-echo "  BUILD_DIR:    $BUILD_DIR"
-echo "  CCACHE_DIR:   $CCACHE_DIR"
-echo ""
-
-echo "== Injecting tt-emule cmake args into tt-mlir's tt-metal ExternalProject =="
-python3 "$TT_EMULE_DIR/.github/scripts/inject_ttemule_into_mlir.py" \
-    "$TT_MLIR_DIR/third_party/CMakeLists.txt" \
-    "$TT_EMULE_DIR"
+echo "  TT_EMULE_DIR:    $TT_EMULE_DIR"
+echo "  TT_MLIR_DIR:     $TT_MLIR_DIR"
+echo "  TT_METAL_DIR:    $TT_METAL_DIR"
+echo "  TT_METAL_BUILD:  $TT_METAL_BUILD"
+echo "  BUILD_DIR:       $BUILD_DIR"
+echo "  CCACHE_DIR:      $CCACHE_DIR"
 echo ""
 
 echo "== Sourcing tt-mlir env/activate =="
-# Must cd into TT_MLIR_DIR — activate uses $(pwd) for path setup.
 cd "$TT_MLIR_DIR"
-# env/activate references unbound vars (e.g. _ACTIVATE_ECHO_TOOLCHAIN_DIR_AND_EXIT);
-# disable `set -u` around the source.
+# env/activate references unbound vars; relax set -u around the source.
 set +u
 # shellcheck disable=SC1091
 source env/activate
 set -u
-echo "  TTMLIR_TOOLCHAIN_DIR=${TTMLIR_TOOLCHAIN_DIR:-unset}"
-echo "  TTMLIR_VENV_DIR=${TTMLIR_VENV_DIR:-unset}"
-which python
-python --version
+which python && python --version
 echo ""
 
-echo "== Configuring tt-mlir =="
-# TTMLIR_TTMETAL_SOURCE_DIR points tt-mlir's ExternalProject at a pre-cloned
-# tt-metal tree (the one the workflow checked out at the SHA derived from
-# tt-mlir's TT_METAL_VERSION). This avoids tt-mlir cloning a second copy.
+# ---------------------------------------------------------------------------
+# 1. Build tt-metal out-of-tree with tt-emule integration.
+# ---------------------------------------------------------------------------
+echo "== Configuring tt-metal (out-of-tree, with -DTT_METAL_USE_EMULE=ON) =="
+cmake -B "$TT_METAL_BUILD" -S "$TT_METAL_DIR" -G Ninja \
+    -DCMAKE_C_COMPILER=clang-20 \
+    -DCMAKE_CXX_COMPILER=clang++-20 \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$TT_METAL_BUILD" \
+    -DCPM_SOURCE_CACHE="$TT_METAL_DIR/.cpmcache" \
+    -DENABLE_CCACHE=ON \
+    -DWITH_PYTHON_BINDINGS=ON \
+    -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON \
+    -DENABLE_TRACY=OFF \
+    -DENABLE_LIBCXX=OFF \
+    -DENABLE_DISTRIBUTED=ON \
+    -DTT_USE_SYSTEM_SFPI=OFF \
+    -DTT_METAL_USE_EMULE=ON \
+    -DTT_EMULE_PATH="$TT_EMULE_DIR"
+
+echo ""
+echo "== Building tt-metal =="
+cmake --build "$TT_METAL_BUILD" -j"$(nproc)"
+
+# Mirror the build->build_Release symlink tt-mlir's ExternalProject's
+# create_build_symlink step usually makes; downstream paths reference it.
+ln -sfn "$TT_METAL_BUILD" "$TT_METAL_DIR/build"
+
+# ---------------------------------------------------------------------------
+# 2. Pre-stamp tt-mlir's tt-metal ExternalProject_Add so cmake --build doesn't
+#    re-configure or rebuild our pre-built tree.
+# ---------------------------------------------------------------------------
+STAMP_DIR="$TT_MLIR_DIR/third_party/tt-metal/src/tt-metal-stamp"
+mkdir -p "$STAMP_DIR"
+for step in mkdir download update patch configure build install create_build_symlink; do
+    touch "$STAMP_DIR/tt-metal-$step"
+done
+echo ""
+echo "== Pre-stamped tt-metal ExternalProject steps under $STAMP_DIR =="
+ls -la "$STAMP_DIR"
+
+# ---------------------------------------------------------------------------
+# 3. Configure and build tt-mlir against the pre-built tt-metal source tree.
+# ---------------------------------------------------------------------------
+echo ""
+echo "== Configuring tt-mlir (TTMLIR_TTMETAL_SOURCE_DIR=$TT_METAL_DIR) =="
 cmake -B "$BUILD_DIR" -S "$TT_MLIR_DIR" -G Ninja \
-    -DCMAKE_C_COMPILER=clang-17 \
-    -DCMAKE_CXX_COMPILER=clang++-17 \
+    -DCMAKE_C_COMPILER=clang-20 \
+    -DCMAKE_CXX_COMPILER=clang++-20 \
     -DCMAKE_BUILD_TYPE=Release \
     -DTTMLIR_ENABLE_RUNTIME=ON \
     -DTT_RUNTIME_ENABLE_TTMETAL=ON \
@@ -75,10 +108,7 @@ cmake -B "$BUILD_DIR" -S "$TT_MLIR_DIR" -G Ninja \
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
 echo ""
-echo "== Building tt-mlir (and tt-metal-against-tt-emule transitively) =="
-# The tt-metal ExternalProject is part of tt-mlir's default build. A plain
-# all-target build covers both, plus python_packages and runtime libs needed
-# by D2M pytest.
+echo "== Building tt-mlir =="
 cmake --build "$BUILD_DIR" -j"$(nproc)"
 
 echo ""
@@ -89,4 +119,4 @@ echo ""
 echo "== Build artifacts =="
 ls -la "$BUILD_DIR/lib/" 2>/dev/null | head -20 || true
 echo "..."
-ls -la "$TT_METAL_DIR/build/lib/" 2>/dev/null | head -20 || true
+ls -la "$TT_METAL_BUILD/lib/" 2>/dev/null | head -20 || true

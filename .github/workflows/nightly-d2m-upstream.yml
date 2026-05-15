@@ -82,13 +82,27 @@ jobs:
           git submodule update --init --depth=1 tt_metal/third_party/umd
           git submodule update --init --depth=1 tt_metal/third_party/tracy
 
+      - name: Install clang-20
+        shell: bash
+        run: |
+          set -e
+          if ! command -v clang-20 >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y -qq wget gnupg lsb-release software-properties-common
+            wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+            chmod +x /tmp/llvm.sh
+            /tmp/llvm.sh 20 all
+          fi
+          clang-20 --version
+          clang++-20 --version
+
       - name: Restore ccache
         uses: actions/cache@v4
         with:
           path: /root/.ccache
-          key: d2m-mlir-${{ steps.resolve.outputs.mlir }}-metal-${{ steps.resolve.outputs.metal }}-clang17-${{ runner.os }}-${{ github.run_id }}
+          key: d2m-mlir-${{ steps.resolve.outputs.mlir }}-metal-${{ steps.resolve.outputs.metal }}-clang20-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
-            d2m-mlir-${{ steps.resolve.outputs.mlir }}-metal-${{ steps.resolve.outputs.metal }}-clang17-${{ runner.os }}-
+            d2m-mlir-${{ steps.resolve.outputs.mlir }}-metal-${{ steps.resolve.outputs.metal }}-clang20-${{ runner.os }}-
             d2m-mlir-${{ steps.resolve.outputs.mlir }}-
             d2m-mlir-
 
