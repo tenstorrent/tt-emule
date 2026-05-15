@@ -14,10 +14,28 @@
 
 #include "internal/risc_attribs.h"
 #include "api/compile_time_args.h"
+#include "api/debug/dprint.h"
+#include "api/debug/device_print.h"
 #include "dev_mem_map.h"
 #include "emule_cb_state.h"
 #include "emule_dfb_state.h"
 #include "tools/profiler/kernel_profiler.hpp"
+
+// llk_defs.h provides LLK function stubs (llk_math_wait_for_dest_available,
+// llk_packer_wait_for_math_done, llk_unpack_A, etc.) and experimental impls
+// (experimental::pack_untilize_block, etc.) that D2M-emitted kernels reference.
+//
+// Before tt-mlir PR #7926 (Apr 15 2026), D2M-emitted kernels explicitly
+// `#include "llk_defs.h"`. After that PR, they no longer do — the PR
+// description says: "Internal headers firmware_common.h and llk_defs.h are
+// both transitively included, so we no longer insert them."
+//
+// On real silicon the transitive include happens via firmware_common.h →
+// llk_*.h chain. tt-emule's `api/compute/*` headers don't pull in llk_defs.h,
+// so without this explicit include here, every JIT-compiled kernel sees
+// "use of undeclared identifier 'llk_math_wait_for_dest_available'" (and
+// friends) when D2M inlines `experimental::tilize_block` and similar bodies.
+#include "llk_defs.h"
 
 #include <vector>
 #include <cstdint>

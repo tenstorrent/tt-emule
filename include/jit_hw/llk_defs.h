@@ -9,10 +9,10 @@
 #include "jit_hw/api/compute/nfaces.h"
 #include "internal/firmware_common.h"
 
-// Data copy type constant (used as template parameter)
-#ifndef A2D
-#define A2D 0
-#endif
+// Data copy type — moved from legacy `#define A2D 0` to the enum class
+// declared below in namespace ckernel. tt-metal PR #43035 converted this
+// from a plain enum to enum class; D2M-emitted kernels now use
+// `DataCopyType::A2D` qualified form.
 
 // Tile dimension constants (used by experimental LLK headers)
 #ifndef FACE_R_DIM
@@ -58,7 +58,22 @@ enum class DstSync : std::uint8_t {
     SyncHalf,
     SyncFull,
 };
+
+// DataCopyType — refactored to an enum class by tt-metal PR #43035
+// "refactor(llk): convert DataCopyType from plain enum to enum class".
+// D2M-emitted kernels reference it as `DataCopyType::A2D` etc. inside the
+// embedded `experimental::tilize_block` / similar bodies. Values mirror
+// upstream tt-llk/llk_defs.h.
+enum class DataCopyType : std::uint8_t {
+    A2D = 0,
+    B2D = 1,
+};
 }  // namespace ckernel
+
+// UnpackToDestEn — bool flag used as a template parameter in D2M-emitted
+// `llk_math_eltwise_unary_datacopy<…, UnpackToDestEn>(…)` calls. On the
+// emulator we don't dispatch on it; default to false.
+inline constexpr bool UnpackToDestEn = false;
 
 // Operand CB interface stub
 struct CbInterface {
@@ -204,15 +219,16 @@ inline void __llk_untilize_datacopy(uint32_t dst_idx) {
     __llk_unpack_current_tile++;
 }
 
-// 4-param version (used by tilize)
-template <int CopyType, int AccumMode, BroadcastType Bcast, bool UnpackToDest>
+// 4-param version (used by tilize). PR #43035 changed CopyType from plain
+// enum (int) to enum class DataCopyType.
+template <ckernel::DataCopyType CopyType, int AccumMode, BroadcastType Bcast, bool UnpackToDest>
 inline void llk_math_eltwise_unary_datacopy(uint32_t dst_idx) {
     if (__llk_unpack_is_tilize) __llk_tilize_datacopy(dst_idx);
     else __llk_untilize_datacopy(dst_idx);
 }
 
 // 3-param version (used by untilize)
-template <int CopyType, int AccumMode, BroadcastType Bcast>
+template <ckernel::DataCopyType CopyType, int AccumMode, BroadcastType Bcast>
 inline void llk_math_eltwise_unary_datacopy(uint32_t dst_idx) {
     if (__llk_unpack_is_tilize) __llk_tilize_datacopy(dst_idx);
     else __llk_untilize_datacopy(dst_idx);
