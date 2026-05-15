@@ -67,6 +67,26 @@ extern thread_local uint32_t __emule_l1_unreserved_base;
 extern thread_local const uint64_t* __emule_l1_tensor_ranges;
 extern thread_local uint32_t __emule_l1_tensor_ranges_count;
 
+// Per-kernel-thread CB-boundary sanitizer state. Populated by
+// emulated_program_runner before each kernel launch only when
+// TT_EMULE_STRICT_CB_BOUNDARY is set; otherwise __emule_cb_boundary_strict
+// stays false and the check inside __emule_local_l1_to_ptr is skipped.
+//
+//   __emule_cb_reserved_pages[i] — pages currently reserved on the write
+//                                   side of CB i (cb_reserve_back += n,
+//                                   cb_push_back -= n). The active write
+//                                   window is the page-modular range
+//                                   [cb.write_idx, cb.write_idx + reserved).
+//   __emule_cb_waited_pages[i]   — pages currently waited on the read side
+//                                   of CB i (cb_wait_front bumps to max,
+//                                   cb_pop_front -= n). The active read
+//                                   window is the page-modular range
+//                                   [cb.read_idx, cb.read_idx + waited).
+//   __emule_cb_boundary_strict   — gate flag; when false the check no-ops.
+extern thread_local uint32_t __emule_cb_reserved_pages[32];
+extern thread_local uint32_t __emule_cb_waited_pages[32];
+extern thread_local bool __emule_cb_boundary_strict;
+
 // Translate a raw L1 firmware offset (or already-absolute host pointer) to a
 // host uint8_t*.  Available to ALL JIT kernels so the l1_arg_ptr regex patch in
 // emulated_program_runner can inject calls without requiring dataflow_api.h.
@@ -104,6 +124,43 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                     "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
                     l1_addr);
             abort();
+        }
+    }
+    // CB-boundary sanitizer. If the address lands inside a configured CB's
+    // byte range, it must also land inside an active page window — either
+    // the write reservation [write_idx, write_idx + reserved) (mod num_pages)
+    // or the read wait window [read_idx, read_idx + waited) (mod num_pages).
+    // Producer threads only populate `reserved`; consumer threads only
+    // populate `waited`; the unused window has count 0 and contributes
+    // nothing. Page-distance math is modular so wraparound (reservation
+    // spanning the num_pages boundary) is handled naturally.
+    if (__emule_cb_boundary_strict && __emule_cbs != nullptr) {
+        for (uint32_t cb_id = 0; cb_id < 32; ++cb_id) {
+            auto& cb = __emule_cbs[cb_id];
+            if (cb.num_pages == 0) continue;
+            uint32_t cb_start = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(cb.base));
+            uint32_t cb_size = cb.num_pages * cb.page_size;
+            if (l1_addr < cb_start || l1_addr >= cb_start + cb_size) continue;
+            uint32_t access_page = (l1_addr - cb_start) / cb.page_size;
+            uint32_t write_dist = (access_page + cb.num_pages - cb.write_idx) % cb.num_pages;
+            uint32_t read_dist  = (access_page + cb.num_pages - cb.read_idx)  % cb.num_pages;
+            uint32_t reserved = __emule_cb_reserved_pages[cb_id];
+            uint32_t waited   = __emule_cb_waited_pages[cb_id];
+            bool in_write_window = (write_dist < reserved);
+            bool in_read_window  = (read_dist  < waited);
+            if (!in_write_window && !in_read_window) {
+                fprintf(stderr,
+                        "[ASAN ERROR] CB Boundary Violation: Attempted to access CB %u at offset 0x%x "
+                        "(byte %u of %u, page %u of %u). "
+                        "Write window: write_idx=%u, %u page(s) reserved. "
+                        "Read window: read_idx=%u, %u page(s) waited.\n",
+                        cb_id, l1_addr, l1_addr - cb_start, cb_size,
+                        access_page, cb.num_pages,
+                        cb.write_idx, reserved,
+                        cb.read_idx, waited);
+                abort();
+            }
+            break;
         }
     }
     uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));

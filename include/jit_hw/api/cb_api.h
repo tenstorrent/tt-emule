@@ -68,6 +68,9 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
     // Lock-free fast path (safe for SPSC — only consumer decrements occupied)
     if ((cb.num_pages - cb.occupied.load(std::memory_order_acquire)) >= n) {
         __emule_pack_offset[cb_id] = 0;
+        // CB-boundary sanitizer: record how many pages are now reservable
+        // starting at the current cb.write_idx. cb_push_back decrements this.
+        __emule_cb_reserved_pages[cb_id] += n;
         return;
     }
     std::unique_lock<std::mutex> lk(cb.mu);
@@ -84,6 +87,7 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
     }
     // Reset PACK engine auto-advance offset for this new batch.
     __emule_pack_offset[cb_id] = 0;
+    __emule_cb_reserved_pages[cb_id] += n;
 }
 
 inline void cb_push_back(uint32_t cb_id, uint32_t n) {
@@ -93,6 +97,13 @@ inline void cb_push_back(uint32_t cb_id, uint32_t n) {
                 "(%u outstanding) — missing noc_async_read_barrier()\n",
                 cb_id, __emule_pending_noc_reads);
         abort();
+    }
+    // CB-boundary sanitizer: shrink the reserved window before the FIFO
+    // advance so any concurrent boundary check sees a consistent view.
+    if (n <= __emule_cb_reserved_pages[cb_id]) {
+        __emule_cb_reserved_pages[cb_id] -= n;
+    } else {
+        __emule_cb_reserved_pages[cb_id] = 0;
     }
     tt_emule::cb_sync_push(__emule_cbs[cb_id], n);
     // Bridge CB→DFB: update tile counters so DM's dfb_wait_front sees compute's output.
@@ -129,7 +140,15 @@ inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
         std::abort();
     }
     // Lock-free fast path (safe for SPSC — only producer increments occupied)
-    if (cb.occupied.load(std::memory_order_acquire) >= n) return;
+    if (cb.occupied.load(std::memory_order_acquire) >= n) {
+        // CB-boundary sanitizer: widen the read window to the largest count
+        // the kernel has waited on since the last pop. max(), not +=, because
+        // overlapping waits before a pop don't grow the consumable region.
+        if (n > __emule_cb_waited_pages[cb_id]) {
+            __emule_cb_waited_pages[cb_id] = n;
+        }
+        return;
+    }
     std::unique_lock<std::mutex> lk(cb.mu);
     if (!cb.data_cv.wait_for(lk, std::chrono::seconds(__emule_cb_timeout_sec()),
             [&]{ return cb.occupied.load(std::memory_order_relaxed) >= n; })) {
@@ -142,9 +161,21 @@ inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
                 my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
         std::abort();
     }
+    if (n > __emule_cb_waited_pages[cb_id]) {
+        __emule_cb_waited_pages[cb_id] = n;
+    }
 }
 
 inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
+    // CB-boundary sanitizer: shrink the read window before the FIFO advance
+    // so any concurrent boundary check sees a consistent view. Saturate at 0
+    // — a kernel that pops more than it waited on is suspect but we don't
+    // want to underflow the sanitizer state.
+    if (n <= __emule_cb_waited_pages[cb_id]) {
+        __emule_cb_waited_pages[cb_id] -= n;
+    } else {
+        __emule_cb_waited_pages[cb_id] = 0;
+    }
     tt_emule::cb_sync_pop(__emule_cbs[cb_id], n);
     // Bridge CB→DFB: update tile counter acked so DM's dfb_reserve_back sees freed space.
     if (__emule_dfbs && __emule_tc_array && __emule_dfbs[cb_id].active) {
