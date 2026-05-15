@@ -2,16 +2,16 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# Nightly Upstream Regression — builds tt-metal at main tip (NOT the pinned SHA)
-# against tt-emule main, then runs the full regression. Warning-only: failures
-# do not block anything. Two purposes:
+# Nightly Metal Upstream Regression — builds tt-metal at main tip (NOT the
+# pinned SHA) against tt-emule main, then runs the full regression. Warning-
+# only: failures do not block anything. Two purposes:
 #   1. Detect tt-metal-induced breakage within 24h.
 #   2. Warm the GitHub Actions ccache against the current tt-metal main, so
 #      that PRs which later bump tt-metal-pin.txt to that SHA hit warm cache.
 #
 # Slack notification on failure is documented in .github/notify-stub.md.
 
-name: Nightly Upstream Regression
+name: Nightly Metal Upstream Regression
 
 on:
   schedule:

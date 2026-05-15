@@ -2,11 +2,11 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# PR Regression — builds tt-metal at the pinned SHA against the PR's tt-emule
-# source, then runs the full tt-emule regression suite. Fails the PR if any
-# test fails outside of .github/known-failures.txt.
+# PR Metal Regression — builds tt-metal at the pinned SHA against the PR's
+# tt-emule source, then runs the full tt-emule regression suite. Fails the PR
+# if any test fails outside of .github/known-failures.txt.
 
-name: PR Regression
+name: PR Metal Regression
 
 on:
   pull_request:
