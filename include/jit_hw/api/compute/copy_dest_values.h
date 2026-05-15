@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Copy dest values stub for emulated mode
 // Delegates to common.h where copy_tile/copy_tile_to_dst_init_short are implemented.

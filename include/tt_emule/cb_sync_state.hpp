@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Shared circular buffer synchronization state and operations.
 // Source of truth for CB FIFO logic, consumed by JIT-compiled kernels via

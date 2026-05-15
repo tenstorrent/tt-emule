@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Unary binop-with-scalar stubs for emulation.
 // Each function applies a binary operation between each DST element and a scalar.

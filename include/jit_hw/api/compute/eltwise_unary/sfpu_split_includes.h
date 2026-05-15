@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Conditional SFPU includes for emulation (mirrors real sfpu_split_includes.h).
 // Only includes headers for operations that have emule stub implementations.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // Minimal stub for JIT compilation — provides tt::DataFormat used by dprint_common.h
 #pragma once
 #include <cstdint>

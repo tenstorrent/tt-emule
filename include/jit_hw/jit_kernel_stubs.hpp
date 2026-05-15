@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Stubs included at the TOP of every JIT wrapper before the kernel source.
 // Provides everything a kernel needs that isn't in its own includes.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Stub for upstream tt_metal/tt-llk/<arch>/common/inc/ckernel_include.h.
 // Provides the firmware-msg enum referenced by some kernels; LLK headers it

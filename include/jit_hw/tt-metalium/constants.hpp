@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // Minimal stub for JIT compilation — tile/face dimension constants
 #pragma once
 #include <cstdint>

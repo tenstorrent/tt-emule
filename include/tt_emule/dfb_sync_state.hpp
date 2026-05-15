@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // DFB synchronization state structures for Quasar emulation.
 // DFBTCSlot: per-tile-counter-slot state (pointer tracking).

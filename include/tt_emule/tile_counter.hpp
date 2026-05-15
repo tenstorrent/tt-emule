@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Tile counter synchronization primitives for Quasar DFB emulation.
 // Each TileCounter tracks posted/acked counts for one hardware tile counter.

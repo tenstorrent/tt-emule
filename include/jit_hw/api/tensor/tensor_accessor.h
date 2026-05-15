@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // JIT TensorAccessor stub.
 // Uses the REAL TensorAccessorArgs from tt-metal/hw/inc (pure C++17 templates,

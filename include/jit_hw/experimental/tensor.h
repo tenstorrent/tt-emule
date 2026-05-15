@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Emulation stub for experimental noc_traits_t<TensorAccessor>.
 // Shadows the real tt_metal/hw/inc/experimental/tensor.h which references

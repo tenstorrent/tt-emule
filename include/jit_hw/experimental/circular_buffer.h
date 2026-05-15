@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Emulation stub for experimental::CircularBuffer + noc_traits_t specialization.
 // Delegates CB operations to jit_hw/api/cb_api.h (the shared sync functions).

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Emulation stub for experimental::DataflowBuffer.
 // Wraps the dfb_api.h free functions in the class API that upstream kernels use.

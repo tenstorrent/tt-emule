@@ -1,4 +1,8 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
 set -euo pipefail
 
 # Regression runner for tt-emule against the upstream-rebased tt-metal.

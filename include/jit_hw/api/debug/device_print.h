@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Stub DEVICE_PRINT macros for JIT-compiled kernels.
 // On real hardware these serialize arguments to a ring buffer.

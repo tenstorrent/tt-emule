@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // DFB operations for JIT-compiled Quasar kernels (parallel to cb_api.h).
 // Delegates to EmuleDFBInterface + TileCounterArray via thread-local pointers.

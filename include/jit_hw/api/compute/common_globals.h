@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Minimal DataFormat enum for JIT-compiled SFPU kernels.
 // Matches the real tt-metal enum values we need.

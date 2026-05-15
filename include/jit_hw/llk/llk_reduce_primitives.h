@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // LLK stubs for the matmul-based reduce path used by ttnn::sum-on-W via
 // ttnn/cpp/ttnn/kernel_lib/reduce_helpers_compute.inl.  Most stubs are no-ops

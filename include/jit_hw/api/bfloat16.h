@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // bfloat16 ↔ float32 conversion helpers for JIT-compiled kernels.
 // Used by compute stubs and available for future SFPU/tilize ops.
