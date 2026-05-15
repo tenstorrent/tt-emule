@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Install build toolchain for the tt-emule CI build job.
 #
 # Run on tt-ubuntu-2204-large-stable runners. Idempotent — safe to re-run.

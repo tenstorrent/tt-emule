@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Nightly Upstream Regression — builds tt-metal at main tip (NOT the pinned SHA)
 # against tt-emule main, then runs the full regression. Warning-only: failures
 # do not block anything. Two purposes:

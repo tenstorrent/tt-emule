@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Firmware common stub for emulated mode
 // Most macros (PACK/MATH/UNPACK/ALWI) are already defined in api/compute/common.h

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // On the real RISC-V target these control memory qualifiers and inlining.
 // In the JIT emulation host build, they are no-ops.

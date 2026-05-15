@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // LLK definitions stub for emulated mode
 // Core enums come from api/compute/common.h; this adds LLK-level stubs.

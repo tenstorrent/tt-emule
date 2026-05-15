@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
 add_executable(test_tilize test_tilize.cpp)
 
 target_include_directories(test_tilize PRIVATE

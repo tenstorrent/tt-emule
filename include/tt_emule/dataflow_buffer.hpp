@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Quasar DataflowBuffer emulation -- kernel-facing API.
 // Each thread constructs a DataflowBuffer from its per-thread EmuleDFBInterface

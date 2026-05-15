@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Minimal ckernel stub for JIT emulation.
 // ThreadId and mailbox ops are now in jit_kernel_stubs.hpp.

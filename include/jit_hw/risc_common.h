@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Stub risc_common.h for JIT-compiled kernels.
 // On real hardware this provides NOC coordinates, cache ops, register access.

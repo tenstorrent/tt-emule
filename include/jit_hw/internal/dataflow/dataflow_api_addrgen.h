@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Minimal interleaved address generation for JIT-compiled kernels.
 // Matches the real firmware interface from tt_metal/hw/inc/internal/dataflow/dataflow_api_addrgen.h

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Emulation stubs for experimental endpoint types + noc_traits_t.
 // Bridge functions resolve L1/DRAM offsets to host pointers directly.

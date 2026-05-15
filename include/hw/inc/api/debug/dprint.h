@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Stub: device-side debug print is not supported in emulation.
 // Macros expand to no-ops so kernels that include this header compile cleanly.

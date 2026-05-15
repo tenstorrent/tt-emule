@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // CB operations for JIT-compiled kernels.
 // Delegates to shared tt_emule::cb_sync_* functions — single source of truth.

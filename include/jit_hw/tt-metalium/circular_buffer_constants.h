@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Local mirror of tt_metal/api/tt-metalium/circular_buffer_constants.h.
 // This file exists only because the JIT include path does not (today) reach

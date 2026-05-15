@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // JIT dataflow API — self-contained implementation for JIT-compiled kernels.
 // Uses uint32_t L1 addresses (truncated host pointers from mmap'd-below-4GB L1)

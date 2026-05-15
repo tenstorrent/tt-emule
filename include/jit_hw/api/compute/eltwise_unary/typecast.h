@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Emulator stub for typecast tile operations.
 // Converts between data formats within DST (float32 storage with type-pun for int32).
