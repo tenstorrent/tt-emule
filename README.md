@@ -447,3 +447,23 @@ CloseDevice(dev);
   (writing via `get_write_ptr`) and the compute thread (reading via `get_read_ptr`) is correctly
   serialized by CB `push_back`/`wait_front`, but TSan may flag it without proper `happens-before`
   annotation.
+
+---
+
+## Contributing
+
+Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
+workflow, build/test expectations, and contributor-license details.
+
+## Security
+
+Please report security issues using GitHub's private vulnerability
+reporting on this repository, or email `ospo@tenstorrent.com`. See
+[SECURITY.md](SECURITY.md) for details.
+
+## License
+
+This project is licensed under the Apache License, Version 2.0 — see
+[LICENSE](LICENSE) and [LICENSE_understanding.txt](LICENSE_understanding.txt).
+Documentation under `docs/` is licensed under
+[CC-BY-4.0](LICENSE-DOCS).
