@@ -1,28 +1,13 @@
 #pragma once
-// Emule entry point for D2M-generated compute kernels. Owns
-// `compute_kernel_hw_startup` and pulls in the per-domain LLK function
-// headers a compute kernel might transitively need. Intercepts the include
-// path so the JIT compile's `-I` search doesn't fall through to the
-// upstream tt-metal header (which references unstubbed LLK setup APIs).
-#include "jit_hw/llk_types.h"
-#include "jit_hw/internal/llk_state.h"
-#include "jit_hw/api/compute/common.h"
-#include "jit_hw/llk_math_eltwise_unary_datacopy.h"
-#include "jit_hw/llk_pack.h"
-#include "jit_hw/llk_unpack_a.h"
-#include "jit_hw/llk_sync_stubs.h"
-#include <cstring>
-
-// ---- Compute startup and init ----
-inline void compute_kernel_hw_startup(uint32_t, uint32_t) {
-    __llk_pack_offset = 0;
-    __llk_pack_is_untilize = false;
-    __llk_unpack_is_tilize = false;
-    // Reset PACK engine auto-advance offsets and L1 acc flag to prevent
-    // stale state from prior kernel invocations in the same thread.
-    std::memset(__emule_pack_offset, 0, sizeof(__emule_pack_offset));
-    __emule_l1_acc_enabled = false;
-}
-inline void compute_kernel_hw_startup(uint32_t a, uint32_t b, uint32_t) {
-    compute_kernel_hw_startup(a, b);
-}
+// tt-emule shim for tt-mlir-emitted `#include "api/compute/compute_kernel_hw_startup.h"`.
+//
+// tt-mlir PR #7926 (Apr 15 2026) added per-API include emission, so D2M-generated
+// matmul/eltwise kernels now ship this `#include`. The upstream tt-metal version
+// pulls in the entire LLK setup surface (`llk_*_hw_configure`, `llk_pack_init`,
+// `llk_*_set_fp32_dest_acc`, …) which doesn't apply to the emulator.
+//
+// This shim is intentionally empty: `compute_kernel_hw_startup` is defined in
+// `llk_defs.h`, which is already pulled in by `jit_kernel_stubs.hpp` at the top
+// of every JIT wrapper. The only purpose of this file is to intercept the
+// `#include` so the JIT compile's `-I` search doesn't fall through to the
+// upstream tt-metal header.
