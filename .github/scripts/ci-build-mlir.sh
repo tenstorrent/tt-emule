@@ -40,15 +40,12 @@ echo "  BUILD_DIR:       $BUILD_DIR"
 echo "  CCACHE_DIR:      $CCACHE_DIR"
 echo ""
 
-echo "== Sourcing tt-mlir env/activate =="
-cd "$TT_MLIR_DIR"
-# env/activate references unbound vars; relax set -u around the source.
-set +u
-# shellcheck disable=SC1091
-source env/activate
-set -u
-which python && python --version
-echo ""
+# NOTE: we deliberately do NOT source tt-mlir's env/activate before the
+# tt-metal build. env/activate sets TT_METAL_HOME / TT_METAL_RUNTIME_ROOT
+# to $TT_MLIR_DIR/third_party/tt-metal/src/tt-metal, which tt-metal's
+# precompile_fw tool then bakes in (it loads core_descriptors/*.yaml from
+# that path at runtime). We want tt-metal to use its own real source dir
+# instead. env/activate is sourced later, just before the tt-mlir build.
 
 # ---------------------------------------------------------------------------
 # 1. Build tt-metal out-of-tree with tt-emule integration.
@@ -103,7 +100,21 @@ echo "== Pre-stamped tt-metal ExternalProject steps under $STAMP_DIR =="
 ls -la "$STAMP_DIR"
 
 # ---------------------------------------------------------------------------
-# 3. Configure and build tt-mlir against the pre-built tt-metal source tree.
+# 3. Source tt-mlir env/activate now (deferred from earlier) — needed for the
+#    venv-installed python deps the tt-mlir build pulls in (StableHLO bindings
+#    etc.). Its TT_METAL_HOME override is harmless here.
+# ---------------------------------------------------------------------------
+echo ""
+echo "== Sourcing tt-mlir env/activate =="
+cd "$TT_MLIR_DIR"
+set +u
+# shellcheck disable=SC1091
+source env/activate
+set -u
+which python && python --version
+
+# ---------------------------------------------------------------------------
+# 4. Configure and build tt-mlir against the pre-built tt-metal source tree.
 # ---------------------------------------------------------------------------
 echo ""
 echo "== Configuring tt-mlir (TTMLIR_TTMETAL_SOURCE_DIR=$TT_METAL_DIR) =="
