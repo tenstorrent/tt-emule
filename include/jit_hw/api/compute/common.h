@@ -36,6 +36,14 @@ enum class EltwiseBinaryReuseDestType { NONE, DEST_TO_SRCA, DEST_TO_SRCB };
 
 } // namespace ckernel
 
+// D2M emits `binary_dest_reuse_tiles<ELWADD, …>(…)` with `ELWADD` as a bare
+// (unqualified) name — apparently inconsistent with its sibling
+// `EltwiseBinaryReuseDestType::DEST_TO_SRCA` which IS qualified. Expose the
+// enum-class values at global scope so the unqualified form resolves.
+inline constexpr ckernel::EltwiseBinaryType ELWADD = ckernel::EltwiseBinaryType::ELWADD;
+inline constexpr ckernel::EltwiseBinaryType ELWSUB = ckernel::EltwiseBinaryType::ELWSUB;
+inline constexpr ckernel::EltwiseBinaryType ELWMUL = ckernel::EltwiseBinaryType::ELWMUL;
+
 // Note: MathFidelity may also be defined in llk_defs.h — guard against redefinition.
 // Values must match tt-metal's enum: LoFi=0, HiFi2=2, HiFi3=3, HiFi4=4.
 #ifndef __EMULE_MATH_FIDELITY_DEFINED
@@ -380,11 +388,15 @@ ALWI void pack_reconfig_data_format(uint32_t, uint32_t) {}
 ALWI void llk_pack_relu_config(ReluType) {}
 ALWI void pack_set_relu_threshold(float) {}
 
-// binary_dest_reuse stubs
-template<EltwiseBinaryReuseDestType ReuseType = EltwiseBinaryReuseDestType::NONE>
+// binary_dest_reuse stubs.
+// D2M emits these as `binary_dest_reuse_tiles{,_init}<BinaryType, ReuseType>(...)`
+// — note the template param ORDER is (BinaryType first, ReuseType second). Older
+// signatures here had only one template param. The init takes a single `cb_id`.
+template<EltwiseBinaryType BinaryType = EltwiseBinaryType::ELWADD,
+         EltwiseBinaryReuseDestType ReuseType = EltwiseBinaryReuseDestType::NONE>
 ALWI void binary_dest_reuse_tiles_init(uint32_t = 0, uint32_t = 0, bool = false) {}
 
-template<EltwiseBinaryReuseDestType ReuseType, EltwiseBinaryType BinaryType>
+template<EltwiseBinaryType BinaryType, EltwiseBinaryReuseDestType ReuseType>
 ALWI void binary_dest_reuse_tiles(uint32_t icb0, uint32_t icb1,
                                   uint32_t itile0, uint32_t itile1, uint32_t idst) {
     // Fallback to regular binary op
@@ -394,6 +406,27 @@ ALWI void binary_dest_reuse_tiles(uint32_t icb0, uint32_t icb1,
         sub_tiles(icb0, icb1, itile0, itile1, idst);
     else
         mul_tiles(icb0, icb1, itile0, itile1, idst);
+}
+
+// 3-arg overload for DEST_TO_SRC{A,B} reuse: read in_tile from icb, combine
+// with DST[idst] via BinaryType, write back to DST[idst]. D2M emits the call
+// as `binary_dest_reuse_tiles<BinaryType, ReuseType>(icb, in_tile, idst)`.
+template<EltwiseBinaryType BinaryType, EltwiseBinaryReuseDestType ReuseType>
+ALWI void binary_dest_reuse_tiles(uint32_t icb, uint32_t in_tile, uint32_t idst) {
+    __emule_dst_check(idst, "binary_dest_reuse_tiles");
+    // Pull in_tile into the highest-index DST slot as scratch, then combine.
+    const uint32_t SCRATCH = __EMULE_DST_TILES - 1;
+    copy_tile(icb, in_tile, SCRATCH);
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        float a = __emule_dst[idst][i];
+        float b = __emule_dst[SCRATCH][i];
+        if constexpr (BinaryType == EltwiseBinaryType::ELWADD)
+            __emule_dst[idst][i] = a + b;
+        else if constexpr (BinaryType == EltwiseBinaryType::ELWSUB)
+            __emule_dst[idst][i] = (ReuseType == EltwiseBinaryReuseDestType::DEST_TO_SRCB) ? (b - a) : (a - b);
+        else
+            __emule_dst[idst][i] = a * b;
+    }
 }
 
 // state_configure — no-op
@@ -423,3 +456,14 @@ ALWI void release_dst() {
 // Bring ckernel functions into the global namespace (matches real device behavior,
 // where "using namespace ckernel" is pulled in via ckernel.h / risc_common.h).
 using namespace ckernel;
+
+// Some D2M-emitted binary-int kernels call `mul_int_tile_init` (and similar
+// add_int / sub_int variants) without including the per-op
+// `api/compute/{mul,add,sub}_int_sfpu.h` header — tt-mlir's emit chain doesn't
+// always pick the per-op include for these. Make them transitively available
+// via common.h so any kernel that includes common.h (which the D2M wrapper
+// always does) can resolve the symbols. Placed at the END of common.h so
+// `ALWI` / `__EMULE_TILE_ELEMS` / DST helpers are already defined.
+#include "api/compute/add_int_sfpu.h"
+#include "api/compute/sub_int_sfpu.h"
+#include "api/compute/mul_int_sfpu.h"
