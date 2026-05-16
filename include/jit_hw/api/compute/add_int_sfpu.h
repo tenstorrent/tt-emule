@@ -4,6 +4,7 @@
 
 namespace ckernel {
 
+template<DataFormat Fmt = DataFormat::Int32>
 ALWI void add_int_tile_init() {}
 
 template<DataFormat Fmt = DataFormat::Int32>
