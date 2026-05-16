@@ -104,21 +104,12 @@ inline void __emule_dst_store_i32(uint32_t slot, uint32_t idx, int32_t v) {
     std::memcpy(&__emule_dst[slot][idx], &v, sizeof(int32_t));
 }
 
-// ---- DST state machine (no-ops in single-thread-per-compute emulation) ----
-
-ALWI void tile_regs_acquire() {
-    // Zero DST on acquire (matches device behavior: acquire gives clean regs).
-    // Mark all slots fresh so reduce_tile<MAX>/<MIN> knows to overwrite on
-    // first use rather than max-accumulate against the zero-init.
-    uint32_t active = __emule_dst_active_tiles();
-    for (uint32_t s = 0; s < active; s++) {
-        std::memset(__emule_dst[s], 0, sizeof(__emule_dst[s]));
-        __emule_dst_fresh[s] = true;
-    }
-}
-ALWI void tile_regs_commit()  {}
-ALWI void tile_regs_wait()    {}
-ALWI void tile_regs_release() {}
+// ---- DST state machine ----
+// tile_regs_acquire / tile_regs_commit / tile_regs_wait / tile_regs_release
+// are now owned by api/compute/reg_api.h (per PR #21 review feedback).
+// Including it transitively here preserves back-compat: existing callers
+// that `#include "api/compute/common.h"` still see the symbols.
+#include "jit_hw/api/compute/reg_api.h"
 
 // ---- Core logical coordinates (for D2M compute kernels) ----
 // Guarded to avoid conflict with dataflow_api.h if both are included.
