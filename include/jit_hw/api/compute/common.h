@@ -106,7 +106,8 @@ inline void __emule_dst_store_i32(uint32_t slot, uint32_t idx, int32_t v) {
 
 // ---- DST state machine ----
 // tile_regs_acquire / tile_regs_commit / tile_regs_wait / tile_regs_release
-// are owned by api/compute/reg_api.h. Include it transitively so callers
+// are now owned by api/compute/reg_api.h (per PR #21 review feedback).
+// Including it transitively here preserves back-compat: existing callers
 // that `#include "api/compute/common.h"` still see the symbols.
 #include "jit_hw/api/compute/reg_api.h"
 

@@ -1,9 +1,9 @@
 #pragma once
-// Emule shim for upstream `llk_lib/llk_unpack_A.h` and friends — variadic
+// emule shim for upstream `llk_lib/llk_unpack_A.h` and friends — variadic
 // tilize stub, unpack tilize/untilize state-setters, and `llk_unpack_A`
-// template.
+// template. Split out of `llk_defs.h`.
 
-#include "jit_hw/llk_types.h"          // type-surface include kept explicit for self-containment
+#include "jit_hw/llk_types.h"          // (defensive — types this header uses live in common.h, but keeping the type-surface include explicit for self-containment)
 #include "internal/llk_state.h"
 #include "api/compute/common.h"        // ckernel::BroadcastType, ckernel::EltwiseBinaryReuseDestType
 
