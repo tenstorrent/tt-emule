@@ -21,17 +21,13 @@
 #include "emule_dfb_state.h"
 #include "tools/profiler/kernel_profiler.hpp"
 
-// llk_defs.h's full surface (DataCopyType, UnpackToDestEn, llk_math_*
-// template stubs, __llk_pack_*/__llk_unpack_* state, experimental::pack_untilize_block)
-// is needed by D2M-generated compute kernels (matmul/eltwise) but regresses
-// the SFPU INT32 unary path (AddUnary/SubUnary CompareWithTorchReference) when
-// pulled into every TU. So include llk_defs.h only via tt-emule's
-// `api/compute/compute_kernel_hw_startup.h` shim, which D2M compute kernels
-// `#include` per tt-mlir PR #7926.
-//
-// The lightweight `firmware_common.h` (invalidate_l1_cache, flush_l1_cache,
-// WAYPOINT) is needed by dataflow kernels too — e.g. `experimental::semaphore_wait`
-// calls `invalidate_l1_cache()`. Pull it in here so every kernel gets it.
+// `firmware_common.h` provides invalidate_l1_cache / flush_l1_cache /
+// WAYPOINT — needed by dataflow kernels via `experimental::semaphore_wait`.
+// Pull it in here so every JIT kernel sees it. The heavier LLK surface
+// (DataCopyType, UnpackToDestEn, llk_math_* templates, __llk_pack_* /
+// __llk_unpack_* state, experimental::pack_untilize_block) is scoped to
+// the compute entry point `api/compute/compute_kernel_hw_startup.h` —
+// pulling it into every TU corrupts the SFPU INT32 unary tile-data path.
 #include "internal/firmware_common.h"
 
 #include <vector>

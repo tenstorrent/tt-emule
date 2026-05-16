@@ -1,8 +1,7 @@
 #pragma once
-// Emule shim for the upstream `llk_lib/llk_math_eltwise_unary_datacopy.h`.
-// Contains the helpers (`__llk_tilize_datacopy`, `__llk_untilize_datacopy`)
-// and the 3-/4-param `llk_math_eltwise_unary_datacopy` templates split out
-// of `llk_defs.h`.
+// Emule shim for upstream `llk_lib/llk_math_eltwise_unary_datacopy.h`.
+// Provides the tilize/untilize datacopy helpers + 3-/4-param
+// `llk_math_eltwise_unary_datacopy` templates.
 #include "jit_hw/llk_types.h"          // ckernel::DataCopyType
 #include "internal/llk_state.h"
 #include "api/compute/common.h"        // ckernel::BroadcastType + __emule_dst / __emule_compute / __emule_bf16 / __emule_nfaces
@@ -49,8 +48,7 @@ inline void __llk_untilize_datacopy(uint32_t dst_idx) {
     __llk_unpack_current_tile++;
 }
 
-// 4-param version (used by tilize). PR #43035 changed CopyType from plain
-// enum (int) to enum class DataCopyType.
+// 4-param version (used by tilize). CopyType is `enum class DataCopyType`.
 template <ckernel::DataCopyType CopyType, int AccumMode, BroadcastType Bcast, bool UnpackToDest>
 inline void llk_math_eltwise_unary_datacopy(uint32_t dst_idx) {
     if (__llk_unpack_is_tilize) __llk_tilize_datacopy(dst_idx);

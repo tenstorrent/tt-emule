@@ -1,19 +1,16 @@
 #pragma once
 // JIT compute API — DST register state machine (tile_regs_*).
 //
-// History: this file used to be an intercept-only shim that delegated to
-// api/compute/common.h via `#include "common.h"`.  Per PR #21 review
-// feedback ("Should we move those APIs here then?"), the relationship is
-// now flipped: reg_api.h OWNS tile_regs_acquire / tile_regs_commit /
-// tile_regs_wait / tile_regs_release, and common.h re-includes this
-// header for back-compat so existing `#include "api/compute/common.h"`
-// callers continue to see the symbols.
+// Owns tile_regs_acquire / tile_regs_commit / tile_regs_wait /
+// tile_regs_release. `api/compute/common.h` re-includes this header so
+// existing `#include "api/compute/common.h"` callers continue to see the
+// symbols.
 //
-// Dependencies: requires __emule_dst (the thread_local DST tile array),
-// __EMULE_TILE_ELEMS, and __emule_dst_active_tiles() to be visible at
-// the point of inclusion.  These currently live in common.h; reg_api.h
-// is included by common.h after those definitions are in scope.  The
-// __emule_dst_fresh[] flag array is pulled in via common_globals.h.
+// Dependencies: __emule_dst (thread_local DST tile array),
+// __EMULE_TILE_ELEMS, and __emule_dst_active_tiles() must be visible at
+// the point of inclusion. They live in common.h; reg_api.h is included
+// by common.h after those definitions are in scope. The __emule_dst_fresh[]
+// flag array is pulled in via common_globals.h.
 
 #include "jit_hw/api/compute/common_globals.h"
 #include "jit_hw/internal/risc_attribs.h"
