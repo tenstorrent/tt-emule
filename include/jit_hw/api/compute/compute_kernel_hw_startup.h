@@ -6,8 +6,10 @@
 // pulls in the entire LLK setup surface (`llk_*_hw_configure`, `llk_pack_init`,
 // `llk_*_set_fp32_dest_acc`, …) which doesn't apply to the emulator.
 //
-// This shim is intentionally empty: `compute_kernel_hw_startup` is defined in
-// `llk_defs.h`, which is already pulled in by `jit_kernel_stubs.hpp` at the top
-// of every JIT wrapper. The only purpose of this file is to intercept the
-// `#include` so the JIT compile's `-I` search doesn't fall through to the
-// upstream tt-metal header.
+// We pull in `llk_defs.h` here (rather than from jit_kernel_stubs.hpp) so the
+// LLK stub surface (DataCopyType, UnpackToDestEn, llk_math_eltwise_unary_datacopy,
+// __llk_pack_*/__llk_unpack_* state, experimental::pack_untilize_block, …) is
+// only visible to kernels that explicitly `#include "compute_kernel_hw_startup.h"`
+// — i.e. D2M-generated kernels. Including llk_defs.h in every TU regressed
+// the SFPU INT32 unary path (AddUnary/SubUnary), so we scope it here instead.
+#include "jit_hw/llk_defs.h"
