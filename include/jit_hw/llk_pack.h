@@ -1,6 +1,6 @@
 #pragma once
-// emule shim for upstream llk_lib/llk_pack.h — pack helpers and llk_pack
-// templates split out of llk_defs.h.
+// Emule shim for upstream llk_lib/llk_pack.h — pack helpers and llk_pack
+// templates.
 
 #include "internal/llk_state.h"
 #include "api/compute/common.h"

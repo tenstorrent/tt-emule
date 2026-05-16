@@ -3,12 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// tt-emule shim for tt-mlir-emitted `#include "api/compute/tilize.h"`.
-// Used to be an empty include-only intercept of the upstream tt-metal
-// `api/compute/tilize.h` (which references unstubbed LLK APIs). Per PR #21
-// review feedback ("intercept-only shim" smell), this shim now OWNS
-// `tilize_init` / `tilize_init_short`, split out of the original monolithic
-// `llk_defs.h`.
+// Emule shim for `api/compute/tilize.h`. Owns `tilize_init` /
+// `tilize_init_short`. Intercepts the include path so the JIT compile
+// doesn't fall through to upstream's version (which references unstubbed
+// LLK APIs).
 #include <cstdint>
 
 #include "jit_hw/internal/llk_state.h"

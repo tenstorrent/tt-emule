@@ -3,13 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// LLK definitions aggregator for emulated mode.
-//
-// All LLK function surface now lives in per-domain headers (split out of
-// the original monolithic llk_defs.h). This file is now purely an
-// aggregator over those headers, preserved for back-compat with any
-// consumer that still `#include`s `jit_hw/llk_defs.h` directly. Commit 10
-// of this split refactor may further reduce it.
+// LLK definitions aggregator for emulated mode. Per-domain headers below
+// own the actual LLK surface; this aggregator is kept for back-compat with
+// any consumer that `#include`s `jit_hw/llk_defs.h` directly.
 #include "llk_types.h"
 #include "api/compute/common.h"
 #include "jit_hw/api/compute/nfaces.h"
