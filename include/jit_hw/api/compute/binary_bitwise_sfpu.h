@@ -15,6 +15,9 @@ ALWI void bitwise_or_binary_tile_init() {}
 template<DataFormat Fmt = DataFormat::Int32>
 ALWI void bitwise_xor_binary_tile_init() {}
 
+// Umbrella init emitted by D2M before a `bitwise_*_binary_tile<Fmt>` call.
+ALWI void binary_bitwise_tile_init() {}
+
 template<DataFormat Fmt = DataFormat::Int32>
 ALWI void bitwise_and_binary_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
