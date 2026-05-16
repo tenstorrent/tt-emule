@@ -21,21 +21,18 @@
 #include "emule_dfb_state.h"
 #include "tools/profiler/kernel_profiler.hpp"
 
-// llk_defs.h provides LLK function stubs (llk_math_wait_for_dest_available,
-// llk_packer_wait_for_math_done, llk_unpack_A, etc.) and experimental impls
-// (experimental::pack_untilize_block, etc.) that D2M-emitted kernels reference.
+// llk_defs.h's full surface (DataCopyType, UnpackToDestEn, llk_math_*
+// template stubs, __llk_pack_*/__llk_unpack_* state, experimental::pack_untilize_block)
+// is needed by D2M-generated compute kernels (matmul/eltwise) but regresses
+// the SFPU INT32 unary path (AddUnary/SubUnary CompareWithTorchReference) when
+// pulled into every TU. So include llk_defs.h only via tt-emule's
+// `api/compute/compute_kernel_hw_startup.h` shim, which D2M compute kernels
+// `#include` per tt-mlir PR #7926.
 //
-// Before tt-mlir PR #7926 (Apr 15 2026), D2M-emitted kernels explicitly
-// `#include "llk_defs.h"`. After that PR, they no longer do — the PR
-// description says: "Internal headers firmware_common.h and llk_defs.h are
-// both transitively included, so we no longer insert them."
-//
-// On real silicon the transitive include happens via firmware_common.h →
-// llk_*.h chain. tt-emule's `api/compute/*` headers don't pull in llk_defs.h,
-// so without this explicit include here, every JIT-compiled kernel sees
-// "use of undeclared identifier 'llk_math_wait_for_dest_available'" (and
-// friends) when D2M inlines `experimental::tilize_block` and similar bodies.
-#include "llk_defs.h"
+// The lightweight `firmware_common.h` (invalidate_l1_cache, flush_l1_cache,
+// WAYPOINT) is needed by dataflow kernels too — e.g. `experimental::semaphore_wait`
+// calls `invalidate_l1_cache()`. Pull it in here so every kernel gets it.
+#include "internal/firmware_common.h"
 
 #include <vector>
 #include <cstdint>
