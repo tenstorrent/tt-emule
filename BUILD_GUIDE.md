@@ -1,6 +1,6 @@
 # tt-emule Build Guide
 
-A complete, step-by-step guide to building tt-emule and all its dependencies from scratch on a new machine. This guide was written and verified on 2026-03-16.
+A complete, step-by-step guide to building tt-emule and all its dependencies from scratch on a new machine.
 
 ## Prerequisites
 
@@ -8,9 +8,9 @@ A complete, step-by-step guide to building tt-emule and all its dependencies fro
 
 | Repo | Branch | Purpose |
 |------|--------|---------|
-| tt-emule | `master` | Software emulator library and regression scripts |
-| tt-metal | `arminale/emule-metal-base` | Metal runtime with emulation support |
-| tt-mlir | `arminale/tt-metal-local-build` (or `main`) | MLIR compiler, needed for D2M regression tests |
+| tt-emule | `main` | Software emulator library and regression scripts |
+| tt-metal | `main` | Metal runtime with emulation support |
+| tt-mlir | `main` | MLIR compiler, needed for D2M regression tests |
 
 ### Required Tools
 
@@ -130,10 +130,14 @@ cmake --build build_emule -j$(nproc)
 ### Build Outputs
 
 After a successful build, you should see:
-- gtest binaries in `build_emule/test/tt_metal/unit_tests_*` (~19 binaries on `d5a16537`)
+- gtest binaries in `build_emule/test/tt_metal/unit_tests_*` (~19 binaries)
 - `_ttnn.so` in `build_emule/ttnn/`
 - `libtt_metal.so` in `build_emule/tt_metal/` — must contain `T tt::tt_metal::emule::execute_program_emulated`. Verify with `nm -DC build_emule/tt_metal/libtt_metal.so | grep emule::execute_program_emulated` — a `T` line proves `TT_METAL_USE_EMULE=ON` took effect.
 - `libtt-umd.so.0.71.0` in `build_emule/lib/` — must contain `SWEmuleChip` symbols. Verify with `nm -DC build_emule/lib/libtt-umd.so.0.71.0 | grep SWEmuleChip::`. If empty, the UMD subbuild was configured without `TT_UMD_BUILD_EMULE` (see the "Missing Include" issue above).
+
+### Warning: don't use `build_emule_clang/` if it exists
+
+A stale `build_emule_clang/` directory may exist alongside `build_emule/`. Both are clang builds; the suffix is misleading. The leftover is partial — missing `_ttnn.so`, ships a stripped-down `libtt_metal.so` — and produces spurious failures (most visibly `EMULE BUG: get_arg_val(N) out of bounds` in DFB tests). Always use `BUILD_DIR=$TT_METAL_DIR/build_emule`. The regression scripts default to that path.
 
 ### Known Build Issue: tracy Submodule Required Even with ENABLE_TRACY=OFF
 
@@ -193,19 +197,11 @@ cd /localdev/<user>/tt-emule
 ./run_regression.sh
 ```
 
-This runs 5 tiers of tests:
-1. **Tier 1 (Host-only):** bit_utils, host_buffer, tilize_untilize, blockfloat_common, CoreRange/CoreRangeSet tests
-2. **Tier 2 (Buffer I/O):** SimpleL1Buffer, SimpleDramBuffer
-3. **Tier 3 (JIT Kernel):** TensixL1Tile
-4. **Tier 4 (TTNN Relational):** ttnn_relational
-5. **Tier 5 (TTNN Matmul):** ttnn_matmul_sweep
+Tiers covered: host-only (bit_utils, CoreRange, …), buffer I/O (Simple{L1,Dram}Buffer), JIT kernel (TensixL1Tile), DFB multi-P/C (Tiers 3b–3h), TTNN relational + matmul (Tier 4/5a), and TTNN reductions (Tier 5b).
 
-**Expected result:**
+**Expected result on `main`:** **127 passed, 16 failed, 0 skipped**. The 16 failures are 7 DFB Config Validation (Tier 3g) + 9 Tier 5b reduction (6 `ttnn_sum_*` + 3 `ttnn_minmax_*`) — all pre-existing, tracked separately. A "passed regression" means the failure set matches this allowlist.
 
-- Against tt-metal `d5a16537` (tt-mlir's bundled pin, upstream `main`, requires UMD fix [`arminale/emule-include-fix`](https://github.com/tenstorrent/tt-umd/tree/arminale/emule-include-fix) for the `SWEmuleChip` missing-include regression in UMD PR #2536): **127 passed, 16 failed, 0 skipped**. Failures: 7 DFB Config Validation (Tier 3g) + 9 Tier 5b reduction (6 `ttnn_sum_*` + 3 `ttnn_minmax_*`). The 4 DFB STRIDED wraparound tests pass on this base.
-- Against tt-metal `arminale/emule-metal-20` (`arminale/emule-metal-base` + cherry-picked Metal 2.0 emule-JIT genfiles commit): **135 passed, 11 failed, 0 skipped**. The 11 failures are 4 DFB STRIDED wraparound (Tier 3b) + 7 DFB Config Validation (Tier 3g) tests; see `IMPLEMENTATION_REPORT.md` § "Changes from v11 to v12" for the list and the upstream-merge follow-up they depend on.
-
-Tier 5b covers all 16 cases in `tests/ttnn/unit_tests/gtests/test_reduction.cpp` (6 `Sum*` aligned/unaligned + 10 `MinMax*` cases). A Quasar variant of the sum-reduction was attempted but blocked upstream — the W-reduce factory uses non-Quasar `DataMovementKernel`.
+Requires UMD fix [`arminale/emule-include-fix`](https://github.com/tenstorrent/tt-umd/tree/arminale/emule-include-fix) for the `SWEmuleChip` missing-include regression in UMD PR #2536.
 
 ---
 
@@ -384,11 +380,11 @@ The `--serial` flag runs test files one at a time (recommended to avoid memory c
 
 ### Expected Results
 
-Numbers below are from `tt-metal-main@d5a16537` + tt-mlir at the matching commit (the `TT_METAL_VERSION` pinned in `tt-mlir/third_party/CMakeLists.txt`). They are **not** the numbers from older tt-mlir checkouts — tt-mlir PR #8091 renamed `test_metal_*.py` → `d2m/test_*.py` and deleted two files (`test_metal_matmul_higher_rank.py`, `test_metal_tensor_collapsing.py`). The 11-file list below matches `run_d2m_regression.sh`'s current `TEST_FILES`.
+Numbers below match `run_d2m_regression.sh`'s current 11-file `TEST_FILES` list against tt-metal + tt-mlir on `main`.
 
-tt-emule tracks a per-test allowlist of expected failures in [issue #6](https://github.com/tenstorrent/tt-emule/issues/6) (~1620 entries at baseline, broken down by op family in sub-issues #7–#17). A "passed regression" means the failure set matches the allowlist, not that there are zero failures. **The tests on this allowlist pass on real hardware; the failures are emulator-side, not compiler bugs.**
+tt-emule tracks a per-test allowlist of expected failures in [issue #6](https://github.com/tenstorrent/tt-emule/issues/6) (broken down by op family in sub-issues #7–#17). A "passed regression" means the failure set matches the allowlist, not that there are zero failures. **The tests on this allowlist pass on real hardware; the failures are emulator-side, not compiler bugs.**
 
-Aggregate: **108 individual passes, 946 fails, 127 xfailed, 44 skipped** across 11 files. Per-file:
+Per-file aggregate:
 
 | File | passed | failed | xfailed | skipped |
 |---|---:|---:|---:|---:|
