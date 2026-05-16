@@ -211,9 +211,9 @@ The D2M regression tests are Python tests from tt-mlir that exercise the emulate
 
 ### ⚠️ Critical: Point tt-mlir at your tt-metal checkout (do this FIRST)
 
-**Do not skip this step.** If tt-mlir is configured without `TTMLIR_TTMETAL_SOURCE_DIR`, its `third_party/CMakeLists.txt` calls `ExternalProject` to clone a **separate** tt-metal at the SHA pinned in `TT_METAL_VERSION` (currently `d5a16537336229bee54fd4a6d8bd54c492abc7d1`). That clone lives at `third_party/tt-metal/src/tt-metal/` as a real directory and is built with `ENABLE_TRACY=ON` into its own `build_Release/`. tt-mlir's runtime libraries get linked against *that* clone's headers and `libtt_metal.so`.
+**Do not skip this step.** If tt-mlir is configured without `TTMLIR_TTMETAL_SOURCE_DIR`, its `third_party/CMakeLists.txt` calls `ExternalProject` to clone a **separate** tt-metal at the SHA pinned in `TT_METAL_VERSION`. That clone lives at `third_party/tt-metal/src/tt-metal/` as a real directory and is built with `ENABLE_TRACY=ON` into its own `build_Release/`. tt-mlir's runtime libraries get linked against *that* clone's headers and `libtt_metal.so`.
 
-If you then point `LD_LIBRARY_PATH` at a different tt-metal build (the user-managed checkout under `/localdev/<user>/tt-metal`), you get a silent **ABI mismatch**: kernels JIT and run, but every D2M test returns `actual_pcc=0.0` because struct layouts and headers diverge between the two trees. Symptom looked like (May 2026): 11/11 D2M files fail, ~28/1604 individual tests pass, no obvious error message — just PCC=0.0 everywhere.
+If you then point `LD_LIBRARY_PATH` at a different tt-metal build (the user-managed checkout under `/localdev/<user>/tt-metal`), you get a silent **ABI mismatch**: kernels JIT and run, but every D2M test returns `actual_pcc=0.0` because struct layouts and headers diverge between the two trees.
 
 The fix is to make tt-mlir use *your* tt-metal source, not its private clone.
 
@@ -286,8 +286,6 @@ If your tt-metal build has `ENABLE_TRACY=ON`, setting `TT_RUNTIME_ENABLE_PERF_TR
 
 **Important:** `-DLLVM_USE_LINKER=lld-20` is required when using clang-20. Without it, GNU ld is used and fails on the `--color-diagnostics` flag.
 
-**Note:** `-DTT_METAL_LOCAL_BUILD=ON` is no longer recognized by tt-mlir's CMake and was removed from this guide. tt-mlir auto-detects the local tt-metal build via the `build_Release` symlink at the override path.
-
 ### Step 5d-verify: Confirm tt-mlir is using your tt-metal
 
 After configure, verify the canonical location really points at your checkout, not a private clone:
@@ -301,7 +299,7 @@ If `ls -la` shows a real directory instead of a symlink, the override did not ta
 
 ### ⚠️ Env Var Pitfall: `TT_METAL_EMULE_MODE` is the correct name
 
-The runtime (`tt_metal/llrt/rtoptions.cpp`) checks `TT_METAL_EMULE_MODE` — a single word "EMULE", not "EMULATED". Setting `TT_METAL_EMULATED_MODE=1` (a name that *sounds* right but doesn't exist) leaves the runtime in `TargetDevice::Mock`: the device opens, the MLIR pipeline compiles, the runtime allocates output buffers, but **no kernel is ever JIT'd or executed**. The output buffer stays at its zero initial state, every PCC check sees a constant-zero output, and every D2M test fails with `actual_pcc=0.0`. There is no error message — the only signal is silence in the JIT logs and a ~0.5 s end-to-end test time (real emule runs take many seconds for kernel build alone).
+The runtime (`tt_metal/llrt/rtoptions.cpp`) checks `TT_METAL_EMULE_MODE` — a single word "EMULE", not "EMULATED". Not setting this correctly leaves the runtime in `TargetDevice::Mock`: the device opens, the MLIR pipeline compiles, the runtime allocates output buffers, but **no kernel is ever JIT'd or executed**. The output buffer stays at its zero initial state, every PCC check sees a constant-zero output, and every D2M test fails with `actual_pcc=0.0`. There is no error message — the only signal is silence in the JIT logs and a ~0.5 s end-to-end test time (real emule runs take many seconds for kernel build alone).
 
 Symptom-to-cause table:
 
@@ -413,41 +411,6 @@ TIMEOUT=600 ./run_d2m_regression.sh --serial
 ---
 
 ## Troubleshooting
-
-### Every D2M test fails with `actual_pcc=0.0`
-The runtime is in `TargetDevice::Mock` instead of `TargetDevice::Emule`. Cause is one of:
-- `TT_METAL_EMULE_MODE` is not exported (or you misspelled it as `TT_METAL_EMULATED_MODE` — the runtime checks the former and silently ignores the latter).
-- `libtt_metal.so` was compiled without `-DTT_METAL_USE_EMULE=ON`. Verify with `nm -DC build_emule/tt_metal/libtt_metal.so | grep emule::execute_program_emulated`; a `T` line means the flag was set, empty output means it wasn't.
-
-### `TT_FATAL: TargetDevice::Emule requires building with TT_METAL_USE_EMULE=ON`
-tt-mlir's `ExternalProject_Add(tt-metal)` reconfigured your tt-metal build dir without `-DTT_METAL_USE_EMULE=ON`, flipping the cache to its default OFF. Re-assert the flag (see Phase 5 callout "tt-mlir's ExternalProject can flip your TT_METAL_USE_EMULE cache").
-
-### `ImportError: libtt_metal.so: undefined symbol: _ZTIN2tt3umd11SWEmuleChipE`
-The UMD library doesn't define `SWEmuleChip` typeinfo. The compile-gated source `chip/sw_emule_chip.cpp` was excluded. Ninja sometimes doesn't notice the gate flipped on; force-rebuild the UMD unity buckets:
-```bash
-cd /localdev/<user>/tt-metal/build_emule/tt_metal/third_party/umd/device/CMakeFiles/tt-umd.dir/Unity
-rm -f *.cxx.o
-cd /localdev/<user>/tt-metal
-cmake --build build_emule --target tt-umd -j$(nproc)
-nm -DC build_emule/lib/libtt-umd.so.0.71.0 | grep SWEmuleChip:: | head -3
-```
-If `build_emule/lib/libtt-umd.so.0.71.0` is older than the rebuilt copy under `build_emule/tt_metal/third_party/umd/lib/`, copy the fresh one over:
-```bash
-cp build_emule/tt_metal/third_party/umd/lib/libtt-umd.so.0.71.0 build_emule/lib/libtt-umd.so.0.71.0
-```
-
-### `ImportError: libTTMLIRRuntime.so: undefined symbol: _ZN5tracy8GetTokenEv`
-tt-mlir built with `TT_RUNTIME_ENABLE_PERF_TRACE=ON` while the tt-metal build provides no tracy symbols. Either reconfigure tt-mlir with `-DTT_RUNTIME_ENABLE_PERF_TRACE=OFF` (recommended) or rebuild tt-metal with `-DENABLE_TRACY=ON`.
-
-### `ModuleNotFoundError: No module named 'tracy'` from `import ttnn._ttnn`
-`PYTHONPATH` is missing `<tt-metal>/tools/`. The `tracy` Python module lives at `tools/tracy/__init__.py`. Add `$TT_METAL_DIR/tools` to `PYTHONPATH`.
-
-### tt-mlir install step fails with `Permission denied` writing `/usr/local/include/blake3.h`
-tt-metal's `build_emule` was configured with the default `CMAKE_INSTALL_PREFIX=/usr/local`. Reconfigure with a writable prefix and rebuild:
-```bash
-cd /localdev/<user>/tt-metal
-cmake -B build_emule -DCMAKE_INSTALL_PREFIX=/localdev/<user>/tt-metal/build_emule
-```
 
 ### "cannot import name 'stablehlo' from 'ttmlir.dialects'"
 Rebuild tt-mlir with `-DTTMLIR_ENABLE_STABLEHLO=ON`.
