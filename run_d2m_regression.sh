@@ -38,6 +38,12 @@ TEST_FILES=(
     test_tms.py
     test_virtual_grid_rowmajor.py
     test_virtual_grids.py
+    # Eltwise (tt-emule#8 unary + tt-emule#9 binary/ternary/fusion):
+    test_unary.py
+    test_binary.py
+    test_ternary.py
+    test_eltwise_fusion.py
+    test_binary_tree.py
 )
 
 echo "========================================"
