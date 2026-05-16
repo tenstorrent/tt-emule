@@ -26,9 +26,6 @@ for arg in "$@"; do
 done
 
 # D2M test files
-# tt-mlir PR #8091 moved tests from test/python/golden/test_metal_*.py to
-# test/python/golden/d2m/test_*.py. test_metal_matmul_higher_rank.py and
-# test_metal_tensor_collapsing.py were deleted in that refactor.
 TEST_FILES=(
     test_matmul.py
     test_tilize.py

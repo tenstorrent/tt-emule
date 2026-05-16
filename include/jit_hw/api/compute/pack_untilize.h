@@ -2,11 +2,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// tt-emule stub: pack_untilize
 #pragma once
-
-// Preempt tt-mlir verbatim injection of experimental_pack_untilize_llks.
-// We provide our own implementation using emulator primitives (copy_tile + __llk_pack_untilize).
+// Emule shim for pack_untilize. Provides emulator implementations of
+// experimental::pack_untilize_block + a no-op surface for the upstream
+// pack_untilize init/dst helpers. The macro define preempts verbatim
+// injection of the experimental_pack_untilize_llks header chain.
 #define TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_PACK_UNTILIZE_LLKS_H
 
 #include "jit_hw/internal/llk_state.h"
@@ -43,10 +43,11 @@ inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
 
 using namespace ckernel;
 
-// ---- Experimental pack_untilize_block (used by D2M-generated untilize kernels) ----
-// Uses copy_tile (CB→DST) + __llk_pack_untilize (DST→CB row-major).
-// __llk_pack_untilize needs __llk_pack_block_c (row stride in tiles) and
-// __llk_pack_offset (linear tile position) to compute scatter coordinates.
+// ---- experimental::pack_untilize_block ----
+// Implements the DST → row-major CB scatter that D2M-generated untilize
+// kernels expect. Uses copy_tile (CB→DST) + __llk_pack_untilize (DST→CB);
+// __llk_pack_block_c is the row stride in tiles, __llk_pack_offset is the
+// linear tile position used to compute scatter coordinates.
 namespace experimental {
 
 template <uint32_t cols_per_dst_pass, uint32_t total_col_tiles>
