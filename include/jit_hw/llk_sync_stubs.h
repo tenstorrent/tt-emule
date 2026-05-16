@@ -1,7 +1,8 @@
 #pragma once
-// Emule shim for upstream LLK CB / sync surface — llk_wait_tiles /
-// llk_pop_tiles / llk_push_tiles / llk_wait_for_free_tiles delegate to
-// cb_* from cb_api.h; math/packer sync stubs are no-ops.
+// emule shim for the upstream LLK CB / sync surface — llk_wait_tiles /
+// llk_pop_tiles / llk_push_tiles / llk_wait_for_free_tiles (delegate to
+// cb_* from cb_api.h) and the empty math/packer sync stubs. Split out of
+// llk_defs.h.
 
 #include "api/cb_api.h"
 #include <cstdint>

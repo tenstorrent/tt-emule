@@ -1,6 +1,6 @@
 #pragma once
-// Emule shim for upstream llk_lib/llk_pack.h — pack helpers and llk_pack
-// templates.
+// emule shim for upstream llk_lib/llk_pack.h — pack helpers and llk_pack
+// templates split out of llk_defs.h.
 
 #include "internal/llk_state.h"
 #include "api/compute/common.h"
@@ -48,12 +48,12 @@ inline void __llk_pack_untilize(uint32_t tile_idx, uint32_t ocb) {
             for (uint32_t c = 0; c < 32; c++)
                 dst[c] = __emule_bf16::from_f32(__emule_dst[tile_idx][r * 32 + c]);
         }
-    } else {  // float32 / int32: use memcpy to preserve exact bit patterns
+    } else {  // float32 / int32
         for (uint32_t r = 0; r < 32; r++) {
-            uint32_t* dst = reinterpret_cast<uint32_t*>(
+            float* dst = reinterpret_cast<float*>(
                 base + tile_row_offset + r * row_stride + tile_col_offset);
             for (uint32_t c = 0; c < 32; c++)
-                std::memcpy(&dst[c], &__emule_dst[tile_idx][r * 32 + c], sizeof(uint32_t));
+                dst[c] = __emule_dst[tile_idx][r * 32 + c];
         }
     }
 }

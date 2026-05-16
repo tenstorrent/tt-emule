@@ -1,8 +1,9 @@
 #pragma once
-// LLK types — types-only surface mirroring upstream
-// `tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_defs.h`. Per-domain LLK
-// headers (`llk_math_eltwise_unary_datacopy.h`, `llk_unpack_a.h`, …) include
-// this to see the type surface without dragging in function bodies or state.
+// LLK types — the types-only surface that mirrors upstream
+// `tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_defs.h`. Pulled out of
+// tt-emule's monolithic `llk_defs.h` so the per-domain LLK headers
+// (`llk_math_eltwise_unary_datacopy.h`, `llk_unpack_a.h`, etc.) can include
+// just the type surface without dragging in function bodies or state.
 
 #include <cstdint>
 
@@ -51,9 +52,11 @@ enum class DstSync : std::uint8_t {
     SyncFull,
 };
 
-// DataCopyType — `enum class` form. D2M-emitted kernels reference it as
-// `DataCopyType::A2D` etc. inside embedded `experimental::tilize_block` /
-// similar bodies. Values mirror upstream tt-llk/llk_defs.h.
+// DataCopyType — refactored to an enum class by tt-metal PR #43035
+// "refactor(llk): convert DataCopyType from plain enum to enum class".
+// D2M-emitted kernels reference it as `DataCopyType::A2D` etc. inside the
+// embedded `experimental::tilize_block` / similar bodies. Values mirror
+// upstream tt-llk/llk_defs.h.
 enum class DataCopyType : std::uint8_t {
     A2D = 0,
     B2D = 1,
