@@ -118,6 +118,13 @@ inline void __emule_dst_store_i32(uint32_t slot, uint32_t idx, int32_t v) {
 // that `#include "api/compute/common.h"` still see the symbols.
 #include "jit_hw/api/compute/reg_api.h"
 
+// ---- LLK sync primitives ----
+// `t6_semaphore_*` / `semaphore::*` / `p_stall::*` are referenced by the
+// verbatim-inlined body of `experimental::unpack_stall_on_pack` that D2M
+// emits into compute kernels. Compute kernels generally include common.h
+// but not compute_kernel_hw_startup.h, so route the sync stubs here.
+#include "jit_hw/llk_sync_stubs.h"
+
 // ---- Core logical coordinates (for D2M compute kernels) ----
 // Guarded to avoid conflict with dataflow_api.h if both are included.
 // Return uint32_t to match the dataflow API signature (uint8_t is sufficient
