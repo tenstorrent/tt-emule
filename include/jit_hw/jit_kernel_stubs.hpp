@@ -67,6 +67,19 @@ extern thread_local uint32_t __emule_l1_unreserved_base;
 extern thread_local const uint64_t* __emule_l1_tensor_ranges;
 extern thread_local uint32_t __emule_l1_tensor_ranges_count;
 
+// Per-kernel-thread tensor-padding sanitizer state. Populated by
+// emulated_program_runner before each kernel launch only when
+// TT_EMULE_STRICT_PADDING is set AND at least one buffer has declared a
+// logical size via Buffer::set_logical_size; otherwise the pointer is left
+// null and the inline check in __emule_local_l1_to_ptr is skipped.
+//
+// Each uint64_t entry packs (logical_end << 32) | physical_end of one L1
+// buffer's padding region. An access in [logical_end, physical_end) is a
+// padding violation. Independent of __emule_l1_tensor_ranges above: padding
+// can be checked without enabling the OOB-tensor sanitizer.
+extern thread_local const uint64_t* __emule_l1_padding_ranges;
+extern thread_local uint32_t __emule_l1_padding_ranges_count;
+
 // Per-kernel-thread CB-boundary sanitizer state. Populated by
 // emulated_program_runner before each kernel launch only when
 // TT_EMULE_STRICT_CB_BOUNDARY is set; otherwise __emule_cb_boundary_strict
@@ -124,6 +137,25 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                     "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
                     l1_addr);
             abort();
+        }
+    }
+    // Tensor-padding sanitizer. Only active when the host has registered at
+    // least one buffer with Buffer::set_logical_size AND TT_EMULE_STRICT_PADDING
+    // is on. Each entry packs (logical_end << 32) | physical_end — an access
+    // in [logical_end, physical_end) is inside a buffer's padded region and
+    // must never be touched by a kernel even though the underlying memory is
+    // allocated (and thus passes the OOB-tensor check above).
+    if (__emule_l1_padding_ranges != nullptr) {
+        for (uint32_t i = 0; i < __emule_l1_padding_ranges_count; ++i) {
+            uint64_t packed = __emule_l1_padding_ranges[i];
+            uint32_t logical_end = static_cast<uint32_t>(packed >> 32);
+            uint32_t physical_end = static_cast<uint32_t>(packed);
+            if (l1_addr >= logical_end && l1_addr < physical_end) {
+                fprintf(stderr,
+                        "[ASAN ERROR] Tensor Padding Violation: Attempted to write to a padded memory region at address 0x%x (logical_end=0x%x, physical_end=0x%x)\n",
+                        l1_addr, logical_end, physical_end);
+                abort();
+            }
         }
     }
     // CB-boundary sanitizer. If the address lands inside a configured CB's

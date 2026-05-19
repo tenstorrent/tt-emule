@@ -102,6 +102,24 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             abort();
         }
     }
+    // Tensor-padding sanitizer. Mirrors the check in jit_kernel_stubs.hpp:
+    // each packed (logical_end << 32) | physical_end describes one buffer's
+    // padded region. Accesses in [logical_end, physical_end) are inside the
+    // allocation (so they pass the OOB check above) but past the caller-
+    // declared logical extent — abort with a padding-violation diagnostic.
+    if (__emule_l1_padding_ranges != nullptr) {
+        for (uint32_t i = 0; i < __emule_l1_padding_ranges_count; ++i) {
+            uint64_t packed = __emule_l1_padding_ranges[i];
+            uint32_t logical_end = static_cast<uint32_t>(packed >> 32);
+            uint32_t physical_end = static_cast<uint32_t>(packed);
+            if (l1_addr >= logical_end && l1_addr < physical_end) {
+                fprintf(stderr,
+                        "[ASAN ERROR] Tensor Padding Violation: Attempted to write to a padded memory region at address 0x%x (logical_end=0x%x, physical_end=0x%x)\n",
+                        l1_addr, logical_end, physical_end);
+                abort();
+            }
+        }
+    }
     // CB-boundary sanitizer. If the address lands inside a configured CB's
     // byte range, it must also land inside an active page window — either
     // the write reservation [write_idx, write_idx + reserved) (mod num_pages)
