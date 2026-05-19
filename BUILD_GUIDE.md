@@ -109,6 +109,8 @@ cmake -B build_emule \
     -DTT_METAL_USE_EMULE=ON \
     -DTT_EMULE_PATH=/localdev/<user>/tt-emule \
     -DWITH_PYTHON_BINDINGS=ON \
+    -DTT_METAL_BUILD_TESTS=ON \
+    -DTTNN_BUILD_TESTS=ON \
     -DCMAKE_INSTALL_PREFIX=/localdev/<user>/tt-metal/build_emule
 
 cmake --build build_emule -j$(nproc)
@@ -123,6 +125,8 @@ cmake --build build_emule -j$(nproc)
 | `TT_METAL_USE_EMULE` | `ON` | Compiles `emulated_program_runner.cpp`, defines `TT_METAL_USE_EMULE=1` in `tt_metal`, `impl`, and `llrt` libraries, and propagates `TT_UMD_BUILD_EMULE=ON` to the UMD subbuild. **This is the only correct flag.** Earlier versions of this guide listed `TT_METAL_USE_TT_EMULE` and `TT_METAL_EMULATION` — neither is a real option; both silently no-op. |
 | `TT_EMULE_PATH` | Path to tt-emule | Points to your tt-emule source tree (CPM uses this instead of fetching from GitHub) |
 | `WITH_PYTHON_BINDINGS` | `ON` | Builds `_ttnn.so` needed by D2M Python tests |
+| `TT_METAL_BUILD_TESTS` | `ON` | Builds `unit_tests_*` gtest binaries under `build_emule/test/tt_metal/` used by `run_regression.sh`. Default is OFF — without this the C++ regression reports every test as `binary not found`. |
+| `TTNN_BUILD_TESTS` | `ON` | Builds the TTNN gtest binaries under `build_emule/test/ttnn/` (Tier 4/5/6). Default is OFF — without this the TTNN tier of the C++ regression reports every test as `binary not found`. |
 | `CMAKE_INSTALL_PREFIX` | `<this build dir>` | tt-mlir's `ExternalProject_Add(tt-metal)` triggers `cmake --build . --target install` on this build dir. With the default `/usr/local`, the CPM-fetched blake3 dep tries to copy headers there and the install step fails with `Permission denied`. Setting the prefix to the build dir keeps it local and harmless. |
 
 (Note: `ENABLE_TRACY` is left at its default; either ON or OFF works as long as tt-mlir's `TT_RUNTIME_ENABLE_PERF_TRACE` is set consistently — see Phase 5.)
@@ -269,10 +273,29 @@ cmake -G Ninja -B build \
     -DTTMLIR_ENABLE_STABLEHLO=ON \
     -DTT_RUNTIME_ENABLE_PERF_TRACE=OFF \
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-    -DLLVM_USE_LINKER=lld-20
+    -DLLVM_USE_LINKER=lld-20 \
+    -DTT_METAL_USE_EMULE=ON \
+    -DTT_EMULE_PATH=/localdev/<user>/tt-emule \
+    -DTT_METAL_BUILD_TESTS=ON \
+    -DTTNN_BUILD_TESTS=ON
 
 cmake --build build -j$(nproc)
 ```
+
+**Important — forward the emule flags through tt-mlir.** tt-mlir's
+`third_party/CMakeLists.txt` wraps tt-metal in `ExternalProject_Add` and
+re-runs `cmake -B <tt-metal>/build_Release …` each time tt-mlir builds.
+If that reconfigure does not include `-DTT_METAL_USE_EMULE=ON`,
+`-DTT_EMULE_PATH=…`, `-DTT_METAL_BUILD_TESTS=ON`, and
+`-DTTNN_BUILD_TESTS=ON`, the cache flips back to defaults and the next
+tt-metal rebuild silently drops the emule code path *and* the test
+gtest binaries. Symptoms range from `actual_pcc=0.0` on every D2M test
+(emule path missing) to `binary not found` on every entry in
+`run_regression.sh` (test binaries missing). Pass the four
+`TT_METAL_USE_EMULE` / `TT_EMULE_PATH` / `TT_METAL_BUILD_TESTS` /
+`TTNN_BUILD_TESTS` flags to tt-mlir's cmake (as above) and tt-mlir
+forwards them; no separate "re-assert and rebuild tt-metal" step is
+needed.
 
 **Important — `TTMLIR_TTMETAL_SOURCE_DIR`:** without this, tt-mlir fetches its own tt-metal clone and you get the silent PCC=0.0 disaster described above.
 
