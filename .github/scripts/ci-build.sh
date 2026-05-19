@@ -68,7 +68,8 @@ cmake -B "$BUILD_DIR" \
     -DENABLE_DISTRIBUTED=OFF \
     -DTT_METAL_BUILD_TESTS=ON \
     -DTTNN_BUILD_TESTS=ON \
-    -DTT_INSTALL=OFF
+    -DTT_INSTALL=OFF \
+    -DTT_USE_SYSTEM_SFPI=OFF
 
 echo ""
 echo "== Building tt-metal =="
