@@ -13,7 +13,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TT_EMULE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-CLUSTER_DESC="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples/wormhole_N150.yaml"
+# Cluster descriptor matches the architecture under test. TT_EMULE_ARCH must
+# match the value passed to run_d2m_regression.sh so that ttrt query generates
+# a system_desc.ttsys for the same emulated arch the tests will run against.
+TT_EMULE_ARCH="${TT_EMULE_ARCH:-wormhole}"
+case "$TT_EMULE_ARCH" in
+    wormhole)  CLUSTER_DESC_FILE="wormhole_N150.yaml" ;;
+    blackhole) CLUSTER_DESC_FILE="blackhole_P100.yaml" ;;
+    *) echo "ERROR: TT_EMULE_ARCH must be wormhole|blackhole, got '$TT_EMULE_ARCH'" >&2; exit 1 ;;
+esac
+CLUSTER_DESC="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples/$CLUSTER_DESC_FILE"
 if [ ! -f "$CLUSTER_DESC" ]; then
     echo "ERROR: cluster descriptor missing at $CLUSTER_DESC" >&2
     exit 1
@@ -42,7 +51,7 @@ export LD_LIBRARY_PATH="$BUILD_DIR/lib:${LD_LIBRARY_PATH:-}"
 export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
 export TT_MLIR_HOME="$TT_MLIR_DIR"
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_DESC"
-export TT_METAL_EMULATED_MODE=1
+export TT_METAL_EMULE_MODE=1
 export TT_METAL_SLOW_DISPATCH_MODE=1
 
 # Some scripts overlay the built _ttnn.so into the source tree so that

@@ -10,6 +10,16 @@ TT_METAL_DIR="${TT_METAL_DIR:-/localdev/arminale/tt-metal}"
 TT_MLIR_DIR="${TT_MLIR_DIR:-/localdev/arminale/tt-mlir}"
 BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule_clang}"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"
+
+# TT_EMULE_ARCH selects which cluster descriptor (and therefore emulated
+# architecture) to run the D2M suite against. CI uses wormhole and blackhole
+# in parallel matrix jobs; default is wormhole for local-dev parity.
+TT_EMULE_ARCH="${TT_EMULE_ARCH:-wormhole}"
+case "$TT_EMULE_ARCH" in
+    wormhole)  CLUSTER_DESC_FILE="wormhole_N150.yaml" ;;
+    blackhole) CLUSTER_DESC_FILE="blackhole_P100.yaml" ;;
+    *) echo "ERROR: TT_EMULE_ARCH must be wormhole|blackhole, got '$TT_EMULE_ARCH'" >&2; exit 1 ;;
+esac
 LOG_DIR="/tmp/tt_emule_d2m_logs_$$"
 TIMEOUT="${TIMEOUT:-1800}"
 D2M_XML_DIR="${D2M_XML_DIR:-}"
@@ -69,7 +79,7 @@ if [ -f "$BUILD_DIR/lib/_ttnn.so" ]; then
 fi
 
 # Set emulation env vars
-export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
+export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/$CLUSTER_DESC_FILE"
 export TT_METAL_EMULE_MODE=1
 export TT_METAL_SLOW_DISPATCH_MODE=1
 
