@@ -151,13 +151,17 @@ jobs:
           if-no-files-found: error
 
   test:
-    name: Run D2M regression
+    name: Run D2M regression (${{ matrix.arch }})
     needs: build
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 120
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
       options: --user root
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [wormhole, blackhole]
     steps:
       - name: Checkout tt-emule (PR)
         uses: actions/checkout@v4
@@ -267,17 +271,19 @@ jobs:
 
       - name: Generate ttrt system_desc.ttsys
         env:
-          TT_MLIR_DIR:  ${{ github.workspace }}/tt-mlir
-          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
-          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build
+          TT_MLIR_DIR:   ${{ github.workspace }}/tt-mlir
+          TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
+          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build
+          TT_EMULE_ARCH: ${{ matrix.arch }}
         shell: bash
         run: bash tt-emule/.github/scripts/ci-d2m-prepare.sh
 
       - name: Run D2M regression
         env:
-          TT_MLIR_DIR:  ${{ github.workspace }}/tt-mlir
-          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
-          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build
+          TT_MLIR_DIR:   ${{ github.workspace }}/tt-mlir
+          TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
+          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build
+          TT_EMULE_ARCH: ${{ matrix.arch }}
         shell: bash
         run: bash tt-emule/.github/scripts/ci-d2m-regression.sh
 
@@ -288,14 +294,14 @@ jobs:
         run: |
           python3 tt-emule/.github/scripts/classify-d2m-results.py \
             --xml-dir "${RUNNER_TEMP}/d2m-xml" \
-            --allowlist tt-emule/.github/known-failures-d2m.txt \
+            --allowlist tt-emule/.github/known-failures-d2m-${{ matrix.arch }}.txt \
             --build-dir "$BUILD_DIR"
 
       - name: Upload regression artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: d2m-regression-results
+          name: d2m-regression-results-${{ matrix.arch }}
           path: |
             ${{ runner.temp }}/d2m-regression.log
             ${{ runner.temp }}/d2m-xml/*.xml

@@ -1,0 +1,31 @@
+# tt-emule known regression failures — wormhole matrix job.
+#
+# Format: one gtest filter expression per line. Wildcards permitted.
+# Comments start with '#'; blank lines are ignored.
+#
+# Generated against tt-metal pinned SHA from local run with TT_EMULE_ARCH=wormhole.
+# Stale or newly-passing entries cause CI to fail — keep this file in sync.
+
+MeshDeviceFixture.DMTensixTest1xDFB4Sx1SConfig
+MeshDeviceFixture.DMTest1xDFB1Sx1BConfig
+MeshDeviceFixture.DMTest1xDFB1Sx4SConfig
+MeshDeviceFixture.DMTest1xDFB2Sx4SConfig
+MeshDeviceFixture.DMTest1xDFB4Sx1SConfig
+MeshDeviceFixture.DMTest1xDFB4Sx2SConfig
+MeshDeviceFixture.DMTest1xDFB4Sx4SConfig
+MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/0
+MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/1
+MinMaxTensorFirstDimTests/MinMaxTensorFirstDimFixture.MinMaxTensorCorrectly/0
+MinMaxTensorFirstDimTests/MinMaxTensorFirstDimFixture.MinMaxTensorCorrectly/1
+MinMaxTensorFirstDimTests/MinMaxTensorFirstDimFixture.MinMaxTensorCorrectly/2
+MinMaxTensorFirstDimTests/MinMaxTensorFirstDimFixture.MinMaxTensorCorrectly/3
+MinMaxTensorLastDimTests/MinMaxTensorLastDimFixture.MinMaxTensorCorrectly/0
+MinMaxTensorLastDimTests/MinMaxTensorLastDimFixture.MinMaxTensorCorrectly/1
+MinMaxTensorLastDimTests/MinMaxTensorLastDimFixture.MinMaxTensorCorrectly/2
+MinMaxTensorLastDimTests/MinMaxTensorLastDimFixture.MinMaxTensorCorrectly/3
+SumTensorBothDimsTests/SumTensorBothDimsFixture.SumTensorCorrectly/0
+SumTensorBothDimsTests/SumTensorBothDimsFixture.SumTensorCorrectly/1
+SumTensorFirstDimTests/SumTensorFirstDimFixture.SumTensorCorrectly/0
+SumTensorFirstDimTests/SumTensorFirstDimFixture.SumTensorCorrectly/1
+SumTensorLastDimTests/SumTensorLastDimFixture.SumTensorCorrectly/0
+SumTensorLastDimTests/SumTensorLastDimFixture.SumTensorCorrectly/1

@@ -20,6 +20,19 @@ set -euo pipefail
 # Each Tier-N run_test invocation below points at one of those binaries with
 # a --gtest_filter that isolates the intended test.
 
+# TT_EMULE_ARCH selects which architecture's tiers to run:
+#   all       — everything (default; preserves prior local-dev behavior)
+#   wormhole  — host-only + Tier 2/3/3b-3j/3k/3l/5/5b/6 (wormhole + Quasar)
+#   blackhole — host-only + Tier 4 + Tier 6
+# CI uses wormhole and blackhole in parallel matrix jobs.
+TT_EMULE_ARCH="${TT_EMULE_ARCH:-all}"
+case "$TT_EMULE_ARCH" in
+    all|wormhole|blackhole) ;;
+    *) echo "ERROR: TT_EMULE_ARCH must be all|wormhole|blackhole, got '$TT_EMULE_ARCH'" >&2; exit 1 ;;
+esac
+run_wormhole() { [ "$TT_EMULE_ARCH" = "all" ] || [ "$TT_EMULE_ARCH" = "wormhole" ]; }
+run_blackhole() { [ "$TT_EMULE_ARCH" = "all" ] || [ "$TT_EMULE_ARCH" = "blackhole" ]; }
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule}"
 TEST_DIR="$BUILD_DIR/test/tt_metal"
@@ -152,6 +165,8 @@ done
 # the fp32 case surfaces as FAIL (missing) until the fp32 variant is wired up.
 run_test "dst_capacity_bf16"  "$API_BIN" --gtest_filter="DstStandalone.*:DstJitBF16.*"
 run_test "dst_capacity_fp32"  "$API_BIN" --gtest_filter="DstJitFP32.*"
+
+if run_wormhole; then
 
 # Tier 2+3: Buffer I/O + JIT (wormhole for buffer tests)
 echo ""
@@ -404,10 +419,20 @@ run_test "DramUnaryDRAMChannels" "$DM_BIN" \
 run_test "DramUnaryDirectedIdeal" "$DM_BIN" \
     --gtest_filter="GenericMeshDeviceFixture.TensixDataMovementDRAMDirectedIdeal"
 
+fi  # end run_wormhole (Tier 2 through Tier 3l)
+
+if run_blackhole; then
+
 # Tier 4: TTNN (blackhole — larger worker grid)
 echo ""
 echo "== Tier 4: TTNN Relational INT32 =="
 
+# Blackhole tier also requires emulation env vars (mock cluster + slow dispatch).
+# These are set by the wormhole branch above, but a pure-blackhole run skips
+# that branch, so set them here too.
+export TT_METAL_EMULE_MODE=1
+export TT_METAL_SLOW_DISPATCH_MODE=1
+export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/blackhole_P100.yaml"
 
 run_test "ttnn_relational"        "$TTNN_BIN" --gtest_filter="RelationalUnaryTests/*"
@@ -415,6 +440,10 @@ run_test "ttnn_add_int_emulated"  "$TTNN_BIN" --gtest_filter="AddUnaryTests/*"
 run_test "ttnn_sub_int"           "$TTNN_BIN" --gtest_filter="SubUnaryTests/*"
 run_test "ttnn_matmul"            "$TTNN_BIN" \
     --gtest_filter="SingleTileMatmulFixture.*:MultiTileMatmulFixture.*"
+
+fi  # end run_blackhole (Tier 4)
+
+if run_wormhole; then
 
 # Tier 5: TTNN Matmul Sweep (wormhole)
 echo ""
@@ -461,6 +490,8 @@ run_test "ttnn_minmax_both_dims" "$TTNN_BIN" \
 # Quasar. Use QuasarDataMovementKernel instead."  This is an upstream factory
 # limitation, not an emulator stub gap; revisit when the W-reduce factory
 # gains a Quasar code path.
+
+fi  # end run_wormhole (Tier 5, 5b)
 
 # Tier 6: Silicon toggle proof (requires real hardware)
 echo ""
