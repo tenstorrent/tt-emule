@@ -40,29 +40,10 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
     constexpr uint32_t DIM = 32;
     float a_rm[DIM * DIM];
     float b_rm[DIM * DIM];
-    if (__emule_compute::cb_is_32bit_format(in0_cb)) {
-        // Float32 path: UNPACK nfaces→row-major conversion.
-        const float* a_ptr = reinterpret_cast<const float*>(
-            __emule_compute::cb_read_ptr_at(in0_cb, in0_tile));
-        const float* b_ptr = reinterpret_cast<const float*>(
-            __emule_compute::cb_read_ptr_at(in1_cb, in1_tile));
-        for (uint32_t i = 0; i < DIM * DIM; i++) {
-            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
-            a_rm[i] = a_ptr[ni];
-            b_rm[i] = b_ptr[ni];
-        }
-    } else {
-        // bfloat16 path: UNPACK nfaces→row-major + bf16→f32 conversion.
-        const uint16_t* a_ptr = reinterpret_cast<const uint16_t*>(
-            __emule_compute::cb_read_ptr_at(in0_cb, in0_tile));
-        const uint16_t* b_ptr = reinterpret_cast<const uint16_t*>(
-            __emule_compute::cb_read_ptr_at(in1_cb, in1_tile));
-        for (uint32_t i = 0; i < DIM * DIM; i++) {
-            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
-            a_rm[i] = __emule_bf16::to_f32(a_ptr[ni]);
-            b_rm[i] = __emule_bf16::to_f32(b_ptr[ni]);
-        }
-    }
+    // UNPACK both operand tiles to row-major float32 regardless of CB dtype
+    // (Bfp8_b block-float / 32-bit raw / bf16 — handled by the shared helper).
+    __emule_unpack_tile_to_f32(in0_cb, in0_tile, a_rm);
+    __emule_unpack_tile_to_f32(in1_cb, in1_tile, b_rm);
     // MATH: row-major matmul accumulating into DST.
 #ifdef EMULE_MATMUL_USE_AVX2
     for (uint32_t r = 0; r < DIM; r++) {

@@ -63,33 +63,15 @@ template <PoolType reduce_type = REDUCE_OP, ReduceDim reduce_dim = REDUCE_DIM, b
 inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
                         uint32_t itile, uint32_t itile_scaler, uint32_t idst) {
     __emule_dst_check(idst, "reduce_tile");
-    // UNPACK source tile: nfaces→row-major + format conversion
+    // UNPACK source tile: row-major float32 regardless of CB dtype
+    // (Bfp8_b / 32-bit raw / bf16).
     float src[1024];
-    {
-        uint8_t* buf = __emule_compute::cb_read_ptr_at(icb, itile);
-        if (__emule_compute::cb_is_32bit_format(icb)) {
-            const float* fbuf = reinterpret_cast<const float*>(buf);
-            for (uint32_t i = 0; i < 1024; i++)
-                src[i] = fbuf[__emule_nfaces::rowmajor_to_nfaces[i]];
-        } else {
-            uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
-            for (uint32_t i = 0; i < 1024; i++)
-                src[i] = __emule_bf16::to_f32(bf[__emule_nfaces::rowmajor_to_nfaces[i]]);
-        }
-    }
+    __emule_unpack_tile_to_f32(icb, itile, src);
 
-    // UNPACK scaler tile: nfaces→row-major (scaler is uniform, but apply for correctness)
-    float scaler = 1.0f;
-    {
-        uint8_t* sbuf = __emule_compute::cb_read_ptr_at(icb_scaler, itile_scaler);
-        if (__emule_compute::cb_is_32bit_format(icb_scaler)) {
-            const float* fsbuf = reinterpret_cast<const float*>(sbuf);
-            scaler = fsbuf[__emule_nfaces::rowmajor_to_nfaces[0]];
-        } else {
-            uint16_t* sbf = reinterpret_cast<uint16_t*>(sbuf);
-            scaler = __emule_bf16::to_f32(sbf[__emule_nfaces::rowmajor_to_nfaces[0]]);
-        }
-    }
+    // UNPACK scaler tile: scaler is uniform, but apply for correctness.
+    float scaler_tile[1024];
+    __emule_unpack_tile_to_f32(icb_scaler, itile_scaler, scaler_tile);
+    float scaler = scaler_tile[0];
 
     // Real HW leaves DST undefined after tile_regs_acquire and the kernel is
     // responsible for staging multi-tile accumulation (e.g. via copy_tile from
