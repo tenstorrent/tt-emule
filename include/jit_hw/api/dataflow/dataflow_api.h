@@ -86,12 +86,14 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
     }
     if (__emule_l1_tensor_ranges != nullptr && l1_addr >= __emule_l1_unreserved_base) {
         bool in_tensor = false;
+        uint64_t matched_packed = 0;
         for (uint32_t i = 0; i < __emule_l1_tensor_ranges_count; ++i) {
             uint64_t packed = __emule_l1_tensor_ranges[i];
             uint32_t r_start = static_cast<uint32_t>(packed >> 32);
             uint32_t r_end = static_cast<uint32_t>(packed);
             if (l1_addr >= r_start && l1_addr < r_end) {
                 in_tensor = true;
+                matched_packed = packed;
                 break;
             }
         }
@@ -100,6 +102,25 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                     "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
                     l1_addr);
             abort();
+        }
+        // Object-intent provenance: log which live tensor this resolution
+        // touched. Under TT_EMULE_STRICT_OBJECT_INTENT, the host comparison
+        // pass treats these entries as the kernel's "intended write set"
+        // for the supported single-kernel-per-core case.
+        if (__emule_l1_resolved_ranges != nullptr &&
+            __emule_l1_resolved_ranges_count != nullptr) {
+            uint32_t cur = *__emule_l1_resolved_ranges_count;
+            bool already = false;
+            for (uint32_t i = 0; i < cur; ++i) {
+                if (__emule_l1_resolved_ranges[i] == matched_packed) {
+                    already = true;
+                    break;
+                }
+            }
+            if (!already && cur < __emule_l1_resolved_ranges_capacity) {
+                __emule_l1_resolved_ranges[cur] = matched_packed;
+                *__emule_l1_resolved_ranges_count = cur + 1;
+            }
         }
     }
     // Tensor-padding sanitizer. Mirrors the check in jit_kernel_stubs.hpp:

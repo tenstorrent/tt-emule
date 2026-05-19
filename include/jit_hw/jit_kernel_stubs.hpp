@@ -80,6 +80,24 @@ extern thread_local uint32_t __emule_l1_tensor_ranges_count;
 extern thread_local const uint64_t* __emule_l1_padding_ranges;
 extern thread_local uint32_t __emule_l1_padding_ranges_count;
 
+// Per-kernel-thread "resolved ranges" log for the object-intent provenance
+// sanitizer. Populated by __emule_local_l1_to_ptr each time it resolves an
+// address that falls inside a live tensor extent: the resolved (start, end)
+// pair (packed (start << 32) | end, mirroring __emule_l1_tensor_ranges) is
+// appended to this writable array if not already present.
+//
+// emulated_program_runner provides the backing storage for one kernel
+// invocation and clears the pointers at kernel exit. Under
+// TT_EMULE_STRICT_OBJECT_INTENT, exact attribution is only supported when one
+// kernel runs on a core for the launch; in that case the host comparison pass
+// treats this array as that kernel's "intended write set" and flags any other
+// live buffer whose bytes change against the pre-launch snapshot. All three
+// pointers null means no tracking — the inline append in
+// __emule_local_l1_to_ptr is a no-op.
+extern thread_local uint64_t* __emule_l1_resolved_ranges;
+extern thread_local uint32_t* __emule_l1_resolved_ranges_count;
+extern thread_local uint32_t __emule_l1_resolved_ranges_capacity;
+
 // Per-kernel-thread CB-boundary sanitizer state. Populated by
 // emulated_program_runner before each kernel launch only when
 // TT_EMULE_STRICT_CB_BOUNDARY is set; otherwise __emule_cb_boundary_strict
@@ -120,15 +138,20 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
     // Out-of-bounds-tensor sanitizer. Only active when emulated_program_runner
     // populated the live ranges (i.e. TT_EMULE_STRICT_TENSOR is set). Accesses
     // below l1_unreserved_base are system regions (mailbox, KERNEL_CONFIG, …)
-    // and pass through; at-or-above must hit a live tensor extent.
+    // and pass through; at-or-above must hit a live tensor extent. The
+    // matched (start, end) is also appended to __emule_l1_resolved_ranges so
+    // the host post-launch comparison knows which buffers this kernel is
+    // intentionally accessing (object-intent provenance check).
     if (__emule_l1_tensor_ranges != nullptr && l1_addr >= __emule_l1_unreserved_base) {
         bool in_tensor = false;
+        uint64_t matched_packed = 0;
         for (uint32_t i = 0; i < __emule_l1_tensor_ranges_count; ++i) {
             uint64_t packed = __emule_l1_tensor_ranges[i];
             uint32_t r_start = static_cast<uint32_t>(packed >> 32);
             uint32_t r_end = static_cast<uint32_t>(packed);
             if (l1_addr >= r_start && l1_addr < r_end) {
                 in_tensor = true;
+                matched_packed = packed;
                 break;
             }
         }
@@ -137,6 +160,21 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                     "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
                     l1_addr);
             abort();
+        }
+        if (__emule_l1_resolved_ranges != nullptr &&
+            __emule_l1_resolved_ranges_count != nullptr) {
+            uint32_t cur = *__emule_l1_resolved_ranges_count;
+            bool already = false;
+            for (uint32_t i = 0; i < cur; ++i) {
+                if (__emule_l1_resolved_ranges[i] == matched_packed) {
+                    already = true;
+                    break;
+                }
+            }
+            if (!already && cur < __emule_l1_resolved_ranges_capacity) {
+                __emule_l1_resolved_ranges[cur] = matched_packed;
+                *__emule_l1_resolved_ranges_count = cur + 1;
+            }
         }
     }
     // Tensor-padding sanitizer. Only active when the host has registered at
