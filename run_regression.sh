@@ -148,6 +148,23 @@ echo "== Tier 3: JIT Kernel Execution =="
 run_test "TensixL1Tile"     "$API_BIN" --gtest_filter="MeshDeviceFixture.TensixTestSimpleL1ReadWrite*"
 
 echo ""
+echo "== Tier 3a: API Sanity / Violation Checks =="
+
+run_test "alignment_writes"       "$API_BIN" \
+    --gtest_filter="MeshDeviceFixture.L1_Alignment_SanityCheck:MeshDeviceFixture.DRAM_Alignment_SanityCheck_WH"
+run_test "cb_leak"                "$API_BIN" --gtest_filter="MeshDeviceFixture.Dirty_CB_SanityCheck"
+run_test "cb_pages"               "$API_BIN" --gtest_filter="MeshDeviceFixture.CB_Reservation_Overflow_SanityCheck"
+run_test "fabric_allocation"      "$API_BIN" --gtest_filter="MeshDeviceFixture.Fabric_Access_Violation_SanityCheck"
+run_test "metadata_size"          "$API_BIN" --gtest_filter="MeshDeviceFixture.Metadata_CB_Tensor_Clash_SanityCheck"
+run_test "noc_without_barrier"    "$API_BIN" --gtest_filter="MeshDeviceFixture.NoC_Barrier_Missing_SanityCheck"
+run_test "padded_write"           "$API_BIN" --gtest_filter="MeshDeviceFixture.Tensor_Padding_Violation_SanityCheck"
+run_test "pointer_size"           "$API_BIN" --gtest_filter="MeshDeviceFixture.Local_L1_Alignment_SanityCheck"
+run_test "semaphore_write"        "$API_BIN" --gtest_filter="MeshDeviceFixture.Semaphore_Direct_Write_SanityCheck"
+run_test "tensor_bad_access"      "$API_BIN" --gtest_filter="MeshDeviceFixture.Host_UAF_*"
+run_test "write_beyond_res_pages" "$API_BIN" --gtest_filter="MeshDeviceFixture.CB_Boundary_*"
+run_test "write_outside_tensor"   "$API_BIN" --gtest_filter="MeshDeviceFixture.OOB_Tensor_Gap_*"
+
+echo ""
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/quasar_Q1.yaml"
 export ARCH_NAME=QUASAR
 
