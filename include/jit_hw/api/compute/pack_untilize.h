@@ -2,12 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// tt-emule stub: pack_untilize
 #pragma once
-
-// Preempt tt-mlir verbatim injection of experimental_pack_untilize_llks.
-// We provide our own implementation using emulator primitives (copy_tile + __llk_pack_untilize).
+// Emule shim for pack_untilize. Provides emulator implementations of
+// experimental::pack_untilize_block + a no-op surface for the upstream
+// pack_untilize init/dst helpers. The macro define preempts verbatim
+// injection of the experimental_pack_untilize_llks header chain.
 #define TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_PACK_UNTILIZE_LLKS_H
+
+#include "jit_hw/internal/llk_state.h"
+#include "jit_hw/llk_pack.h"
+#include "jit_hw/api/compute/common.h"
 
 namespace ckernel {
 
@@ -39,5 +43,34 @@ inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
 
 using namespace ckernel;
 
-// experimental::pack_untilize_block is implemented in llk_defs.h (which has full
-// context for copy_tile, __llk_pack_untilize, __llk_pack_offset, etc.).
+// ---- experimental::pack_untilize_block ----
+// Implements the DST → row-major CB scatter that D2M-generated untilize
+// kernels expect. Uses copy_tile (CB→DST) + __llk_pack_untilize (DST→CB);
+// __llk_pack_block_c is the row stride in tiles, __llk_pack_offset is the
+// linear tile position used to compute scatter coordinates.
+namespace experimental {
+
+template <uint32_t cols_per_dst_pass, uint32_t total_col_tiles>
+inline void pack_untilize_block(uint32_t icb, uint32_t ocb,
+                                uint32_t block_row_tiles,
+                                uint32_t block_col_tiles) {
+    __llk_pack_block_c = total_col_tiles;
+    __llk_pack_offset = 0;
+
+    const uint32_t num_col_blocks = block_col_tiles / cols_per_dst_pass;
+    for (uint32_t r = 0; r < block_row_tiles; ++r) {
+        for (uint32_t b = 0; b < num_col_blocks; ++b) {
+            for (uint32_t c = 0; c < cols_per_dst_pass; ++c) {
+                uint32_t src_tile = r * block_col_tiles + b * cols_per_dst_pass + c;
+                copy_tile(icb, src_tile, c);
+            }
+
+            for (uint32_t c = 0; c < cols_per_dst_pass; ++c) {
+                __llk_pack_untilize(c, ocb);
+                __llk_pack_offset++;
+            }
+        }
+    }
+}
+
+} // namespace experimental

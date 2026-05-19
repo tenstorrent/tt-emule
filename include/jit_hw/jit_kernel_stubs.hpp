@@ -14,10 +14,21 @@
 
 #include "internal/risc_attribs.h"
 #include "api/compile_time_args.h"
+#include "api/debug/dprint.h"
+#include "api/debug/device_print.h"
 #include "dev_mem_map.h"
 #include "emule_cb_state.h"
 #include "emule_dfb_state.h"
 #include "tools/profiler/kernel_profiler.hpp"
+
+// `firmware_common.h` provides invalidate_l1_cache / flush_l1_cache /
+// WAYPOINT — needed by dataflow kernels via `experimental::semaphore_wait`.
+// Pull it in here so every JIT kernel sees it. The heavier LLK surface
+// (DataCopyType, UnpackToDestEn, llk_math_* templates, __llk_pack_* /
+// __llk_unpack_* state, experimental::pack_untilize_block) is scoped to
+// the compute entry point `api/compute/compute_kernel_hw_startup.h` —
+// pulling it into every TU corrupts the SFPU INT32 unary tile-data path.
+#include "internal/firmware_common.h"
 
 #include <vector>
 #include <cstdint>

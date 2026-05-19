@@ -104,21 +104,11 @@ inline void __emule_dst_store_i32(uint32_t slot, uint32_t idx, int32_t v) {
     std::memcpy(&__emule_dst[slot][idx], &v, sizeof(int32_t));
 }
 
-// ---- DST state machine (no-ops in single-thread-per-compute emulation) ----
-
-ALWI void tile_regs_acquire() {
-    // Zero DST on acquire (matches device behavior: acquire gives clean regs).
-    // Mark all slots fresh so reduce_tile<MAX>/<MIN> knows to overwrite on
-    // first use rather than max-accumulate against the zero-init.
-    uint32_t active = __emule_dst_active_tiles();
-    for (uint32_t s = 0; s < active; s++) {
-        std::memset(__emule_dst[s], 0, sizeof(__emule_dst[s]));
-        __emule_dst_fresh[s] = true;
-    }
-}
-ALWI void tile_regs_commit()  {}
-ALWI void tile_regs_wait()    {}
-ALWI void tile_regs_release() {}
+// ---- DST state machine ----
+// tile_regs_acquire / tile_regs_commit / tile_regs_wait / tile_regs_release
+// are owned by api/compute/reg_api.h. Include it transitively so callers
+// that `#include "api/compute/common.h"` still see the symbols.
+#include "jit_hw/api/compute/reg_api.h"
 
 // ---- Core logical coordinates (for D2M compute kernels) ----
 // Guarded to avoid conflict with dataflow_api.h if both are included.
@@ -369,9 +359,13 @@ ALWI void copy_tile_to_dst_init_short_with_dt(uint32_t, uint32_t, uint32_t = 0) 
 // ---- Reconfig operations (no-ops) ----
 ALWI void reconfig_data_format(uint32_t) {}
 ALWI void reconfig_data_format(uint32_t, uint32_t) {}
+template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
 ALWI void reconfig_data_format_srca(uint32_t) {}
+template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
 ALWI void reconfig_data_format_srca(uint32_t, uint32_t) {}
+template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
 ALWI void reconfig_data_format_srcb(uint32_t) {}
+template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
 ALWI void reconfig_data_format_srcb(uint32_t, uint32_t) {}
 ALWI void pack_reconfig_data_format(uint32_t) {}
 ALWI void pack_reconfig_data_format(uint32_t, uint32_t) {}

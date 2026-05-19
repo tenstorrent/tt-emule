@@ -8,8 +8,8 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TT_METAL_DIR="${TT_METAL_DIR:-/localdev/arminale/tt-metal}"
 TT_MLIR_DIR="${TT_MLIR_DIR:-/localdev/arminale/tt-mlir}"
-BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule_clang}"
-TEST_DIR="$TT_MLIR_DIR/test/python/golden"
+BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule}"
+TEST_DIR="$TT_MLIR_DIR/test/python/golden/d2m"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"
 LOG_DIR="/tmp/tt_emule_d2m_logs_$$"
 TIMEOUT="${TIMEOUT:-1800}"
@@ -27,19 +27,17 @@ done
 
 # D2M test files
 TEST_FILES=(
-    test_metal_matmul.py
-    test_metal_matmul_higher_rank.py
-    test_metal_tilize.py
-    test_metal_dma.py
-    test_metal_layout.py
-    test_metal_allocate.py
-    test_metal_masking.py
-    test_metal_reductions.py
-    test_metal_bfp8_typecast.py
-    test_metal_tensor_collapsing.py
-    test_metal_tms.py
-    test_metal_virtual_grid_rowmajor.py
-    test_metal_virtual_grids.py
+    test_matmul.py
+    test_tilize.py
+    test_dma.py
+    test_layout.py
+    test_allocate.py
+    test_masking.py
+    test_reductions.py
+    test_bfp8_typecast.py
+    test_tms.py
+    test_virtual_grid_rowmajor.py
+    test_virtual_grids.py
 )
 
 echo "========================================"
@@ -58,8 +56,10 @@ if [ -f "$TT_MLIR_DIR/env/activate" ]; then
     source "$TT_MLIR_DIR/env/activate"
 fi
 
-# Set PYTHONPATH for ttnn (from tt-metal build) and ttmlir_runtime (from tt-mlir build)
-export PYTHONPATH="$TT_METAL_DIR/ttnn:$BUILD_DIR/lib:$TT_MLIR_DIR/build/python_packages:$TT_MLIR_DIR/build/runtime/python:${PYTHONPATH:-}"
+# Set PYTHONPATH for ttnn (from tt-metal build) and ttmlir_runtime (from tt-mlir build).
+# $TT_METAL_DIR/tools is required because ttnn's __init__.py imports the tracy python
+# module from tt-metal-main/tools/tracy/.
+export PYTHONPATH="$TT_METAL_DIR/ttnn:$TT_METAL_DIR/tools:$BUILD_DIR/lib:$TT_MLIR_DIR/build/python_packages:$TT_MLIR_DIR/build/runtime/python:${PYTHONPATH:-}"
 export LD_LIBRARY_PATH="$BUILD_DIR/lib:${LD_LIBRARY_PATH:-}"
 export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
 export TT_MLIR_HOME="$TT_MLIR_DIR"
@@ -71,7 +71,7 @@ fi
 
 # Set emulation env vars
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
-export TT_METAL_EMULATED_MODE=1
+export TT_METAL_EMULE_MODE=1
 export TT_METAL_SLOW_DISPATCH_MODE=1
 
 # Clear stale JIT cache
