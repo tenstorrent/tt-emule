@@ -48,12 +48,12 @@ inline void __llk_pack_untilize(uint32_t tile_idx, uint32_t ocb) {
             for (uint32_t c = 0; c < 32; c++)
                 dst[c] = __emule_bf16::from_f32(__emule_dst[tile_idx][r * 32 + c]);
         }
-    } else {  // float32 / int32
+    } else {  // float32 / int32: use memcpy to preserve exact bit patterns
         for (uint32_t r = 0; r < 32; r++) {
-            float* dst = reinterpret_cast<float*>(
+            uint32_t* dst = reinterpret_cast<uint32_t*>(
                 base + tile_row_offset + r * row_stride + tile_col_offset);
             for (uint32_t c = 0; c < 32; c++)
-                dst[c] = __emule_dst[tile_idx][r * 32 + c];
+                std::memcpy(&dst[c], &__emule_dst[tile_idx][r * 32 + c], sizeof(uint32_t));
         }
     }
 }
