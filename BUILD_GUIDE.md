@@ -386,7 +386,7 @@ Per-file aggregate:
 
 | File | passed | failed | xfailed | skipped |
 |---|---:|---:|---:|---:|
-| `d2m/test_matmul.py` | 0 | 123 | 14 | 0 |
+| `d2m/test_matmul.py` | 123 | 0 | 14 | 0 |
 | `d2m/test_tilize.py` | 0 | 44 | 0 | 0 |
 | `d2m/test_dma.py` | 1 | 48 | 0 | 0 |
 | `d2m/test_layout.py` | 81 | 13 | 0 | 0 |
