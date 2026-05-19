@@ -3,7 +3,6 @@
 # Format: one gtest filter expression per line. Wildcards permitted.
 # Comments start with '#'; blank lines are ignored.
 #
-# Generated against tt-metal pinned SHA from local run with TT_EMULE_ARCH=blackhole.
+# Regenerated from local run against pinned tt-metal SHA with TT_EMULE_ARCH=blackhole.
 # Stale or newly-passing entries cause CI to fail — keep this file in sync.
 
-RelationalUnaryTests/RelationalUnaryFixture.EqUnaryMatchesExpected/2

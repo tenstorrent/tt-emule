@@ -3,7 +3,7 @@
 # Format: one gtest filter expression per line. Wildcards permitted.
 # Comments start with '#'; blank lines are ignored.
 #
-# Generated against tt-metal pinned SHA from local run with TT_EMULE_ARCH=wormhole.
+# Regenerated from local run against pinned tt-metal SHA with TT_EMULE_ARCH=wormhole.
 # Stale or newly-passing entries cause CI to fail — keep this file in sync.
 
 MeshDeviceFixture.DMTensixTest1xDFB4Sx1SConfig
