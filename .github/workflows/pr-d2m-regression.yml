@@ -1,5 +1,5 @@
 # PR D2M Regression — builds tt-mlir at the pinned SHA (and tt-metal at the
-# SHA tt-mlir itself pins, against the PR's tt-emule), then runs the 13-file
+# SHA tt-mlir itself pins, against the PR's tt-emule), then runs the
 # tt-mlir D2M pytest suite. Fails the PR on new failures, newly-passing
 # allowlist entries, or stale allowlist entries.
 
@@ -8,6 +8,11 @@ name: PR D2M Regression
 on:
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE*'
+      - 'NOTICE'
   push:
     branches: [main]
 
