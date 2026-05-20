@@ -113,16 +113,27 @@ def expand_allowlist(
     return matches, stale
 
 
-def read_allowlist(path: Path) -> list[str]:
+def read_allowlist(path: Path) -> tuple[list[str], set[str]]:
+    """Parse the allowlist. Entries prefixed with `flaky:` are returned with
+    the prefix stripped and also collected into a `flaky` set so the caller
+    can suppress newly-passing/stale errors for those entries (a flake
+    documented elsewhere is expected to flip between PASS and FAIL).
+    """
     if not path.is_file():
-        return []
+        return [], set()
     entries: list[str] = []
+    flaky: set[str] = set()
     for line in path.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        entries.append(line)
-    return entries
+        if line.startswith("flaky:"):
+            pat = line[len("flaky:"):].strip()
+            entries.append(pat)
+            flaky.add(pat)
+        else:
+            entries.append(line)
+    return entries, flaky
 
 
 def write_summary(
@@ -211,15 +222,22 @@ def main() -> int:
     passed, failed = parse_xml(args.xml_dir)
     universe = passed | set(failed.keys())
 
-    allowlist_patterns = read_allowlist(args.allowlist)
+    allowlist_patterns, flaky_patterns = read_allowlist(args.allowlist)
     matches, stale = expand_allowlist(allowlist_patterns, universe)
 
     allowlisted_fqnames: set[str] = set()
-    for hits in matches.values():
+    flaky_fqnames: set[str] = set()
+    for pat, hits in matches.items():
         allowlisted_fqnames |= hits
+        if pat in flaky_patterns:
+            flaky_fqnames |= hits
+
+    # Flaky entries: stale only if they matched neither pass nor fail.
+    flaky_patterns_seen = {pat for pat in flaky_patterns if matches.get(pat)}
+    stale = [pat for pat in stale if pat not in flaky_patterns_seen]
 
     new_failures = {fq: src for fq, src in failed.items() if fq not in allowlisted_fqnames}
-    newly_passing = allowlisted_fqnames & passed
+    newly_passing = (allowlisted_fqnames & passed) - flaky_fqnames
 
     summary_path_env = os.environ.get("GITHUB_STEP_SUMMARY")
     summary_path = Path(summary_path_env) if summary_path_env else None
