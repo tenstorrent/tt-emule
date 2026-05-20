@@ -11,7 +11,8 @@ tab UI. Follow this checklist to add Slack alerting:
 
 1. Create a Slack incoming-webhook URL for the destination channel.
 2. Store as a repository secret named `NIGHTLY_SLACK_WEBHOOK_URL`.
-3. Append a step to `.github/workflows/nightly-upstream.yml`:
+3. Append a step to `.github/workflows/nightly-metal-upstream.yml` (and the
+   equivalent in `nightly-d2m-upstream.yml`):
 
    ```yaml
    - name: Notify Slack on regression

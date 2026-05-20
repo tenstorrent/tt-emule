@@ -1,0 +1,309 @@
+# PR D2M Regression — builds tt-mlir at the pinned SHA (and tt-metal at the
+# SHA tt-mlir itself pins, against the PR's tt-emule), then runs the 13-file
+# tt-mlir D2M pytest suite. Fails the PR on new failures, newly-passing
+# allowlist entries, or stale allowlist entries.
+
+name: PR D2M Regression
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: pr-d2m-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # tt-mlir's CI image: ubuntu-22-04 + pre-built /opt/ttmlir-toolchain
+  # (LLVM, StableHLO, Shardy, flatbuffers). Mirrored via harbor for shared runners.
+  TT_MLIR_CI_IMAGE: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+
+jobs:
+  build:
+    name: Build tt-mlir+tt-metal against PR's tt-emule
+    runs-on: tt-ubuntu-2204-large-stable
+    timeout-minutes: 240
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+      options: --user root
+    outputs:
+      mlir-pin:  ${{ steps.pin.outputs.mlir }}
+      metal-pin: ${{ steps.pin.outputs.metal }}
+    steps:
+      - name: Checkout tt-emule (PR)
+        uses: actions/checkout@v4
+        with:
+          path: tt-emule
+
+      - name: Resolve pinned tt-mlir SHA + derived tt-metal SHA
+        id: pin
+        shell: bash
+        run: |
+          MLIR_SHA=$(grep -vE '^\s*(#|$)' tt-emule/tt-mlir-pin.txt | head -1 | awk '{print $1}')
+          if [ -z "$MLIR_SHA" ]; then
+            echo "::error::tt-mlir-pin.txt has no SHA"
+            exit 1
+          fi
+          echo "Pinned tt-mlir SHA: $MLIR_SHA"
+          # Fetch just the third_party/CMakeLists.txt at the pinned SHA to read TT_METAL_VERSION.
+          METAL_SHA=$(curl -fsSL "https://raw.githubusercontent.com/tenstorrent/tt-mlir/$MLIR_SHA/third_party/CMakeLists.txt" \
+              | grep 'set(TT_METAL_VERSION' \
+              | sed 's/.*"\(.*\)".*/\1/' \
+              | head -1)
+          if [ -z "$METAL_SHA" ]; then
+            echo "::error::could not extract TT_METAL_VERSION from tt-mlir@$MLIR_SHA"
+            exit 1
+          fi
+          echo "Derived tt-metal SHA: $METAL_SHA"
+          echo "mlir=$MLIR_SHA"  >> "$GITHUB_OUTPUT"
+          echo "metal=$METAL_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tt-mlir at pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-mlir
+          ref: ${{ steps.pin.outputs.mlir }}
+          path: tt-mlir
+          fetch-depth: 0
+          submodules: false
+
+      - name: Checkout tt-metal at derived SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ steps.pin.outputs.metal }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Init tt-metal submodules
+        # tt-metal's CMakeLists.txt FATAL_ERRORs if umd isn't present. Init only
+        # what's needed (umd + tracy) at depth 1 — tt_llk is not pinned by all
+        # tt-metal revisions and the build doesn't need it under TT_METAL_USE_EMULE.
+        shell: bash
+        working-directory: tt-metal
+        run: |
+          git submodule update --init --depth=1 tt_metal/third_party/umd
+          git submodule update --init --depth=1 tt_metal/third_party/tracy
+
+      - name: Install clang-20 + gcc-13 libstdc++
+        # tt-mlir's CI container ships clang-17 + gcc-12's libstdc++. clang-20
+        # on libstdc++-12 trips -Werror,-Wdeprecated-declarations on
+        # get_temporary_buffer (in template instantiations in mlir's
+        # Scheduler.cpp). gcc-13's libstdc++ stops declaring that template in
+        # C++20 mode, fixing the warning at the source. We also keep libstdc++-13
+        # available as a runtime dep.
+        shell: bash
+        run: |
+          set -e
+          apt-get update -qq
+          apt-get install -y -qq wget gnupg lsb-release software-properties-common
+          if ! command -v clang-20 >/dev/null 2>&1; then
+            wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+            chmod +x /tmp/llvm.sh
+            /tmp/llvm.sh 20 all
+          fi
+          if [ ! -d /usr/lib/gcc/x86_64-linux-gnu/13 ]; then
+            add-apt-repository -y ppa:ubuntu-toolchain-r/test
+            apt-get update -qq
+            apt-get install -y -qq gcc-13 g++-13 libstdc++-13-dev
+          fi
+          clang-20 --version
+          ls /usr/lib/gcc/x86_64-linux-gnu/ | head
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: /root/.ccache
+          key: d2m-mlir-${{ steps.pin.outputs.mlir }}-metal-${{ steps.pin.outputs.metal }}-clang20-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            d2m-mlir-${{ steps.pin.outputs.mlir }}-metal-${{ steps.pin.outputs.metal }}-clang20-${{ runner.os }}-
+            d2m-mlir-${{ steps.pin.outputs.mlir }}-
+            d2m-mlir-
+
+      - name: Build
+        env:
+          TT_EMULE_DIR: ${{ github.workspace }}/tt-emule
+          TT_MLIR_DIR:  ${{ github.workspace }}/tt-mlir
+          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-build-mlir.sh
+
+      - name: Tar build trees
+        shell: bash
+        run: |
+          # With TTMLIR_TTMETAL_SOURCE_DIR, tt-metal lives at $github.workspace/tt-metal
+          # and tt-mlir's ExternalProject symlinks third_party/tt-metal/src/tt-metal
+          # to it. Tar only the build outputs — the source trees are re-cloned on
+          # the test runner.
+          tar --posix --dereference -czf d2m-build.tar.gz \
+              tt-mlir/build \
+              tt-metal/build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: d2m-build-${{ github.run_id }}
+          path: d2m-build.tar.gz
+          retention-days: 1
+          if-no-files-found: error
+
+  test:
+    name: Run D2M regression (${{ matrix.arch }})
+    needs: build
+    runs-on: tt-ubuntu-2204-xlarge-stable
+    timeout-minutes: 120
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+      options: --user root
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [wormhole, blackhole]
+    steps:
+      - name: Checkout tt-emule (PR)
+        uses: actions/checkout@v4
+        with:
+          path: tt-emule
+
+      - name: Checkout tt-mlir at pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-mlir
+          ref: ${{ needs.build.outputs.mlir-pin }}
+          path: tt-mlir
+          fetch-depth: 0
+          submodules: false
+
+      - name: Checkout tt-metal at derived SHA
+        # Used as the user-managed source for tt-mlir's tt-metal ExternalProject
+        # (via TTMLIR_TTMETAL_SOURCE_DIR) during build, and as the source tree
+        # the regression script reads ttnn/ / cluster_descriptor_examples from.
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ needs.build.outputs.metal-pin }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Init tt-metal umd submodule
+        # umd carries tests/cluster_descriptor_examples, which run_d2m_regression.sh
+        # and ci-d2m-prepare.sh both reference for the n150 yaml.
+        shell: bash
+        working-directory: tt-metal
+        run: git submodule update --init --depth=1 tt_metal/third_party/umd
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: d2m-build-${{ github.run_id }}
+          path: ${{ github.workspace }}
+
+      - name: Unpack build trees
+        shell: bash
+        run: |
+          tar -xzf d2m-build.tar.gz
+          ls -la tt-mlir/build/ | head -10
+          ls -la tt-metal/build/lib/ | head -10
+
+      - name: Restore executable bits on test entry points
+        shell: bash
+        run: |
+          chmod +x tt-metal/build/test/tt_metal/unit_tests_* 2>/dev/null || true
+          chmod +x tt-metal/build/test/ttnn/unit_tests_* 2>/dev/null || true
+
+      - name: Install gcc-13 libstdc++ runtime
+        # The build job links libTTMLIRRuntime.so against libstdc++ from
+        # gcc-13 (GLIBCXX_3.4.32). The container ships libstdc++-12 by
+        # default; ttrt fails to import with:
+        #   ImportError: libstdc++.so.6: version 'GLIBCXX_3.4.32' not found
+        # Install gcc-13 from ppa:ubuntu-toolchain-r/test to upgrade
+        # libstdc++6 to a version that provides the required symbols.
+        shell: bash
+        run: |
+          set -e
+          apt-get update -qq
+          apt-get install -y -qq software-properties-common
+          if [ ! -d /usr/lib/gcc/x86_64-linux-gnu/13 ]; then
+            add-apt-repository -y ppa:ubuntu-toolchain-r/test
+            apt-get update -qq
+            apt-get install -y -qq libstdc++6 gcc-13 g++-13 libstdc++-13-dev
+          fi
+          strings /lib/x86_64-linux-gnu/libstdc++.so.6 | grep -E '^GLIBCXX_3\.4\.(3[0-9])' | sort -u | tail
+
+      - name: Install ttrt wheel
+        # The build job pip-installs ttrt into its venv, but venv state doesn't
+        # carry across job containers. Reinstall on the test runner from the
+        # wheel produced under tt-mlir/build/tools/ttrt/build/. Without this,
+        # `python -m ttrt` runs but ttrt's importlib.metadata-based version
+        # lookup raises StopIteration, so ttrt query never writes system_desc.
+        #
+        # NOTE: use $GITHUB_WORKSPACE (env), not ${{ github.workspace }}.
+        # The latter expands to the host path /opt/runner/_work/...; the
+        # container has the same workspace mounted at /__w/... and only the
+        # env var is translated correctly.
+        shell: bash
+        run: |
+          set -xeo pipefail
+          ls -la tt-mlir/build/tools/ttrt/build/ 2>&1 | head -20 || true
+          set +u
+          cd tt-mlir
+          # shellcheck disable=SC1091
+          source env/activate
+          set -u
+          shopt -s nullglob
+          WHEELS=("$GITHUB_WORKSPACE/tt-mlir/build/tools/ttrt/build/"ttrt-*.whl)
+          if [ ${#WHEELS[@]} -eq 0 ]; then
+            echo "::error::ttrt wheel not found under tt-mlir/build/tools/ttrt/build/"
+            exit 1
+          fi
+          WHEEL="${WHEELS[0]}"
+          echo "Installing $WHEEL"
+          pip show ttrt >/dev/null 2>&1 && pip uninstall -y ttrt || true
+          pip install --force-reinstall --no-deps "$WHEEL"
+          which ttrt
+          # ttrt --help can exit non-zero on the test runner when an optional
+          # subcommand import fails — skip the sanity check and let the actual
+          # `ttrt query` in the prepare step be the test of usability.
+
+      - name: Generate ttrt system_desc.ttsys
+        env:
+          TT_MLIR_DIR:   ${{ github.workspace }}/tt-mlir
+          TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
+          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build
+          TT_EMULE_ARCH: ${{ matrix.arch }}
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-d2m-prepare.sh
+
+      - name: Run D2M regression
+        env:
+          TT_MLIR_DIR:   ${{ github.workspace }}/tt-mlir
+          TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
+          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build
+          TT_EMULE_ARCH: ${{ matrix.arch }}
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-d2m-regression.sh
+
+      - name: Classify results
+        env:
+          BUILD_DIR: ${{ github.workspace }}/tt-metal/build
+        shell: bash
+        run: |
+          python3 tt-emule/.github/scripts/classify-d2m-results.py \
+            --xml-dir "${RUNNER_TEMP}/d2m-xml" \
+            --allowlist tt-emule/.github/known-failures-d2m-${{ matrix.arch }}.txt \
+            --build-dir "$BUILD_DIR"
+
+      - name: Upload regression artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: d2m-regression-results-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/d2m-regression.log
+            ${{ runner.temp }}/d2m-xml/*.xml
+          retention-days: 30
+          if-no-files-found: warn

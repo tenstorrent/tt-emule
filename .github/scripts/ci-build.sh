@@ -30,6 +30,17 @@ echo "  BUILD_DIR:    $BUILD_DIR"
 echo "  CCACHE_DIR:   $CCACHE_DIR"
 echo ""
 
+# Workaround for missing #include in tt-metal/umd at currently-pinned SHAs:
+# cluster.cpp references SWEmuleChip (under #ifdef TT_UMD_BUILD_EMULE) but
+# never includes umd/device/chip/sw_emule_chip.hpp. Idempotent in-place patch.
+# Tracked upstream in https://github.com/tenstorrent/tt-umd/pull/2645.
+UMD_CLUSTER="$TT_METAL_DIR/tt_metal/third_party/umd/device/cluster.cpp"
+if [ -f "$UMD_CLUSTER" ] && ! grep -q 'sw_emule_chip.hpp' "$UMD_CLUSTER"; then
+    echo "== Patching $UMD_CLUSTER to include sw_emule_chip.hpp =="
+    sed -i '/^#include "umd\/device\/chip\/mock_chip.hpp"$/a #include "umd/device/chip/sw_emule_chip.hpp"' \
+        "$UMD_CLUSTER"
+fi
+
 echo "== Configuring tt-metal =="
 # Use tt-metal's libc++ toolchain file. ENABLE_LIBCXX=ON alone only verifies
 # libc++ is installed (cmake/compilers.cmake:5) — it does NOT pass
@@ -38,6 +49,11 @@ echo "== Configuring tt-metal =="
 # CMAKE_CXX_FLAGS_INIT="-stdlib=libc++" and is what actually switches the
 # stdlib. Without it, tt-metal's C++20 ranges code fails to compile against
 # Ubuntu 22.04's libstdc++ (from gcc-11).
+#
+# The tt-emule integration is selected with -DTT_METAL_USE_EMULE=ON (no extra
+# TT_ prefix). Earlier revisions of this script passed -DTT_METAL_USE_TT_EMULE
+# and -DTT_METAL_EMULATION which tt-metal didn't recognize, so the build
+# silently defaulted to TT_METAL_USE_EMULE=OFF and built stock tt-metal.
 cmake -B "$BUILD_DIR" \
     -S "$TT_METAL_DIR" \
     -G Ninja \
@@ -45,15 +61,15 @@ cmake -B "$BUILD_DIR" \
     -DCMAKE_AR=/usr/bin/llvm-ar-20 \
     -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
     -DCMAKE_BUILD_TYPE=Release \
-    -DTT_METAL_USE_TT_EMULE=ON \
-    -DTT_METAL_EMULATION=ON \
+    -DTT_METAL_USE_EMULE=ON \
     -DTT_EMULE_PATH="$TT_EMULE_DIR" \
     -DWITH_PYTHON_BINDINGS=OFF \
     -DENABLE_TRACY=OFF \
     -DENABLE_DISTRIBUTED=OFF \
     -DTT_METAL_BUILD_TESTS=ON \
     -DTTNN_BUILD_TESTS=ON \
-    -DTT_INSTALL=OFF
+    -DTT_INSTALL=OFF \
+    -DTT_USE_SYSTEM_SFPI=OFF
 
 echo ""
 echo "== Building tt-metal =="
