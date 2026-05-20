@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // INT32 addition SFPU stub: DST-to-DST integer add.
 #include "jit_hw/api/compute/common.h"

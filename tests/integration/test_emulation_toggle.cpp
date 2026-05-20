@@ -1,8 +1,8 @@
-// SPDX-FileCopyrightText: © 2024 Tenstorrent Inc.
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// Verifies that TT_METAL_EMULATED_MODE env var actually toggles between
+// Verifies that TT_METAL_EMULE_MODE env var actually toggles between
 // emulated and silicon execution at runtime from the same binary.
 //
 // Run the SAME binary twice to prove the toggle:
@@ -52,35 +52,35 @@ TEST(EmulationToggle, BuildFlagCompiled) {
 #else
     FAIL() << "TT_METAL_EMULATION is NOT defined -- "
               "emulated code paths (#ifdef TT_METAL_EMULATION) do not exist in this binary. "
-              "The env var TT_METAL_EMULATED_MODE alone cannot enable emulation without this build flag.";
+              "The env var TT_METAL_EMULE_MODE alone cannot enable emulation without this build flag.";
 #endif
 }
 
 TEST(EmulationToggle, DefaultIsNotEmulated) {
-    const char* env = std::getenv("TT_METAL_EMULATED_MODE");
+    const char* env = std::getenv("TT_METAL_EMULE_MODE");
     if (env != nullptr) {
-        GTEST_SKIP() << "TT_METAL_EMULATED_MODE is set -- run without it to test the default path";
+        GTEST_SKIP() << "TT_METAL_EMULE_MODE is set -- run without it to test the default path";
     }
-    SUCCEED() << "TT_METAL_EMULATED_MODE is not set; runtime would default to TargetDevice::Silicon";
+    SUCCEED() << "TT_METAL_EMULE_MODE is not set; runtime would default to TargetDevice::Silicon";
 }
 
 // ============================================================================
 // Group 2: SiliconActive -- MetalContext proves silicon path was selected.
-// These skip when TT_METAL_EMULATED_MODE IS set (emulated runs).
+// These skip when TT_METAL_EMULE_MODE IS set (emulated runs).
 // ============================================================================
 
 TEST(SiliconActive, TargetDeviceIsSilicon) {
-    if (std::getenv("TT_METAL_EMULATED_MODE")) {
-        GTEST_SKIP() << "TT_METAL_EMULATED_MODE is set -- not in silicon mode";
+    if (std::getenv("TT_METAL_EMULE_MODE")) {
+        GTEST_SKIP() << "TT_METAL_EMULE_MODE is set -- not in silicon mode";
     }
     auto target = MetalContext::instance().get_cluster().get_target_device_type();
     EXPECT_EQ(target, tt::TargetDevice::Silicon)
-        << "Without TT_METAL_EMULATED_MODE, target device should be Silicon";
+        << "Without TT_METAL_EMULE_MODE, target device should be Silicon";
 }
 
 TEST(SiliconActive, IsNotMockOrEmulated) {
-    if (std::getenv("TT_METAL_EMULATED_MODE")) {
-        GTEST_SKIP() << "TT_METAL_EMULATED_MODE is set";
+    if (std::getenv("TT_METAL_EMULE_MODE")) {
+        GTEST_SKIP() << "TT_METAL_EMULE_MODE is set";
     }
     EXPECT_FALSE(MetalContext::instance().get_cluster().is_mock_or_emulated())
         << "Silicon device should report is_mock_or_emulated() == false";
@@ -88,29 +88,29 @@ TEST(SiliconActive, IsNotMockOrEmulated) {
 
 // ============================================================================
 // Group 3: EmulationActive -- MetalContext proves emulated path was selected.
-// These skip when TT_METAL_EMULATED_MODE is not set (silicon runs).
+// These skip when TT_METAL_EMULE_MODE is not set (silicon runs).
 // ============================================================================
 
 TEST(EmulationActive, TargetDeviceIsEmulated) {
-    if (!std::getenv("TT_METAL_EMULATED_MODE")) {
-        GTEST_SKIP() << "TT_METAL_EMULATED_MODE not set";
+    if (!std::getenv("TT_METAL_EMULE_MODE")) {
+        GTEST_SKIP() << "TT_METAL_EMULE_MODE not set";
     }
     auto target = MetalContext::instance().get_cluster().get_target_device_type();
-    EXPECT_EQ(target, tt::TargetDevice::Emulated)
-        << "With TT_METAL_EMULATED_MODE set, target device should be Emulated";
+    EXPECT_EQ(target, tt::TargetDevice::Emule)
+        << "With TT_METAL_EMULE_MODE set, target device should be Emule";
 }
 
 TEST(EmulationActive, SlowDispatchForced) {
-    if (!std::getenv("TT_METAL_EMULATED_MODE")) {
-        GTEST_SKIP() << "TT_METAL_EMULATED_MODE not set";
+    if (!std::getenv("TT_METAL_EMULE_MODE")) {
+        GTEST_SKIP() << "TT_METAL_EMULE_MODE not set";
     }
     EXPECT_FALSE(MetalContext::instance().rtoptions().get_fast_dispatch())
         << "Emulated mode must disable fast dispatch (no HWCommandQueue)";
 }
 
 TEST(EmulationActive, IsMockOrEmulated) {
-    if (!std::getenv("TT_METAL_EMULATED_MODE")) {
-        GTEST_SKIP() << "TT_METAL_EMULATED_MODE not set";
+    if (!std::getenv("TT_METAL_EMULE_MODE")) {
+        GTEST_SKIP() << "TT_METAL_EMULE_MODE not set";
     }
     EXPECT_TRUE(MetalContext::instance().get_cluster().is_mock_or_emulated())
         << "Emulated device should report is_mock_or_emulated() == true";
@@ -126,7 +126,7 @@ TEST_F(MeshDeviceFixture, EmulatedRunnerInvoked) {
     GTEST_SKIP() << "TT_METAL_EMULATION not compiled in";
 #else
     auto target = MetalContext::instance().get_cluster().get_target_device_type();
-    if (target != tt::TargetDevice::Emulated) {
+    if (target != tt::TargetDevice::Emule) {
         GTEST_SKIP() << "Not in emulated mode (target="
                       << static_cast<int>(target) << ")";
     }

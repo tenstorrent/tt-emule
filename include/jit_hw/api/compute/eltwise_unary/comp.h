@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Unary comparison SFPU stubs for emulation.
 // Each function compares DST elements against a scalar parameter or zero.

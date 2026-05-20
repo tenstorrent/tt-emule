@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Emulation stub for experimental::Noc and noc_traits_t.
 // Dispatches async_read/write through noc_traits_t specializations, then does

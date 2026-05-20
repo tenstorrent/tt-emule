@@ -1,0 +1,11 @@
+# Pinned tt-metal commit used by PR regression CI.
+#
+# The first non-comment, non-blank line is the SHA the CI will check out.
+# To bump: edit this file in a PR; the regression must pass against the new pin
+# before the PR is mergeable.
+#
+# Keep this in sync with the SHA pinned in tt-mlir's third_party/CMakeLists.txt
+# (the same one tt-mlir-pin.txt cascades to via TT_METAL_VERSION). Drifting
+# apart pins the two CI pipelines on different umd revisions and exposes
+# version-specific umd bugs in one pipeline but not the other.
+d5a16537336229bee54fd4a6d8bd54c492abc7d1

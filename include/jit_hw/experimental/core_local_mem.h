@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Emulation stub for experimental::CoreLocalMem<T>.
 // Wraps an L1 address as a typed pointer into Core's mmap'd L1 region.

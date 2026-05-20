@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Stub debug print for JIT-compiled kernels.
 // On the real device, DPRINT streams to a ring buffer read by the host.

@@ -1,7 +1,11 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Emulation Toggle Verification
 #
-# Proves that TT_METAL_EMULATED_MODE env var toggles between silicon and
+# Proves that TT_METAL_EMULE_MODE env var toggles between silicon and
 # emulated execution from the SAME binary. Requires:
 #   - tt-metal built with TT_METAL_EMULATION=ON
 #   - A Tenstorrent device on this machine (for silicon phase)
@@ -51,25 +55,25 @@ echo ""
 # EmulationActive tests auto-skip.
 # ==========================================================
 echo "== Phase 1: Silicon =="
-echo "(TT_METAL_EMULATED_MODE unset -- real hardware)"
+echo "(TT_METAL_EMULE_MODE unset -- real hardware)"
 echo ""
-unset TT_METAL_MOCK_CLUSTER_DESC_PATH TT_METAL_EMULATED_MODE TT_METAL_SLOW_DISPATCH_MODE 2>/dev/null || true
+unset TT_METAL_MOCK_CLUSTER_DESC_PATH TT_METAL_EMULE_MODE TT_METAL_SLOW_DISPATCH_MODE 2>/dev/null || true
 
 run_test "silicon" \
     "$TEST_DIR/test_emulation_toggle"
 
 # ==========================================================
-# Phase 2: Emulated (TT_METAL_EMULATED_MODE=1)
-# EmulationActive tests activate and confirm TargetDevice::Emulated.
+# Phase 2: Emulated (TT_METAL_EMULE_MODE=1)
+# EmulationActive tests activate and confirm TargetDevice::Emule.
 # SiliconActive tests auto-skip.
 # ==========================================================
 echo ""
 echo "== Phase 2: Emulated =="
-echo "(TT_METAL_EMULATED_MODE=1 -- software emulation)"
+echo "(TT_METAL_EMULE_MODE=1 -- software emulation)"
 echo ""
 
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
-export TT_METAL_EMULATED_MODE=1
+export TT_METAL_EMULE_MODE=1
 export TT_METAL_SLOW_DISPATCH_MODE=1
 
 run_test "emulated" \
@@ -83,7 +87,7 @@ echo "========================================"
 echo " Toggle Verification Results"
 echo "========================================"
 echo " Silicon:  SiliconActive.* activated, EmulationActive.* skipped"
-echo " Emulated: EmulationActive.* activated, SiliconActive.* skipped"
+echo " Emule: EmulationActive.* activated, SiliconActive.* skipped"
 echo ""
 echo " $PASS passed, $FAIL failed, $SKIP skipped"
 echo "========================================"

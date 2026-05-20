@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Firmware common stub for emulated mode
 // Most macros (PACK/MATH/UNPACK/ALWI) are already defined in api/compute/common.h
@@ -13,6 +17,6 @@ inline void flush_l1_cache() {}
 #define WAYPOINT(...)
 #endif
 
-#ifndef UnpackToDestEn
-#define UnpackToDestEn false
-#endif
+// UnpackToDestEn lives in llk_types.h as `inline constexpr bool` (not a
+// macro). D2M-emitted kernels use it as a non-type template argument; the
+// constexpr form preserves type information at the template-arg site.

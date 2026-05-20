@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 #include "device.hpp"
 #include "buffer.hpp"
@@ -25,20 +29,6 @@ CommandQueue CreateCommandQueue(Device& device);
 
 // ---- Program construction ----
 Program CreateProgram();
-
-// Function-pointer kernel (in-process, existing API)
-KernelHandle CreateKernel(Program& program, KernelFn fn, CoreCoord core,
-                           DataMovementConfig config);
-KernelHandle CreateKernel(Program& program, KernelFn fn, CoreCoord core,
-                           ComputeConfig config);
-
-// Quasar kernel creation
-KernelHandle CreateKernel(Program& program, KernelFn fn, CoreCoord core,
-                           QuasarDataMovementConfig config,
-                           uint8_t processor_id = 0);
-KernelHandle CreateKernel(Program& program, KernelFn fn, CoreCoord core,
-                           QuasarComputeConfig config,
-                           uint8_t processor_id = 8);
 
 void SetRuntimeArgs(Program& program, KernelHandle kernel_id, CoreCoord core,
                     std::vector<uint32_t> args);

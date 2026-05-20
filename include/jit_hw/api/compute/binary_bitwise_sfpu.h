@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Bitwise binary SFPU stubs (AND, OR, XOR).
 #include "jit_hw/api/compute/common.h"

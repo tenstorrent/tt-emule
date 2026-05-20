@@ -1,9 +1,5 @@
-add_subdirectory(eltwise_add)
-add_subdirectory(matmul)
-add_subdirectory(tilize)
-add_subdirectory(dfb_passthrough)
-add_subdirectory(dfb_multi_consumer)
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
 
-if(TT_EMULE_COMPAT_HEADERS)
-    add_subdirectory(compat)
-endif()
+add_subdirectory(tilize)

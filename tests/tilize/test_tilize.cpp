@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // Single-threaded tilize/untilize round-trip test.
 // Directly uses CircularBuffer and Tile; no kernel threads needed.
 // Verifies that tilize_block followed by untilize_block is an identity transform.

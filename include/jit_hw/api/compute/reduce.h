@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Reduce compute stub for emulated mode
 // Implements reduce_tile with actual SUM/MAX math across ROW/COL/SCALAR dimensions.

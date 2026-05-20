@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #include "tt_emule/jit_kernel.hpp"
 #include <dlfcn.h>
 #include <unistd.h>
@@ -67,7 +71,7 @@ KernelFn jit_compile_kernel(const std::string& kernel_src_path,
         ct_flag = ss.str();
     }
 
-    // parent of jit_hw/ gives us access to kernel_api/
+    // parent of jit_hw/ resolves project-relative include paths from kernel sources
     std::string parent_inc = std::filesystem::path(jit_inc).parent_path().string();
 
     // 5. Build and run compile command

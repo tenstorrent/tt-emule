@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #include "tt_emule/host_api.hpp"
 #include "tt_emule/program.hpp"
 #include "tt_emule/device.hpp"
@@ -9,17 +13,15 @@
 #include <barrier>
 #include <stdexcept>
 
-// Thread-local context used by kernel_api headers
+// Thread-local context consumed by JIT kernel stubs in include/jit_hw/.
 thread_local std::vector<uint32_t> __rt_args;
 thread_local tt_emule::Core*       __core   = nullptr;
 thread_local tt_emule::Device*     __device = nullptr;
 thread_local uint8_t               __processor_id = 0;
 
-// DFB thread-locals: both paths (__dfb_ifaces for standalone, __emule_dfbs for JIT)
-// are always set to the same value in the thread setup below.
-thread_local tt_emule::EmuleDFBInterface* __dfb_ifaces = nullptr;
+// DFB thread-locals consumed by jit_hw/cb_api.h and jit_hw/dfb_api.h.
 thread_local tt_emule::TileCounterArray*  __emule_tc_array = nullptr;
-thread_local tt_emule::EmuleDFBInterface* __emule_dfbs = nullptr;
+thread_local tt_emule::EmuleDFBInterface* __emule_dfbs     = nullptr;
 
 extern "C" uint8_t* __emule_dram_ptr(uint64_t offset) {
     return __device->dram_ptr(offset);
@@ -255,8 +257,7 @@ void EnqueueProgram(Device& device, Program& program, bool /*blocking*/) {
             __processor_id = kd.processor_id;
 
             if (has_dfbs) {
-                __dfb_ifaces    = dfb_iface_per_thread[i].data();
-                __emule_dfbs    = dfb_iface_per_thread[i].data();
+                __emule_dfbs     = dfb_iface_per_thread[i].data();
                 __emule_tc_array = core.tile_counters();
             }
 

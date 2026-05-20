@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // JIT compute stub for matmul operations.
 // matmul_tiles performs a 32x32 tile GEMM (bfloat16 inputs, float32 DST accumulate).

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
 cmake_minimum_required(VERSION 3.16)
 project(tt_emule CXX)
 
@@ -13,10 +17,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Threads REQUIRED)
-
-option(TT_EMULE_COMPAT_HEADERS
-    "Build with tt-metal-compatible header aliases (ttkernel/ and tt_metal_compat.hpp)"
-    OFF)
 
 # Optionally enable ThreadSanitizer in Debug builds
 if(PROJECT_IS_TOP_LEVEL AND CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -63,15 +63,9 @@ install(TARGETS tt_emule_lib tt_emule_headers
     EXPORT tt-emule-targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
-install(DIRECTORY include/tt_emule include/kernel_api
+install(DIRECTORY include/tt_emule
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
-
-if(TT_EMULE_COMPAT_HEADERS)
-    install(DIRECTORY include/ttkernel
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    )
-endif()
 
 install(EXPORT tt-emule-targets
     FILE tt-emule-config.cmake

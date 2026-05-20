@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 // Empty shim. The reduce_w_neg / reduce_h_neg compute kernels include this
 // header but never reference any symbol from it (likely a refactor leftover
