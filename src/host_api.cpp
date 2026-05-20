@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "tt_emule/host_api.hpp"
-#include "tt_emule/jit_kernel.hpp"
 #include <cstring>
 #include <span>
 
@@ -197,23 +196,3 @@ void ReadFromDeviceDRAMChannel(Device* device, uint32_t /*channel*/,
 
 } // namespace tt_emule
 
-// JIT helper: lives outside tt_emule namespace to avoid ADL conflicts when
-// test code has `using namespace tt::tt_metal` and all arg types are tt_emule aliases.
-namespace tt_emule_internal {
-
-tt_emule::KernelHandle create_jit_kernel(
-    tt_emule::Program& program, const std::string& kernel_src_path,
-    tt_emule::CoreCoord core, tt_emule::DataMovementConfig config)
-{
-    using namespace tt_emule;
-    KernelType type = config.type;
-    if (config.processor == DataMovementProcessor::RISCV_1 &&
-        type == KernelType::DataMovement0) {
-        type = KernelType::DataMovement1;
-    }
-    // Empty string → jit_kernel.cpp uses TT_EMULE_JIT_INCLUDE_DIR from CMake
-    KernelFn fn = jit_compile_kernel(kernel_src_path, config.compile_args, "");
-    return program.add_kernel(type, std::move(fn), core);
-}
-
-} // namespace tt_emule_internal

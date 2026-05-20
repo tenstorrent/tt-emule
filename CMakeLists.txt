@@ -28,7 +28,6 @@ endif()
 add_library(tt_emule_lib STATIC
     src/host_api.cpp
     src/kernel_runner.cpp
-    src/jit_kernel.cpp
 )
 
 target_include_directories(tt_emule_lib PUBLIC
