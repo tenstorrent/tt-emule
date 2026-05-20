@@ -6,7 +6,7 @@ Build the emulator + tt-metal, run the C++ regression, and wire up your first te
 
 | Tool | Version |
 |------|---------|
-| clang-20 | 20.x |
+| clang-17 | 17.x |
 | CMake | ≥ 3.24 |
 | Ninja | ≥ 1.10 |
 
@@ -42,12 +42,15 @@ git config submodule.tt_metal/third_party/umd.url git@github.com:tenstorrent/tt-
 ```bash
 cd "$ROOT/tt-metal"
 cmake -B build_emule -G Ninja \
-  -DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20 \
-  -DCMAKE_AR=/usr/bin/llvm-ar-20 -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
+  -DCMAKE_C_COMPILER=clang-17 -DCMAKE_CXX_COMPILER=clang++-17 \
+  -DCMAKE_AR=/usr/bin/llvm-ar-17 -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-17 \
   -DCMAKE_BUILD_TYPE=Release \
-  -DTT_METAL_USE_TT_EMULE=ON -DTT_METAL_EMULATION=ON \
+  -DTT_METAL_USE_EMULE=ON \
   -DTT_EMULE_PATH="$ROOT/tt-emule" \
-  -DENABLE_TRACY=OFF -DTT_INSTALL=OFF
+  -DCMAKE_INSTALL_PREFIX="$ROOT/tt-metal/build_emule" \
+  -DWITH_PYTHON_BINDINGS=ON \
+  -DTT_METAL_BUILD_TESTS=ON \
+  -DTTNN_BUILD_TESTS=ON
 cmake --build build_emule -j$(nproc)
 ```
 
@@ -113,5 +116,5 @@ See `IMPLEMENTATION_REPORT.md` § "Test Results" for the authoritative per-tier 
 
 ## Common Pitfalls
 
-- **`unit_tests_api: binary not found`** — build is missing. Re-check `TT_METAL_USE_TT_EMULE=ON` and `TT_METAL_EMULATION=ON` were set when configuring.
+- **`unit_tests_api: binary not found`** — build is missing. Re-check `-DTT_METAL_USE_EMULE=ON` was passed to cmake when configuring. Verify with `nm -DC build_emule/tt_metal/libtt_metal.so | grep emule::execute_program_emulated` — a `T` line confirms it.
 - **Crash on JIT path** — likely an unguarded code path. Wrap with `is_mock_or_emulated()` in tt-metal (see `tt_metal/impl/...` for examples).

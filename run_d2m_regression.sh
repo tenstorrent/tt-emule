@@ -8,7 +8,7 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TT_METAL_DIR="${TT_METAL_DIR:-/localdev/arminale/tt-metal}"
 TT_MLIR_DIR="${TT_MLIR_DIR:-/localdev/arminale/tt-mlir}"
-BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule_clang}"
+BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule}"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"
 
 # TT_EMULE_ARCH selects which cluster descriptor (and therefore emulated
