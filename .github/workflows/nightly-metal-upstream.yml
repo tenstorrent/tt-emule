@@ -141,15 +141,16 @@ jobs:
           cp -r tt-metal/build_emule_clang/_cluster_descs/cluster_descriptor_examples \
                 tt-metal/tt_metal/third_party/umd/tests/
 
-      - name: Install Python + libc++ runtime
-        # See PR workflow for explanation.
+      - name: Install Python + libc++ runtime + clang-20
+        # See PR workflow for explanation. clang-20 is needed at runtime by the
+        # emulated program runner's JIT kernel compile path.
         run: |
           if [ ! -f /etc/apt/sources.list.d/llvm-toolchain-jammy-20.list ]; then
             wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg
             echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main" | sudo tee /etc/apt/sources.list.d/llvm-toolchain-jammy-20.list >/dev/null
           fi
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends python3 libc++-20-dev libc++abi-20-dev libnuma1 libhwloc15 libtbb12
+          sudo apt-get install -y --no-install-recommends python3 clang-20 libc++-20-dev libc++abi-20-dev libnuma1 libhwloc15 libtbb12
 
       - name: Install SFPI toolchain
         # tt-metal's JIT kernel compiler looks for sfpi at <TT_METAL_HOME>/runtime/sfpi/

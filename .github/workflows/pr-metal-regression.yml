@@ -140,18 +140,25 @@ jobs:
           cp -r tt-metal/build_emule_clang/_cluster_descs/cluster_descriptor_examples \
                 tt-metal/tt_metal/third_party/umd/tests/
 
-      - name: Install Python + libc++ runtime
+      - name: Install Python + libc++ runtime + clang-20
         # Test binaries are dynamically linked against libc++.so.1 / libc++abi.so.1
         # (built with tt-metal's libc++ toolchain). Match the build runner's
         # package install — apt.llvm.org provides libc++-20-dev / libc++abi-20-dev,
         # which include the runtime .so files. No separate "libc++1-20" pkg exists.
+        #
+        # clang-20 is also required at *runtime*: the emulated program runner
+        # (tt_metal/impl/emulation/emulated_program_runner.cpp) JIT-compiles each
+        # kernel source via system(TT_EMULE_CXX_COMPILER ...). That define is
+        # baked into libtt_metal.so at build time as /usr/bin/clang++-20, so the
+        # test runner must have it on PATH or every JIT compile returns exit 127
+        # ("command not found", shown as exit 32512 = 127<<8).
         run: |
           if [ ! -f /etc/apt/sources.list.d/llvm-toolchain-jammy-20.list ]; then
             wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg
             echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main" | sudo tee /etc/apt/sources.list.d/llvm-toolchain-jammy-20.list >/dev/null
           fi
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends python3 libc++-20-dev libc++abi-20-dev libnuma1 libhwloc15 libtbb12
+          sudo apt-get install -y --no-install-recommends python3 clang-20 libc++-20-dev libc++abi-20-dev libnuma1 libhwloc15 libtbb12
 
       - name: Install SFPI toolchain
         # tt-metal's JIT kernel compiler (tt_metal/jit_build/build.cpp) looks for
