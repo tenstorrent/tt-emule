@@ -153,6 +153,19 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends python3 libc++-20-dev libc++abi-20-dev libnuma1 libhwloc15 libtbb12
 
+      - name: Install SFPI toolchain
+        # tt-metal's JIT kernel compiler (tt_metal/jit_build/build.cpp) looks for
+        # the sfpi toolchain at either <TT_METAL_HOME>/runtime/sfpi/ or
+        # /opt/tenstorrent/sfpi/. The build job fetches sfpi via CMake's
+        # FetchContent into the *source tree* (runtime/sfpi/), but that path is
+        # not part of the build artifact, and the test job does a fresh
+        # tt-metal checkout — so it has neither. Install via tt-metal's own
+        # install_dependencies.sh --sfpi which fetches the released .deb from
+        # tenstorrent/sfpi and apt-installs it into /opt/tenstorrent/sfpi/,
+        # matching tt-metal's own CI flow.
+        run: |
+          sudo bash tt-metal/install_dependencies.sh --sfpi
+
       - name: Run regression
         env:
           TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
