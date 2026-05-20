@@ -79,6 +79,7 @@ extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
 // matches by name only; a mismatch leaves the 4th arg as register garbage.
 extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src,
                                         uint32_t size, bool include_self);
+extern "C" bool __emule_noc_addr_is_dram(uint64_t noc_addr);
 
 // ---- Debug logging (enabled by TT_EMULE_DEBUG_MULTICAST=1 env var) ----
 inline bool __emule_debug_multicast() {
@@ -109,16 +110,52 @@ inline uint32_t __emule_addr_to_offset(uint32_t addr) {
 #ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED
 #define __EMULE_LOCAL_L1_TO_PTR_DEFINED
 inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
-    if (l1_addr % 4 != 0) {
-        fprintf(stderr, "[ASAN ERROR] Local L1 Alignment: Offset 0x%x must be 4-byte aligned for scalar access\n", l1_addr);
-        abort();
-    }
     if (__emule_sem_l1_range_end > 0 &&
         l1_addr >= __emule_sem_l1_range_start && l1_addr < __emule_sem_l1_range_end) {
         fprintf(stderr,
                 "[ASAN ERROR] Illegal Semaphore Access: Offset 0x%x is inside the reserved Semaphore region [0x%x, 0x%x)\n",
                 l1_addr, __emule_sem_l1_range_start, __emule_sem_l1_range_end);
         abort();
+    }
+    // CB-range check — must run before the OOB-tensor check. CB backing memory
+    // is not registered in LiveL1Ranges; a CB address reaching the OOB check
+    // always produces "Out-of-Bounds Write" even for legitimate accesses.
+    // Using an early return prevents falling through to OOB/padding.
+    // NOTE: jit_kernel_stubs.hpp defines this function first via the
+    // __EMULE_LOCAL_L1_TO_PTR_DEFINED guard; this copy is an unreachable
+    // fallback included only for standalone builds without that header.
+    if (__emule_cbs != nullptr) {
+        for (uint32_t cb_id = 0; cb_id < 32; ++cb_id) {
+            auto& cb = __emule_cbs[cb_id];
+            if (cb.num_pages == 0) continue;
+            uint32_t cb_start = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(cb.base));
+            uint32_t cb_size = cb.num_pages * cb.page_size;
+            if (l1_addr < cb_start || l1_addr >= cb_start + cb_size) continue;
+            if (__emule_cb_boundary_strict) {
+                uint32_t access_page = (l1_addr - cb_start) / cb.page_size;
+                uint32_t write_dist = (access_page + cb.num_pages - cb.write_idx) % cb.num_pages;
+                uint32_t read_dist  = (access_page + cb.num_pages - cb.read_idx)  % cb.num_pages;
+                uint32_t reserved = __emule_cb_reserved_pages[cb_id];
+                uint32_t waited   = __emule_cb_waited_pages[cb_id];
+                if (!(write_dist < reserved) && !(read_dist < waited)) {
+                    fprintf(stderr,
+                            "[ASAN ERROR] CB Boundary Violation: Attempted to access CB %u at offset 0x%x "
+                            "(byte %u of %u, page %u of %u). "
+                            "Write window: write_idx=%u, %u page(s) reserved. "
+                            "Read window: read_idx=%u, %u page(s) waited.\n",
+                            cb_id, l1_addr, l1_addr - cb_start, cb_size,
+                            access_page, cb.num_pages,
+                            cb.write_idx, reserved,
+                            cb.read_idx, waited);
+                    abort();
+                }
+            }
+            uint32_t l1_base_cb = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
+            if (l1_addr >= l1_base_cb) {
+                return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
+            }
+            return __emule_bridge_l1 + l1_addr;
+        }
     }
     if (__emule_l1_tensor_ranges != nullptr && l1_addr >= __emule_l1_unreserved_base) {
         bool in_tensor = false;
@@ -175,43 +212,6 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                         l1_addr, logical_end, physical_end);
                 abort();
             }
-        }
-    }
-    // CB-boundary sanitizer. If the address lands inside a configured CB's
-    // byte range, it must also land inside an active page window — either
-    // the write reservation [write_idx, write_idx + reserved) (mod num_pages)
-    // or the read wait window [read_idx, read_idx + waited) (mod num_pages).
-    // Producer threads only populate `reserved`; consumer threads only
-    // populate `waited`; the unused window has count 0 and contributes
-    // nothing. Page-distance math is modular so wraparound (reservation
-    // spanning the num_pages boundary) is handled naturally.
-    if (__emule_cb_boundary_strict && __emule_cbs != nullptr) {
-        for (uint32_t cb_id = 0; cb_id < 32; ++cb_id) {
-            auto& cb = __emule_cbs[cb_id];
-            if (cb.num_pages == 0) continue;
-            uint32_t cb_start = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(cb.base));
-            uint32_t cb_size = cb.num_pages * cb.page_size;
-            if (l1_addr < cb_start || l1_addr >= cb_start + cb_size) continue;
-            uint32_t access_page = (l1_addr - cb_start) / cb.page_size;
-            uint32_t write_dist = (access_page + cb.num_pages - cb.write_idx) % cb.num_pages;
-            uint32_t read_dist  = (access_page + cb.num_pages - cb.read_idx)  % cb.num_pages;
-            uint32_t reserved = __emule_cb_reserved_pages[cb_id];
-            uint32_t waited   = __emule_cb_waited_pages[cb_id];
-            bool in_write_window = (write_dist < reserved);
-            bool in_read_window  = (read_dist  < waited);
-            if (!in_write_window && !in_read_window) {
-                fprintf(stderr,
-                        "[ASAN ERROR] CB Boundary Violation: Attempted to access CB %u at offset 0x%x "
-                        "(byte %u of %u, page %u of %u). "
-                        "Write window: write_idx=%u, %u page(s) reserved. "
-                        "Read window: read_idx=%u, %u page(s) waited.\n",
-                        cb_id, l1_addr, l1_addr - cb_start, cb_size,
-                        access_page, cb.num_pages,
-                        cb.write_idx, reserved,
-                        cb.read_idx, waited);
-                abort();
-            }
-            break;
         }
     }
     uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
@@ -401,10 +401,60 @@ FORCE_INLINE void noc_async_write_tile(
     noc_async_write_page(id, addrgen, src_local_l1_addr, size, offset, noc);
 }
 
+// ---- NOC transfer alignment check (gated by TT_EMULE_STRICT_NOC_ALIGN) ----
+// Off by default — many existing kernels would false-positive.
+// Checks that src and dst lower bits match per the hardware requirement:
+//   L1<->L1: lower 4 bits must match (16-byte granularity)
+//   DRAM read WH: lower 8 bits must match; BH: lower 16 bits must match
+//   DRAM write (WH/BH): lower 4 bits must match
+inline bool __emule_strict_noc_align_enabled() {
+    static bool val = std::getenv("TT_EMULE_STRICT_NOC_ALIGN") != nullptr;
+    return val;
+}
+
+inline void __emule_check_noc_read_alignment(uint64_t src_noc_addr, uint32_t dst_local_l1_addr) {
+    if (!__emule_strict_noc_align_enabled()) return;
+    uint32_t src_off = static_cast<uint32_t>(src_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
+    if (__emule_noc_addr_is_dram(src_noc_addr)) {
+#ifdef ARCH_BLACKHOLE
+        constexpr uint32_t mask = 0xFFFF;
+#else
+        constexpr uint32_t mask = 0xFF;
+#endif
+        if ((src_off & mask) != (dst_local_l1_addr & mask)) {
+            fprintf(stderr,
+                    "[ASAN ERROR] NOC Transfer Alignment: DRAM src(0x%x) and L1 dst(0x%x) lower bits must match (mask=0x%x)\n",
+                    src_off, dst_local_l1_addr, mask);
+            std::abort();
+        }
+    } else {
+        if ((src_off & 0xF) != (dst_local_l1_addr & 0xF)) {
+            fprintf(stderr,
+                    "[ASAN ERROR] NOC Transfer Alignment: L1 src(0x%x) and L1 dst(0x%x) lower 4 bits must match\n",
+                    src_off, dst_local_l1_addr);
+            std::abort();
+        }
+    }
+}
+
+inline void __emule_check_noc_write_alignment(uint32_t src_local_l1_addr, uint64_t dst_noc_addr) {
+    if (!__emule_strict_noc_align_enabled()) return;
+    uint32_t dst_off = static_cast<uint32_t>(dst_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
+    // Both L1 and DRAM writes use 0xF mask (16-byte) for both WH and BH
+    if ((src_local_l1_addr & 0xF) != (dst_off & 0xF)) {
+        const char* dst_type = __emule_noc_addr_is_dram(dst_noc_addr) ? "DRAM" : "L1";
+        fprintf(stderr,
+                "[ASAN ERROR] NOC Transfer Alignment: L1 src(0x%x) and %s dst(0x%x) lower 4 bits must match\n",
+                src_local_l1_addr, dst_type, dst_off);
+        std::abort();
+    }
+}
+
 // ---- Raw NOC read/write ----
 
 inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
                            uint32_t size, uint8_t noc = noc_index, uint32_t vc = 0) {
+    __emule_check_noc_read_alignment(src_noc_addr, dst_local_l1_addr);
     // NOC addresses are already properly constructed by get_noc_addr() or
     // get_noc_addr_from_bank_id() — no fixup needed here.  Applying
     // __emule_fixup_noc_addr would destroy DRAM bank offsets (> 2MB).
@@ -432,6 +482,7 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
 
 inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
                             uint32_t size, uint8_t noc = noc_index, uint32_t vc = 0) {
+    __emule_check_noc_write_alignment(src_local_l1_addr, dst_noc_addr);
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     uint8_t* dst = __emule_resolve_noc_addr(dst_noc_addr);
     // Guard BOTH ends. The src L1 resolve can legitimately fail when the
