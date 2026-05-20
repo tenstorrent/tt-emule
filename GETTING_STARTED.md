@@ -6,7 +6,8 @@ Build the emulator + tt-metal, run the C++ regression, and wire up your first te
 
 | Tool | Version |
 |------|---------|
-| clang-17 | 17.x |
+| clang-20 | 20.x |
+| libc++-20-dev | 20.x |
 | CMake | ≥ 3.24 |
 | Ninja | ≥ 1.10 |
 
@@ -41,16 +42,18 @@ git config submodule.tt_metal/third_party/umd.url git@github.com:tenstorrent/tt-
 
 ```bash
 cd "$ROOT/tt-metal"
-cmake -B build_emule -G Ninja \
-  -DCMAKE_C_COMPILER=clang-17 -DCMAKE_CXX_COMPILER=clang++-17 \
-  -DCMAKE_AR=/usr/bin/llvm-ar-17 -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-17 \
+cmake -S . -B build_emule -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE="$ROOT/tt-metal/cmake/x86_64-linux-clang-20-libcpp-toolchain.cmake" \
+  -DCMAKE_AR=/usr/bin/llvm-ar-20 \
+  -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
   -DCMAKE_BUILD_TYPE=Release \
   -DTT_METAL_USE_EMULE=ON \
   -DTT_EMULE_PATH="$ROOT/tt-emule" \
   -DCMAKE_INSTALL_PREFIX="$ROOT/tt-metal/build_emule" \
   -DWITH_PYTHON_BINDINGS=ON \
   -DTT_METAL_BUILD_TESTS=ON \
-  -DTTNN_BUILD_TESTS=ON
+  -DTTNN_BUILD_TESTS=ON \
+  -DENABLE_TRACY=OFF
 cmake --build build_emule -j$(nproc)
 ```
 
