@@ -121,13 +121,3 @@ inline void ReadFromBuffer(const std::shared_ptr<Buffer>& buf,
 } // namespace detail
 
 } // namespace tt_emule
-
-// JIT kernel creation helper — lives OUTSIDE tt_emule to avoid ADL conflicts.
-// When test code has `using namespace tt::tt_metal` and arg types are tt_emule
-// aliases, ADL would otherwise find tt_emule::CreateKernel instead of
-// tt::tt_metal::CreateKernel.
-namespace tt_emule_internal {
-    tt_emule::KernelHandle create_jit_kernel(
-        tt_emule::Program& program, const std::string& kernel_src_path,
-        tt_emule::CoreCoord core, tt_emule::DataMovementConfig config);
-} // namespace tt_emule_internal
