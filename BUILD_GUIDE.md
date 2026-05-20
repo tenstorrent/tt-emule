@@ -37,7 +37,7 @@ The ttmlir-toolchain must be installed at `/opt/ttmlir-toolchain` (provides LLVM
 All three repositories should be siblings under the same parent directory:
 
 ```
-/localdev/<user>/
+$ROOT/
 ├── tt-emule/      # This project
 ├── tt-metal/      # Metal runtime (arminale/emule-metal-base branch)
 └── tt-mlir/       # MLIR compiler
@@ -49,10 +49,10 @@ This layout is important because tt-metal's `TT_EMULE_PATH` CMake variable defau
 
 ## Phase 0: Clone the Repositories
 
-Pick a parent directory (must match your `<user>` throughout this guide):
+Pick a parent directory and export it as `ROOT` — all commands in this guide use this variable:
 
 ```bash
-export ROOT=/localdev/<user>   # e.g. /localdev/xchin
+export ROOT=$HOME/work   # or any directory you prefer
 mkdir -p "$ROOT"
 ```
 
@@ -88,7 +88,8 @@ The regression scripts read `TT_METAL_DIR`, `TT_MLIR_DIR`, and `BUILD_DIR` from 
 Set these in your shell before any Phase 4 or Phase 6 command (add to `~/.bashrc` or `~/.zshrc` for persistence):
 
 ```bash
-export ROOT=/localdev/<user>          # same value as Phase 0
+# ROOT must already be set from Phase 0 — or set it again here:
+# export ROOT=$HOME/work
 export TT_METAL_DIR="$ROOT/tt-metal"
 export TT_MLIR_DIR="$ROOT/tt-mlir"
 export BUILD_DIR="$TT_METAL_DIR/build_emule"   # IMPORTANT: not build_emule_clang
@@ -103,7 +104,7 @@ Explicitly setting `BUILD_DIR` is defensive but recommended: it overrides any st
 tt-metal has several git submodules that must be initialized before building. The critical one is UMD, which contains cluster descriptor YAML files used by the regression tests.
 
 ```bash
-cd /localdev/<user>/tt-metal
+cd $ROOT/tt-metal
 ```
 
 If your machine does not have HTTPS authentication configured for GitHub, override the submodule URLs to use SSH:
@@ -135,21 +136,21 @@ ls tt_metal/third_party/umd/tests/cluster_descriptor_examples/wormhole_N150.yaml
 This is the main build step. It compiles the full tt-metal library with emulation enabled, plus all emulation test binaries and Python bindings.
 
 ```bash
-cd /localdev/<user>/tt-metal
+cd $ROOT/tt-metal
 
 cmake -S . -B build_emule -G Ninja \
-    -DCMAKE_TOOLCHAIN_FILE=/localdev/<user>/tt-metal/cmake/x86_64-linux-clang-20-libcpp-toolchain.cmake \
+    -DCMAKE_TOOLCHAIN_FILE=$ROOT/tt-metal/cmake/x86_64-linux-clang-20-libcpp-toolchain.cmake \
     -DCMAKE_AR=/usr/bin/llvm-ar-20 \
     -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
     -DCMAKE_BUILD_TYPE=Release \
     -DTT_METAL_USE_EMULE=ON \
-    -DTT_EMULE_PATH=/localdev/<user>/tt-emule \
+    -DTT_EMULE_PATH=$ROOT/tt-emule \
     -DWITH_PYTHON_BINDINGS=ON \
     -DTT_METAL_BUILD_TESTS=ON \
     -DTTNN_BUILD_TESTS=ON \
     -DENABLE_TRACY=OFF \
     -DENABLE_DISTRIBUTED=OFF \
-    -DCMAKE_INSTALL_PREFIX=/localdev/<user>/tt-metal/build_emule
+    -DCMAKE_INSTALL_PREFIX=$ROOT/tt-metal/build_emule
 
 cmake --build build_emule -j$(nproc)
 ```
@@ -214,9 +215,9 @@ Then rebuild tt-metal.
 ## Phase 4: Run First Regression (C++ Tests)
 
 ```bash
-cd /localdev/<user>/tt-emule
+cd $ROOT/tt-emule
 # TT_METAL_DIR must be exported (set in Phase 1; repeated here for clarity)
-export TT_METAL_DIR=/localdev/<user>/tt-metal
+export TT_METAL_DIR=$ROOT/tt-metal
 ./run_regression.sh 2>&1 | tee regression.log
 ```
 
@@ -245,13 +246,13 @@ The D2M regression tests are Python tests from tt-mlir that exercise the emulate
 
 **Do not skip this step.** If tt-mlir is configured without `TTMLIR_TTMETAL_SOURCE_DIR`, its `third_party/CMakeLists.txt` calls `ExternalProject` to clone a **separate** tt-metal at the SHA pinned in `TT_METAL_VERSION`. That clone lives at `third_party/tt-metal/src/tt-metal/` as a real directory and is built with `ENABLE_TRACY=ON` into its own `build_Release/`. tt-mlir's runtime libraries get linked against *that* clone's headers and `libtt_metal.so`.
 
-If you then point `LD_LIBRARY_PATH` at a different tt-metal build (the user-managed checkout under `/localdev/<user>/tt-metal`), you get a silent **ABI mismatch**: kernels JIT and run, but every D2M test returns `actual_pcc=0.0` because struct layouts and headers diverge between the two trees.
+If you then point `LD_LIBRARY_PATH` at a different tt-metal build (the user-managed checkout under `$ROOT/tt-metal`), you get a silent **ABI mismatch**: kernels JIT and run, but every D2M test returns `actual_pcc=0.0` because struct layouts and headers diverge between the two trees.
 
 The fix is to make tt-mlir use *your* tt-metal source, not its private clone.
 
 ### Step 5a: Set TTMLIR_TTMETAL_SOURCE_DIR (preferred)
 
-Configure tt-mlir with `-DTTMLIR_TTMETAL_SOURCE_DIR=/localdev/<user>/tt-metal`. tt-mlir's CMake will symlink `third_party/tt-metal/src/tt-metal` → your override and will *not* fetch a separate clone.
+Configure tt-mlir with `-DTTMLIR_TTMETAL_SOURCE_DIR=$ROOT/tt-metal`. tt-mlir's CMake will symlink `third_party/tt-metal/src/tt-metal` → your override and will *not* fetch a separate clone.
 
 If a *real* directory already exists at `third_party/tt-metal/src/tt-metal/` (because a prior configure ran without the override), tt-mlir's CMake will hard-fail with:
 
@@ -270,19 +271,19 @@ You must remove (or rename) that bundled clone before re-configuring. The bundle
 The D2M regression requires a **separate tt-metal build** using libstdc++ (not libc++). This is because tt-mlir's runtime (`libTTMLIRRuntime.so`) is compiled with libstdc++, and types like `ttnn::Tensor` cross the ABI boundary at runtime — both sides must agree on the stdlib layout.
 
 ```bash
-cd /localdev/<user>/tt-metal
+cd $ROOT/tt-metal
 
 cmake -S . -B build_Release -G Ninja \
-    -DCMAKE_TOOLCHAIN_FILE=/localdev/<user>/tt-metal/cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake \
+    -DCMAKE_TOOLCHAIN_FILE=$ROOT/tt-metal/cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake \
     -DCMAKE_AR=/usr/bin/llvm-ar-20 \
     -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
     -DCMAKE_BUILD_TYPE=Release \
     -DTT_METAL_USE_EMULE=ON \
-    -DTT_EMULE_PATH=/localdev/<user>/tt-emule \
+    -DTT_EMULE_PATH=$ROOT/tt-emule \
     -DWITH_PYTHON_BINDINGS=ON \
     -DENABLE_TRACY=OFF \
     -DENABLE_DISTRIBUTED=ON \
-    -DCMAKE_INSTALL_PREFIX=/localdev/<user>/tt-metal/build_Release
+    -DCMAKE_INSTALL_PREFIX=$ROOT/tt-metal/build_Release
 
 cmake --build build_Release -j$(nproc)
 ```
@@ -298,7 +299,7 @@ cmake --build build_Release -j$(nproc)
 tt-mlir expects all shared libraries under `build_Release/lib/`. The emulation build places them in subdirectories. Create symlinks:
 
 ```bash
-cd /localdev/<user>/tt-metal/build_Release/lib
+cd $ROOT/tt-metal/build_Release/lib
 ln -sfn ../tt_metal/libtt_metal.so libtt_metal.so
 ln -sfn ../tt_stl/libtt_stl.so libtt_stl.so
 ln -sfn ../ttnn/_ttnncpp.so _ttnncpp.so
@@ -308,7 +309,7 @@ ln -sfn ../ttnn/_ttnn.so _ttnn.so
 ### Step 5d: Configure and Build tt-mlir
 
 ```bash
-cd /localdev/<user>/tt-mlir
+cd $ROOT/tt-mlir
 source env/activate
 
 cmake -G Ninja -B build \
@@ -316,7 +317,7 @@ cmake -G Ninja -B build \
     -DCMAKE_CXX_COMPILER=clang++-20 \
     -DCMAKE_C_FLAGS="-Wno-deprecated-declarations" \
     -DCMAKE_CXX_FLAGS="-Wno-deprecated-declarations" \
-    -DTTMLIR_TTMETAL_SOURCE_DIR=/localdev/<user>/tt-metal \
+    -DTTMLIR_TTMETAL_SOURCE_DIR=$ROOT/tt-metal \
     -DCMAKE_BUILD_TYPE=Release \
     -DTTMLIR_ENABLE_RUNTIME=ON \
     -DTTMLIR_ENABLE_STABLEHLO=ON \
@@ -334,7 +335,7 @@ cmake -G Ninja -B build \
 **Do this before `cmake --build`.** tt-mlir wraps tt-metal in `ExternalProject_Add`. During the build step, CMake will re-run `cmake -B build_Release` on your tt-metal tree — without `-DTT_METAL_USE_EMULE=ON` — stripping the emulation code path and breaking all D2M tests with `actual_pcc=0.0`. Pre-touching the stamp files prevents this:
 
 ```bash
-stamp_dir=/localdev/<user>/tt-mlir/third_party/tt-metal/src/tt-metal-stamp
+stamp_dir=$ROOT/tt-mlir/third_party/tt-metal/src/tt-metal-stamp
 mkdir -p "$stamp_dir"
 touch "$stamp_dir/tt-metal-configure" "$stamp_dir/tt-metal-build" "$stamp_dir/tt-metal-install"
 ```
@@ -362,8 +363,8 @@ If your tt-metal build has `ENABLE_TRACY=ON`, setting `TT_RUNTIME_ENABLE_PERF_TR
 After configure, verify the canonical location really points at your checkout, not a private clone:
 
 ```bash
-ls -la /localdev/<user>/tt-mlir/third_party/tt-metal/src/tt-metal
-# Expect: tt-metal -> /localdev/<user>/tt-metal
+ls -la $ROOT/tt-mlir/third_party/tt-metal/src/tt-metal
+# Expect: tt-metal -> $ROOT/tt-metal
 ```
 
 If `ls -la` shows a real directory instead of a symlink, the override did not take effect (likely a stale cache or prior clone). Re-run Step 5a.
@@ -373,17 +374,17 @@ If `ls -la` shows a real directory instead of a symlink, the override did not ta
 After `cmake --build` completes for tt-mlir, confirm the ExternalProject did not silently reconfigure your tt-metal build without `-DTT_METAL_USE_EMULE=ON`:
 
 ```bash
-nm -DC /localdev/<user>/tt-metal/build_Release/tt_metal/libtt_metal.so \
+nm -DC $ROOT/tt-metal/build_Release/tt_metal/libtt_metal.so \
   | grep emule::execute_program_emulated
 ```
 
 **Must show a `T` line.** If the output is empty, the ExternalProject flipped `TT_METAL_USE_EMULE` to OFF. Fix:
 
 ```bash
-cd /localdev/<user>/tt-metal
+cd $ROOT/tt-metal
 cmake -S . -B build_Release \
-    -DCMAKE_TOOLCHAIN_FILE=/localdev/<user>/tt-metal/cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake \
-    -DTT_METAL_USE_EMULE=ON -DTT_EMULE_PATH=/localdev/<user>/tt-emule
+    -DCMAKE_TOOLCHAIN_FILE=$ROOT/tt-metal/cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake \
+    -DTT_METAL_USE_EMULE=ON -DTT_EMULE_PATH=$ROOT/tt-emule
 cmake --build build_Release -j$(nproc)
 ```
 
@@ -411,17 +412,17 @@ Two ways to defend:
 
 1. **Re-assert the cache flag after each tt-mlir build:**
    ```bash
-   cd /localdev/<user>/tt-metal
+   cd $ROOT/tt-metal
    cmake -S . -B build_Release \
-       -DCMAKE_TOOLCHAIN_FILE=/localdev/<user>/tt-metal/cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake \
-       -DTT_METAL_USE_EMULE=ON -DTT_EMULE_PATH=/localdev/<user>/tt-emule
+       -DCMAKE_TOOLCHAIN_FILE=$ROOT/tt-metal/cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake \
+       -DTT_METAL_USE_EMULE=ON -DTT_EMULE_PATH=$ROOT/tt-emule
    cmake --build build_Release -j$(nproc)
    ```
    The flag goes back on, ninja regenerates, only the affected targets rebuild.
 
 2. **Pre-touch the ExternalProject stamp files** so tt-mlir skips the configure step entirely (the approach PR #5 uses). Before the first `cmake --build` on the tt-mlir side:
    ```bash
-   stamp_dir=/localdev/<user>/tt-mlir/third_party/tt-metal/src/tt-metal-stamp
+   stamp_dir=$ROOT/tt-mlir/third_party/tt-metal/src/tt-metal-stamp
    mkdir -p "$stamp_dir"
    touch "$stamp_dir/tt-metal-configure" "$stamp_dir/tt-metal-build" "$stamp_dir/tt-metal-install"
    ```
@@ -438,13 +439,13 @@ Must show a `T` line.
 The D2M tests need a system descriptor file that describes the target hardware:
 
 ```bash
-cd /localdev/<user>/tt-mlir
+cd $ROOT/tt-mlir
 source env/activate
 
-export TT_METAL_MOCK_CLUSTER_DESC_PATH="/localdev/<user>/tt-metal/tt_metal/third_party/umd/tests/cluster_descriptor_examples/wormhole_N150.yaml"
+export TT_METAL_MOCK_CLUSTER_DESC_PATH="$ROOT/tt-metal/tt_metal/third_party/umd/tests/cluster_descriptor_examples/wormhole_N150.yaml"
 export TT_METAL_EMULE_MODE=1
 export TT_METAL_SLOW_DISPATCH_MODE=1
-export TT_METAL_RUNTIME_ROOT="/localdev/<user>/tt-metal"
+export TT_METAL_RUNTIME_ROOT="$ROOT/tt-metal"
 
 ttrt query --save-artifacts
 ```
@@ -455,7 +456,7 @@ This creates `ttrt-artifacts/system_desc.ttsys` in the tt-mlir directory.
 
 Set the environment variable for test runs:
 ```bash
-export SYSTEM_DESC_PATH="/localdev/<user>/tt-mlir/ttrt-artifacts/system_desc.ttsys"
+export SYSTEM_DESC_PATH="$ROOT/tt-mlir/ttrt-artifacts/system_desc.ttsys"
 ```
 
 ---
@@ -463,9 +464,9 @@ export SYSTEM_DESC_PATH="/localdev/<user>/tt-mlir/ttrt-artifacts/system_desc.tts
 ## Phase 6: Run D2M Regression (Python Tests)
 
 ```bash
-cd /localdev/<user>/tt-emule
-export SYSTEM_DESC_PATH="/localdev/<user>/tt-mlir/ttrt-artifacts/system_desc.ttsys"
-export BUILD_DIR=/localdev/<user>/tt-metal/build_emule   # override the wrong script default
+cd $ROOT/tt-emule
+export SYSTEM_DESC_PATH="$ROOT/tt-mlir/ttrt-artifacts/system_desc.ttsys"
+export BUILD_DIR=$ROOT/tt-metal/build_emule   # override the wrong script default
 ./run_d2m_regression.sh --serial
 ```
 
