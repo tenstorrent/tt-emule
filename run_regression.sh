@@ -16,6 +16,8 @@ set -euo pipefail
 # Each Tier-N run_test invocation below points at one of those binaries with
 # a --gtest_filter that isolates the intended test.
 
+start_time=$(date +%s)
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule}"
 TEST_DIR="$BUILD_DIR/test/tt_metal"
@@ -464,9 +466,13 @@ unset TT_METAL_MOCK_CLUSTER_DESC_PATH TT_METAL_EMULE_MODE TT_METAL_SLOW_DISPATCH
 
 run_test "ttnn_add_int_silicon" "$TTNN_BIN" --gtest_filter="AddUnaryTests/*"
 
+end_time=$(date +%s)
+elapsed=$(( end_time - start_time ))
+
 echo ""
-echo "========================================"
-echo " Results: $PASS passed, $FAIL failed, $SKIP skipped"
-echo "========================================"
+echo "================================================================================"
+echo " Results: $PASS passed, $FAIL failed, $SKIP skipped, ran in $elapsed seconds"
+echo "================================================================================"
+
 
 [ "$FAIL" -eq 0 ]
