@@ -62,10 +62,14 @@ inline int __emule_cb_timeout_sec() {
 
 inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
     auto& cb = __emule_cbs[cb_id];
+    // Load-bearing (cannot be gated): a request for n > num_pages can never be
+    // satisfied, so the CV wait below would deadlock until TT_EMULE_CB_TIMEOUT.
     if (n > cb.num_pages) {
-        fprintf(stderr, "EMULE BUG: cb_reserve_back(cb_id=%u, n=%u) requests more than capacity "
-                "(num_pages=%u, page_size=%u) [phys (%u,%u) logical (%u,%u)]\n",
-                cb_id, n, cb.num_pages, cb.page_size,
+        fprintf(stderr,
+                "[ASAN ERROR] CB Reservation Overflow: CB %u has %u total pages, "
+                "but kernel requested to reserve %u pages. This would hang on silicon! "
+                "(page_size=%u) [phys (%u,%u) logical (%u,%u)]\n",
+                cb_id, cb.num_pages, n, cb.page_size,
                 my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
         std::abort();
     }
@@ -232,10 +236,24 @@ inline void cb_pop_front(uint32_t cb_id, int32_t n)    { cb_pop_front(cb_id, sta
 
 // ---- Pointer accessors ----
 
+// Strict CB-write-ptr alignment check (gated by TT_EMULE_STRICT_CB_ALIGN).
+// Off by default — see [[feedback-tt-emule-conventions]].
+inline bool __emule_strict_cb_align_enabled() {
+    static bool val = std::getenv("TT_EMULE_STRICT_CB_ALIGN") != nullptr;
+    return val;
+}
+
 // Return uint32_t (truncated host pointer). CB memory is mmap'd below 4 GB.
 inline uint32_t get_write_ptr(uint32_t cb_id) {
     uint8_t* ptr = tt_emule::cb_sync_write_ptr(__emule_cbs[cb_id]);
-    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr));
+    uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr));
+    if (__emule_strict_cb_align_enabled() && (addr % 4 != 0)) {
+        fprintf(stderr,
+                "[ASAN ERROR] CB Write Ptr Misaligned: Ptr 0x%x for CB %u is not 4-byte aligned!\n",
+                addr, cb_id);
+        std::abort();
+    }
+    return addr;
 }
 
 inline uint32_t get_read_ptr(uint32_t cb_id) {

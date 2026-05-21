@@ -373,8 +373,32 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
     }
 }
 
+// Strict NOC-DMA alignment check (gated by TT_EMULE_STRICT_NOC_ALIGN).
+// Off by default — see [[feedback-tt-emule-conventions]].
+inline bool __emule_strict_noc_align_enabled() {
+    static bool val = std::getenv("TT_EMULE_STRICT_NOC_ALIGN") != nullptr;
+    return val;
+}
+
 inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
                             uint32_t size, uint8_t noc = 0, uint32_t vc = 0) {
+    if (__emule_strict_noc_align_enabled()) {
+        // NOC DMA transfers must be 16-byte aligned at src, dst, and size.
+        // dst_noc_addr's low NOC_ADDR_LOCAL_BITS hold the L1/DRAM offset.
+        uint32_t dst_off = static_cast<uint32_t>(dst_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
+        if ((src_local_l1_addr % 16 != 0) || (dst_off % 16 != 0)) {
+            fprintf(stderr,
+                    "[ASAN ERROR] NOC DMA Write Alignment: Src(0x%x) and Dst(0x%x) must be 16-byte aligned\n",
+                    src_local_l1_addr, dst_off);
+            std::abort();
+        }
+        if (size % 16 != 0) {
+            fprintf(stderr,
+                    "[ASAN ERROR] NOC DMA Write Size: Size (%u) must be a multiple of 16\n",
+                    size);
+            std::abort();
+        }
+    }
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     uint8_t* dst = __emule_resolve_noc_addr(dst_noc_addr);
     if (dst) {
