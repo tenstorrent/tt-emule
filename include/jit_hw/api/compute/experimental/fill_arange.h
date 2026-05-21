@@ -36,7 +36,7 @@ namespace experimental {
 //   pack_tile(dst, out_cb)                  -- write result
 template <DataFormat DATA_FORMAT = DataFormat::Float16_b>
 ALWI void fill_arange_tile(uint32_t cb_id) {
-    uint8_t* buf = __emule_compute::cb_write_ptr_at(cb_id, 0);
+    uint8_t* buf = __emule_compute::cb_read_ptr_at(cb_id, 0);
     if constexpr (DATA_FORMAT == DataFormat::Float32) {
         float* out = reinterpret_cast<float*>(buf);
         for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
@@ -68,7 +68,7 @@ ALWI void fill_arange_tile(uint32_t cb_id) {
 // The tile is written in nfaces layout.
 template <DataFormat DATA_FORMAT = DataFormat::Float32>
 ALWI void write_row_mask_tile(uint32_t validRows, uint32_t cb_id) {
-    uint8_t* buf = __emule_compute::cb_write_ptr_at(cb_id, 0);
+    uint8_t* buf = __emule_compute::cb_read_ptr_at(cb_id, 0);
     if constexpr (DATA_FORMAT == DataFormat::Float32) {
         float* out = reinterpret_cast<float*>(buf);
         for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
@@ -100,7 +100,7 @@ ALWI void write_row_mask_tile(uint32_t validRows, uint32_t cb_id) {
 // The tile is written in nfaces layout.
 template <DataFormat DATA_FORMAT = DataFormat::Float32>
 ALWI void write_col_mask_tile(uint32_t validCols, uint32_t cb_id) {
-    uint8_t* buf = __emule_compute::cb_write_ptr_at(cb_id, 0);
+    uint8_t* buf = __emule_compute::cb_read_ptr_at(cb_id, 0);
     if constexpr (DATA_FORMAT == DataFormat::Float32) {
         float* out = reinterpret_cast<float*>(buf);
         for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
