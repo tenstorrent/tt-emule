@@ -11,7 +11,6 @@
 #include "jit_hw/llk_pack.h"
 #include "jit_hw/llk_unpack_a.h"
 #include "jit_hw/llk_sync_stubs.h"
-#include "jit_hw/api/compute/experimental/fill_arange.h"
 #include <cstring>
 
 // ---- Compute startup and init ----
