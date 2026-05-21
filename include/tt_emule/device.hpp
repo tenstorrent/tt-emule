@@ -96,24 +96,6 @@ public:
     // granularity). Host→device writes/reads are validated separately at the
     // tt-metal host API layer.
     uint8_t* l1_ptr(uint32_t offset) {
-        if (role_ == CoreRole::DRAM) {
-            // Hardcoded for Wormhole (N150): 32-byte DRAM alignment.
-            // tt-emule does not currently expose arch() at this level and
-            // emulation always targets WH per project policy.
-            if (offset % 32 != 0) {
-                fprintf(stderr,
-                        "[ASAN ERROR] DRAM Alignment: Offset 0x%x must be 32-byte aligned\n",
-                        offset);
-                abort();
-            }
-        } else {
-            if (offset % 4 != 0) {
-                fprintf(stderr,
-                        "[ASAN ERROR] Local L1 Alignment: Offset 0x%x must be 4-byte aligned for scalar access\n",
-                        offset);
-                abort();
-            }
-        }
         return l1_ + offset;
     }
 

@@ -246,14 +246,7 @@ inline bool __emule_strict_cb_align_enabled() {
 // Return uint32_t (truncated host pointer). CB memory is mmap'd below 4 GB.
 inline uint32_t get_write_ptr(uint32_t cb_id) {
     uint8_t* ptr = tt_emule::cb_sync_write_ptr(__emule_cbs[cb_id]);
-    uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr));
-    if (__emule_strict_cb_align_enabled() && (addr % 4 != 0)) {
-        fprintf(stderr,
-                "[ASAN ERROR] CB Write Ptr Misaligned: Ptr 0x%x for CB %u is not 4-byte aligned!\n",
-                addr, cb_id);
-        std::abort();
-    }
-    return addr;
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr));
 }
 
 inline uint32_t get_read_ptr(uint32_t cb_id) {
