@@ -191,7 +191,7 @@ echo ""
 echo "== Tier 3a: API Sanity / Violation Checks =="
 
 run_test "alignment_writes"       "$API_BIN" \
-    --gtest_filter="MeshDeviceFixture.L1_Alignment_SanityCheck:MeshDeviceFixture.DRAM_Alignment_SanityCheck_WH"
+    --gtest_filter="MeshDeviceFixture.NocRead_L1_Misaligned_SanityCheck:MeshDeviceFixture.NocWrite_L1_Misaligned_SanityCheck:MeshDeviceFixture.NocRead_DRAM_Misaligned_SanityCheck_WH:MeshDeviceFixture.NocWrite_DRAM_Misaligned_SanityCheck"
 run_test "cb_leak"                "$API_BIN" --gtest_filter="MeshDeviceFixture.Dirty_CB_SanityCheck"
 run_test "cb_pages"               "$API_BIN" --gtest_filter="MeshDeviceFixture.CB_Reservation_Overflow_SanityCheck"
 run_test "fabric_allocation"      "$API_BIN" --gtest_filter="MeshDeviceFixture.Fabric_Access_Violation_SanityCheck"

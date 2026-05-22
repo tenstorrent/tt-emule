@@ -40,6 +40,7 @@
 // ---- Bridge function declarations for cross-core access ----
 extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
 extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src, uint32_t size);
+extern "C" bool __emule_noc_addr_is_dram(uint64_t noc_addr);
 
 // ---- Debug logging (enabled by TT_EMULE_DEBUG_MULTICAST=1 env var) ----
 inline bool __emule_debug_multicast() {
@@ -340,10 +341,60 @@ FORCE_INLINE void noc_async_write_tile(
     noc_async_write_page(id, addrgen, src_local_l1_addr, size, offset, noc);
 }
 
+// ---- NOC transfer alignment check (gated by TT_EMULE_STRICT_NOC_ALIGN) ----
+// Off by default — many existing kernels would false-positive.
+// Checks that src and dst lower bits match per the hardware requirement:
+//   L1<->L1: lower 4 bits must match (16-byte granularity)
+//   DRAM read WH: lower 8 bits must match; BH: lower 16 bits must match
+//   DRAM write (WH/BH): lower 4 bits must match
+inline bool __emule_strict_noc_align_enabled() {
+    static bool val = std::getenv("TT_EMULE_STRICT_NOC_ALIGN") != nullptr;
+    return val;
+}
+
+inline void __emule_check_noc_read_alignment(uint64_t src_noc_addr, uint32_t dst_local_l1_addr) {
+    if (!__emule_strict_noc_align_enabled()) return;
+    uint32_t src_off = static_cast<uint32_t>(src_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
+    if (__emule_noc_addr_is_dram(src_noc_addr)) {
+#ifdef ARCH_BLACKHOLE
+        constexpr uint32_t mask = 0xFFFF;
+#else
+        constexpr uint32_t mask = 0xFF;
+#endif
+        if ((src_off & mask) != (dst_local_l1_addr & mask)) {
+            fprintf(stderr,
+                    "[ASAN ERROR] NOC Transfer Alignment: DRAM src(0x%x) and L1 dst(0x%x) lower bits must match (mask=0x%x)\n",
+                    src_off, dst_local_l1_addr, mask);
+            std::abort();
+        }
+    } else {
+        if ((src_off & 0xF) != (dst_local_l1_addr & 0xF)) {
+            fprintf(stderr,
+                    "[ASAN ERROR] NOC Transfer Alignment: L1 src(0x%x) and L1 dst(0x%x) lower 4 bits must match\n",
+                    src_off, dst_local_l1_addr);
+            std::abort();
+        }
+    }
+}
+
+inline void __emule_check_noc_write_alignment(uint32_t src_local_l1_addr, uint64_t dst_noc_addr) {
+    if (!__emule_strict_noc_align_enabled()) return;
+    uint32_t dst_off = static_cast<uint32_t>(dst_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
+    // Both L1 and DRAM writes use 0xF mask (16-byte) for both WH and BH
+    if ((src_local_l1_addr & 0xF) != (dst_off & 0xF)) {
+        const char* dst_type = __emule_noc_addr_is_dram(dst_noc_addr) ? "DRAM" : "L1";
+        fprintf(stderr,
+                "[ASAN ERROR] NOC Transfer Alignment: L1 src(0x%x) and %s dst(0x%x) lower 4 bits must match\n",
+                src_local_l1_addr, dst_type, dst_off);
+        std::abort();
+    }
+}
+
 // ---- Raw NOC read/write ----
 
 inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
                            uint32_t size, uint8_t noc = 0, uint32_t vc = 0) {
+    __emule_check_noc_read_alignment(src_noc_addr, dst_local_l1_addr);
     // NOC addresses are already properly constructed by get_noc_addr() or
     // get_noc_addr_from_bank_id() — no fixup needed here.  Applying
     // __emule_fixup_noc_addr would destroy DRAM bank offsets (> 2MB).
@@ -369,32 +420,9 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
     }
 }
 
-// Strict NOC-DMA alignment check (gated by TT_EMULE_STRICT_NOC_ALIGN).
-// Off by default — see [[feedback-tt-emule-conventions]].
-inline bool __emule_strict_noc_align_enabled() {
-    static bool val = std::getenv("TT_EMULE_STRICT_NOC_ALIGN") != nullptr;
-    return val;
-}
-
 inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
                             uint32_t size, uint8_t noc = 0, uint32_t vc = 0) {
-    if (__emule_strict_noc_align_enabled()) {
-        // NOC DMA transfers must be 16-byte aligned at src, dst, and size.
-        // dst_noc_addr's low NOC_ADDR_LOCAL_BITS hold the L1/DRAM offset.
-        uint32_t dst_off = static_cast<uint32_t>(dst_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
-        if ((src_local_l1_addr % 16 != 0) || (dst_off % 16 != 0)) {
-            fprintf(stderr,
-                    "[ASAN ERROR] NOC DMA Write Alignment: Src(0x%x) and Dst(0x%x) must be 16-byte aligned\n",
-                    src_local_l1_addr, dst_off);
-            std::abort();
-        }
-        if (size % 16 != 0) {
-            fprintf(stderr,
-                    "[ASAN ERROR] NOC DMA Write Size: Size (%u) must be a multiple of 16\n",
-                    size);
-            std::abort();
-        }
-    }
+    __emule_check_noc_write_alignment(src_local_l1_addr, dst_noc_addr);
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     uint8_t* dst = __emule_resolve_noc_addr(dst_noc_addr);
     if (dst) {
