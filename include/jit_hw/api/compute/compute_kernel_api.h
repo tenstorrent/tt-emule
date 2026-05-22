@@ -9,3 +9,4 @@
 #include "api/compute/matmul.h"
 #include "api/compute/eltwise_binary.h"
 #include "api/compute/tile_move_copy.h"
+#include "jit_hw/api/compute/experimental/fill_arange.h"
