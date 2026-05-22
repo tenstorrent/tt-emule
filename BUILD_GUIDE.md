@@ -294,8 +294,6 @@ cmake --build build_Release -j$(nproc)
 
 ### Step 5b: Create Library Symlinks in `build_Release`
 
-### Step 5b: Create Library Symlinks in `build_Release`
-
 tt-mlir expects all shared libraries under `build_Release/lib/`. The emulation build places them in subdirectories. Create symlinks:
 
 ```bash
@@ -345,6 +343,8 @@ Then build tt-mlir:
 ```bash
 cmake --build build -j$(nproc)
 ```
+
+This also builds and installs the `ttrt` Python wheel (which bundles the tt-metal runtime tree into the package). The `ttrt` target is required for `ttrt query` — without it, `ttrt` cannot find SOC descriptor files.
 
 **Important — `TTMLIR_TTMETAL_SOURCE_DIR`:** without this, tt-mlir fetches its own tt-metal clone and you get the silent PCC=0.0 disaster described above.
 
@@ -466,7 +466,7 @@ export SYSTEM_DESC_PATH="$ROOT/tt-mlir/ttrt-artifacts/system_desc.ttsys"
 ```bash
 cd $ROOT/tt-emule
 export SYSTEM_DESC_PATH="$ROOT/tt-mlir/ttrt-artifacts/system_desc.ttsys"
-export BUILD_DIR=$ROOT/tt-metal/build_emule   # override the wrong script default
+export BUILD_DIR=$ROOT/tt-metal/build_Release
 ./run_d2m_regression.sh --serial
 ```
 

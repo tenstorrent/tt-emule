@@ -9,13 +9,8 @@
 // This header adds the per-op *_init stubs (no-ops in emulation).
 #include "api/compute/common.h"
 
-// Some D2M-emitted binary kernels call `mul_int_tile_init` etc. directly
-// (the call site uses `mul_int_tile_init();` rather than going through
-// `api/compute/mul_int_sfpu.h`). Pull in the integer-SFPU headers so those
-// symbols are reachable wherever eltwise_binary.h is included.
-#include "api/compute/add_int_sfpu.h"
-#include "api/compute/sub_int_sfpu.h"
-#include "api/compute/mul_int_sfpu.h"
+// Note: add_int_sfpu.h / sub_int_sfpu.h / mul_int_sfpu.h are pulled in
+// transitively via common.h (see bottom of common.h).
 
 namespace ckernel {
 
