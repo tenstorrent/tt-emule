@@ -8,11 +8,21 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TT_METAL_DIR="${TT_METAL_DIR:-/localdev/arminale/tt-metal}"
 TT_MLIR_DIR="${TT_MLIR_DIR:-/localdev/arminale/tt-mlir}"
-BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule_clang}"
-TEST_DIR="$TT_MLIR_DIR/test/python/golden/d2m"
+BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule}"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"
+
+# TT_EMULE_ARCH selects which cluster descriptor (and therefore emulated
+# architecture) to run the D2M suite against. CI uses wormhole and blackhole
+# in parallel matrix jobs; default is wormhole for local-dev parity.
+TT_EMULE_ARCH="${TT_EMULE_ARCH:-wormhole}"
+case "$TT_EMULE_ARCH" in
+    wormhole)  CLUSTER_DESC_FILE="wormhole_N150.yaml" ;;
+    blackhole) CLUSTER_DESC_FILE="blackhole_P100.yaml" ;;
+    *) echo "ERROR: TT_EMULE_ARCH must be wormhole|blackhole, got '$TT_EMULE_ARCH'" >&2; exit 1 ;;
+esac
 LOG_DIR="/tmp/tt_emule_d2m_logs_$$"
 TIMEOUT="${TIMEOUT:-1800}"
+D2M_XML_DIR="${D2M_XML_DIR:-}"
 
 SERIAL=0
 PYTEST_EXTRA_ARGS=()
@@ -25,26 +35,19 @@ for arg in "$@"; do
     esac
 done
 
-# D2M test files
-TEST_FILES=(
-    test_matmul.py
-    test_tilize.py
-    test_dma.py
-    test_layout.py
-    test_allocate.py
-    test_masking.py
-    test_reductions.py
-    test_bfp8_typecast.py
-    test_tms.py
-    test_virtual_grid_rowmajor.py
-    test_virtual_grids.py
-    # Eltwise (tt-emule#8 unary + tt-emule#9 binary/ternary/fusion):
-    test_unary.py
-    test_binary.py
-    test_ternary.py
-    test_eltwise_fusion.py
-    test_binary_tree.py
-)
+# Auto-detect D2M test layout. tt-mlir main puts the suite under
+# test/python/golden/d2m/test_*.py (33 files); older branches kept them at
+# test/python/golden/test_metal_*.py (13 files).
+if [ -d "$TT_MLIR_DIR/test/python/golden/d2m" ]; then
+    TEST_DIR="$TT_MLIR_DIR/test/python/golden/d2m"
+    mapfile -t TEST_FILES < <(cd "$TEST_DIR" && ls test_*.py 2>/dev/null | sort)
+elif [ -d "$TT_MLIR_DIR/test/python/golden" ]; then
+    TEST_DIR="$TT_MLIR_DIR/test/python/golden"
+    mapfile -t TEST_FILES < <(cd "$TEST_DIR" && ls test_metal_*.py 2>/dev/null | sort)
+else
+    echo "ERROR: no golden test directory under $TT_MLIR_DIR/test/python/" >&2
+    exit 1
+fi
 
 echo "========================================"
 echo " D2M Golden Test Regression"
@@ -76,7 +79,7 @@ if [ -f "$BUILD_DIR/lib/_ttnn.so" ]; then
 fi
 
 # Set emulation env vars
-export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
+export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/$CLUSTER_DESC_FILE"
 export TT_METAL_EMULE_MODE=1
 export TT_METAL_SLOW_DISPATCH_MODE=1
 
@@ -108,10 +111,16 @@ for tf in "${TEST_FILES[@]}"; do
 
     log_file="$LOG_DIR/${tf%.py}.log"
 
+    JUNIT_ARG=()
+    if [ -n "$D2M_XML_DIR" ]; then
+        mkdir -p "$D2M_XML_DIR"
+        JUNIT_ARG=("--junitxml=$D2M_XML_DIR/${tf%.py}.xml")
+    fi
+
     if [ $SERIAL -eq 1 ]; then
         echo "--- $tf ---"
         START=$(date +%s)
-        timeout "$TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider --forked "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1
+        timeout "$TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider --forked "${JUNIT_ARG[@]}" "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1
         RC=$?
         END=$(date +%s)
         ELAPSED=$((END - START))
@@ -130,7 +139,7 @@ for tf in "${TEST_FILES[@]}"; do
         # Clear JIT cache between test files
         rm -rf /tmp/tt_emule_jit_*
     else
-        timeout "$TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider --forked "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1 &
+        timeout "$TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider --forked "${JUNIT_ARG[@]}" "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1 &
         PIDS[$tf]=$!
     fi
 done
