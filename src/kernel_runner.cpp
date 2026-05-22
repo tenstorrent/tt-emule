@@ -23,6 +23,28 @@ thread_local uint8_t               __processor_id = 0;
 thread_local tt_emule::TileCounterArray*  __emule_tc_array = nullptr;
 thread_local tt_emule::EmuleDFBInterface* __emule_dfbs     = nullptr;
 
+// Sanitizer thread-locals consumed by jit_hw headers. Storage must live in
+// this library so JIT-compiled kernel .so files can resolve the symbols at
+// dlopen time, including from test binaries that don't link tt-metal's
+// emulated_program_runner.cpp. The host writes these via extern declarations
+// before invoking each kernel; when the host leaves them at their zero/null
+// default, the inline sanitizer checks in jit_kernel_stubs.hpp / cb_api.h /
+// dataflow_api.h short-circuit as no-ops.
+thread_local uint32_t __emule_sem_l1_range_start = 0;
+thread_local uint32_t __emule_sem_l1_range_end = 0;
+thread_local uint32_t __emule_pending_noc_reads = 0;
+thread_local uint32_t __emule_l1_unreserved_base = 0;
+thread_local const uint64_t* __emule_l1_tensor_ranges = nullptr;
+thread_local uint32_t __emule_l1_tensor_ranges_count = 0;
+thread_local const uint64_t* __emule_l1_padding_ranges = nullptr;
+thread_local uint32_t __emule_l1_padding_ranges_count = 0;
+thread_local uint64_t* __emule_l1_resolved_ranges = nullptr;
+thread_local uint32_t* __emule_l1_resolved_ranges_count = nullptr;
+thread_local uint32_t __emule_l1_resolved_ranges_capacity = 0;
+thread_local uint32_t __emule_cb_reserved_pages[32] = {};
+thread_local uint32_t __emule_cb_waited_pages[32] = {};
+thread_local bool __emule_cb_boundary_strict = false;
+
 extern "C" uint8_t* __emule_dram_ptr(uint64_t offset) {
     return __device->dram_ptr(offset);
 }
