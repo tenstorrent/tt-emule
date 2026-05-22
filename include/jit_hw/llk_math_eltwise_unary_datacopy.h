@@ -30,12 +30,12 @@ inline void __llk_tilize_datacopy(uint32_t dst_idx) {
             for (uint32_t c = 0; c < 32; c++)
                 __emule_dst[dst_idx][r * 32 + c] = __emule_bf16::to_f32(src[c]);
         }
-    } else {  // float32 / int32
+    } else {  // float32 / int32: use memcpy to preserve exact bit patterns
         for (uint32_t r = 0; r < 32; r++) {
-            float* src = reinterpret_cast<float*>(
+            uint32_t* src = reinterpret_cast<uint32_t*>(
                 base + tile_row_offset + r * row_stride + tile_col_offset);
             for (uint32_t c = 0; c < 32; c++)
-                __emule_dst[dst_idx][r * 32 + c] = src[c];
+                std::memcpy(&__emule_dst[dst_idx][r * 32 + c], &src[c], sizeof(uint32_t));
         }
     }
     __llk_unpack_current_tile++;
