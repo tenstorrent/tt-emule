@@ -6,4 +6,4 @@
 # -DTTMLIR_TTMETAL_SOURCE_DIR=<path> so the CI can use a single,
 # pre-cloned tt-metal source tree for both build and test, and the
 # injector only needs to add tt-emule cmake args (not switch sources).
-cad4698a5156d844751c6aeb3b2660eb3df788d7
+8b8cccac358830a088f0c6a4b32d497a52eb069e
