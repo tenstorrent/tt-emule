@@ -40,7 +40,11 @@ jobs:
         id: resolve
         shell: bash
         run: |
-          MLIR_SHA=$(git ls-remote https://github.com/tenstorrent/tt-mlir main | awk '{print $1}')
+          # Use a fully-qualified refspec — `main` alone glob-matches anything
+          # ending in /main and could return multiple SHAs (see tt-metal's
+          # `bliu/main` / `mirror/rekudyu/main`), which would break
+          # `$GITHUB_OUTPUT` writes downstream.
+          MLIR_SHA=$(git ls-remote https://github.com/tenstorrent/tt-mlir refs/heads/main | awk '{print $1}')
           if [ -z "$MLIR_SHA" ]; then
             echo "::error::failed to resolve tt-mlir main tip"
             exit 1

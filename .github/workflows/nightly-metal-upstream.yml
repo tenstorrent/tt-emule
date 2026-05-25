@@ -45,7 +45,10 @@ jobs:
         id: resolve
         shell: bash
         run: |
-          SHA=$(git ls-remote https://github.com/tenstorrent/tt-metal main | awk '{print $1}')
+          # Use a fully-qualified refspec — `main` alone glob-matches anything
+          # ending in /main (e.g. `bliu/main`, `mirror/rekudyu/main`), which
+          # returns multiple SHAs and breaks `$GITHUB_OUTPUT` writes.
+          SHA=$(git ls-remote https://github.com/tenstorrent/tt-metal refs/heads/main | awk '{print $1}')
           if [ -z "$SHA" ]; then
             echo "::error::failed to resolve tt-metal main tip"
             exit 1
