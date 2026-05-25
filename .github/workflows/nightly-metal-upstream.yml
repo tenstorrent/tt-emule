@@ -8,15 +8,18 @@
 #   1. Detect tt-metal-induced breakage within 24h.
 #   2. Warm the GitHub Actions ccache against the current tt-metal main, so
 #      that PRs which later bump tt-metal-pin.txt to that SHA hit warm cache.
-#
-# Slack notification on failure is documented in .github/notify-stub.md.
 
 name: Nightly Metal Upstream Regression
 
 on:
   schedule:
     - cron: '0 7 * * *'   # 07:00 UTC daily
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      test_slack:
+        description: 'Force a fake build failure to test the Slack notification path'
+        type: boolean
+        default: false
 
 concurrency:
   group: nightly-upstream
@@ -50,6 +53,21 @@ jobs:
           fi
           echo "tt-metal main tip: $SHA"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Forced failure (Slack test path only)
+        if: ${{ inputs.test_slack }}
+        run: |
+          echo "::error::synthetic failure to exercise Slack notification path"
+          exit 1
+
+      - name: Write SHA header to build job summary
+        run: |
+          {
+            echo "## Nightly Metal Upstream — build"
+            echo ""
+            echo "**Resolved tt-metal SHA:** \`${{ steps.resolve.outputs.sha }}\`"
+            echo "**Workflow run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Checkout tt-metal
         uses: actions/checkout@v4
@@ -173,6 +191,15 @@ jobs:
           TT_EMULE_ARCH: ${{ matrix.arch }}
         run: bash tt-emule/.github/scripts/ci-regression.sh
 
+      - name: Write SHA header to job summary
+        run: |
+          {
+            echo "## Nightly Metal Upstream — ${{ matrix.arch }}"
+            echo ""
+            echo "**Resolved tt-metal SHA:** \`${{ needs.build.outputs.sha }}\`"
+            echo "**Workflow run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Classify results
         env:
           BUILD_DIR: ${{ github.workspace }}/tt-metal/build_emule_clang
@@ -193,3 +220,29 @@ jobs:
             tt-metal-pin-resolved.txt
           retention-days: 30
           if-no-files-found: warn
+
+  notify:
+    name: Notify Slack on failure
+    needs: [build, test]
+    # `always()` is required: without it, `if:` short-circuits when an upstream
+    # `needs` failed and the job is skipped before evaluating the OR.
+    if: always() && (needs.build.result == 'failure' || needs.test.result == 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine failing stage
+        id: stage
+        run: |
+          if [ "${{ needs.build.result }}" = "failure" ]; then
+            echo "stage=build" >> "$GITHUB_OUTPUT"
+          else
+            echo "stage=test" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Post to Slack
+        uses: slackapi/slack-github-action@v1.26.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.NIGHTLY_SLACK_WEBHOOK_URL }}
+        with:
+          payload: |
+            {
+              "text": ":rotating_light: *${{ github.workflow }}* failed at *${{ steps.stage.outputs.stage }}* stage\nResolved tt-metal SHA: `${{ needs.build.outputs.sha }}`\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#summary"
+            }
