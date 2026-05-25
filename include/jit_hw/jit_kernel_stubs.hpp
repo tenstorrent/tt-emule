@@ -150,89 +150,23 @@ extern "C" uint8_t* __emule_noc_resolve(uint32_t x, uint32_t y, uint64_t addr);
 // from mmap'd-below-4GB L1) and real host pointers.
 extern thread_local uint8_t* __emule_bridge_l1;
 
-// Per-kernel-thread semaphore L1 range, populated by emulated_program_runner
-// before each kernel launch. Used by __emule_local_l1_to_ptr to abort on
-// direct scalar accesses into the reserved semaphore region — kernels must go
-// through the semaphore API instead.
+// Sanitizer thread-locals — see ASAN.md for the full handshake.
 extern thread_local uint32_t __emule_sem_l1_range_start;
 extern thread_local uint32_t __emule_sem_l1_range_end;
-
-// Per-kernel-thread outstanding-NOC-read counter. Incremented by noc_async_read /
-// noc_async_read_page, zeroed by noc_async_read_barrier. cb_push_back consults it
-// to flag missing-barrier race conditions: pushing a CB while a read into that
-// CB is still in-flight publishes garbage to the consumer on real silicon.
 extern thread_local uint32_t __emule_pending_noc_reads;
-
-// Per-kernel-thread out-of-bounds-tensor sanitizer state. Populated by
-// emulated_program_runner before each kernel launch only when
-// TT_EMULE_STRICT_TENSOR is set; otherwise __emule_l1_tensor_ranges stays
-// null and the check inside __emule_local_l1_to_ptr is skipped.
-//
-//   __emule_l1_unreserved_base    — start of user-allocatable L1. Accesses
-//                                    below this are system regions (mailbox,
-//                                    KERNEL_CONFIG, etc.) and pass through.
-//   __emule_l1_tensor_ranges      — packed (start<<32)|end array. Accesses at
-//                                    or above l1_unreserved_base must fall
-//                                    inside one of these ranges.
-//   __emule_l1_tensor_ranges_count
 extern thread_local uint32_t __emule_l1_unreserved_base;
 extern thread_local const uint64_t* __emule_l1_tensor_ranges;
 extern thread_local uint32_t __emule_l1_tensor_ranges_count;
-
-// Per-kernel-thread tensor-padding sanitizer state. Populated by
-// emulated_program_runner before each kernel launch only when
-// TT_EMULE_STRICT_PADDING is set AND at least one buffer has declared a
-// logical size via Buffer::set_logical_size; otherwise the pointer is left
-// null and the inline check in __emule_local_l1_to_ptr is skipped.
-//
-// Each uint64_t entry packs (logical_end << 32) | physical_end of one L1
-// buffer's padding region. An access in [logical_end, physical_end) is a
-// padding violation. Independent of __emule_l1_tensor_ranges above: padding
-// can be checked without enabling the OOB-tensor sanitizer.
 extern thread_local const uint64_t* __emule_l1_padding_ranges;
 extern thread_local uint32_t __emule_l1_padding_ranges_count;
-
-// Per-kernel-thread "resolved ranges" log for the object-intent provenance
-// sanitizer. Populated by __emule_local_l1_to_ptr each time it resolves an
-// address that falls inside a live tensor extent: the resolved (start, end)
-// pair (packed (start << 32) | end, mirroring __emule_l1_tensor_ranges) is
-// appended to this writable array if not already present.
-//
-// emulated_program_runner provides the backing storage for one kernel
-// invocation and clears the pointers at kernel exit. Under
-// TT_EMULE_STRICT_OBJECT_INTENT, exact attribution is only supported when one
-// kernel runs on a core for the launch; in that case the host comparison pass
-// treats this array as that kernel's "intended write set" and flags any other
-// live buffer whose bytes change against the pre-launch snapshot. All three
-// pointers null means no tracking — the inline append in
-// __emule_local_l1_to_ptr is a no-op.
 extern thread_local uint64_t* __emule_l1_resolved_ranges;
 extern thread_local uint32_t* __emule_l1_resolved_ranges_count;
 extern thread_local uint32_t __emule_l1_resolved_ranges_capacity;
-
-// Per-kernel-thread CB-boundary sanitizer state. Populated by
-// emulated_program_runner before each kernel launch only when
-// TT_EMULE_STRICT_CB_BOUNDARY is set; otherwise __emule_cb_boundary_strict
-// stays false and the check inside __emule_local_l1_to_ptr is skipped.
-//
-//   __emule_cb_reserved_pages[i] — pages currently reserved on the write
-//                                   side of CB i (cb_reserve_back += n,
-//                                   cb_push_back -= n). The active write
-//                                   window is the page-modular range
-//                                   [cb.write_idx, cb.write_idx + reserved).
-//   __emule_cb_waited_pages[i]   — pages currently waited on the read side
-//                                   of CB i (cb_wait_front bumps to max,
-//                                   cb_pop_front -= n). The active read
-//                                   window is the page-modular range
-//                                   [cb.read_idx, cb.read_idx + waited).
-//   __emule_cb_boundary_strict   — gate flag; when false the check no-ops.
 extern thread_local uint32_t __emule_cb_reserved_pages[32];
 extern thread_local uint32_t __emule_cb_waited_pages[32];
 extern thread_local bool __emule_cb_boundary_strict;
 
-// Translate a raw L1 firmware offset (or already-absolute host pointer) to a
-// host uint8_t*.  Available to ALL JIT kernels so the l1_arg_ptr regex patch in
-// emulated_program_runner can inject calls without requiring dataflow_api.h.
+// L1 access chokepoint — all kernel sanitizers run here. See ASAN.md.
 #ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED
 #define __EMULE_LOCAL_L1_TO_PTR_DEFINED
 inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
@@ -243,11 +177,8 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                 l1_addr, __emule_sem_l1_range_start, __emule_sem_l1_range_end);
         abort();
     }
-    // CB-range check — must run before the OOB-tensor check. CB backing memory
-    // is not registered in LiveL1Ranges; a CB address reaching the OOB check
-    // always produces "Out-of-Bounds Write" even for legitimate accesses.
-    // Using an early return (rather than a flag) prevents the compiler from
-    // deferring this scan past the OOB abort.
+    // CB ranges must be matched before OOB — CB memory isn't registered in
+    // LiveL1Ranges and would otherwise look out-of-bounds.
     if (__emule_cbs != nullptr) {
         for (uint32_t cb_id = 0; cb_id < 32; ++cb_id) {
             auto& cb = __emule_cbs[cb_id];
@@ -255,8 +186,6 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             uint32_t cb_start = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(cb.base));
             uint32_t cb_size = cb.num_pages * cb.page_size;
             if (l1_addr < cb_start || l1_addr >= cb_start + cb_size) continue;
-            // Address is inside CB cb_id. Validate the page window when strict
-            // mode is on, then translate and return — skip OOB and padding.
             if (__emule_cb_boundary_strict) {
                 uint32_t access_page = (l1_addr - cb_start) / cb.page_size;
                 uint32_t write_dist = (access_page + cb.num_pages - cb.write_idx) % cb.num_pages;
@@ -276,7 +205,6 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                     abort();
                 }
             }
-            // Valid CB access — translate and return without running OOB/padding.
             uint32_t l1_base_cb = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
             if (l1_addr >= l1_base_cb) {
                 return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
@@ -284,13 +212,6 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             return __emule_bridge_l1 + l1_addr;
         }
     }
-    // Out-of-bounds-tensor sanitizer. Only active when emulated_program_runner
-    // populated the live ranges (i.e. TT_EMULE_STRICT_TENSOR is set). Accesses
-    // below l1_unreserved_base are system regions (mailbox, KERNEL_CONFIG, …)
-    // and pass through; at-or-above must hit a live tensor extent. The
-    // matched (start, end) is also appended to __emule_l1_resolved_ranges so
-    // the host post-launch comparison knows which buffers this kernel is
-    // intentionally accessing (object-intent provenance check).
     if (__emule_l1_tensor_ranges != nullptr && l1_addr >= __emule_l1_unreserved_base) {
         bool in_tensor = false;
         uint64_t matched_packed = 0;
@@ -326,12 +247,6 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             }
         }
     }
-    // Tensor-padding sanitizer. Only active when the host has registered at
-    // least one buffer with Buffer::set_logical_size AND TT_EMULE_STRICT_PADDING
-    // is on. Each entry packs (logical_end << 32) | physical_end — an access
-    // in [logical_end, physical_end) is inside a buffer's padded region and
-    // must never be touched by a kernel even though the underlying memory is
-    // allocated (and thus passes the OOB-tensor check above).
     if (__emule_l1_padding_ranges != nullptr) {
         for (uint32_t i = 0; i < __emule_l1_padding_ranges_count; ++i) {
             uint64_t packed = __emule_l1_padding_ranges[i];

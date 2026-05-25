@@ -119,12 +119,11 @@ constexpr uint8_t unpack_tile_num_faces[32] = {
     4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
 };
 
-// ---- Per-RISC CB pointers ----
-// The per-thread read/write pointers (the single source of truth that fixes the
-// #139 race) live in jit_hw/internal/emule_cb_ptr.h (__emule_local_cb). This
-// file's cb_push_back/cb_pop_front advance them via __emule_cb_advance_wr/rd and
-// get_write_ptr/get_read_ptr read them via __emule_cb_wr_addr/__emule_cb_rd_addr.
-// CBSyncState here owns only the shared occupied semaphore.
+// Master ASAN switch (TT_METAL_EMULE_ASAN). Re-read every call; see ASAN.md.
+inline bool __emule_asan_enabled() {
+    const char* v = std::getenv("TT_METAL_EMULE_ASAN");
+    return v != nullptr && v[0] != '\0' && v[0] != '0';
+}
 
 // ---- Circular Buffer sync operations ----
 
@@ -140,8 +139,7 @@ inline int __emule_cb_timeout_sec() {
 
 inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
     auto& cb = __emule_cbs[cb_id];
-    // Load-bearing (cannot be gated): a request for n > num_pages can never be
-    // satisfied, so the CV wait below would deadlock until TT_EMULE_CB_TIMEOUT.
+    // Always on: gating this would deadlock the CV wait below. See ASAN.md.
     if (n > cb.num_pages) {
         fprintf(stderr,
                 "[ASAN ERROR] CB Reservation Overflow: CB %u has %u total pages, "
@@ -160,8 +158,6 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
     // one trailing push_back(Wt)).
     // Lock-free fast path (safe for SPSC — only consumer decrements occupied)
     if ((cb.num_pages - cb.occupied.load(std::memory_order_acquire)) >= n) {
-        // CB-boundary sanitizer: record how many pages are now reservable
-        // starting at the current cb.write_idx. cb_push_back decrements this.
         __emule_cb_reserved_pages[cb_id] += n;
         return;
     }
@@ -189,15 +185,15 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
 }
 
 inline void cb_push_back(uint32_t cb_id, uint32_t n) {
-    if (__emule_pending_noc_reads > 0) {
+    if (__emule_asan_enabled() && __emule_pending_noc_reads > 0) {
         fprintf(stderr,
                 "[ASAN ERROR] Race Condition: cb_push_back(cb_id=%u) called while a NoC read is still pending "
                 "(%u outstanding) — missing noc_async_read_barrier()\n",
                 cb_id, __emule_pending_noc_reads);
         abort();
     }
-    // CB-boundary sanitizer: shrink the reserved window before the FIFO
-    // advance so any concurrent boundary check sees a consistent view.
+    // Shrink the reserved window before the FIFO advance — keeps any concurrent
+    // boundary check consistent.
     if (n <= __emule_cb_reserved_pages[cb_id]) {
         __emule_cb_reserved_pages[cb_id] -= n;
     } else {
@@ -248,11 +244,10 @@ inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
     // (the in-place recycle idiom) does not block waiting on a non-existent
     // other consumer. See __emule_cb_self_consume_mask.
     __emule_cb_self_consume_mask |= (1u << cb_id);
-    // Lock-free fast path (safe for SPSC — only producer increments occupied)
+    // Lock-free fast path (safe for SPSC — only producer increments occupied).
     if (cb.occupied.load(std::memory_order_acquire) >= n) {
-        // CB-boundary sanitizer: widen the read window to the largest count
-        // the kernel has waited on since the last pop. max(), not +=, because
-        // overlapping waits before a pop don't grow the consumable region.
+        // max(), not += — overlapping waits before a pop don't grow the
+        // consumable region.
         if (n > __emule_cb_waited_pages[cb_id]) {
             __emule_cb_waited_pages[cb_id] = n;
         }
@@ -284,10 +279,7 @@ inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
 }
 
 inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
-    // CB-boundary sanitizer: shrink the read window before the FIFO advance
-    // so any concurrent boundary check sees a consistent view. Saturate at 0
-    // — a kernel that pops more than it waited on is suspect but we don't
-    // want to underflow the sanitizer state.
+    // Saturate at 0; popping more than waited is suspect but mustn't underflow.
     if (n <= __emule_cb_waited_pages[cb_id]) {
         __emule_cb_waited_pages[cb_id] -= n;
     } else {
@@ -310,36 +302,6 @@ inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
     }
 }
 
-// ---- Dirty-CB sanitizer (called by emulated_program_runner) ----
-//
-// On silicon, a kernel that finishes with pages still on a CB (push count >
-// pop count, i.e. occupied > 0) leaves the CB pointers offset for the next
-// program launch — which then immediately back-pressures on cb_reserve_back.
-// The emulator detects this by walking __emule_cbs at kernel exit and
-// aborting on any leftover pages, attributing the leak to the kernel that
-// just finished. The runner also performs a final whole-program sweep in
-// case multi-kernel programs cancel out per-kernel.
-inline void __emule_check_kernel_cb_dirty(uint32_t lx, uint32_t ly, uint8_t processor_id) {
-    if (__emule_cbs == nullptr) {
-        return;
-    }
-    for (uint32_t cb_id = 0; cb_id < 32; ++cb_id) {
-        auto& cb = __emule_cbs[cb_id];
-        if (cb.num_pages == 0) {
-            continue;  // CB not configured on this core
-        }
-        uint32_t occupied = cb.occupied.load(std::memory_order_acquire);
-        if (occupied > 0) {
-            fprintf(stderr,
-                    "[ASAN ERROR] Dirty CB Detected: Core (%u, %u) CB %u was not flushed! "
-                    "Kernel (processor %u) ended with %u/%u pages still on the CB "
-                    "(push > pop) — this back-pressures the next program launch on silicon.\n",
-                    lx, ly, cb_id, processor_id, occupied, cb.num_pages);
-            std::abort();
-        }
-    }
-}
-
 // ---- int32_t overloads (D2M int32 support emits int32_t tile counts) ----
 inline void cb_reserve_back(uint32_t cb_id, int32_t n) { cb_reserve_back(cb_id, static_cast<uint32_t>(n)); }
 inline void cb_push_back(uint32_t cb_id, int32_t n)    { cb_push_back(cb_id, static_cast<uint32_t>(n)); }
@@ -348,12 +310,6 @@ inline void cb_pop_front(uint32_t cb_id, int32_t n)    { cb_pop_front(cb_id, sta
 
 // ---- Pointer accessors ----
 
-// Strict CB-write-ptr alignment check (gated by TT_EMULE_STRICT_CB_ALIGN).
-// Off by default — see [[feedback-tt-emule-conventions]].
-inline bool __emule_strict_cb_align_enabled() {
-    static bool val = std::getenv("TT_EMULE_STRICT_CB_ALIGN") != nullptr;
-    return val;
-}
 
 // Return uint32_t (truncated host pointer). CB memory is mmap'd below 4 GB.
 // Reads the calling thread's own per-RISC write/read pointer (emule_cb_ptr.h),
