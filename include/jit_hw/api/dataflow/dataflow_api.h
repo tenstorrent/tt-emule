@@ -85,13 +85,7 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                 l1_addr, __emule_sem_l1_range_start, __emule_sem_l1_range_end);
         abort();
     }
-    // CB-range check — must run before the OOB-tensor check. CB backing memory
-    // is not registered in LiveL1Ranges; a CB address reaching the OOB check
-    // always produces "Out-of-Bounds Write" even for legitimate accesses.
-    // Using an early return prevents falling through to OOB/padding.
-    // NOTE: jit_kernel_stubs.hpp defines this function first via the
-    // __EMULE_LOCAL_L1_TO_PTR_DEFINED guard; this copy is an unreachable
-    // fallback included only for standalone builds without that header.
+    // CB range must be checked before OOB — CB memory is not in LiveL1Ranges.
     if (__emule_cbs != nullptr) {
         for (uint32_t cb_id = 0; cb_id < 32; ++cb_id) {
             auto& cb = __emule_cbs[cb_id];
@@ -144,10 +138,6 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                     l1_addr);
             abort();
         }
-        // Object-intent provenance: log which live tensor this resolution
-        // touched. Under TT_EMULE_STRICT_OBJECT_INTENT, the host comparison
-        // pass treats these entries as the kernel's "intended write set"
-        // for the supported single-kernel-per-core case.
         if (__emule_l1_resolved_ranges != nullptr &&
             __emule_l1_resolved_ranges_count != nullptr) {
             uint32_t cur = *__emule_l1_resolved_ranges_count;
@@ -164,11 +154,6 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             }
         }
     }
-    // Tensor-padding sanitizer. Mirrors the check in jit_kernel_stubs.hpp:
-    // each packed (logical_end << 32) | physical_end describes one buffer's
-    // padded region. Accesses in [logical_end, physical_end) are inside the
-    // allocation (so they pass the OOB check above) but past the caller-
-    // declared logical extent — abort with a padding-violation diagnostic.
     if (__emule_l1_padding_ranges != nullptr) {
         for (uint32_t i = 0; i < __emule_l1_padding_ranges_count; ++i) {
             uint64_t packed = __emule_l1_padding_ranges[i];
@@ -184,10 +169,8 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
     }
     uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
     if (l1_addr >= l1_base) {
-        // Already an absolute host pointer (from l1_alloc / CB / DFB).
         return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
     }
-    // Firmware L1 offset — translate via bridge pointer.
     return __emule_bridge_l1 + l1_addr;
 }
 #endif
@@ -341,19 +324,13 @@ FORCE_INLINE void noc_async_write_tile(
     noc_async_write_page(id, addrgen, src_local_l1_addr, size, offset, noc);
 }
 
-// ---- NOC transfer alignment check (gated by TT_EMULE_STRICT_NOC_ALIGN) ----
-// Off by default — many existing kernels would false-positive.
+// ---- NOC transfer alignment check (gated by TT_METAL_EMULE_ASAN) ----
 // Checks that src and dst lower bits match per the hardware requirement:
 //   L1<->L1: lower 4 bits must match (16-byte granularity)
 //   DRAM read WH: lower 8 bits must match; BH: lower 16 bits must match
 //   DRAM write (WH/BH): lower 4 bits must match
-inline bool __emule_strict_noc_align_enabled() {
-    static bool val = std::getenv("TT_EMULE_STRICT_NOC_ALIGN") != nullptr;
-    return val;
-}
-
 inline void __emule_check_noc_read_alignment(uint64_t src_noc_addr, uint32_t dst_local_l1_addr) {
-    if (!__emule_strict_noc_align_enabled()) return;
+    if (!__emule_asan_enabled()) return;
     uint32_t src_off = static_cast<uint32_t>(src_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
     if (__emule_noc_addr_is_dram(src_noc_addr)) {
 #ifdef ARCH_BLACKHOLE
@@ -378,7 +355,7 @@ inline void __emule_check_noc_read_alignment(uint64_t src_noc_addr, uint32_t dst
 }
 
 inline void __emule_check_noc_write_alignment(uint32_t src_local_l1_addr, uint64_t dst_noc_addr) {
-    if (!__emule_strict_noc_align_enabled()) return;
+    if (!__emule_asan_enabled()) return;
     uint32_t dst_off = static_cast<uint32_t>(dst_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
     // Both L1 and DRAM writes use 0xF mask (16-byte) for both WH and BH
     if ((src_local_l1_addr & 0xF) != (dst_off & 0xF)) {
