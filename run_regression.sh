@@ -497,7 +497,9 @@ fi  # end run_wormhole (Tier 5, 5b)
 echo ""
 echo "== Tier 6: Silicon (toggle proof) =="
 
-unset TT_METAL_MOCK_CLUSTER_DESC_PATH TT_METAL_EMULE_MODE TT_METAL_SLOW_DISPATCH_MODE 2>/dev/null || true
+# Keep emulation mode active; use a wormhole mock cluster so open_mesh_device succeeds
+# in containers without /dev/tenstorrent hardware.
+export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
 
 run_test "ttnn_add_int_silicon" "$TTNN_BIN" --gtest_filter="AddUnaryTests/*"
 

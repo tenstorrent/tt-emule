@@ -57,6 +57,27 @@ private:
     template <typename T> using dst_args_t = typename noc_traits_t<T>::dst_args_type;
     template <typename T> using dst_args_mcast_t = typename noc_traits_t<T>::dst_args_mcast_type;
 
+    // Convert an address value (returned by noc_traits_t::src_addr / dst_addr) to a
+    // real host uint8_t* that can be passed to std::memcpy.
+    //
+    // Design contract: noc_traits_t specialisations ALWAYS return host pointers
+    // as their uintptr_t return value.  For NOC-type addresses this means the trait
+    // already resolved the NOC address (e.g. via __emule_dram_ptr or
+    // __emule_resolve_noc_addr) before returning — we simply cast here.
+    //
+    // LOCAL_L1 addresses are raw CB/DFB firmware pointers (uint32_t) or truncated
+    // host pointers that must be run through __emule_local_l1_to_ptr, which handles
+    // both "firmware offset from L1 base" and "truncated 32-bit host pointer" cases.
+    template <AddressType addr_type>
+    static uint8_t* to_host_ptr(uintptr_t addr) {
+        if constexpr (addr_type == AddressType::NOC) {
+            // Trait already resolved to a host pointer — cast directly.
+            return reinterpret_cast<uint8_t*>(addr);
+        } else {
+            return __emule_local_l1_to_ptr(static_cast<uint32_t>(addr));
+        }
+    }
+
 public:
     // ----- Constructors -----
 
@@ -95,10 +116,12 @@ public:
         const dst_args_t<Dst>& dst_args,
         uint32_t vc  = NOC_UNICAST_WRITE_VC,
         uint32_t trid = INVALID_TXN_ID) const {
-        uintptr_t s = noc_traits_t<Src>::template src_addr<AddressType::NOC>(src, *this, src_args);
-        uintptr_t d = noc_traits_t<Dst>::template dst_addr<AddressType::LOCAL_L1>(dst, *this, dst_args);
-        if (s && d) {
-            std::memcpy(reinterpret_cast<uint8_t*>(d), reinterpret_cast<uint8_t*>(s), size_bytes);
+        uint8_t* src_ptr = to_host_ptr<AddressType::NOC>(
+            noc_traits_t<Src>::template src_addr<AddressType::NOC>(src, *this, src_args));
+        uint8_t* dst_ptr = to_host_ptr<AddressType::LOCAL_L1>(
+            noc_traits_t<Dst>::template dst_addr<AddressType::LOCAL_L1>(dst, *this, dst_args));
+        if (src_ptr && dst_ptr) {
+            std::memcpy(dst_ptr, src_ptr, size_bytes);
         }
     }
 
@@ -131,10 +154,12 @@ public:
         // When max_page_size fits in one packet, size comes from cached state.
         constexpr bool fits_in_one_packet = max_page_size <= NOC_MAX_BURST_SIZE;
         const uint32_t bytes = fits_in_one_packet ? cached_size_ : size_bytes;
-        uintptr_t s = noc_traits_t<Src>::template src_addr<AddressType::NOC>(src, *this, src_args);
-        uintptr_t d = noc_traits_t<Dst>::template dst_addr<AddressType::LOCAL_L1>(dst, *this, dst_args);
-        if (s && d && bytes) {
-            std::memcpy(reinterpret_cast<uint8_t*>(d), reinterpret_cast<uint8_t*>(s), bytes);
+        uint8_t* src_ptr = to_host_ptr<AddressType::NOC>(
+            noc_traits_t<Src>::template src_addr<AddressType::NOC>(src, *this, src_args));
+        uint8_t* dst_ptr = to_host_ptr<AddressType::LOCAL_L1>(
+            noc_traits_t<Dst>::template dst_addr<AddressType::LOCAL_L1>(dst, *this, dst_args));
+        if (src_ptr && dst_ptr && bytes) {
+            std::memcpy(dst_ptr, src_ptr, bytes);
         }
     }
 
@@ -154,10 +179,12 @@ public:
         const dst_args_t<Dst>& dst_args,
         uint32_t vc   = NOC_UNICAST_WRITE_VC,
         uint32_t trid = INVALID_TXN_ID) const {
-        uintptr_t s = noc_traits_t<Src>::template src_addr<AddressType::LOCAL_L1>(src, *this, src_args);
-        uintptr_t d = noc_traits_t<Dst>::template dst_addr<AddressType::NOC>(dst, *this, dst_args);
-        if (s && d) {
-            std::memcpy(reinterpret_cast<uint8_t*>(d), reinterpret_cast<uint8_t*>(s), size_bytes);
+        uint8_t* src_ptr = to_host_ptr<AddressType::LOCAL_L1>(
+            noc_traits_t<Src>::template src_addr<AddressType::LOCAL_L1>(src, *this, src_args));
+        uint8_t* dst_ptr = to_host_ptr<AddressType::NOC>(
+            noc_traits_t<Dst>::template dst_addr<AddressType::NOC>(dst, *this, dst_args));
+        if (src_ptr && dst_ptr) {
+            std::memcpy(dst_ptr, src_ptr, size_bytes);
         }
     }
 
@@ -173,7 +200,8 @@ public:
         const dst_args_t<Dst>& dst_args,
         uint8_t /*vc*/ = NOC_UNICAST_WRITE_VC) const {
         cached_size_      = size_bytes;
-        cached_write_dst_ = noc_traits_t<Dst>::template dst_addr<AddressType::NOC>(dst, *this, dst_args);
+        cached_write_dst_ = reinterpret_cast<uintptr_t>(to_host_ptr<AddressType::NOC>(
+            noc_traits_t<Dst>::template dst_addr<AddressType::NOC>(dst, *this, dst_args)));
     }
 
     template <
@@ -189,14 +217,17 @@ public:
         uint8_t /*vc*/ = NOC_UNICAST_WRITE_VC) const {
         constexpr bool fits_in_one_packet = max_page_size <= NOC_MAX_BURST_SIZE;
         const uint32_t bytes = fits_in_one_packet ? cached_size_ : size_bytes;
-        uintptr_t s = noc_traits_t<Src>::template src_addr<AddressType::LOCAL_L1>(src, *this, src_args);
+        uint8_t* src_ptr = to_host_ptr<AddressType::LOCAL_L1>(
+            noc_traits_t<Src>::template src_addr<AddressType::LOCAL_L1>(src, *this, src_args));
         // Prefer the pre-resolved destination from set_async_write_state when available;
         // fall back to re-resolving from the dst argument for safety.
-        uintptr_t d = cached_write_dst_
-            ? cached_write_dst_
-            : noc_traits_t<Dst>::template dst_addr<AddressType::NOC>(dst, *this, dst_args);
-        if (s && d && bytes) {
-            std::memcpy(reinterpret_cast<uint8_t*>(d), reinterpret_cast<uint8_t*>(s), bytes);
+        // cached_write_dst_ is already a host pointer (resolved in set_async_write_state).
+        uint8_t* dst_ptr = cached_write_dst_
+            ? reinterpret_cast<uint8_t*>(cached_write_dst_)
+            : to_host_ptr<AddressType::NOC>(
+                noc_traits_t<Dst>::template dst_addr<AddressType::NOC>(dst, *this, dst_args));
+        if (src_ptr && dst_ptr && bytes) {
+            std::memcpy(dst_ptr, src_ptr, bytes);
         }
     }
 
@@ -246,8 +277,8 @@ public:
         uint32_t vc  = NOC_UNICAST_WRITE_VC,
         uint32_t trid = INVALID_TXN_ID) const {
         static_assert(txn_id_mode == TxnIdMode::DISABLED);
-        uintptr_t addr = noc_traits_t<Dst>::template dst_addr<AddressType::NOC>(dst, *this, dst_args);
-        uint8_t* ptr = reinterpret_cast<uint8_t*>(addr);
+        uint8_t* ptr = to_host_ptr<AddressType::NOC>(
+            noc_traits_t<Dst>::template dst_addr<AddressType::NOC>(dst, *this, dst_args));
         if (ptr) {
             __emule_dw_write_be(ptr, val, be);
         }

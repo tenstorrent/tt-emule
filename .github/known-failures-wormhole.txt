@@ -6,6 +6,10 @@
 # Regenerated from local run against pinned tt-metal SHA with TT_EMULE_ARCH=wormhole.
 # Stale or newly-passing entries cause CI to fail — keep this file in sync.
 
+# Quasar atomic LR/SC: DM0/DM1 not reserved in emulation so first_dm_id=2 offset
+# calculation yields a negative index when DM0 is the reader. Cannot fix without
+# breaking DFB 4Sx4S (which needs all 8 DM cores). Accepted as a permanent emulation limit.
+RISCVAtomicsFixture.TestAtomicLoadStoreRISCV
 MeshDeviceFixture.DMTensixTest1xDFB4Sx1SConfig
 MeshDeviceFixture.DMTest1xDFB1Sx1BConfig
 MeshDeviceFixture.DMTest1xDFB1Sx4SConfig

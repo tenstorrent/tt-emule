@@ -182,10 +182,11 @@ Noc::async_read(const Src& src,
                 const DataflowBufferArgs& dst_args) const {
     const uint32_t size = dst.get_entry_size();
     dst.reserve_back(1);
-    uintptr_t s = noc_traits_t<Src>::template src_addr<AddressType::NOC>(src, *this, src_args);
-    uintptr_t d = static_cast<uintptr_t>(dst.get_write_ptr() + dst_args.offset_bytes);
-    if (s && d && size)
-        std::memcpy(reinterpret_cast<void*>(d), reinterpret_cast<void*>(s), size);
+    uint8_t* src_ptr = to_host_ptr<AddressType::NOC>(
+        noc_traits_t<Src>::template src_addr<AddressType::NOC>(src, *this, src_args));
+    uint8_t* dst_ptr = __emule_local_l1_to_ptr(dst.get_write_ptr() + dst_args.offset_bytes);
+    if (src_ptr && dst_ptr && size)
+        std::memcpy(dst_ptr, src_ptr, size);
     dst.push_back(1);
 }
 
@@ -197,9 +198,10 @@ Noc::async_write(DataflowBuffer& src,
                  const typename noc_traits_t<Dst>::dst_args_type& dst_args) const {
     const uint32_t size = src.get_entry_size();
     src.wait_front(1);
-    uintptr_t s = static_cast<uintptr_t>(src.get_read_ptr() + src_args.offset_bytes);
-    uintptr_t d = noc_traits_t<Dst>::template dst_addr<AddressType::NOC>(dst, *this, dst_args);
-    if (s && d && size)
-        std::memcpy(reinterpret_cast<void*>(d), reinterpret_cast<void*>(s), size);
+    uint8_t* src_ptr = __emule_local_l1_to_ptr(src.get_read_ptr() + src_args.offset_bytes);
+    uint8_t* dst_ptr = to_host_ptr<AddressType::NOC>(
+        noc_traits_t<Dst>::template dst_addr<AddressType::NOC>(dst, *this, dst_args));
+    if (src_ptr && dst_ptr && size)
+        std::memcpy(dst_ptr, src_ptr, size);
     src.pop_front(1);
 }
