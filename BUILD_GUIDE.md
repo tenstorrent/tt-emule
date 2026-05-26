@@ -182,8 +182,8 @@ Expected baseline:
 
 | Job | Passed | Failed |
 |-----|-------:|-------:|
-| wormhole | 31 | 9 |
-| blackhole | 20 | 0 |
+| wormhole | 30 | 9 |
+| blackhole | 19 | 0 |
 | quasar | 105 | 9 |
 
 A "passed regression" means failures match `.github/known-failures-{arch}.txt`; CI's `.github/scripts/classify-results.py` does the per-test cross-check. The per-arch scripts exit non-zero on any failure (including known), so the exit code alone does not distinguish a new regression — compare the PASS/FAIL summary against the allowlist.

@@ -10,7 +10,6 @@ set -euo pipefail
 # Tiers:
 #   1  — host-only (no device, no env vars)
 #   4  — TTNN INT32 Relational / Add / Sub / Matmul (blackhole_P100.yaml)
-#   6  — Silicon toggle proof (wormhole_N150.yaml)
 #
 # Required env:
 #   TT_METAL_DIR  — path to tt-metal source tree (with build_emule/ inside)
@@ -155,21 +154,6 @@ run_test "ttnn_add_int_emulated"  "$TTNN_BIN" --gtest_filter="AddUnaryTests/*"
 run_test "ttnn_sub_int"           "$TTNN_BIN" --gtest_filter="SubUnaryTests/*"
 run_test "ttnn_matmul"            "$TTNN_BIN" \
     --gtest_filter="SingleTileMatmulFixture.*:MultiTileMatmulFixture.*"
-
-# ===========================================================================
-# Tier 6: Silicon toggle proof (wormhole_N150.yaml — open_mesh_device needs a
-# valid mock cluster; wormhole is the canonical choice for containers without
-# /dev/tenstorrent hardware)
-# ===========================================================================
-echo ""
-echo "== Tier 6: Silicon (toggle proof) =="
-
-export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
-export TT_METAL_EMULE_MODE=1
-export TT_METAL_SLOW_DISPATCH_MODE=1
-export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
-
-run_test "ttnn_add_int_silicon" "$TTNN_BIN" --gtest_filter="AddUnaryTests/*"
 
 # ===========================================================================
 

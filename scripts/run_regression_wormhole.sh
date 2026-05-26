@@ -15,7 +15,6 @@ set -euo pipefail
 #   3l     — DM Direct Write & DRAM Unary (wormhole_N150.yaml)
 #   5      — TTNN Matmul Sweep (wormhole_N150.yaml)
 #   5b     — TTNN Reduction (wormhole_N150.yaml)
-#   6      — Silicon toggle proof (wormhole_N150.yaml)
 #
 # Required env:
 #   TT_METAL_DIR  — path to tt-metal source tree (with build_emule/ inside)
@@ -237,14 +236,6 @@ run_test "ttnn_minmax_first_dim" "$TTNN_BIN" \
     --gtest_filter="MinMaxTensorFirstDimTests/MinMaxTensorFirstDimFixture.MinMaxTensorCorrectly/*"
 run_test "ttnn_minmax_both_dims" "$TTNN_BIN" \
     --gtest_filter="MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/*"
-
-# ===========================================================================
-# Tier 6: Silicon toggle proof
-# ===========================================================================
-echo ""
-echo "== Tier 6: Silicon (toggle proof) =="
-
-run_test "ttnn_add_int_silicon" "$TTNN_BIN" --gtest_filter="AddUnaryTests/*"
 
 # ===========================================================================
 

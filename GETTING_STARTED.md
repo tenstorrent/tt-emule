@@ -62,7 +62,7 @@ bash scripts/run_regression_blackhole.sh
 bash scripts/run_regression_quasar.sh
 ```
 
-Baseline: wormhole **31/9**, blackhole **20/0**, quasar **105/9** — failures match `.github/known-failures-{arch}.txt`.
+Baseline: wormhole **30/9**, blackhole **19/0**, quasar **105/9** — failures match `.github/known-failures-{arch}.txt`.
 
 ## 5. Add a TTNN Test
 
