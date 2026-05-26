@@ -1,0 +1,11 @@
+[==========] Running 14 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 14 tests from MatmulSweep/MatmulSweepFixture
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/32x32x32
+unknown file: Failure
+C++ exception with description "jit_compile_kernel: dlopen failed: /tmp/tt_emule_jit_cache_1000/cc454a49e8752733.so.tmp.9626: undefined symbol: __emule_cb_waited_pages" thrown in the test body.
+[  FAILED  ] MatmulSweep/MatmulSweepFixture.MatmulSweep/32x32x32 (988 ms)
+[ RUN      ] MatmulSweep/MatmulSweepFixture.MatmulSweep/64x64x64
+unknown file: Failure
+C++ exception with description "jit_compile_kernel: dlopen failed: /tmp/tt_emule_jit_cache_1000/d83e38ccd1b17ffc.so.tmp.9626: undefined symbol: __emule_cb_waited_pages" thrown in the test body.
+[  FAILED  ] MatmulSweep/MatmulSweepFixture.MatmulSweep/64x64x64 (1064 ms)

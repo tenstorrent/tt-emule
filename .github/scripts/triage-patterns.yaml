@@ -1,0 +1,118 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Pattern library for the nightly triage agent.
+#
+# Edit this file (not triage.py!) to add new failure signatures.  The schema
+# is documented at triage-patterns.schema.json and validated by the unit
+# tests under tests/triage/.
+#
+# Each pattern is scanned in descending `priority` order.  The first pattern
+# to match a given (source, signature) pair "wins" — more specific patterns
+# come first.
+
+version: 1
+patterns:
+
+  # ---------------------------------------------------------------- specific
+  - id: UMD_VIRTUAL_OVERRIDE_DRIFT
+    category: UPSTREAM_INTERFACE_CHANGE
+    priority: 100
+    sources: [build_log]
+    match: "non-virtual member function marked 'override' hides virtual member function"
+    after_match_window: 10
+    capture:
+      - name: hiding_signature
+        regex: "(?m)^\\s*\\d+\\s*\\|\\s*(?P<hiding_signature>(?:virtual\\s+)?[A-Za-z_][\\w*&: <>]*\\([^)]*\\)\\s*override)"
+      - name: hidden_signature
+        regex: "hidden overloaded virtual function '(?P<hidden_signature>[^']+)'"
+    signature_groups: [hidden_signature]
+    upstream_link: "https://github.com/tenstorrent/tt-umd/pull/2645"
+    summary_template: |
+      **Upstream interface change**: base virtual `${hidden_signature}` no longer matches tt-emule's override.
+      Most often caused by a UMD `Chip` signature change.
+      See upstream: ${upstream_link}
+    issue_title_template: "[auto-triage ${signature_hash}] UMD virtual drift: ${hidden_signature}"
+    suggested_fix: |
+      1. Check the upstream UMD `Chip` interface for recent signature changes.
+      2. Update tt-emule's `SWEmuleChip` overrides to match.
+      3. Re-run the D2M nightly via `gh workflow run nightly-d2m-upstream.yml`.
+    labels: [upstream-blocker]
+
+  - id: DLOPEN_MISSING_EMULE_SYMBOL
+    category: MISSING_SYMBOL
+    priority: 90
+    sources: [regression_log]
+    match: "dlopen failed[^\\n]*undefined symbol: (?P<symbol>__emule_[A-Za-z0-9_]+)"
+    signature_groups: [symbol]
+    summary_template: |
+      **Missing emule shim**: `${symbol}` is referenced by tt-metal but not exported by libemule.
+      This usually means tt-metal added a new UMD API and tt-emule needs a corresponding `__emule_*` stub.
+    issue_title_template: "[auto-triage ${signature_hash}] missing emule symbol ${symbol}"
+    suggested_fix: |
+      Add the storage definition in `src/host_api.cpp` (or appropriate module) and re-export
+      via the corresponding header. See PR #28 for the pattern.
+
+  - id: TRACY_RINGBUFFER_RACE
+    category: FLAKE
+    priority: 80
+    sources: [build_log]
+    match: "cmake_install\\.cmake.*?cannot set modification time on\\s+.*?TracyRingBuffer\\.hpp"
+    signature_groups: []
+    fixed_signature: "tracy-ringbuffer-mtime-race"
+    summary_template: |
+      Known intermittent tt-alchemist tracy install race (parallel `cmake --install` vs `copy_directory`).
+      Retry the nightly; no code change required.
+    issue_title_template: "[auto-triage ${signature_hash}] FLAKE: tracy install race"
+    labels: [flake]
+
+  # -------------------------------------------------------- classify summary
+  - id: ALLOWLIST_NEWLY_PASSING
+    category: ALLOWLIST_DRIFT
+    priority: 70
+    sources: [classify_summary, build_log]
+    match: "##\\s*⚠️\\s*Newly-passing allowlist entries"
+    after_match_window: 200
+    capture:
+      - name: entries
+        # No `^` anchor: GHA run-log lines are prefixed with job/step/timestamp,
+        # so the bullet character isn't at column 0 in the captured text.
+        regex: "-\\s+`(?P<entry>test_[^`]+)`"
+        multi: true
+    signature_groups: []
+    fixed_signature: "allowlist-drift-newly-passing"
+    summary_template: |
+      ${entries|length} entries in `known-failures*.txt` now PASS. Drop them from the allowlist.
+    issue_title_template: "[auto-triage ${signature_hash}] allowlist drift: newly-passing entries"
+
+  - id: ALLOWLIST_NEW_FAILURES
+    category: TESTS_FAILED
+    priority: 70
+    sources: [classify_summary, build_log]
+    match: "##\\s*❌\\s*New failures"
+    after_match_window: 500
+    capture:
+      - name: failures
+        # No `^` anchor: GHA run-log lines are prefixed with job/step/timestamp.
+        regex: "###\\s+`(?P<failure>[^`]+)`"
+        multi: true
+    threshold:
+      field: failures
+      min_count: 1
+    signature_groups: [failures]
+    summary_template: |
+      ${failures|length} new test failures (not in allowlist):
+      ${failures|bullets}
+    issue_title_template: "[auto-triage ${signature_hash}] ${failures|length} new test failures"
+
+  # ------------------------------------------------------------------ generic
+  - id: NINJA_GENERIC_BUILD_FAILURE
+    category: BUILD_FAILURE
+    priority: 10
+    sources: [build_log]
+    match: "ninja: build stopped: subcommand failed"
+    signature_groups: []
+    fixed_signature: "ninja-generic"
+    summary_template: |
+      Generic build failure — no specific pattern matched. See log for details.
+    issue_title_template: "[auto-triage ${signature_hash}] generic build failure"

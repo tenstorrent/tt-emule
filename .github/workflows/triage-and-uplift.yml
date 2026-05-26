@@ -1,0 +1,146 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Nightly Triage + Uplift Agent
+#
+# Fires after either nightly workflow completes.  Two jobs:
+#   * `triage`  — runs on every completion.  Classifies failures with the
+#                 pattern library (.github/scripts/triage-patterns.yaml),
+#                 upserts tracking issues, and refreshes the AUTO-TRIAGE
+#                 region of the matching open auto/uplift-* PR.
+#   * `uplift`  — only on conclusion == 'success'.  Advances the relevant
+#                 pin file (tt-metal-pin.txt or tt-mlir-pin.txt) on its
+#                 long-lived branch (auto/uplift-metal or auto/uplift-mlir)
+#                 and opens/refreshes the PR.  Must use a PAT (not
+#                 GITHUB_TOKEN) so the PR triggers downstream pr-*.yml.
+#
+# Kill switch: set repo variable TRIAGE_AGENT_DISABLED to "1".
+
+name: Nightly Triage + Uplift Agent
+
+on:
+  workflow_run:
+    workflows:
+      - "Nightly Metal Upstream Regression"
+      - "Nightly D2M Upstream"
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Nightly run_id to re-triage"
+        required: true
+      nightly:
+        description: "metal | d2m"
+        required: true
+      conclusion:
+        description: "success | failure (empty = derive)"
+        required: false
+        default: ""
+
+concurrency:
+  group: triage-and-uplift
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+jobs:
+  triage:
+    if: >-
+      vars.TRIAGE_AGENT_DISABLED != '1' && (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event.workflow_run.event == 'schedule' ||
+         github.event.workflow_run.event == 'workflow_dispatch')
+      )
+    runs-on: ubuntu-22.04
+    env:
+      RUN_ID: ${{ github.event.workflow_run.id || github.event.inputs.run_id }}
+      NIGHTLY: ${{ contains(github.event.workflow_run.name, 'D2M') && 'd2m' || (github.event.inputs.nightly || 'metal') }}
+      CONCLUSION: ${{ github.event.workflow_run.conclusion || github.event.inputs.conclusion || 'failure' }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout tt-emule
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml==6.0.2
+
+      - name: Download nightly artifacts
+        run: |
+          mkdir -p _triage_artifacts
+          gh run download "$RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir _triage_artifacts \
+            --pattern 'nightly-*regression-results-*' || true
+
+      - name: Capture full run log (build_log.txt)
+        # gh run view --log dumps the concatenated job logs.  Build-stage
+        # failures (UMD override drift, generic ninja, etc.) and the classify
+        # step's stdout (which mirrors $GITHUB_STEP_SUMMARY) both live here.
+        # Lines are prefixed with `<job-name>\t<step-name>\t<timestamp>` but
+        # the patterns regex over arbitrary substrings, so the prefix is fine.
+        run: |
+          gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --log > _triage_artifacts/build_log.txt 2>/dev/null || true
+          ls -la _triage_artifacts/ | head -10
+
+      - name: Run triage
+        run: |
+          python3 .github/scripts/triage.py \
+            --workflow   "$NIGHTLY" \
+            --run-id     "$RUN_ID" \
+            --conclusion "$CONCLUSION" \
+            --artifacts-dir _triage_artifacts \
+            --patterns   .github/scripts/triage-patterns.yaml
+
+  uplift:
+    needs: triage
+    if: >-
+      vars.TRIAGE_AGENT_DISABLED != '1' &&
+      (github.event.workflow_run.conclusion == 'success' ||
+       github.event.inputs.conclusion == 'success')
+    runs-on: ubuntu-22.04
+    env:
+      RUN_ID: ${{ github.event.workflow_run.id || github.event.inputs.run_id }}
+      NIGHTLY: ${{ contains(github.event.workflow_run.name, 'D2M') && 'd2m' || (github.event.inputs.nightly || 'metal') }}
+      GH_TOKEN: ${{ secrets.UPLIFT_BOT_PAT }}
+    steps:
+      - name: Checkout tt-emule (with bot PAT for force-push)
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.UPLIFT_BOT_PAT }}
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml==6.0.2
+
+      - name: Download nightly artifacts
+        run: |
+          mkdir -p _triage_artifacts
+          gh run download "$RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir _triage_artifacts \
+            --pattern 'nightly-*regression-results-*'
+
+      - name: Advance uplift PR
+        run: |
+          python3 .github/scripts/uplift_pr.py advance \
+            --workflow      "$NIGHTLY" \
+            --run-id        "$RUN_ID" \
+            --artifacts-dir _triage_artifacts

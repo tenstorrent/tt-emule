@@ -1,0 +1,17 @@
+[669/1136] Building CXX object tt_metal/third_party/umd/device/CMakeFiles/tt-umd.dir/Unity/unity_0_cxx.cxx.o
+FAILED: tt_metal/third_party/umd/device/CMakeFiles/tt-umd.dir/Unity/unity_0_cxx.cxx.o
+In file included from /__w/tt-emule/tt-emule/tt-metal/build_Release/tt_metal/third_party/umd/device/CMakeFiles/tt-umd.dir/Unity/unity_0_cxx.cxx:37:
+In file included from /__w/tt-emule/tt-emule/tt-metal/tt_metal/third_party/umd/device/chip/sw_emule_chip.cpp:5:
+/__w/tt-emule/tt-emule/tt-metal/tt_metal/third_party/umd/device/api/umd/device/chip/sw_emule_chip.hpp:36:25: error: non-virtual member function marked 'override' hides virtual member function
+   36 |     void start_device() override;
+      |                         ^
+/__w/tt-emule/tt-emule/tt-metal/tt_metal/third_party/umd/device/api/umd/device/chip/chip.hpp:44:18: note: hidden overloaded virtual function 'tt::umd::Chip::start_device' declared here: different number of parameters (1 vs 0)
+   44 |     virtual void start_device(uint32_t dram_membar_subchannel = 0) = 0;
+      |                  ^
+/__w/tt-emule/tt-emule/tt-metal/tt_metal/third_party/umd/device/api/umd/device/chip/sw_emule_chip.hpp:64:68: error: non-virtual member function marked 'override' hides virtual member function
+   64 |     void dram_membar(const std::unordered_set<uint32_t>& channels) override;
+      |                                                                    ^
+/__w/tt-emule/tt-emule/tt-metal/tt_metal/third_party/umd/device/api/umd/device/chip/chip.hpp:78:18: note: hidden overloaded virtual function 'tt::umd::Chip::dram_membar' declared here: different number of parameters (2 vs 1)
+   78 |     virtual void dram_membar(const std::unordered_set<uint32_t>& channels, uint32_t subchannel = 0) = 0;
+      |                  ^
+ninja: build stopped: subcommand failed.

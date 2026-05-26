@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tenstorrent/tt-emule/triage-patterns.schema.json",
+  "title": "Triage patterns",
+  "type": "object",
+  "required": ["version", "patterns"],
+  "properties": {
+    "version": { "const": 1 },
+    "patterns": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Pattern" }
+    }
+  },
+  "$defs": {
+    "Pattern": {
+      "type": "object",
+      "required": ["id", "category", "priority", "sources", "match"],
+      "additionalProperties": false,
+      "properties": {
+        "id":       { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" },
+        "category": { "type": "string", "enum": [
+          "BUILD_FAILURE", "TESTS_FAILED", "INFRA_FAILURE", "FLAKE",
+          "ALLOWLIST_DRIFT", "UPSTREAM_INTERFACE_CHANGE", "MISSING_SYMBOL"
+        ]},
+        "priority": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "sources":  {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["build_log", "regression_log", "classify_summary"] }
+        },
+        "match":              { "type": "string" },
+        "after_match_window": { "type": "integer", "minimum": 0, "default": 5 },
+        "capture": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "regex"],
+            "additionalProperties": false,
+            "properties": {
+              "name":  { "type": "string" },
+              "regex": { "type": "string" },
+              "multi": { "type": "boolean", "default": false }
+            }
+          }
+        },
+        "threshold": {
+          "type": "object",
+          "required": ["field"],
+          "properties": {
+            "field":     { "type": "string" },
+            "min_count": { "type": "integer", "minimum": 1, "default": 1 }
+          }
+        },
+        "signature_groups": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "fixed_signature":      { "type": "string" },
+        "upstream_link":        { "type": "string", "format": "uri" },
+        "summary_template":     { "type": "string" },
+        "issue_title_template": { "type": "string" },
+        "suggested_fix":        { "type": "string" },
+        "labels":               { "type": "array", "items": { "type": "string" } }
+      },
+      "oneOf": [
+        { "required": ["signature_groups"], "properties": { "signature_groups": { "minItems": 1 } } },
+        { "required": ["fixed_signature"] }
+      ]
+    }
+  }
+}

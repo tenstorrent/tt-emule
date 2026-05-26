@@ -1,0 +1,10 @@
+[1382/1402] DEBUG: Installing all available components
+FAILED: [code=1] tools/tt-alchemist/templates/cpp/standalone/ttnn-install/.all-components-installed /__w/tt-emule/tt-emule/tt-mlir/build/tools/tt-alchemist/templates/cpp/standalone/ttnn-install/.all-components-installed
+cd /__w/tt-emule/tt-emule/tt-mlir/build/tools/tt-alchemist/csrc && cmake --install /__w/tt-emule/tt-emule/tt-metal/build_Release --prefix /__w/tt-emule/tt-emule/tt-mlir/build/tools/tt-alchemist/csrc/../templates/cpp/standalone/ttnn-install
+CMake Error at /__w/tt-emule/tt-emule/tt-metal/build_Release/tt_metal/third_party/tracy/cmake_install.cmake:79 (file):
+  file INSTALL cannot set modification time on
+  "/__w/tt-emule/tt-emule/tt-mlir/build/tools/tt-alchemist/csrc/../templates/cpp/standalone/ttnn-install/include/client/TracyRingBuffer.hpp":
+  No such file or directory.
+Call Stack (most recent call first):
+  /__w/tt-emule/tt-emule/tt-metal/build_Release/cmake_install.cmake:57 (include)
+ninja: build stopped: subcommand failed.
