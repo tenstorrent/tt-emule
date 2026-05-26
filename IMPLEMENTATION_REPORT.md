@@ -179,49 +179,49 @@ The compute engine emulates the hardware's UNPACK → MATH → PACK pipeline. On
 | Reduce | `reduce_tile` (ROW/COL/SCALAR × SUM/MAX) | `reduce.h` |
 | L1 acc toggle | `llk_pack_reconfig_l1_acc` | `common.h` |
 
-Stubbed operations (compile but no-op): SFPU element-wise ops (23 files), broadcast, transpose_wh, tilize/untilize compute path, pack_untilize, quantization. See [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) section 5.5 for the full list.
+Stubbed operations (compile but no-op): SFPU element-wise ops, broadcast, transpose_wh, tilize/untilize compute path, pack_untilize, quantization. See [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) section 5.5 for the full list.
 
 ### Codebase Structure
 
 ```
-tt-emule/                           (~8,400 lines across 131 files)
+tt-emule/
 ├── include/
-│   ├── tt_emule/       (14 files)  Host-side types: Device, Core, L1Pool, Buffer, Program,
-│   │                               CircularBuffer, CBSyncState, DstRegisterFile,
-│   │                               TileCounter, TileCounterArray, EmuleDFBInterface,
-│   │                               DFBSyncState, DataflowBuffer
-│   ├── kernel_api/      (4 files)  Standalone device-side API (links tt_emule directly)
-│   ├── jit_hw/         (88 files)  JIT kernel stubs (resolved via dlopen + -rdynamic)
-│   │   ├── api/compute/            55 compute op headers (32 top-level + 23 eltwise_unary)
-│   │   ├── api/dataflow/           NOC ops, multicast, semaphores, addrgen page ops
-│   │   ├── api/tensor/             TensorAccessor for page-based addressing
-│   │   ├── api/dfb_api.h           DFB operations with timeout and DFB↔CB bridge
-│   │   ├── internal/               Banking infra, RISC attribs, mod_div_lib
-│   │   └── experimental/           CoreLocalMem, Noc, AllocatorBank, Lock stubs
-│   └── ttkernel/        (4 files)  Forwarding headers for tt-metal kernel include paths
-├── src/                 (3 files)  host_api.cpp, kernel_runner.cpp, jit_kernel.cpp
-├── tests/              (17 files)  eltwise_add, matmul, tilize, compat, dfb_passthrough,
-│                                   dfb_multi_consumer tests
-└── docs/                (3 files)  DFB_EMULATION.md, QUASAR_EMULATION.md, TEST_COVERAGE_TODO.md
+│   ├── tt_emule/        Host-side types: Device, Core, L1Pool, Buffer, Program,
+│   │                    CircularBuffer, CBSyncState, DstRegisterFile,
+│   │                    TileCounter, TileCounterArray, EmuleDFBInterface,
+│   │                    DFBSyncState, DataflowBuffer
+│   ├── kernel_api/      Standalone device-side API (links tt_emule directly)
+│   ├── jit_hw/          JIT kernel stubs (resolved via dlopen + -rdynamic)
+│   │   ├── api/compute/      Compute op headers (top-level + eltwise_unary SFPU)
+│   │   ├── api/dataflow/     NOC ops, multicast, semaphores, addrgen page ops
+│   │   ├── api/tensor/       TensorAccessor for page-based addressing
+│   │   ├── api/dfb_api.h     DFB operations with timeout and DFB↔CB bridge
+│   │   ├── internal/         Banking infra, RISC attribs, mod_div_lib
+│   │   └── experimental/     CoreLocalMem, Noc, AllocatorBank, Lock stubs
+│   └── ttkernel/        Forwarding headers for tt-metal kernel include paths
+├── src/                 host_api.cpp, kernel_runner.cpp, jit_kernel.cpp
+├── tests/               eltwise_add, matmul, tilize, compat, dfb_passthrough,
+│                        dfb_multi_consumer tests
+└── docs/                DFB_EMULATION.md, QUASAR_EMULATION.md, changelog.md, etc.
 ```
 
 ### JIT Kernel API Coverage
 
-The `jit_hw/` directory provides stub implementations for 75 header files covering:
+The `jit_hw/` directory provides stub implementations covering:
 
-| Category | Files | Key APIs |
-|----------|-------|----------|
-| Compute | 55 | `matmul_tiles`, `matmul_block`, `add/sub/mul_tiles`, `pack_tile`, `copy_tile`, `reduce_tile` (row/col/scalar × sum/max), `bcast`, `tilize/untilize`, `pack_untilize` (with `experimental::pack_untilize_block`), `transpose_wh`, `quantization`, 23 eltwise_unary SFPU ops (`abs_tile`, `exp_tile`, `negative_tile`, `typecast_tile`, etc.), binary bitwise/shift/comp/fmod/max_min, `gcd/lcm`, `xlogy`, `copy_dest_values` |
-| Compute nfaces | 1 | `__emule_nfaces::rowmajor_to_nfaces` constexpr LUT — UNPACK/PACK engine layout conversion between nfaces (L1) and row-major (DST) |
-| Dataflow | 2 | `noc_async_read/write`, `noc_async_write_multicast`, `noc_inline_dw_write` (unicast/multicast/stateful), semaphore ops, `InterleavedAddrGen<DRAM/L1>`, banking arrays |
-| CB sync | 1 | `cb_reserve_back`, `cb_push_back`, `cb_wait_front`, `cb_pop_front` (uint32_t and int32_t overloads), DFB↔CB bridge |
-| DFB sync | 1 | `dfb_reserve_back`, `dfb_push_back`, `dfb_wait_front`, `dfb_pop_front`, `dfb_finish`, `dfb_get_write_ptr`/`dfb_get_read_ptr`, timeout detection |
-| CSR emulation | 1 | `csr_read<CSR::NEO_ID>()`, `csr_read<CSR::TRISC_ID>()` via TLS `__emule_neo_id`, `__emule_trisc_id` |
-| LLK defs | 1 | `llk_unpack_A`, `llk_wait_tiles`, `llk_pop_tiles`, `llk_push_tiles`, `llk_wait_for_free_tiles`, `get_output_id`, `FACE_R_DIM`, `TILE_C_DIM`, coordinate APIs (`get_absolute_logical_x/y`) |
-| Tensor | 1 | `TensorAccessor`, `TensorAccessorArgs` |
-| Infrastructure | 8 | compile-time args, bfloat16, dprint, assert stubs, DataFormat enum, tile constants |
-| Experimental | 5 | `Noc`, `CircularBuffer`, `AllocatorBank`, `Lock`, `CoreLocalMem` |
-| Compatibility | 5 | `ckernel.h`, `ckernel_defs.h`, `common_values.hpp`, `risc_attribs.h` (`InlineWriteDst`, `write_at_cmd_buf`), `dprint.h` (debug print stubs) |
+| Category | Key APIs |
+|----------|----------|
+| Compute | `matmul_tiles`, `matmul_block`, `add/sub/mul_tiles`, `pack_tile`, `copy_tile`, `reduce_tile` (row/col/scalar × sum/max), `bcast`, `tilize/untilize`, `pack_untilize` (with `experimental::pack_untilize_block`), `transpose_wh`, `quantization`, eltwise_unary SFPU ops (`abs_tile`, `exp_tile`, `negative_tile`, `typecast_tile`, etc.), binary bitwise/shift/comp/fmod/max_min, `gcd/lcm`, `xlogy`, `copy_dest_values` |
+| Compute nfaces | `__emule_nfaces::rowmajor_to_nfaces` constexpr LUT — UNPACK/PACK engine layout conversion between nfaces (L1) and row-major (DST) |
+| Dataflow | `noc_async_read/write`, `noc_async_write_multicast`, `noc_inline_dw_write` (unicast/multicast/stateful), semaphore ops, `InterleavedAddrGen<DRAM/L1>`, banking arrays |
+| CB sync | `cb_reserve_back`, `cb_push_back`, `cb_wait_front`, `cb_pop_front` (uint32_t and int32_t overloads), DFB↔CB bridge |
+| DFB sync | `dfb_reserve_back`, `dfb_push_back`, `dfb_wait_front`, `dfb_pop_front`, `dfb_finish`, `dfb_get_write_ptr`/`dfb_get_read_ptr`, timeout detection |
+| CSR emulation | `csr_read<CSR::NEO_ID>()`, `csr_read<CSR::TRISC_ID>()` via TLS `__emule_neo_id`, `__emule_trisc_id` |
+| LLK defs | `llk_unpack_A`, `llk_wait_tiles`, `llk_pop_tiles`, `llk_push_tiles`, `llk_wait_for_free_tiles`, `get_output_id`, `FACE_R_DIM`, `TILE_C_DIM`, coordinate APIs (`get_absolute_logical_x/y`) |
+| Tensor | `TensorAccessor`, `TensorAccessorArgs` |
+| Infrastructure | compile-time args, bfloat16, dprint, assert stubs, DataFormat enum, tile constants |
+| Experimental | `Noc`, `CircularBuffer`, `AllocatorBank`, `Lock`, `CoreLocalMem` |
+| Compatibility | `ckernel.h`, `ckernel_defs.h`, `common_values.hpp`, `risc_attribs.h` (`InlineWriteDst`, `write_at_cmd_buf`), `dprint.h` (debug print stubs) |
 
 ### Dual API Paths
 
@@ -239,56 +239,14 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 
 ### Test Results
 
-**Standalone tests** (5/5 pass): dfb_passthrough, dfb_multi_consumer, eltwise_add, matmul, tilize
+The emulated C++ regression runs as three parallel CI matrix jobs (`wormhole`, `blackhole`, `quasar`), driven by the per-arch scripts under `scripts/`. The D2M golden-test regression runs through `run_d2m_regression.sh`.
 
-**tt-metal emulated regression** (135 passing, 11 failing, 0 skipped, against tt-metal `arminale/emule-metal-20` — `arminale/emule-metal-base @ 8711ac3d0ba` plus the cherry-picked Metal 2.0 emule-JIT genfiles commit):
+Authoritative state lives outside this report so it stays in sync:
 
-| Tier | Tests | Pass | Fail | Description | Cluster |
-|------|-------|------|------|-------------|---------|
-| 0 | Standalone | 3 | 0 | dfb_passthrough, dfb_multi_consumer, eltwise_add | None |
-| 1 | Host-only | 15 | 0 | bit_utils, host_buffer, tilize_untilize, blockfloat, dst_capacity, 9 CoreRange/Set | None |
-| 2 | Buffer I/O | 2 | 0 | SimpleL1Buffer, SimpleDramBuffer | WH N150 |
-| 3a | JIT Kernel | 1 | 0 | TensixL1Tile — experimental CB/Noc API | WH N150 |
-| 3b | DFB STRIDED (Group A) | 8 | **4** | DM-DM multi-P/C; failures in 4Sx4S / 2Sx4S wraparound (both ImplicitSync variants) | Quasar |
-| 3c | DFB Bridge (Groups B+C) | 24 | 0 | DM→Tensix + Tensix→DM STRIDED topologies | Quasar |
-| 3d | DFB Pipeline (Group D) | 3 | 0 | DM→Tensix→DM multi-DFB pipeline | Quasar |
-| 3e | DFB BLOCKED | 30 | 0 | DM-DM + DM→Tensix + Tensix→DM BLOCKED, both ImplicitSync | Quasar |
-| 3f | DFB Multi-Core | 6 | 0 | 2-core STRIDED (1Sx1S, 2Sx2S) + BLOCKED (1Sx4B), both ImplicitSync | Quasar |
-| 3g | DFB Config Validation | 3 | **7** | TC pairing, risc_mask, remapper validation; 7 fail (1Sx4S, 4Sx1S × {DM,Tensix}, 4Sx4S, 2Sx4S, 4Sx2S, 1Sx1B Configs) | Quasar |
-| 3h | Quasar Compute + Matmul PCC | 7 | 0 | MultipleThreads, SingleThread, MultipleKernels, TLS, MatmulBlock, MatmulBlockInitShort, MatmulBlockDemo | Quasar |
-| 3i | Quasar Semaphores | 3 | 0 | ComputeKernelSemaphores, DmAndComputeSemaphores, DmLoopback | Quasar |
-| 3j | Simple DM + Atomics | 4 | 0 | SingleDmL1Write, 3× RISC-V atomic tests | Quasar |
-| 3k | Data Movement | 4 | 0 | LoopbackPacketSizes, LoopbackDirectedIdeal, OneFromOnePacketSizes, OneFromOneDirectedIdeal | WH N150 |
-| 3l | DM Direct Write + DRAM | 7 | 0 | 3 direct write (unicast, stateful, multicast) + 4 DRAM unary (packet sizes, core locations, channels, directed) | WH N150 |
-| 4 | TTNN INT32 | 4 | 0 | ttnn_relational_int (66 sub-cases), ttnn_add_int + variants | BH P100 |
-| 5 | TTNN Matmul Sweep | 1 | 0 | 14 sub-cases: multi-core matmul 32² through 2048² | WH N150 |
-| 5b | TTNN Reduction (WH) | 9 | 0 | All 16 cases in `tests/ttnn/unit_tests/gtests/test_reduction.cpp`: 6 `Sum*` (Last/First/Both × aligned/unaligned) + 10 `MinMax*` (Last/First/Both × 4/4/2 params) — BF16 reductions on `ttnn::sum`, `ttnn::max`, `ttnn::min` | WH N150 |
-| 6 | Silicon Toggle | 1 | 0 | ttnn_add_int — env vars unset, runs in emulation (toggle proof) | WH N150 |
-| **Total** | | **135** | **11** | | |
-
-(A Quasar variant of the sum-last-dim test is not run: the upstream W-reduce host factory uses `CreateKernel`, which tt-metal rejects on Quasar with "DataMovementKernel is not supported on Quasar. Use QuasarDataMovementKernel instead." — an upstream factory limitation, not an emulator stub gap.)
-
-See [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) section 8 for a feature-by-feature table with test evidence.
-
-**D2M golden test regression** (1694 pass / 164 fail / 224 skip-xfail):
-
-| Test File | Total | Passed | Failed | Skip/XFail | Status |
-|-----------|-------|--------|--------|------------|--------|
-| test_metal_layout | 94 | 94 | 0 | 0 | **PASS** |
-| test_metal_matmul | 127 | 112 | 1 | 14 xfail | FAIL (1 regression) |
-| test_metal_matmul_higher_rank | 10 | 10 | 0 | 0 | **PASS** |
-| test_metal_allocate | 6 | 6 | 0 | 0 | **PASS** |
-| test_metal_tms | 339 | 332 | 4 | 3 skip | PASS (arange only) |
-| test_metal_reductions | 1300 | 991 | 131 | 178 | FAIL (unaligned) |
-| test_metal_dma | 49 | 49 | 0 | 0 | **PASS** |
-| test_metal_tilize | 44 | 44 | 0 | 0 | **PASS** |
-| test_metal_tensor_collapsing | 14 | 12 | 0 | 2 skip | **PASS** |
-| test_metal_virtual_grids | 39 | 39 | 0 | 0 | **PASS** |
-| test_metal_virtual_grid_rowmajor | 27 | 0 | 0 | 27 skip | SKIP (needs n300) |
-| test_metal_masking | 20 | 5 | 15 | 0 | FAIL (partial tile) |
-| test_metal_bfp8_typecast | 13 | 0 | 13 | 0 | FAIL (PCC mismatch) |
-
-See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md) for detailed failure analysis and historical progression.
+- **C++ regression allowlist** — `.github/known-failures-{wormhole,blackhole,quasar}.txt`. CI's `classify-results.py` cross-checks per-test.
+- **D2M failure allowlist** — tracked per op-family in [issue #6](https://github.com/tenstorrent/tt-emule/issues/6) (sub-issues #7–#17). Tests on the allowlist pass on real hardware; failures are emulator-side.
+- **Quasar feature coverage** — [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) §8 has a feature-by-feature table with test evidence.
+- **D2M failure analysis** — [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
 
 ---
 
@@ -310,8 +268,8 @@ The integration follows three key principles:
 
 ```
 tt_metal/third_party/umd/device/
-├── api/umd/device/chip/sw_emulated_chip.hpp   (70 lines)
-└── chip/sw_emulated_chip.cpp                   (111 lines)
+├── api/umd/device/chip/sw_emulated_chip.hpp
+└── chip/sw_emulated_chip.cpp
 ```
 
 `SWEmulatedChip` extends `MockChip` with memory-backed I/O:
@@ -362,22 +320,24 @@ The emulated program runner is the core integration component:
 
 ```
 tt_metal/impl/emulation/
-├── emulated_program_runner.hpp   (51 lines)
-├── emulated_program_runner.cpp  (~975 lines)
-└── emulated_run_stats.hpp       (20 lines)
+├── emulated_program_runner.hpp
+├── emulated_program_runner.cpp
+└── emulated_run_stats.hpp
 ```
 
 **JIT Compilation Pipeline:**
 
-1. Kernel source `.cpp` -> temp directory with `wrapper.cpp` (kernel `#define`s + `#include "jit_kernel_stubs.hpp"` + `#include kernel.cpp`)
+1. Kernel source `.cpp` -> temp directory with `wrapper.cpp` (kernel `#define`s + `#include "jit_kernel_stubs.hpp"` + Metal 2.0 namespace blocks + `#include kernel.cpp`)
 2. `g++ -std=c++17 -fPIC -shared -O3` with tt-emule and kernel-directory include paths
 3. Compile-time args as `-DKERNEL_COMPILE_TIME_ARGS=v0,v1,...`; named args via `-DKERNEL_COMPILE_TIME_ARG_MAP`
-4. Quasar-specific patches applied via regex before compilation:
+4. Metal 2.0 named-binding namespaces (`args::`/`dfb::`/`sem::`/`ta::`) emitted inline into `wrapper.cpp` by `emit_metal2_namespaces()`. Replaces the `kernel_args_generated.h` + `kernel_bindings_generated.h` that upstream's `tt_metal/jit_build/genfiles.cpp` would produce — kept text-equivalent to `write_kernel_{args,bindings}_generated_header` so kernels using `args::NAME`, `dfb::NAME`, `sem::NAME`, `ta::NAME` resolve identically to the silicon JIT build. Contained entirely in `emulated_program_runner.cpp` (no public-API leak into `genfiles.hpp`).
+5. Quasar-specific patches applied via regex before compilation:
    - `mhartid` CSR: `asm volatile("csrr %0, mhartid" ...)` → `var = __processor_id;`
    - RISC-V fence: `asm volatile("fence")` → `__sync_synchronize()`
    - Raw L1 pointer casts: `reinterpret_cast<T*>(get_arg_val(N))` → adds `__emule_bridge_l1` offset
-5. `dlopen` + `dlsym("__emule_kernel_entry")` -> `std::function<void()>`
-6. Results cached by `(source_path : compile_args : defines)` key; cache misses compiled in parallel via `std::async`
+   - Metal 2.0 named-arg L1 pointer casts: `reinterpret_cast<T*>(static_cast<uintptr_t>(get_arg(args::NAME)))` → routed through `__emule_local_l1_to_ptr`
+6. `dlopen` + `dlsym("__emule_kernel_entry")` -> `std::function<void()>`
+7. Results cached by `(source_path : compile_args : defines [: metal2_binding_suffix])` key; the suffix (`:dfb:NAME=ID:sem:NAME=ID:ta:NAME=CTA,CRTA:rta:NAME:crta:NAME`) is computed via `Metal2BindingsSnapshot::cache_key_suffix()` from the Kernel's public binding-accessor methods so two Metal 2.0 kernels sharing source/CTAs/defines but binding different IDs don't collide on the cached `.so`. Cache misses compiled in parallel via `std::async`.
 
 **Program Execution — direct Core memory, no copies:**
 
@@ -479,18 +439,18 @@ A second interception in `ConfigureDeviceWithProgram()` skips binary writing for
 
 ### Guard Pattern: `is_mock_or_emulated()`
 
-32 call sites across 15 files guard hardware-specific operations:
+`is_mock_or_emulated()` call sites short-circuit hardware-specific operations across these subsystems:
 
-| Subsystem | Files | Guards | Operations Skipped |
-|-----------|-------|--------|--------------------|
-| Dispatch queues | `fd_mesh_command_queue.cpp`, `sd_mesh_command_queue.cpp` | 8 | HW queue operations |
-| Firmware | `risc_firmware_initializer.cpp` | 5 | RISC firmware load |
-| Context init | `metal_context.cpp` | 4 | Fabric, FW, watcher, dprint |
-| Program dispatch | `program.cpp`, `dispatch.cpp` | 2 | Dispatch data population |
-| Device init | `device.cpp`, `device_manager.cpp` | 2 | HAL/HW initialization |
-| Fabric | `control_plane.cpp`, `channel_trimming_export.cpp` | 2 | Fabric control plane |
-| Buffer/event dispatch | `buffers/dispatch.cpp`, `event/dispatch.cpp` | 2 | HW buffer/event ops |
-| Other | `system_memory_manager.cpp`, `prefetch.cpp`, `core_descriptor.cpp`, etc. | 7 | Misc HW operations |
+| Subsystem | Files | Operations Skipped |
+|-----------|-------|--------------------|
+| Dispatch queues | `fd_mesh_command_queue.cpp`, `sd_mesh_command_queue.cpp` | HW queue operations |
+| Firmware | `risc_firmware_initializer.cpp` | RISC firmware load |
+| Context init | `metal_context.cpp` | Fabric, FW, watcher, dprint |
+| Program dispatch | `program.cpp`, `dispatch.cpp` | Dispatch data population |
+| Device init | `device.cpp`, `device_manager.cpp` | HAL/HW initialization |
+| Fabric | `control_plane.cpp`, `channel_trimming_export.cpp` | Fabric control plane |
+| Buffer/event dispatch | `buffers/dispatch.cpp`, `event/dispatch.cpp` | HW buffer/event ops |
+| Other | `system_memory_manager.cpp`, `prefetch.cpp`, `core_descriptor.cpp`, etc. | Misc HW operations |
 
 Definition (in `tt_cluster.hpp`):
 
@@ -561,28 +521,24 @@ cmake -B build_emule \
 
 ### Test Infrastructure
 
-Tests in `tt_emule/` are organized in tiers and use standard tt-metal fixtures — no custom test infrastructure:
+Tests in `tt_emule/` are organized in tiers and use standard tt-metal fixtures — no custom test infrastructure.
 
-The tier table above in Test Results reflects the full `run_regression.sh` structure (91 test invocations across 12 tiers). Additional ttnn tests built but not in regression: `test_ttnn_add`, `test_ttnn_sub_int`, `test_ttnn_rsub_int`, `test_ttnn_matmul`.
-
-D2M golden test regression: `run_d2m_regression.sh` — runs 13 tt-mlir test files (2082 tests) against the emulated backend. 1694 pass, 164 fail, 224 skip/xfail. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
-
-Regression scripts: `run_regression.sh` (127 passing, 11 failing — see Test Results above) + `run_d2m_regression.sh` (13 D2M test files, 2082 tests; counts not re-run on the new merge-base, treat as stale).
+The C++ regression is driven by the per-arch scripts under `scripts/`; CI runs them as parallel matrix jobs. The D2M golden-test regression runs through `run_d2m_regression.sh` against the tt-mlir test suite. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md) for failure analysis.
 
 ### tt-metal Files Modified
 
-The complete set of tt-metal modifications for emulation support:
+tt-metal modifications for emulation support:
 
-| Category | Files | Lines |
-|----------|-------|-------|
-| New: program runner | `emulated_program_runner.{hpp,cpp}`, `emulated_run_stats.hpp` | ~1000 |
-| New: UMD chip | `sw_emulated_chip.{hpp,cpp}` | ~181 |
-| New: test infrastructure | `tt_emule/CMakeLists.txt`, `tt_emule/ttnn_tests/CMakeLists.txt` | ~207 |
-| New: Quasar test files | `test_dfb_emulation.cpp`, `test_dataflow_buffer.cpp`, `test_quasar_compute_kernels.cpp`, `test_quasar_semaphores.cpp`, `test_dm_loopback.cpp`, `test_single_dm_l1_write.cpp`, `test_riscv_atomics.cpp`, `test_globals_tls.cpp`, `test_matmul_X_tile.cpp`, data_movement tests | ~2500 |
-| Modified: dispatch | `tt_metal.cpp` | ~20 |
-| Modified: guards | 15 files (`is_mock_or_emulated()`) | ~32 one-liners |
-| Modified: enum additions | `rtoptions.cpp`, `tt_cluster.hpp`, UMD types | ~15 |
-| Modified: CMake | `CMakeLists.txt` (top-level + UMD) | ~40 |
+| Category | Files |
+|----------|-------|
+| New: program runner | `emulated_program_runner.{hpp,cpp}`, `emulated_run_stats.hpp` |
+| New: UMD chip | `sw_emulated_chip.{hpp,cpp}` |
+| New: test infrastructure | `tt_emule/CMakeLists.txt`, `tt_emule/ttnn_tests/CMakeLists.txt` |
+| New: Quasar test files | `test_dfb_emulation.cpp`, `test_dataflow_buffer.cpp`, `test_quasar_compute_kernels.cpp`, `test_quasar_semaphores.cpp`, `test_dm_loopback.cpp`, `test_single_dm_l1_write.cpp`, `test_riscv_atomics.cpp`, `test_globals_tls.cpp`, `test_matmul_X_tile.cpp`, data_movement tests |
+| Modified: dispatch | `tt_metal.cpp` (`#ifdef TT_METAL_EMULATION` branch) |
+| Modified: guards | `is_mock_or_emulated()` call sites in `impl/`, `llrt/`, `umd/` |
+| Modified: enum additions | `rtoptions.cpp`, `tt_cluster.hpp`, UMD types |
+| Modified: CMake | top-level `CMakeLists.txt` + UMD build glue |
 
 ---
 
@@ -590,29 +546,27 @@ The complete set of tt-metal modifications for emulation support:
 
 ### Pros
 
-**Development velocity without hardware.** Developers can write, compile, and test kernels on any x86 Linux machine. The full loop — kernel compilation, buffer I/O, multi-threaded multi-core execution with CB synchronization and NOC communication — runs in seconds without requiring a Tenstorrent card. The matmul sweep (14 cases up to 2048x2048) completes in under 30 seconds.
+**Development velocity without hardware.** Developers can write, compile, and test kernels on any x86 Linux machine. The full loop — kernel compilation, buffer I/O, multi-threaded multi-core execution with CB synchronization and NOC communication — runs in seconds without requiring a Tenstorrent card.
 
 **Zero fake headers reduces drift.** By linking the real `Metalium::Metal` library and using real tt-metal headers, tests exercise the actual host API code paths. Header changes in tt-metal are immediately visible as compile errors in emulated tests, rather than silently diverging behind a fake header layer.
 
 **Memory isolation eliminates copy overhead.** `tt_emule::Core` is the single memory owner for both worker L1 and DRAM banks. The program runner sets bridge pointers directly to Core's mmap'd region — no copy-in / copy-out, no temporary allocations, no munmap lifecycle. Core memory persists across program runs, matching hardware semantics.
 
-**Multi-core execution is realistic.** All cores launch concurrently in separate threads, with cross-core communication via NOC multicast writes and semaphore atomic operations. This catches real concurrency bugs: the semaphore address translation fix was discovered only because the multi-core matmul sweep exercises genuine cross-thread synchronization.
+**Multi-core execution is realistic.** All cores launch concurrently in separate threads, with cross-core communication via NOC multicast writes and semaphore atomic operations. This catches real concurrency bugs that single-threaded harnesses miss.
 
-**Semaphore layout matches hardware.** The HAL-based semaphore base (`kernel_config_base + prog_config.sem_offset`) uses the same values computed by `finalize_sems()` for real firmware. This eliminated the CB/semaphore overlap bug that caused matmul_block-2048x2048 to abort, and ensures that any future changes to semaphore placement in tt-metal are automatically reflected in emulation.
+**Semaphore layout matches hardware.** The HAL-based semaphore base (`kernel_config_base + prog_config.sem_offset`) uses the same values `finalize_sems()` produces for real firmware. Any change to semaphore placement in tt-metal is automatically reflected in emulation.
 
 **Runtime toggle from a single binary.** A binary built with `TT_METAL_EMULATION=ON` supports both silicon and emulated execution — the `TT_METAL_EMULATED_MODE` environment variable selects which path is taken at runtime. The build flag is a prerequisite: without it, the emulated code paths (`SWEmulatedChip`, `execute_program_emulated`) are not compiled in (`#ifdef TT_METAL_EMULATION`).
 
 **Interleaved DRAM banking is production-accurate.** Bank mapping arrays (`dram_bank_to_noc_xy`, `bank_to_dram_offset`, etc.) are populated from the real `metal_SocDescriptor` at program execution time. `InterleavedAddrGen<DRAM>` computes proper banked NOC addresses matching the real firmware's banking logic.
 
-**DFB MPMC synchronization is hardware-accurate.** The tile counter model (`TileCounter` + `TileCounterArray` + `EmuleDFBInterface`) replicates the hardware's per-consumer posted/acked counter pair with correct BLOCKED drain semantics (`drain_per_tc`). 72 DFB tests (42 STRIDED + 30 BLOCKED) verify correctness across all P/C combinations from 1P-1C through 4P-4C, with both DM-DM and DM-Tensix-DM topologies.
+**DFB MPMC synchronization is hardware-accurate.** The tile counter model (`TileCounter` + `TileCounterArray` + `EmuleDFBInterface`) replicates the hardware's per-consumer posted/acked counter pair with correct BLOCKED drain semantics (`drain_per_tc`). The DFB regression covers STRIDED and BLOCKED access patterns across the full P/C matrix (DM-DM and DM-Tensix-DM topologies).
 
-**UNPACK/PACK nfaces layout conversion is verified by matmul PCC.** The constexpr nfaces LUT (`nfaces.h`) ensures that bfloat16 tile data is correctly converted between L1 (nfaces) and DST (row-major) formats. Matmul PCC tests pass with non-trivial input data, which requires both UNPACK (nfaces→rowmajor) and PACK (rowmajor→nfaces) conversions to be correct.
+**UNPACK/PACK nfaces layout conversion is verified by matmul PCC.** The constexpr nfaces LUT (`nfaces.h`) ensures that bfloat16 tile data is correctly converted between L1 (nfaces) and DST (row-major) formats. Matmul PCC tests exercise both UNPACK (nfaces→rowmajor) and PACK (rowmajor→nfaces) conversions end-to-end via `test_matmul_X_tile.cpp` (tile GEMM with AVX2/FMA against golden reference, full UNPACK→MATH→PACK pipeline through the DFB↔CB bridge).
 
-**Matmul PCC passing is a milestone.** `test_matmul_X_tile.cpp` verifies tile GEMM with AVX2/FMA acceleration against golden reference, exercising the full UNPACK→MATH→PACK pipeline end-to-end through the DFB↔CB bridge.
+**Incrementally extensible.** New compute ops are single-file headers in `jit_hw/api/compute/`, following a consistent DST-to-DST pattern with format-aware load/store.
 
-**Incrementally extensible.** New compute ops are single-file headers in `jit_hw/api/compute/`. The pattern (DST-to-DST operations with format-aware load/store) has been applied consistently across 53 compute headers.
-
-**D2M golden test coverage.** 1624 of 1878 D2M golden tests pass (86% pass rate), covering layout transforms, buffer allocation, matmul (single-core, multi-core, double-buffered, 3D/4D batched up to 2048x2048x2048), reductions (sum, max, mean), DMA (L1-to-L1 and partial DRAM), TMS (reshape, permute, concatenate_heads), tilize/untilize, virtual grids, and tensor collapsing. This provides broad regression coverage for D2M-generated kernels.
+**D2M golden test coverage.** Broad coverage across layout transforms, buffer allocation, matmul (single-core, multi-core, double-buffered, 3D/4D batched), reductions, DMA, TMS, tilize/untilize, virtual grids, and tensor collapsing. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md) for the current allowlist.
 
 ### Cons
 
@@ -628,7 +582,7 @@ Tests that pass in emulation may fail on silicon due to timing, precision, or re
 
 **JIT compilation overhead.** Each unique kernel requires a `g++` invocation (typically 1--3 seconds). Results are cached within a process but not persisted across runs. Cache misses are compiled in parallel via `std::async`, but test suites with many distinct kernels still pay full compilation cost on every invocation.
 
-**`MAP_32BIT` address space pressure.** The JIT path relies on `mmap` with `MAP_32BIT` to ensure L1 pointers fit in `uint32_t`. The 32-bit address space region (~2 GB) is shared across all cores. L1Pool mitigates this by consolidating all worker L1 into a single contiguous allocation (Wormhole 80 cores x 2 MB = 160 MB, Blackhole 140 cores x 2 MB = 280 MB — both fit easily). DRAM cores use regular mmap outside the 32-bit region. The remaining risk is that non-pool fallback cores (from pool exhaustion) still compete for the same 32-bit space.
+**`MAP_32BIT` address space pressure.** The JIT path relies on `mmap` with `MAP_32BIT` to ensure L1 pointers fit in `uint32_t`. The 32-bit address space region (~2 GB) is shared across all cores. L1Pool mitigates this by consolidating worker L1 into a single contiguous allocation; the per-arch grids (Wormhole / Blackhole) fit easily. DRAM cores use regular mmap outside the 32-bit region. The remaining risk is that non-pool fallback cores (from pool exhaustion) still compete for the same 32-bit space.
 
 **Format detection heuristic.** The `page_size > 2048` heuristic used by `copy_tile` and `pack_tile` to distinguish bfloat16 from 32-bit formats is fragile. It works for current tile sizes but would break for new formats with different tile sizes.
 
@@ -638,18 +592,18 @@ Tests that pass in emulation may fail on silicon due to timing, precision, or re
 
 **Nfaces conversion not exercised in isolation.** The UNPACK and PACK engines are tested only indirectly via compute operations (matmul, add_tiles, etc.) that happen to exercise them. No dedicated UNPACK-only or PACK-only test exists. A bug in the nfaces LUT for a specific face/element combination might not be caught if no existing compute test triggers that access pattern. See `docs/TEST_COVERAGE_TODO.md`.
 
-**D2M coverage gaps.** 1 test file fails entirely: bfp8_typecast (13 PCC mismatches). 2 files have partial failures: reductions (131/1300 fail on unaligned shapes) and masking (15/20 fail on partial tiles). DMA tests now pass fully (49/49). The remaining 10 files pass fully. The primary gaps are unaligned tensor reductions, partial tile masking, and BFP8 format precision.
+**D2M coverage gaps.** Known gaps: BFP8 typecast PCC, unaligned tensor reductions, and partial-tile masking. Per-test allowlist tracked in [issue #6](https://github.com/tenstorrent/tt-emule/issues/6).
 
 ### Maintainability
 
-**Low ongoing cost for tt-emule standalone.** The standalone emulator (~8,400 lines) is self-contained with no external dependencies beyond the C++ standard library and pthreads. Changes to tt-metal do not affect standalone tests.
+**Low ongoing cost for tt-emule standalone.** The standalone emulator is self-contained with no external dependencies beyond the C++ standard library and pthreads. Changes to tt-metal do not affect standalone tests.
 
-**Medium ongoing cost for tt-metal integration.** The primary maintenance burden is keeping JIT stubs (`jit_hw/`) aligned with tt-metal kernel APIs. When tt-metal adds or changes a kernel API function, the corresponding stub must be created or updated. The current 78 `jit_hw/` files cover the most common operations but represent a fraction of the full kernel API surface.
+**Medium ongoing cost for tt-metal integration.** The primary maintenance burden is keeping JIT stubs (`jit_hw/`) aligned with tt-metal kernel APIs. When tt-metal adds or changes a kernel API function, the corresponding stub must be created or updated. `jit_hw/` covers the most common operations but represents a fraction of the full kernel API surface.
 
 **Rebase risk is bounded.** The tt-metal integration is concentrated in:
-- `tt_metal/impl/emulation/` — the program runner (900 lines)
-- `SWEmulatedChip` in UMD (181 lines, with L1Pool)
-- `is_mock_or_emulated()` guards (32 one-liners across 15 files)
+- `tt_metal/impl/emulation/` — the program runner
+- `SWEmulatedChip` in UMD (with L1Pool)
+- `is_mock_or_emulated()` one-liner guards in `impl/`, `llrt/`, `umd/`
 - One dispatch branch in `tt_metal.cpp`
 
 Rebasing onto new tt-metal versions primarily requires:
@@ -667,142 +621,7 @@ Rebasing onto new tt-metal versions primarily requires:
 
 **HAL-based semaphore placement is self-maintaining.** By reading `kernel_config_base` and `sem_offset` from the HAL and ProgramConfig respectively, the emulator automatically tracks any changes to the L1 memory map or semaphore layout in tt-metal. No hardcoded constants to update.
 
-### Changes from v3 to v4
-
-| Aspect | v3 | v4 |
-|--------|----|----|
-| Codebase size | ~5,990 lines, 87 files | ~6,000 lines, 110 files |
-| JIT stubs | 55 files | 78 files (+23 compute headers) |
-| Compute headers | 26 | 53 (30 top-level + 23 eltwise_unary) |
-| Program runner | 674 lines | 829 lines (parallel JIT compile, HAL-based semaphore base) |
-| Semaphore base | Dynamic `max(0xFFE00, max_cb_end)` from CB pre-scan | HAL-based: `kernel_config_base + prog_config.sem_offset` (matches real firmware) |
-| JIT compilation | Sequential | Parallel via `std::async` for cache misses |
-| `is_mock_or_emulated()` guards | 35 across 16 files | 32 across 15 files |
-| D2M golden tests | Not tracked | 249 pass / ~244 fail / 56 skip-xfail (13 test files, ~1146 tests) |
-| Matmul D2M coverage | 15 pass, abort at 2048x matmul_block | 56 pass (incl. 2048x2048x2048 bf16+f32), timeout at 48% |
-| Regression scripts | `run_regression.sh` (18 tests) | + `run_d2m_regression.sh` (13 D2M test files, ~1146 tests) |
-
-### Changes from v4 to v5
-
-| Aspect | v4 | v5 |
-|--------|----|----|
-| Codebase size | ~6,000 lines, 110 files | ~6,800 lines, 113 files |
-| JIT stubs | 78 files | 75 files (consolidated) |
-| tt-mlir base | Pre-uplift | Rebased on `milant/uplift_mar_25` (new LLK APIs, expanded test suites) |
-| D2M golden tests | 832 pass / 162 fail / 81 skip (1075 tests) | **1589 pass** / 147 fail / 142 skip (1878 tests) |
-| D2M pass rate | ~77% | **85%** |
-| D2M fully-passing files | 5 of 13 | **8 of 13** |
-| Matmul D2M | 108 pass, 7 double-buffered fail | **113 pass**, 14 xfail (all functional tests pass) |
-| Pack untilize | Not supported | `experimental::pack_untilize_block` with `copy_tile` + `__llk_pack_untilize` |
-| LLK CB stubs | Not present | `llk_wait_tiles`, `llk_pop_tiles`, `llk_push_tiles`, `llk_wait_for_free_tiles` delegating to `cb_api.h` |
-| SFPU ops | Stubs only (no logic) | Functional: `abs_tile`, `exp_tile`, `negative_tile`, `typecast_tile` with DST element-wise math |
-| CB API | uint32_t only | + int32_t overloads for D2M-generated code |
-| Coordinate API | Not present | `get_absolute_logical_x/y` in compute context |
-| New D2M wins | — | virtual_grids (0→39), tensor_collapsing (2→12), TMS (169→332), reductions (420→932), DMA (16→39) |
-
-### Changes from v5 to v6
-
-| Aspect | v5 | v6 |
-|--------|----|----|
-| Codebase size | ~6,800 lines, 113 files | ~8,400 lines, 131 files |
-| JIT stubs | 75 files (consolidated) | 88 files |
-| Compute headers | 53 (30 top-level + 23 eltwise_unary) | 55 (32 top-level + 23 eltwise_unary) |
-| Quasar architecture | Not documented | 12-thread model (8 DM + 4 compute per Neo), 4 MB shared L1 |
-| DFB infrastructure | Not documented | TileCounter, TileCounterArray, EmuleDFBInterface, DFBSyncState; STRIDED + BLOCKED access patterns; DFB↔CB bridge |
-| Compute engine | DST briefly mentioned (8 slots) | Full UNPACK/MATH/PACK pipeline: nfaces LUT, mode-aware DST (16/8 slots), L1 accumulation, AVX2/FMA matmul |
-| Implemented compute ops | Not enumerated | 11 operations: copy/pack tile, add/sub/mul_tiles, matmul_tiles/block, reduce_tile, L1 acc toggle |
-| CSR emulation | Not documented | NEO_ID, TRISC_ID via TLS; mhartid regex patch |
-| JIT patches | mhartid only | + fence instruction, L1 pointer cast patches |
-| tt-metal regression | 18 pass | **126 pass**, 1 fail (hardware-only), 2 skip |
-| Quasar-specific tests | None | 72 DFB + 4 compute + 3 semaphore + 4 atomics/DM + 4 NOC + 2 matmul = 89 tests |
-| Matmul PCC | Not tracked | Passing (`TensixMatmulBlock`, `TensixMatmulBlockInitShort`) |
-| Reference docs | None | `docs/DFB_EMULATION.md`, `docs/QUASAR_EMULATION.md`, `docs/TEST_COVERAGE_TODO.md` |
-
-### Changes from v6 to v7
-
-| Aspect | v6 | v7 |
-|--------|----|----|
-| Nfaces UNPACK/PACK | Not applied to general compute ops | All UNPACK (CB→DST) and PACK (DST→CB) ops use nfaces LUT |
-| D2M golden tests | 1595 pass / 141 fail / 142 skip | **1624 pass** / 112 fail / 142 skip |
-| D2M pass rate | 85% | **86%** |
-| D2M fully-passing files | 8 of 13 | **9 of 13** (tilize now passes) |
-| Tilize/Untilize D2M | 12/44 pass (PCC mismatch) | **44/44 pass** — nfaces in `__llk_pack_tiled` and `copy_tile` fixed all 32 failures |
-| DMA D2M | 38/49 pass | **40/49 pass** (+2 tiled roundtrip fixes) |
-| Standalone regression | 83 pass / 28 fail / 2 skip | **85 pass** / 28 fail / 2 skip (→ 126/1/2 after rebase fixes in v8) |
-| Quasar matmul PCC | 0/2 pass (data corruption) | **2/2 pass** — nfaces conversion resolved PCC failures |
-| Files modified | — | `common.h`, `matmul.h`, `reduce.h`, `llk_defs.h` |
-
-**Key insight:** On real hardware, UNPACK converts nfaces→row-major when loading from L1/CB into DST, and PACK converts row-major→nfaces when writing back. The emulator was missing these conversions. Element-wise ops (add/sub/mul) previously worked "by accident" because nfaces permutation cancels for identical per-element operations. Non-element-wise ops (matmul, tilize/untilize) failed because element positions were scrambled. The fix applies the nfaces LUT to all general UNPACK and PACK operations, plus the D2M tilize PACK path (`__llk_pack_tiled`).
-
-### Changes from v7 to v8
-
-| Aspect | v7 | v8 |
-|--------|----|----|
-| tt-metal rebase | Pre-rebase (`3fa4d75355`) | Rebased (1,669 commits newer), 7 fixes applied |
-| tt-metal regression | 85 pass / 28 fail / 2 skip | **126 pass** / 1 fail / 2 skip |
-| DFB BLOCKED multi-P/C | All 16 failing (8 DM-DM + 8 TensixDM) | **All 16 passing** |
-| BLOCKED consumer model | Round-robin tc_idx on every pop_front | `drain_per_tc`: drain each TC slot fully before advancing |
-| BLOCKED TC slot layout | All slots share full buffer range | Per-slot sub-ranges: `base_addr = alloc_base + p*capacity*entry_size` |
-| EmuleDFBInterface struct | `broadcast_tc`, `active` | + `drain_per_tc` field between `broadcast_tc` and `active` |
-| JIT cache | Source path + compile args key | Same (struct layout changes require manual cache clear) |
-| Rebase fixes | — | JIT stubs, HAL core count, finalize alloc_addr, BLOCKED stride/offset, WH proc_bit, early DFB finalize, BLOCKED drain |
-| Pre-existing failures | 28 | **1** (ttnn_add_int_silicon) |
-
-**Key insight:** BLOCKED mode consumers on hardware perform block reads — they exhaust all entries from one producer's TC slot before advancing to the next producer's slot. The emulation was incorrectly round-robining through TC slots on every `pop_front` call, producing a shuffled read order. Additionally, all TC slots shared the full buffer address range instead of each slot having its own contiguous sub-range. Both bugs only manifested with multiple producers or consumers (1P-1C was unaffected since there's only one TC slot).
-
-### Changes from v8 to v9
-
-| Aspect | v8 | v9 |
-|--------|----|----|
-| tt-metal regression | 133 pass / 1 fail / 2 skip | **137 pass / 0 fail / 0 skip** |
-| DFB STRIDED wraparound tests | 4 failing (`DMTest1xDFB4Sx4S`, `DMTest1xDFB2Sx4S` + `_IS` variants) | **All 4 passing** |
-| RISC-V atomic tests | 3 segfaulting (`TestAtomicLoadStoreRISCV`, `TestAtomicAddFetchRISCV`, `TestAtomicCASRISCV`) | **All 3 passing** |
-| `__emule_local_l1_to_ptr` availability | Defined in `dataflow_api.h` only | Also in `jit_kernel_stubs.hpp` under `#ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED` — available to every JIT kernel |
-| L1 pointer cast JIT patch | Not present | Regex in runner patches `reinterpret_cast<T*>(get_arg_val<uint32_t>(N))` → `reinterpret_cast<T*>((uintptr_t)__emule_local_l1_to_ptr(...))` |
-| DFB test `num_entries_in_buffer` (4Sx4S / 2Sx4S) | 29 / 21 — not divisible by `max(P,C)=4` | 28 / 20 — divisible by 4; wraparound still exercised (both > `num_entries=16`) |
-| Tier 6 Silicon Toggle | FAIL (expected; requires real hardware) | **PASS** (runs in emulation after env-var unset) |
-
-**Key insight (DFB wraparound):** `num_entries_in_buffer` must be a multiple of `max(P, C)` for every entry to be processed. With `num_entries_in_buffer=29` and `max(P,C)=4`, each producer/consumer does `floor(29/4)=7` iterations covering 28 of 29 entries; entry 28 is never written to the output buffer and stays zero. Choosing values divisible by `max(P,C)` (28 and 20 respectively) eliminates the truncation while preserving the wraparound-exercise invariant.
-
-**Key insight (atomic segfaults):** Quasar atomic kernels call `reinterpret_cast<std::atomic<T>*>(get_arg_val<uint32_t>(0))` where arg[0] is a raw L1 firmware offset (~`0xba780`). On real hardware these offsets are directly dereferenceable by firmware; on x86 emulation they are not valid host addresses, causing an immediate segfault. The fix: (1) move `__emule_local_l1_to_ptr()` into `jit_kernel_stubs.hpp` so every JIT kernel has access to it before any kernel-specific includes; (2) guard the existing definition in `dataflow_api.h` with `#ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED` to prevent ODR violations; (3) add a JIT preprocessor regex that rewrites the pattern automatically so existing and future kernels with this idiom need no source modifications.
-
-### Changes from v9 to v10
-
-| Aspect | v9 | v10 |
-|--------|----|-----|
-| tt-metal base | `arminale/quasar-rebased` (in-flight working branch) | `arminale/emule-metal-base` @ `c812fbb1cc` (frozen pointer at upstream merge commit `tt-emule support for Quasar (#43091)`) |
-| tt-metal regression | 137 pass / 0 fail / 0 skip (against in-flight branch with v8/v9 fixes layered on top) | **126 pass / 11 fail / 0 skip** (against the upstream merge commit, before the wraparound + DFB-config fixes from v8/v9 land in main) |
-| Failures | 0 | 4 DFB STRIDED wraparound (Tier 3b: `DMTest1xDFB4Sx4S`, `DMTest1xDFB4Sx4S_IS`, `DMTest1xDFB2Sx4S`, `DMTest1xDFB2Sx4S_IS`) + 7 DFB Config Validation (Tier 3g: `DMTest1xDFB1Sx4SConfig`, `DMTensixTest1xDFB4Sx1SConfig`, `DMTest1xDFB4Sx1SConfig`, `DMTest1xDFB4Sx4SConfig`, `DMTest1xDFB2Sx4SConfig`, `DMTest1xDFB4Sx2SConfig`, `DMTest1xDFB1Sx1BConfig`) |
-| Branch policy | Working branch could be force-pushed | `arminale/emule-metal-base` is a stable pointer at an upstream main commit; downstream consumers can pin against it |
-
-**Key insight:** v9 measured the emulator against the in-flight branch that contained the wraparound and BLOCKED-config fixes. The new `arminale/emule-metal-base` is intentionally pinned to the upstream merge commit (which predates those fixes), so the 11 failures are the known set of follow-up work that has not yet landed back in `main`. They are not regressions in the emulator itself; they will resolve once the upstream commits are merged and the base pointer is bumped (see "Deferred Follow-up" in `~/.claude/plans/floofy-tickling-otter.md` for the bbradel-merge-base bump option).
-
-### Changes from v10 to v11
-
-| Aspect | v10 | v11 |
-|--------|-----|-----|
-| tt-metal base | `arminale/emule-metal-base` @ `c812fbb1cc` (first frozen pointer) | `arminale/emule-metal-base` @ `8711ac3d0b` ("Implement warmup flow in demo (#43109)", merge-base of `origin/main` and `origin/bbradel-41067_generic_reduce_host20`, +40 commits) |
-| `tt_llk` source | submodule at `tt_metal/third_party/tt_llk` | promoted into the main tree at `tt_metal/tt-llk/` (submodule no longer initialized) |
-| Regression baseline | 126 / 11 / 0 | **126 / 13 / 0** pre-stub-fix; **127 / 11 / 0** post-stub-fix |
-| New test tiers | — | Tier 5b `ttnn_sum_last_dim_wh` (W-axis reduction, BF16, 3200×64 → 3200×1). A Quasar variant was attempted but the upstream W-reduce factory rejects the Quasar arch (`DataMovementKernel is not supported on Quasar`) — out of emule's scope. |
-| Reduce kernel JIT stubs | implicit | added: `ckernel::PoolType` / `ckernel::ReduceDim` namespace alias, `MEM_ZEROS_SIZE`, `experimental::Noc::VcSelection`, `set_async_read_state`, `async_read_with_state` (consumed by `ttnn/cpp/ttnn/kernel_lib/{l1_helpers.hpp, reduce_helpers_*.hpp}`) |
-
-**Key insight:** the merge-base reduce kernels at `8711ac3d0b` reference a layered helper library (`ttnn/cpp/ttnn/kernel_lib/`) that wraps NOC state-cache primitives. The static stub-coverage check missed these because they live behind transitive `#include`s. With the stubs added, the same kernels compile under the emulator JIT and the (already-functional) `reduce_tile<SUM, REDUCE_ROW>` math produces correct PCC. The 11 DFB failures are unchanged; they need upstream fixes to reach `main`.
-
-### Changes from v11 to v12
-
-| Aspect | v11 | v12 |
-|--------|-----|-----|
-| tt-metal base | `arminale/emule-metal-base` @ `8711ac3d0ba` | `arminale/emule-metal-20` (`emule-metal-base` + cherry-picked Metal 2.0 emule-JIT genfiles commit `5c6ffaca751`) |
-| Regression baseline | 127 / 11 / 0 | **135 / 11 / 0** (+8 from new Tier 5b reduction entries; same 11 DFB failures) |
-| `test_reduction.cpp` coverage | 1 / 16 (W-aligned sum only) | **16 / 16** — all 6 `Sum*` (Last/First/Both × aligned/unaligned) and all 10 `MinMax*` (Last/First/Both × 4/4/2 params) |
-| Metal 2.0 named-args | not supported in emule JIT | `experimental/kernel_args.h` ported; emulator runner emits `kernel_bindings_generated.h` / `kernel_args_generated.h` per kernel via tt-metal's `genfiles.cpp` and adds `-I<dir>` to JIT compile; cache key incorporates DFB/sem/RTA/CRTA names |
-| New JIT stubs | — | `llk_math_eltwise_binary.h` (empty shim — dead include in `_neg` reduce kernels), `tt-metalium/buffer_types.hpp` (4 enums consumed via `sharded_tensor_addr_gen.hpp`), `DYNAMIC_NOC_X/Y` + `NOC_XY_ADDR` macros, single-arg `reconfig_data_format_*` overloads, DPRINT stream-manipulator stubs (`HEX`/`DEC`/`OCT`/`BIN`/`FIXED`/`DEFAULTFLOAT`/`SETW`/`SETPRECISION`) |
-| `reduce_tile<MAX>` | accumulated as `max(DST[i], result)`, which clamped to 0 when DST was zero-initialized and inputs were all negative — broke `ttnn::min` (lowers to `min(x) = -max(-x)`) | per-DST-slot fresh flag: `tile_regs_acquire` marks slots fresh; writers (`copy_tile`, `add/sub/mul_tiles`, `matmul_tiles`) clear it; `reduce_tile<MAX>` overwrites on fresh slots, max-accumulates on dirty ones |
-| Code review | — | second-pass review on Phase A + C: relocated `MEM_ZEROS_BASE` to top of L1 (was colliding with bump allocator), aligned `set_async_read_state`/`async_read_with_state` with upstream contract (size from cached state for fits-in-one-packet, src always recomputed), switched header-level macros to `constexpr`, refactored `__emule_matmul_state` from 6 TLS vars into one struct |
-
-**Key insight:** emule's `tile_regs_acquire()` zero-init of DST diverges from real HW (which leaves DST undefined). The previous `reduce_tile<MAX>` accumulation logic worked when the kernel pre-loaded a running max via `copy_tile(cb_acc)` but produced wrong results on the first call after acquire when all inputs were negative. The fresh-flag distinguishes "first call" from "accumulating into a kernel-staged running max" without changing behavior for `tile_regs_acquire`'s zero-init contract that other ops (notably `reduce_tile<SUM>`) rely on.
 
 ---
 
-*Report updated 2026-05-04. Covers tt-emule on branch `armin/quasar-reduction` / tt-metal on branch `arminale/emule-metal-20` (cherry-pick of metal-2.0 emule-JIT genfiles commit on top of `arminale/emule-metal-base @ 8711ac3d0ba`). Regression baseline: **135 / 11 / 0**.*
+*See [docs/changelog.md](docs/changelog.md) for per-version diffs of this report.*
