@@ -5,19 +5,10 @@
 #
 # Regenerated from local run against pinned tt-metal SHA with TT_EMULE_ARCH=wormhole.
 # Stale or newly-passing entries cause CI to fail — keep this file in sync.
+#
+# Quasar-specific failures (DFB topology limits, config-validation) live in
+# known-failures-quasar.txt — they are not exercised by the wormhole job.
 
-# DM→DM 4Sx4S topology needs 4+4=8 DM cores but only 6 user DMs are available
-# (DM0/DM1 reserved by firmware on Quasar). Obsolete test — emulation matches
-# real-hardware behaviour of enforcing the 6-user-DM limit.
-ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx4S/ImplicitSyncFalse
-ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx4S/ImplicitSyncTrue
-MeshDeviceFixture.DMTensixTest1xDFB4Sx1SConfig
-MeshDeviceFixture.DMTest1xDFB1Sx1BConfig
-MeshDeviceFixture.DMTest1xDFB1Sx4SConfig
-MeshDeviceFixture.DMTest1xDFB2Sx4SConfig
-MeshDeviceFixture.DMTest1xDFB4Sx1SConfig
-MeshDeviceFixture.DMTest1xDFB4Sx2SConfig
-MeshDeviceFixture.DMTest1xDFB4Sx4SConfig
 MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/0
 MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/1
 MinMaxTensorFirstDimTests/MinMaxTensorFirstDimFixture.MinMaxTensorCorrectly/0

@@ -3,11 +3,12 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# Run the full tt-emule regression suite with gtest XML output enabled.
+# Run the tt-emule regression suite for one architecture with gtest XML output.
 #
 # Required env:
 #   TT_METAL_DIR    path to tt-metal workspace (checked out at the right SHA)
 #   BUILD_DIR       absolute path to the build tree (containing test/tt_metal/*)
+#   TT_EMULE_ARCH   architecture to test: wormhole | blackhole | quasar
 #
 # Optional env:
 #   GTEST_XML_DIR   where per-test XML lands; default: $RUNNER_TEMP/gtest-xml
@@ -17,6 +18,12 @@ set -euo pipefail
 
 : "${TT_METAL_DIR:?TT_METAL_DIR must be set}"
 : "${BUILD_DIR:?BUILD_DIR must be set}"
+: "${TT_EMULE_ARCH:?TT_EMULE_ARCH must be set (wormhole|blackhole|quasar)}"
+
+case "$TT_EMULE_ARCH" in
+    wormhole|blackhole|quasar) ;;
+    *) echo "ERROR: TT_EMULE_ARCH must be wormhole|blackhole|quasar, got '$TT_EMULE_ARCH'" >&2; exit 1 ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TT_EMULE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -31,17 +38,15 @@ echo "== ci-regression.sh =="
 echo "  TT_EMULE_DIR:   $TT_EMULE_DIR"
 echo "  TT_METAL_DIR:   $TT_METAL_DIR"
 echo "  BUILD_DIR:      $BUILD_DIR"
+echo "  TT_EMULE_ARCH:  $TT_EMULE_ARCH"
 echo "  GTEST_XML_DIR:  $GTEST_XML_DIR"
 echo "  REGRESSION_LOG: $REGRESSION_LOG"
 echo ""
 
-cd "$TT_EMULE_DIR"
-
-# Tee the full output to a log artifact while preserving the script's exit code.
-# run_regression.sh always exits 0 (per-test PASS/FAIL is tracked in counters);
-# real classification happens in classify-results.py against the XML output.
+# Call the per-architecture script directly. Real classification happens in
+# classify-results.py against the XML output; we tee the log for artifacts.
 set +e
-bash run_regression.sh 2>&1 | tee "$REGRESSION_LOG"
+bash "$TT_EMULE_DIR/scripts/run_regression_${TT_EMULE_ARCH}.sh" 2>&1 | tee "$REGRESSION_LOG"
 rc=${PIPESTATUS[0]}
 set -e
 
