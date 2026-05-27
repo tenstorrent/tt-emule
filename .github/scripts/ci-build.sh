@@ -8,16 +8,19 @@
 # Required env:
 #   TT_EMULE_DIR    path to tt-emule workspace (the PR source)
 #   TT_METAL_DIR    path to tt-metal workspace (checked out at pinned SHA)
-#   BUILD_DIR       absolute path for the build tree (default: $TT_METAL_DIR/build_emule_clang)
+#   BUILD_DIR       absolute path for the build tree (default: $TT_METAL_DIR/build_emule)
 #
-# Mirrors the configure + build phase of build_and_test.sh so that local and CI
-# runs share the same flags.
+# Mirrors the configure + build phase of BUILD_GUIDE.md's Phase 3 so that local
+# and CI runs share the same toolchain (clang-20 + libstdc++) and build dir
+# (build_emule). The CI build is a subset of the guide's flags — Python
+# bindings and distributed support are OFF here because the metal-regression
+# CI only exercises the C++ gtest binaries.
 
 set -euo pipefail
 
 : "${TT_EMULE_DIR:?TT_EMULE_DIR must be set}"
 : "${TT_METAL_DIR:?TT_METAL_DIR must be set}"
-BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule_clang}"
+BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule}"
 
 export CCACHE_DIR="${CCACHE_DIR:-$HOME/.ccache}"
 export CMAKE_C_COMPILER_LAUNCHER=ccache
@@ -42,13 +45,10 @@ if [ -f "$UMD_CLUSTER" ] && ! grep -q 'sw_emule_chip.hpp' "$UMD_CLUSTER"; then
 fi
 
 echo "== Configuring tt-metal =="
-# Use tt-metal's libc++ toolchain file. ENABLE_LIBCXX=ON alone only verifies
-# libc++ is installed (cmake/compilers.cmake:5) — it does NOT pass
-# -stdlib=libc++ to the compiler. The toolchain file at
-# cmake/x86_64-linux-clang-20-libcpp-toolchain.cmake sets
-# CMAKE_CXX_FLAGS_INIT="-stdlib=libc++" and is what actually switches the
-# stdlib. Without it, tt-metal's C++20 ranges code fails to compile against
-# Ubuntu 22.04's libstdc++ (from gcc-11).
+# Use tt-metal's libstdc++ toolchain file. This matches BUILD_GUIDE.md's Phase 3
+# and the stdlib tt-mlir's runtime is built against, so a single toolchain
+# choice covers both C++ regression (this script) and D2M (ci-build-mlir.sh).
+# libstdc++ is also tt-metal upstream's default (build_metal.sh:89).
 #
 # The tt-emule integration is selected with -DTT_METAL_USE_EMULE=ON (no extra
 # TT_ prefix). Earlier revisions of this script passed -DTT_METAL_USE_TT_EMULE
@@ -57,7 +57,7 @@ echo "== Configuring tt-metal =="
 cmake -B "$BUILD_DIR" \
     -S "$TT_METAL_DIR" \
     -G Ninja \
-    -DCMAKE_TOOLCHAIN_FILE="$TT_METAL_DIR/cmake/x86_64-linux-clang-20-libcpp-toolchain.cmake" \
+    -DCMAKE_TOOLCHAIN_FILE="$TT_METAL_DIR/cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake" \
     -DCMAKE_AR=/usr/bin/llvm-ar-20 \
     -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
     -DCMAKE_BUILD_TYPE=Release \

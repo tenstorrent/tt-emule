@@ -79,7 +79,7 @@ Pinned SHAs match what CI uses; unpinned `main` risks ABI/UMD issues not yet in 
 ```bash
 export TT_METAL_DIR="$ROOT/tt-metal"
 export TT_MLIR_DIR="$ROOT/tt-mlir"
-export BUILD_DIR="$TT_METAL_DIR/build_emule"   # not build_emule_clang
+export BUILD_DIR="$TT_METAL_DIR/build_emule"
 ```
 
 ---
@@ -141,8 +141,6 @@ cmake --build build_emule -j$(nproc)
 | `CMAKE_INSTALL_PREFIX` | `<this build dir>` | tt-mlir's `ExternalProject_Add(tt-metal)` triggers `cmake --build . --target install` on this build dir. With the default `/usr/local`, the CPM-fetched blake3 dep tries to copy headers there and the install step fails with `Permission denied`. Setting the prefix to the build dir keeps it local and harmless. |
 
 (`ENABLE_TRACY` is OFF here; tt-mlir's `TT_RUNTIME_ENABLE_PERF_TRACE` must be OFF too — see Phase 5.)
-
-> **CI divergence:** local-dev uses libstdc++ via `build_emule/`. The CI workflows (`.github/scripts/ci-build.sh`) still use `build_emule_clang/` with the libc++ toolchain — a transitional state. Don't reuse a `build_emule_clang/` directory locally; the per-arch regression scripts default to `build_emule/`. Convergence is tracked as a separate task.
 
 ### Post-build symlinks (one-time, mandatory)
 
