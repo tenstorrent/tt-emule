@@ -13,11 +13,8 @@ enum class InputClamping : uint8_t {
     None = 0,
 };
 
-// VectorMode — mirrors tt-metal's SFPU vector mode enum.
-#ifndef __EMULE_VECTOR_MODE_DEFINED
-#define __EMULE_VECTOR_MODE_DEFINED
-enum class VectorMode : uint8_t { RC = 0, R = 1, C = 2 };
-#endif
+// VectorMode lives in ckernel::; see api/compute/vector_mode.h.
+#include "jit_hw/api/compute/vector_mode.h"
 
 // p_sfpu constants used by real exp_tile callers
 namespace p_sfpu {

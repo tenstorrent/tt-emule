@@ -7,12 +7,10 @@
 
 #include <cstdint>
 
-namespace ckernel {
+// VectorMode lives in ckernel::; see api/compute/vector_mode.h.
+#include "jit_hw/api/compute/vector_mode.h"
 
-#ifndef __EMULE_VECTOR_MODE_DEFINED
-#define __EMULE_VECTOR_MODE_DEFINED
-enum class VectorMode : uint8_t { RC = 0, R = 1, C = 2 };
-#endif
+namespace ckernel {
 
 template <bool legacy_compat = true>
 ALWI void recip_tile_init() {}
