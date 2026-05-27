@@ -15,10 +15,17 @@ ALWI void rand_tile_init(uint32_t seed = 0) {
 
 ALWI void rand_tile(uint32_t idst, uint32_t from = 0, uint32_t scale = 0) {
     __emule_dst_check(idst, "rand_tile");
-    if (from == 0 || scale == 0) {
-        fprintf(stderr, "[EMULE] rand_tile: from=%u scale=%u; emule cannot "
-                        "distinguish 'not provided' from packed 0.0f. Caller "
-                        "must pass packed bits of both arguments.\n", from, scale);
+    // Abort only when *both* args are the default zero — that is the
+    // unambiguous "caller relied on defaults and forgot to pass packed bits"
+    // case. A zero `from` alone is a legitimate value (e.g. uniform [0, 1]),
+    // and so is a zero `scale` alone (a degenerate but well-defined point
+    // distribution). Distinguishable bit patterns mean the caller was
+    // explicit; trust them.
+    if (from == 0 && scale == 0) {
+        fprintf(stderr, "[EMULE] rand_tile: both from and scale are 0; emule "
+                        "cannot tell whether the caller forgot to pass packed "
+                        "bits or actually meant a zero-width range starting "
+                        "at zero. Pass both arguments explicitly.\n");
         std::abort();
     }
     float from_f, scale_f;
