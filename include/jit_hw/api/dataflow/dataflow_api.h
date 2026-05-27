@@ -37,6 +37,24 @@
 #define NOC_MULTICAST_WRITE_VC 8
 #endif
 
+// ---- NOC burst size and address extraction macros ----
+// Wormhole N150 value (NOC_MAX_BURST_WORDS * NOC_WORD_BYTES).
+// Used as the default max_page_size template argument in noc.h.
+#ifndef NOC_MAX_BURST_SIZE
+#define NOC_MAX_BURST_SIZE 8192u
+#endif
+// Address-field extraction matching the emulation NOC encoding:
+//   X in bits [NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS - 1 : NOC_ADDR_LOCAL_BITS]
+//   Y in bits [NOC_ADDR_LOCAL_BITS + 2*NOC_ADDR_NODE_ID_BITS - 1 : NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS]
+#ifndef NOC_UNICAST_ADDR_X
+#define NOC_UNICAST_ADDR_X(addr) \
+    (((uint64_t)(addr) >> NOC_ADDR_LOCAL_BITS) & 0x3Fu)
+#endif
+#ifndef NOC_UNICAST_ADDR_Y
+#define NOC_UNICAST_ADDR_Y(addr) \
+    (((uint64_t)(addr) >> (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) & 0x3Fu)
+#endif
+
 // ---- Bridge function declarations for cross-core access ----
 extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
 extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src, uint32_t size);
@@ -444,9 +462,15 @@ inline void noc_async_write_multicast_loopback_src(
 // (cb_push_back, semaphore inc) won't flag a missing-barrier race. In emule
 // the underlying reads are synchronous memcpys, so there's nothing to actually
 // wait for — but the contract must still be observed for parity with silicon.
-inline void noc_async_read_barrier() { __emule_pending_noc_reads = 0; }
-inline void noc_async_write_barrier() {}
-inline void noc_async_writes_flushed() {}
+inline void noc_async_read_barrier(uint8_t noc = 0) { __emule_pending_noc_reads = 0; }
+inline void noc_async_write_barrier(uint8_t noc = 0) {}
+inline void noc_async_writes_flushed(uint8_t noc = 0) {}
+inline void noc_async_posted_writes_flushed(uint8_t noc = 0) {}
+inline void noc_async_read_barrier_with_trid(uint32_t trid, uint8_t noc = 0) {}
+inline void noc_async_write_barrier_with_trid(uint32_t trid, uint8_t noc = 0) {}
+inline void noc_async_write_flushed_with_trid(uint32_t trid, uint8_t noc = 0) {}
+inline void noc_async_atomic_barrier(uint8_t noc = 0) {}
+inline void noc_async_full_barrier(uint8_t noc = 0) {}
 
 // ---- Semaphore operations ----
 
@@ -537,7 +561,8 @@ inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32
 
 // Atomically increment a remote semaphore.
 // noc_addr is a 64-bit encoded NOC address pointing to the semaphore.
-inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc = 0) {
+inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc = 0,
+                             uint8_t vc = NOC_UNICAST_WRITE_VC) {
     uint32_t noc_x = (noc_addr >> NOC_ADDR_LOCAL_BITS) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
     uint32_t noc_y = (noc_addr >> (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
     uint32_t offset = static_cast<uint32_t>(noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));

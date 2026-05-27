@@ -11,6 +11,11 @@ name: PR Metal Regression
 on:
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE*'
+      - 'NOTICE'
   push:
     branches: [main]
 
@@ -98,7 +103,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [wormhole, blackhole]
+        arch: [wormhole, blackhole, quasar]
     steps:
       - name: Checkout tt-emule (PR)
         uses: actions/checkout@v4

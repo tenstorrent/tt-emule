@@ -106,7 +106,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [wormhole, blackhole]
+        arch: [wormhole, blackhole, quasar]
     steps:
       - name: Checkout tt-emule (main)
         uses: actions/checkout@v4
