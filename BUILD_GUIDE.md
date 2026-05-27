@@ -23,6 +23,8 @@ A complete, step-by-step guide to building tt-emule and all its dependencies fro
 | Python | 3.10+ | `python3 --version` |
 | Git | 2.x | `git --version` |
 
+> **Ubuntu 22.04**: system default is gcc-11, whose libstdc++ doesn't implement enough of C++20 ranges for tt-metal (`std::ranges::for_each` over a `views::filter` in `levelized_graph.cpp` fails constraint checks). Install `gcc-13` and add `-DCMAKE_C_FLAGS="--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13" -DCMAKE_CXX_FLAGS="--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13"` to the Phase 3 cmake. CI uses this flag.
+
 ### Required System Packages
 
 The ttmlir-toolchain must be installed at `/opt/ttmlir-toolchain` (provides LLVM/MLIR libraries, Python venv with torch, pybind11, nanobind, etc.). This is typically pre-installed on Tenstorrent development machines.
