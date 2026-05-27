@@ -80,20 +80,20 @@ jobs:
         env:
           TT_EMULE_DIR: ${{ github.workspace }}/tt-emule
           TT_METAL_DIR: ${{ github.workspace }}/tt-metal
-          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule_clang
+          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule
         run: bash tt-emule/.github/scripts/ci-build.sh
 
       - name: Stage cluster descriptors with build artifact
         run: |
-          mkdir -p tt-metal/build_emule_clang/_cluster_descs
+          mkdir -p tt-metal/build_emule/_cluster_descs
           cp -r tt-metal/tt_metal/third_party/umd/tests/cluster_descriptor_examples \
-                tt-metal/build_emule_clang/_cluster_descs/
+                tt-metal/build_emule/_cluster_descs/
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: nightly-tt-metal-build-${{ github.run_id }}
-          path: tt-metal/build_emule_clang/
+          path: tt-metal/build_emule/
           retention-days: 1
           if-no-files-found: error
 
@@ -127,21 +127,21 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: nightly-tt-metal-build-${{ github.run_id }}
-          path: tt-metal/build_emule_clang/
+          path: tt-metal/build_emule/
 
       - name: Restore executable bits on test binaries
         # actions/upload-artifact@v4 strips Unix mode bits.
         run: |
-          chmod +x tt-metal/build_emule_clang/test/tt_metal/unit_tests_* 2>/dev/null || true
-          chmod +x tt-metal/build_emule_clang/test/ttnn/unit_tests_* 2>/dev/null || true
+          chmod +x tt-metal/build_emule/test/tt_metal/unit_tests_* 2>/dev/null || true
+          chmod +x tt-metal/build_emule/test/ttnn/unit_tests_* 2>/dev/null || true
 
       - name: Place cluster descriptors
         run: |
           mkdir -p tt-metal/tt_metal/third_party/umd/tests
-          cp -r tt-metal/build_emule_clang/_cluster_descs/cluster_descriptor_examples \
+          cp -r tt-metal/build_emule/_cluster_descs/cluster_descriptor_examples \
                 tt-metal/tt_metal/third_party/umd/tests/
 
-      - name: Install Python + libc++ runtime + clang-20
+      - name: Install Python + clang-20
         # See PR workflow for explanation. clang-20 is needed at runtime by the
         # emulated program runner's JIT kernel compile path.
         run: |
@@ -150,7 +150,7 @@ jobs:
             echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main" | sudo tee /etc/apt/sources.list.d/llvm-toolchain-jammy-20.list >/dev/null
           fi
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends python3 clang-20 libc++-20-dev libc++abi-20-dev libnuma1 libhwloc15 libtbb12
+          sudo apt-get install -y --no-install-recommends python3 clang-20 libnuma1 libhwloc15 libtbb12
 
       - name: Install SFPI toolchain
         # tt-metal's JIT kernel compiler looks for sfpi at <TT_METAL_HOME>/runtime/sfpi/
@@ -166,13 +166,13 @@ jobs:
       - name: Run regression
         env:
           TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
-          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule_clang
+          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
           TT_EMULE_ARCH: ${{ matrix.arch }}
         run: bash tt-emule/.github/scripts/ci-regression.sh
 
       - name: Classify results
         env:
-          BUILD_DIR: ${{ github.workspace }}/tt-metal/build_emule_clang
+          BUILD_DIR: ${{ github.workspace }}/tt-metal/build_emule
         run: |
           python3 tt-emule/.github/scripts/classify-results.py \
             --xml-dir "${RUNNER_TEMP}/gtest-xml" \
