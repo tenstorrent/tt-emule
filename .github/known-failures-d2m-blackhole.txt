@@ -509,7 +509,10 @@ test_dram_ops.py::test_dram_ternary_clamp_tensor[ttmetal-f32-2048x2048]
 test_dram_ops.py::test_dram_ternary_clamp_tensor[ttmetal-f32-23x383x457]
 test_dram_ops.py::test_dram_ternary_clamp_tensor[ttmetal-f32-512x8192]
 test_dram_ops.py::test_dram_ternary_clamp_tensor[ttmetal-f32-5x3x439x373]
-test_dram_ops.py::test_dram_ternary_clamp_tensor[ttmetal-i32-16384x256]
+# Flips PASS/FAIL between runs against the same code (665bc4e6 ≡ fd030a06).
+# Caught run #3 (job 77984168432) flagging it as newly-passing while run #2
+# (job 77968256245) had it failing. Mark flaky until the flake is rooted.
+flaky: test_dram_ops.py::test_dram_ternary_clamp_tensor[ttmetal-i32-16384x256]
 test_dram_ops.py::test_dram_ternary_clamp_tensor[ttmetal-i32-23x383x457]
 test_dram_ops.py::test_dram_ternary_clamp_tensor[ttmetal-i32-512x8192]
 test_dram_ops.py::test_dram_ternary_clamp_tensor[ttmetal-i32-5x3x439x373]
