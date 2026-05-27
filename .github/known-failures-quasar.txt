@@ -1,0 +1,23 @@
+# tt-emule known regression failures — quasar matrix job.
+#
+# Format: one gtest filter expression per line. Wildcards permitted.
+# Comments start with '#'; blank lines are ignored.
+#
+# Regenerated from local run against pinned tt-metal SHA with TT_EMULE_ARCH=quasar.
+# Stale or newly-passing entries cause CI to fail — keep this file in sync.
+
+# DM→DM 4Sx4S topology needs 4+4=8 DM cores but only 6 user DMs are available
+# (DM0/DM1 reserved by firmware on Quasar). Obsolete test — emulation correctly
+# enforces the same 6-user-DM limit as real hardware.
+ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx4S/ImplicitSyncFalse
+ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx4S/ImplicitSyncTrue
+
+# DFB config-validation tests whose requested topology exceeds the 6-user-DM limit
+# (DM0/DM1 reserved by firmware). These correctly fail on real Quasar hardware too.
+MeshDeviceFixture.DMTensixTest1xDFB4Sx1SConfig
+MeshDeviceFixture.DMTest1xDFB1Sx1BConfig
+MeshDeviceFixture.DMTest1xDFB1Sx4SConfig
+MeshDeviceFixture.DMTest1xDFB2Sx4SConfig
+MeshDeviceFixture.DMTest1xDFB4Sx1SConfig
+MeshDeviceFixture.DMTest1xDFB4Sx2SConfig
+MeshDeviceFixture.DMTest1xDFB4Sx4SConfig

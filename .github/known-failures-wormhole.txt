@@ -5,14 +5,10 @@
 #
 # Regenerated from local run against pinned tt-metal SHA with TT_EMULE_ARCH=wormhole.
 # Stale or newly-passing entries cause CI to fail — keep this file in sync.
+#
+# Quasar-specific failures (DFB topology limits, config-validation) live in
+# known-failures-quasar.txt — they are not exercised by the wormhole job.
 
-MeshDeviceFixture.DMTensixTest1xDFB4Sx1SConfig
-MeshDeviceFixture.DMTest1xDFB1Sx1BConfig
-MeshDeviceFixture.DMTest1xDFB1Sx4SConfig
-MeshDeviceFixture.DMTest1xDFB2Sx4SConfig
-MeshDeviceFixture.DMTest1xDFB4Sx1SConfig
-MeshDeviceFixture.DMTest1xDFB4Sx2SConfig
-MeshDeviceFixture.DMTest1xDFB4Sx4SConfig
 MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/0
 MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/1
 MinMaxTensorFirstDimTests/MinMaxTensorFirstDimFixture.MinMaxTensorCorrectly/0

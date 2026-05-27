@@ -127,6 +127,18 @@ def write_summary(
     lines.append("")
     lines.append(f"- **{passed_count}** tests passed")
     lines.append(f"- **{failed_count}** tests failed ({failed_count - len(new_failures)} expected, {len(new_failures)} new)")
+    # Surface all three allowlist-health counts up front. Each is an independent
+    # gate (any non-zero count fails the job). Showing them here in the summary
+    # means a reader cannot miss one of the three problem categories — important
+    # because the per-category sections below are only rendered when non-empty,
+    # and a reader who scrolls only to the first ❌/⚠️ section may not realize a
+    # second one is below.
+    new_marker = "❌" if new_failures else "✅"
+    np_marker = "⚠️" if newly_passing else "✅"
+    stale_marker = "⚠️" if stale_entries else "✅"
+    lines.append(f"- {new_marker} **{len(new_failures)}** new failures (failed but not allowlisted)")
+    lines.append(f"- {np_marker} **{len(newly_passing)}** newly-passing allowlist entries (allowlisted but now passing)")
+    lines.append(f"- {stale_marker} **{len(stale_entries)}** stale allowlist entries (matched no test in this run)")
     lines.append("")
 
     if new_failures:
