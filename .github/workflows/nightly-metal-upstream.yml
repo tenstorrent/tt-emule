@@ -22,12 +22,20 @@ concurrency:
   group: nightly-upstream
   cancel-in-progress: false
 
+env:
+  # Same container PR Metal Regression and PR D2M Regression use — keeps the
+  # nightly job's toolchain identical to the PR jobs.
+  TT_MLIR_CI_IMAGE: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+
 jobs:
   build:
     name: Build tt-metal (main tip) against tt-emule main
     runs-on: tt-ubuntu-2204-large-stable
     timeout-minutes: 240
     continue-on-error: true
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+      options: --user root
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
     steps:
@@ -39,6 +47,7 @@ jobs:
 
       - name: Resolve tt-metal main tip
         id: resolve
+        shell: bash
         run: |
           SHA=$(git ls-remote https://github.com/tenstorrent/tt-metal main | awk '{print $1}')
           if [ -z "$SHA" ]; then
@@ -58,18 +67,38 @@ jobs:
           submodules: false
 
       - name: Init required tt-metal submodules
+        shell: bash
         run: |
           cd tt-metal
           git submodule update --init --depth=1 tt_metal/third_party/umd
           git submodule update --init --depth=1 tt_metal/third_party/tracy
 
-      - name: Install toolchain
-        run: bash tt-emule/.github/scripts/ci-setup.sh
+      - name: Install clang-20 + gcc-13 libstdc++
+        # Mirrors PR Metal Regression. See pr-metal-regression.yml for the
+        # toolchain rationale (container ships clang-17 + gcc-12, we need
+        # clang-20 + gcc-13 for the JIT path and C++20 ranges).
+        shell: bash
+        run: |
+          set -e
+          apt-get update -qq
+          apt-get install -y -qq wget gnupg lsb-release software-properties-common
+          if ! command -v clang-20 >/dev/null 2>&1; then
+            wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+            chmod +x /tmp/llvm.sh
+            /tmp/llvm.sh 20 all
+          fi
+          if [ ! -d /usr/lib/gcc/x86_64-linux-gnu/13 ]; then
+            add-apt-repository -y ppa:ubuntu-toolchain-r/test
+            apt-get update -qq
+            apt-get install -y -qq gcc-13 g++-13 libstdc++-13-dev
+          fi
+          clang-20 --version
+          ls /usr/lib/gcc/x86_64-linux-gnu/ | head
 
       - name: Restore ccache
         uses: actions/cache@v4
         with:
-          path: ~/.ccache
+          path: /root/.ccache
           key: tt-metal-${{ steps.resolve.outputs.sha }}-clang20-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             tt-metal-${{ steps.resolve.outputs.sha }}-clang20-${{ runner.os }}-
@@ -81,9 +110,11 @@ jobs:
           TT_EMULE_DIR: ${{ github.workspace }}/tt-emule
           TT_METAL_DIR: ${{ github.workspace }}/tt-metal
           BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule
+        shell: bash
         run: bash tt-emule/.github/scripts/ci-build.sh
 
       - name: Stage cluster descriptors with build artifact
+        shell: bash
         run: |
           mkdir -p tt-metal/build_emule/_cluster_descs
           cp -r tt-metal/tt_metal/third_party/umd/tests/cluster_descriptor_examples \
@@ -103,6 +134,9 @@ jobs:
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 60
     continue-on-error: true
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+      options: --user root
     strategy:
       fail-fast: false
       matrix:
@@ -131,36 +165,48 @@ jobs:
 
       - name: Restore executable bits on test binaries
         # actions/upload-artifact@v4 strips Unix mode bits.
+        shell: bash
         run: |
           chmod +x tt-metal/build_emule/test/tt_metal/unit_tests_* 2>/dev/null || true
           chmod +x tt-metal/build_emule/test/ttnn/unit_tests_* 2>/dev/null || true
 
       - name: Place cluster descriptors
+        shell: bash
         run: |
           mkdir -p tt-metal/tt_metal/third_party/umd/tests
           cp -r tt-metal/build_emule/_cluster_descs/cluster_descriptor_examples \
                 tt-metal/tt_metal/third_party/umd/tests/
 
-      - name: Install Python + clang-20
-        # See PR workflow for explanation. clang-20 is needed at runtime by the
-        # emulated program runner's JIT kernel compile path.
+      - name: Install clang-20 + gcc-13 libstdc++ runtime
+        # Mirrors PR Metal Regression test job's install step. clang-20 needed
+        # for the runtime JIT compile; gcc-13 libstdc++ needed for the
+        # GLIBCXX_3.4.32 symbols the build links against.
+        shell: bash
         run: |
-          if [ ! -f /etc/apt/sources.list.d/llvm-toolchain-jammy-20.list ]; then
-            wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg
-            echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main" | sudo tee /etc/apt/sources.list.d/llvm-toolchain-jammy-20.list >/dev/null
+          set -e
+          apt-get update -qq
+          apt-get install -y -qq wget gnupg lsb-release software-properties-common
+          if ! command -v clang-20 >/dev/null 2>&1; then
+            wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+            chmod +x /tmp/llvm.sh
+            /tmp/llvm.sh 20 all
           fi
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends python3 clang-20 libnuma1 libhwloc15 libtbb12
+          if [ ! -d /usr/lib/gcc/x86_64-linux-gnu/13 ]; then
+            add-apt-repository -y ppa:ubuntu-toolchain-r/test
+            apt-get update -qq
+            apt-get install -y -qq libstdc++6 gcc-13 g++-13 libstdc++-13-dev
+          fi
 
       - name: Install SFPI toolchain
         # tt-metal's JIT kernel compiler looks for sfpi at <TT_METAL_HOME>/runtime/sfpi/
         # or /opt/tenstorrent/sfpi/. Neither is present on the fresh test-runner
         # checkout, so use tt-metal's own install_dependencies.sh --sfpi (which
         # apt-installs the released .deb under /opt/tenstorrent/sfpi/).
-        run: |
-          sudo bash tt-metal/install_dependencies.sh --sfpi
+        shell: bash
+        run: bash tt-metal/install_dependencies.sh --sfpi
 
       - name: Record tt-metal SHA for downstream steps
+        shell: bash
         run: echo "${{ needs.build.outputs.sha }}" > tt-metal-pin-resolved.txt
 
       - name: Run regression
@@ -168,11 +214,13 @@ jobs:
           TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
           BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
           TT_EMULE_ARCH: ${{ matrix.arch }}
+        shell: bash
         run: bash tt-emule/.github/scripts/ci-regression.sh
 
       - name: Classify results
         env:
           BUILD_DIR: ${{ github.workspace }}/tt-metal/build_emule
+        shell: bash
         run: |
           python3 tt-emule/.github/scripts/classify-results.py \
             --xml-dir "${RUNNER_TEMP}/gtest-xml" \
