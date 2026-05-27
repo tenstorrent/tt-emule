@@ -61,8 +61,14 @@ ALWI void log_tile(uint32_t idst) {
 ALWI void power_tile_init() {}
 ALWI void power_tile(uint32_t idst, uint32_t exponent_packed = 0) {
     __emule_dst_check(idst, "power_tile");
-    float exponent = 1.0f;
-    if (exponent_packed != 0) std::memcpy(&exponent, &exponent_packed, sizeof(float));
+    if (exponent_packed == 0) {
+        fprintf(stderr, "[EMULE] power_tile: exponent_packed=0; emule cannot "
+                        "distinguish 'not provided' from packed 0.0f. Caller "
+                        "must pass packed bits of the exponent.\n");
+        std::abort();
+    }
+    float exponent;
+    std::memcpy(&exponent, &exponent_packed, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
         __emule_dst[idst][i] = std::pow(__emule_dst[idst][i], exponent);
 }
