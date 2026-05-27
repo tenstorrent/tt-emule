@@ -23,7 +23,7 @@ A complete, step-by-step guide to building tt-emule and all its dependencies fro
 | Python | 3.10+ | `python3 --version` |
 | Git | 2.x | `git --version` |
 
-> **Ubuntu 22.04**: system default is gcc-11, whose libstdc++ doesn't implement enough of C++20 ranges for tt-metal (`std::ranges::for_each` over a `views::filter` in `levelized_graph.cpp` fails constraint checks). Install `gcc-13` and add `-DCMAKE_C_FLAGS="--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13" -DCMAKE_CXX_FLAGS="--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13"` to the Phase 3 cmake. CI uses this flag.
+> **Ubuntu 22.04**: system default is gcc-11, whose libstdc++ doesn't implement enough of C++20 ranges for tt-metal (`std::ranges::for_each` over a `views::filter` in `levelized_graph.cpp` fails constraint checks). Install `gcc-13` and add `-DCMAKE_C_FLAGS="--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13" -DCMAKE_CXX_FLAGS="--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13"` to the Phase 3 cmake. CI uses this flag — both the metal-regression and D2M jobs run inside the `tt-mlir-ci-ubuntu-22-04` container, where the `Install clang-20 + gcc-13 libstdc++` step adds gcc-13 from `ppa:ubuntu-toolchain-r/test`. The cmake invocation is identical to the local-dev one.
 
 ### Required System Packages
 
