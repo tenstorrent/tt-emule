@@ -63,8 +63,9 @@ enum class ReluType { NO_RELU, ZERO_RELU, MIN_THRESHOLD_RELU, MAX_THRESHOLD_RELU
 #define DST_ACCUM_MODE 0
 #endif
 
-// ---- bfloat16 conversion helpers ----
+// ---- bfloat16 / bfloat8_b conversion helpers ----
 #include "jit_hw/api/bfloat16.h"
+#include "jit_hw/api/bfloat8.h"
 
 // ---- Thread-local DST register file ----
 // Physical size: 16 tile slots × 1024 elements × 4 bytes = 64 KB (same on WH/BH/Quasar).
@@ -168,8 +169,15 @@ inline uint32_t cb_tile_elems(uint32_t cb_id) {
     return __emule_cbs[cb_id].page_size / sizeof(uint16_t);
 }
 
-// Is this CB using a 32-bit data format (INT32, Float32)?
-// Heuristic: bf16 tiles = 2048 bytes (1024 × 2), 32-bit tiles > 2048.
+// CB tile format detection by page_size:
+//   Bfp8_b:  page_size  = 1088 = TILE_HW(1024) + 64 face-row exponent bytes
+//   bf16:    page_size  = 2048 = TILE_HW × 2
+//   fp32:    page_size  = 4096 = TILE_HW × 4
+//   (Bfp4_b: page_size  =  576 = TILE_HW/2(512) + 64 — not yet supported)
+inline bool cb_is_bfp8_b_format(uint32_t cb_id) {
+    uint32_t ps = __emule_cbs[cb_id].page_size;
+    return ps > 0 && ps < 2048;
+}
 inline bool cb_is_32bit_format(uint32_t cb_id) {
     return __emule_cbs[cb_id].page_size > 2048;
 }
@@ -219,6 +227,23 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
                 std::memcpy(&out[ni], &__emule_dst[dst_slot][i], sizeof(uint32_t));
             }
         }
+    } else if (cb_is_bfp8_b_format(ocb)) {
+        // Bfp8_b: 64 exp bytes + 1024 mantissa bytes. Encode 16 elements per
+        // face-row at a time (sharing one exponent). Iterate over the 64
+        // face-rows in nfaces order.
+        // L1 accumulation for bfp8 would require reading old, dequant, add,
+        // requant — not supported by real hardware's PACK accumulate either,
+        // so treat acc as overwrite (consistent with how real Tensix lowers
+        // l1_acc on bfp8 packs).
+        float face_row[16];
+        for (uint32_t fr = 0; fr < 64; ++fr) {
+            for (uint32_t k = 0; k < 16; ++k) {
+                uint32_t ni = fr * 16 + k;
+                uint32_t rm = __emule_nfaces::nfaces_to_rowmajor[ni];
+                face_row[k] = __emule_dst[dst_slot][rm];
+            }
+            __emule_bfp8::encode_face_row(face_row, buf + fr, buf + __emule_bfp8::EXP_BLOCK_BYTES + fr * 16);
+        }
     } else {
         uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
         uint32_t n = cb_tile_elems(ocb);
@@ -261,6 +286,9 @@ inline float __emule_read_cb_elem_at(uint32_t cb, uint32_t itile, uint32_t ni) {
     uint8_t* buf = __emule_compute::cb_read_ptr_at(cb, itile);
     if (__emule_compute::cb_is_32bit_format(cb)) {
         return reinterpret_cast<const float*>(buf)[ni];
+    }
+    if (__emule_compute::cb_is_bfp8_b_format(cb)) {
+        return __emule_bfp8::to_f32(buf, ni);
     }
     return __emule_bf16::to_f32(reinterpret_cast<const uint16_t*>(buf)[ni]);
 }

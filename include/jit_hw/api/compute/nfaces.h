@@ -40,4 +40,17 @@ constexpr std::array<uint32_t, 1024> make_rowmajor_to_nfaces() {
 
 inline constexpr auto rowmajor_to_nfaces = make_rowmajor_to_nfaces();
 
+// Inverse: nfaces_to_rowmajor[ni] = row-major index whose element lands at
+// nfaces offset ni. Needed when iterating in nfaces order (e.g. Bfp8_b
+// per-face-row pack) and pulling the matching row-major DST element back.
+constexpr std::array<uint32_t, 1024> make_nfaces_to_rowmajor() {
+    std::array<uint32_t, 1024> inv{};
+    for (uint32_t i = 0; i < 1024; i++) {
+        inv[rowmajor_to_nfaces[i]] = i;
+    }
+    return inv;
+}
+
+inline constexpr auto nfaces_to_rowmajor = make_nfaces_to_rowmajor();
+
 } // namespace __emule_nfaces

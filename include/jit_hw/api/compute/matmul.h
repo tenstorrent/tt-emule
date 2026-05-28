@@ -40,22 +40,13 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
     constexpr uint32_t DIM = 32;
     float a_rm[DIM * DIM];
     float b_rm[DIM * DIM];
-    // Each CB has its own format (bf16 page_size=2048 vs fp32 page_size=4096).
-    // Required for reduce-via-matmul where in0 (input data) and in1 (scaler)
-    // can be different formats — e.g. cb_xmm2 fp32 × cb_scaler bf16 in
-    // layernorm's first-stage reduce.
-    uint8_t* a_buf = __emule_compute::cb_read_ptr_at(in0_cb, in0_tile);
-    uint8_t* b_buf = __emule_compute::cb_read_ptr_at(in1_cb, in1_tile);
-    const bool a_is_32 = __emule_compute::cb_is_32bit_format(in0_cb);
-    const bool b_is_32 = __emule_compute::cb_is_32bit_format(in1_cb);
+    // Each CB has its own format (bf16 / fp32 / Bfp8_b). Required for
+    // reduce-via-matmul where in0 (input data) and in1 (scaler) can differ —
+    // e.g. layernorm's first-stage reduce calls matmul_tiles(fp32 × bf16).
     for (uint32_t i = 0; i < DIM * DIM; i++) {
         uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
-        a_rm[i] = a_is_32
-            ? reinterpret_cast<const float*>(a_buf)[ni]
-            : __emule_bf16::to_f32(reinterpret_cast<const uint16_t*>(a_buf)[ni]);
-        b_rm[i] = b_is_32
-            ? reinterpret_cast<const float*>(b_buf)[ni]
-            : __emule_bf16::to_f32(reinterpret_cast<const uint16_t*>(b_buf)[ni]);
+        a_rm[i] = __emule_read_cb_elem_at(in0_cb, in0_tile, ni);
+        b_rm[i] = __emule_read_cb_elem_at(in1_cb, in1_tile, ni);
     }
     // MATH: row-major matmul accumulating into DST.
 #ifdef EMULE_MATMUL_USE_AVX2
