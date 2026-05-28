@@ -22,6 +22,11 @@ template<int N>
 constexpr uint32_t get_ct_arg() { return kernel_compile_time_args_arr[N]; }
 } // anonymous namespace
 
+// Alias matching real Metal compile_time_args.h (which uses `kernel_compile_time_args`).
+// Kernel source may use either spelling; both refer to the same array.
+static constexpr const uint32_t (&kernel_compile_time_args)[sizeof(kernel_compile_time_args_arr) / sizeof(uint32_t)] =
+    kernel_compile_time_args_arr;
+
 #define get_compile_time_arg_val(N) get_ct_arg<N>()
 
 // Named compile-time args.  The JIT compiler passes

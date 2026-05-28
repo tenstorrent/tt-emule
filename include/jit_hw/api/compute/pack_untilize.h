@@ -39,6 +39,25 @@ inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
                                 uint32_t block_c_index = 0, uint32_t face_r_dim = 16,
                                 uint32_t num_faces = 4, uint32_t tile_dst_rt_offset = 0) {}
 
+// pack_untilize_block<block_ct_dim, full_ct_dim>(icb, block_rt_dim, ocb, block_c_index)
+// Matches the real Metal api/compute/pack_untilize.h signature used by
+// untilize_helpers.inl.  For each row, loads block_ct_dim tiles from the
+// input CB into DST and pack-untilizes them to the output CB.
+template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim>
+inline void pack_untilize_block(uint32_t icb, uint32_t block_rt_dim, uint32_t ocb, uint32_t /*block_c_index*/ = 0) {
+    __llk_pack_block_c = full_ct_dim;
+    __llk_pack_offset = 0;
+    for (uint32_t r = 0; r < block_rt_dim; ++r) {
+        for (uint32_t c = 0; c < block_ct_dim; ++c) {
+            copy_tile(icb, r * block_ct_dim + c, c);
+        }
+        for (uint32_t c = 0; c < block_ct_dim; ++c) {
+            __llk_pack_untilize(c, ocb);
+            __llk_pack_offset++;
+        }
+    }
+}
+
 }  // namespace ckernel
 
 using namespace ckernel;

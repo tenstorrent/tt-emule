@@ -197,10 +197,23 @@ extern thread_local uint8_t __emule_trisc_id;
 extern thread_local uint32_t __emule_num_threads;
 extern thread_local uint32_t __emule_my_thread_id;
 
-// tt_l1_ptr: type qualifier for L1 pointers. On real HW, this adds volatile.
-// In emulation, L1 is normal host memory — the qualifier is empty.
+// tt_l1_ptr / tt_reg_ptr: pointer type qualifiers for L1 and MMIO registers.
+// On real HW these add volatile; in emulation they're empty.
 #ifndef tt_l1_ptr
 #define tt_l1_ptr
+#endif
+#ifndef tt_reg_ptr
+#define tt_reg_ptr
+#endif
+
+// Hardware wall-clock register addresses — used by the spin() debug helper in
+// common.hpp.  In emulation these are never read; define them as zero so the
+// function body parses without generating actual hardware accesses.
+#ifndef RISCV_DEBUG_REG_WALL_CLOCK_L
+#define RISCV_DEBUG_REG_WALL_CLOCK_L 0u
+#endif
+#ifndef RISCV_DEBUG_REG_WALL_CLOCK_H
+#define RISCV_DEBUG_REG_WALL_CLOCK_H 0u
 #endif
 
 // NOC index — always 0 for emulation (real firmware sets this per core).

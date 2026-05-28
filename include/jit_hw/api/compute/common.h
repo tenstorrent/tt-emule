@@ -288,6 +288,12 @@ ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
         __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++), idst, ocb);
 }
 
+// pack_tile (3-arg non-template): called by Metal kernel source that writes pack_tile(idst, ocb, 0)
+// without an explicit template argument. Output offset is ignored; uses the auto-advance path.
+ALWI void pack_tile(uint32_t idst, uint32_t ocb, uint32_t /*output_offset*/) {
+    pack_tile(idst, ocb);
+}
+
 // pack_tile (templated): used by D2M-generated code.
 // Template param <true> means "use output_offset as the write slot index".
 template <bool UseOutputOffset>

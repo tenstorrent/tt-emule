@@ -14,8 +14,11 @@
 // delegate to InterleavedAddrGen for NOC address computation — sufficient for
 // JIT data-movement kernels.
 
-#include <cstdint>
+#include <array>
 #include <cstddef>
+#include <cstdint>
+#include <tuple>
+#include <utility>
 
 // Real TensorAccessorArgs (pure C++17 templates, compiles without KERNEL_BUILD).
 // Dependency chain: tensor_accessor_args.h → arg_config.hpp → flags.hpp, const.h
@@ -74,3 +77,62 @@ struct TensorAccessor {
         return addrgen.get_noc_addr(page_id, offset, noc);
     }
 };
+
+// AbstractTensorAccessorWrapper — type-erased wrapper over any TensorAccessor.
+// Matches real Metal api/tensor/tensor_accessor.h (class AbstractTensorAccessorWrapper).
+class AbstractTensorAccessorWrapper {
+public:
+    AbstractTensorAccessorWrapper() = default;
+
+    template <typename Accessor>
+    explicit AbstractTensorAccessorWrapper(const Accessor& accessor) :
+        accessor_ptr(&accessor),
+        get_noc_addr_fn([](const void* acc, uint32_t page_idx, uint32_t offset, uint8_t noc) {
+            return static_cast<const Accessor*>(acc)->get_noc_addr(page_idx, offset, noc);
+        }) {}
+
+    inline uint64_t get_noc_addr(uint32_t page_idx, uint32_t offset = 0, uint8_t noc = 0) const {
+        return get_noc_addr_fn(accessor_ptr, page_idx, offset, noc);
+    }
+
+private:
+    using GetNocAddrFn = uint64_t (*)(const void*, uint32_t, uint32_t, uint8_t);
+    const void* accessor_ptr = nullptr;
+    GetNocAddrFn get_noc_addr_fn = nullptr;
+};
+
+// make_tensor_accessor_tuple — matches real Metal api/tensor/tensor_accessor.h.
+// Constructs a std::tuple<TensorAccessor...> from a tuple of TensorAccessorArgs
+// plus a starting runtime arg index that holds the base addresses.
+namespace tensor_accessor::detail {
+template <typename... Args, uint32_t... Indexes>
+auto make_tensor_accessor_tuple(
+    const std::tuple<Args...>& args, uint32_t address_rt_arg_index_start,
+    std::integer_sequence<uint32_t, Indexes...>) {
+    return std::make_tuple(
+        TensorAccessor(std::get<Indexes>(args), get_arg_val<uint32_t>(address_rt_arg_index_start + Indexes))...);
+}
+}  // namespace tensor_accessor::detail
+
+template <typename... Args>
+auto make_tensor_accessor_tuple(const std::tuple<Args...>& args, uint32_t address_rt_arg_index_start) {
+    return tensor_accessor::detail::make_tensor_accessor_tuple(
+        args, address_rt_arg_index_start, std::make_integer_sequence<uint32_t, sizeof...(Args)>());
+}
+
+// make_abstract_tensor_accessor_wrappers — matches real Metal.
+// Wraps a tuple of typed TensorAccessors into an array of AbstractTensorAccessorWrappers.
+namespace tensor_accessor::detail {
+template <typename... Accessors, uint32_t... Indexes>
+auto make_abstract_tensor_accessor_wrappers(
+    const std::tuple<Accessors...>& accessors, std::integer_sequence<uint32_t, Indexes...>)
+    -> std::array<AbstractTensorAccessorWrapper, sizeof...(Accessors)> {
+    return {AbstractTensorAccessorWrapper(std::get<Indexes>(accessors))...};
+}
+}  // namespace tensor_accessor::detail
+
+template <typename... Accessors>
+auto make_abstract_tensor_accessor_wrappers(const std::tuple<Accessors...>& accessors) {
+    return tensor_accessor::detail::make_abstract_tensor_accessor_wrappers(
+        accessors, std::make_integer_sequence<uint32_t, sizeof...(Accessors)>());
+}

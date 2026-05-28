@@ -431,6 +431,20 @@ inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
     }
 }
 
+// Templated burst-size wrappers: noc_async_read<max_burst>(src, dst, size).
+// Used by common.hpp and other kernels.  In emulation the burst size is
+// irrelevant; delegate to the non-template versions defined above.
+template <uint32_t max_burst_size>
+inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
+                           uint32_t size, uint8_t noc = 0, uint32_t vc = 0) {
+    noc_async_read(src_noc_addr, dst_local_l1_addr, size, noc, vc);
+}
+template <uint32_t max_burst_size>
+inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
+                            uint32_t size, uint8_t noc = 0, uint32_t vc = 0) {
+    noc_async_write(src_local_l1_addr, dst_noc_addr, size, noc, vc);
+}
+
 // ---- Multicast write ----
 
 inline void noc_async_write_multicast(
@@ -455,6 +469,59 @@ inline void noc_async_write_multicast_loopback_src(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
     uint32_t size, uint32_t num_dests, bool linked = false, uint8_t noc = 0) {
     noc_async_write_multicast(src_local_l1_addr, dst_mcast_noc_addr, size, num_dests, linked, noc);
+}
+
+// noc_async_read_one_packet / noc_async_write_one_packet — single-packet NOC
+// transfer variants.  In emulation there is no burst-size limit, so these
+// simply delegate to noc_async_read / noc_async_write.
+template <bool enable_noc_tracing = true>
+inline void noc_async_read_one_packet(
+    uint64_t src_noc_addr, uint32_t dst_local_l1_addr, uint32_t size,
+    uint8_t noc = 0, uint32_t /*read_req_vc*/ = 0) {
+    noc_async_read(src_noc_addr, dst_local_l1_addr, size, noc);
+}
+
+template <bool enable_noc_tracing = true, bool posted = false>
+inline void noc_async_write_one_packet(
+    uint32_t src_local_l1_addr, uint64_t dst_noc_addr, uint32_t size,
+    uint8_t noc = 0, uint32_t /*vc*/ = 0) {
+    noc_async_write(src_local_l1_addr, dst_noc_addr, size, noc);
+}
+
+// Transaction-ID NOC API — hardware tracks per-trid outstanding read counts.
+// Emulation reads are synchronous memcpys so transaction IDs are no-ops and
+// any flush check immediately returns true (flushed).
+inline void noc_async_read_set_trid(uint32_t /*trid*/ = 0, uint8_t /*noc*/ = 0) {}
+inline void noc_async_write_set_trid(uint32_t /*trid*/ = 0, uint8_t /*noc*/ = 0) {}
+inline bool ncrisc_noc_read_with_transaction_id_flushed(uint32_t /*noc*/, uint32_t /*trid*/) { return true; }
+
+// Stateful one-packet read API — hardware uses sticky XY registers so
+// _with_state only needs to supply the new local L1 src address and dst address.
+// Emulation stores the full NOC addr from _set_state and replaces only the lower
+// NOC_ADDR_LOCAL_BITS (36) bits when _with_state is called.
+namespace {
+struct __EmuleNocReadState {
+    uint64_t src_noc_addr = 0;
+    uint32_t size = 0;
+};
+}
+static thread_local __EmuleNocReadState __emule_noc_read_state;
+
+template <bool use_vc = false>
+inline void noc_async_read_one_packet_set_state(
+    uint64_t src_noc_addr, uint32_t size, const uint32_t /*vc*/ = 0, uint8_t /*noc*/ = noc_index) {
+    __emule_noc_read_state.src_noc_addr = src_noc_addr;
+    __emule_noc_read_state.size = size;
+}
+
+template <bool inc_num_issued = true, bool use_vc = false>
+inline void noc_async_read_one_packet_with_state(
+    uint32_t src_local_l1_addr, uint32_t dst_local_l1_addr, const uint32_t /*vc*/ = 0, uint8_t noc = noc_index) {
+    // Keep XY from stored state; replace local address bits with the new src.
+    static constexpr uint64_t local_mask = (uint64_t(1) << 36) - 1;
+    uint64_t noc_addr = (__emule_noc_read_state.src_noc_addr & ~local_mask) |
+                        (uint64_t(__emule_addr_to_offset(src_local_l1_addr)) & local_mask);
+    noc_async_read(noc_addr, dst_local_l1_addr, __emule_noc_read_state.size, noc);
 }
 
 // ---- Barriers ----

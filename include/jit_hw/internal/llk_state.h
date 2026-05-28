@@ -38,9 +38,14 @@ inline bool get_output_narrow_tile(uint32_t) { return false; }
 inline uint32_t get_output_face_r_dim(uint32_t) { return 16; }
 inline uint32_t get_output_num_faces(uint32_t) { return 4; }
 
-// Format arrays (stub)
-inline uint32_t unpack_src_format[32] = {};
-inline uint32_t unpack_dst_format[32] = {};
+// Format arrays.
+// The constexpr versions (all zeros = Float16_b) are used by tilize_helpers.inl
+// constexpr format queries — fast-tilize float32 path is never taken in emulation.
+// The mutable runtime arrays are kept for any non-constexpr consumers.
+constexpr uint32_t unpack_src_format[32] = {};
+constexpr uint32_t unpack_dst_format[32] = {};
+constexpr uint32_t pack_dst_format[32] = {};
+constexpr uint32_t pack_src_format[32] = {};
 
 // ---- Tilize/Untilize state ----
 // Unpack state: tracks source CB and tile position for datacopy calls
