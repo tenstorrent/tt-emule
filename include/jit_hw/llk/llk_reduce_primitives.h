@@ -45,10 +45,27 @@ template <ckernel::MathFidelity Fidelity, int Throttle, typename... Args>
 inline void llk_math_matmul_init(Args... /*ignored*/) {}
 template <typename... Args>
 inline void llk_unpack_AB_matmul_init(Args... /*ignored*/) {}
-template <int Mode, typename... Args>
-inline void llk_unpack_reconfig_data_format_srca(Args... /*ignored*/) {}
-template <int Mode, typename... Args>
-inline void llk_math_reconfig_data_format_srca(Args... /*ignored*/) {}
+
+// Reconfig stubs match the real tt-metal signatures at
+//   tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_unpack_common.h:80
+// which take <bool is_fp32_dest_acc_en, p_dim_stride_target dim_stride_target, bool to_from_int8>
+// — i.e. all non-type template args, sometimes with the second omitted.
+// Use `auto... TArgs` so any combination of non-type args compiles, and
+// default the runtime cb-id args so unary calls (single argument) work too.
+// emule's compute path is format-agnostic so the body is a no-op regardless.
+enum class p_dim_stride_target {
+    IGNORE,          // Do not modify dim/stride
+    FACE_ROW_MAJOR,  // Set dim/stride for face-row-major unpack
+};
+
+template <auto... TArgs>
+inline void llk_unpack_reconfig_data_format_srca(uint32_t /*old_or_new*/ = 0, uint32_t /*new_operand*/ = 0) {}
+template <auto... TArgs>
+inline void llk_math_reconfig_data_format_srca(uint32_t /*old_or_new*/ = 0, uint32_t /*new_operand*/ = 0) {}
+template <auto... TArgs>
+inline void llk_unpack_reconfig_data_format_srcb(uint32_t /*old_or_new*/ = 0, uint32_t /*new_operand*/ = 0) {}
+template <auto... TArgs>
+inline void llk_math_reconfig_data_format_srcb(uint32_t /*old_or_new*/ = 0, uint32_t /*new_operand*/ = 0) {}
 
 inline void llk_unpack_AB_matmul(uint32_t in0_cb, uint32_t in1_cb, uint32_t in0_idx, uint32_t in1_idx) {
     __emule_matmul_state = {in0_cb, in1_cb, in0_idx, in1_idx};
