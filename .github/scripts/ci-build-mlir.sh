@@ -62,14 +62,9 @@ if [ -f "$UMD_CLUSTER" ] && ! grep -q 'sw_emule_chip.hpp' "$UMD_CLUSTER"; then
 fi
 
 echo "== Configuring tt-metal (out-of-tree, with -DTT_METAL_USE_EMULE=ON) =="
-# Point clang-20 at gcc-13's libstdc++ headers; gcc-12's headers trip
-# -Werror,-Wdeprecated-declarations under clang-20 in C++20 mode.
-GCC13_FLAGS="--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13"
 cmake -B "$TT_METAL_BUILD" -S "$TT_METAL_DIR" -G Ninja \
     -DCMAKE_C_COMPILER=clang-20 \
     -DCMAKE_CXX_COMPILER=clang++-20 \
-    -DCMAKE_C_FLAGS="$GCC13_FLAGS" \
-    -DCMAKE_CXX_FLAGS="$GCC13_FLAGS" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$TT_METAL_BUILD" \
     -DCPM_SOURCE_CACHE="$TT_METAL_DIR/.cpmcache" \
@@ -126,8 +121,6 @@ echo "== Configuring tt-mlir (TTMLIR_TTMETAL_SOURCE_DIR=$TT_METAL_DIR) =="
 cmake -B "$BUILD_DIR" -S "$TT_MLIR_DIR" -G Ninja \
     -DCMAKE_C_COMPILER=clang-20 \
     -DCMAKE_CXX_COMPILER=clang++-20 \
-    -DCMAKE_C_FLAGS="$GCC13_FLAGS" \
-    -DCMAKE_CXX_FLAGS="$GCC13_FLAGS" \
     -DCMAKE_BUILD_TYPE=Release \
     -DTTMLIR_ENABLE_RUNTIME=ON \
     -DTT_RUNTIME_ENABLE_TTMETAL=ON \

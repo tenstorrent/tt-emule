@@ -7,7 +7,7 @@ Quick path: clone, build, verify, then wire up a new ttnn test. Skip to `BUILD_G
 | Tool | Version |
 |------|---------|
 | clang-20 | 20.x |
-| libstdc++ (gcc-12+) | 12.x |
+| libstdc++ (gcc-13+) | 13.x |
 | CMake | ≥ 3.24 |
 | Ninja | ≥ 1.10 |
 
@@ -38,8 +38,6 @@ One libstdc++ build covers C++ regression, ttnn pytest, and tt-mlir D2M:
 cd "$ROOT/tt-metal"
 cmake -S . -B build_emule -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$ROOT/tt-metal/cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake" \
-  -DCMAKE_AR=/usr/bin/llvm-ar-20 \
-  -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
   -DCMAKE_BUILD_TYPE=Release \
   -DTT_METAL_USE_EMULE=ON \
   -DTT_EMULE_PATH="$ROOT/tt-emule" \

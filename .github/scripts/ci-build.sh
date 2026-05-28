@@ -50,26 +50,14 @@ echo "== Configuring tt-metal =="
 # choice covers both C++ regression (this script) and D2M (ci-build-mlir.sh).
 # libstdc++ is also tt-metal upstream's default (build_metal.sh:89).
 #
-# Point clang at gcc-13's libstdc++ headers. Ubuntu 22.04's system libstdc++
-# (gcc-11) does not implement enough of C++20 ranges to compile tt-metal —
-# levelized_graph.cpp's std::ranges::for_each over a views::filter trips
-# constraint failures in gcc-11's ranges_algo.h. ci-build-mlir.sh uses the
-# same flag on the same runner. Local dev boxes typically default to
-# gcc-12+ and don't need this; the tt-ubuntu-2204 CI runner does.
-#
 # The tt-emule integration is selected with -DTT_METAL_USE_EMULE=ON (no extra
 # TT_ prefix). Earlier revisions of this script passed -DTT_METAL_USE_TT_EMULE
 # and -DTT_METAL_EMULATION which tt-metal didn't recognize, so the build
 # silently defaulted to TT_METAL_USE_EMULE=OFF and built stock tt-metal.
-GCC13_FLAGS="--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13"
 cmake -B "$BUILD_DIR" \
     -S "$TT_METAL_DIR" \
     -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$TT_METAL_DIR/cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake" \
-    -DCMAKE_C_FLAGS="$GCC13_FLAGS" \
-    -DCMAKE_CXX_FLAGS="$GCC13_FLAGS" \
-    -DCMAKE_AR=/usr/bin/llvm-ar-20 \
-    -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
     -DCMAKE_BUILD_TYPE=Release \
     -DTT_METAL_USE_EMULE=ON \
     -DTT_EMULE_PATH="$TT_EMULE_DIR" \

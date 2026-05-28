@@ -23,21 +23,16 @@ concurrency:
   group: pr-regression-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # tt-mlir's CI image: ubuntu-22-04 + pre-built /opt/ttmlir-toolchain
-  # (LLVM, StableHLO, Shardy, flatbuffers). Same image PR D2M Regression uses,
-  # which is why both workflows can share the same gcc-13 / clang-20 install
-  # pattern below.
-  TT_MLIR_CI_IMAGE: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
-
 jobs:
   build:
     name: Build tt-metal against PR's tt-emule
     runs-on: tt-ubuntu-2204-large-stable
     timeout-minutes: 180
     container:
-      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
-      options: --user root
+      # ubuntu-24-04: ships clang-20 + gcc-13 + /opt/ttmlir-toolchain
+      # pre-baked, so the workflow doesn't need to apt-install at runtime
+      # (which is why we don't need --user root).
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     outputs:
       pin: ${{ steps.pin.outputs.sha }}
     steps:
@@ -74,35 +69,10 @@ jobs:
           git submodule update --init --depth=1 tt_metal/third_party/umd
           git submodule update --init --depth=1 tt_metal/third_party/tracy
 
-      - name: Install clang-20 + gcc-13 libstdc++
-        # tt-mlir's CI container ships clang-17 + gcc-12's libstdc++. We need
-        # clang-20 (because the runtime JIT compile path uses /usr/bin/clang++-20
-        # baked into libtt_metal.so) and gcc-13 (because tt-metal's C++20
-        # std::ranges code in levelized_graph.cpp doesn't compile against
-        # gcc-11/gcc-12 libstdc++ — see BUILD_GUIDE.md). Mirrors the D2M build
-        # workflow's install step.
-        shell: bash
-        run: |
-          set -e
-          apt-get update -qq
-          apt-get install -y -qq wget gnupg lsb-release software-properties-common
-          if ! command -v clang-20 >/dev/null 2>&1; then
-            wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
-            chmod +x /tmp/llvm.sh
-            /tmp/llvm.sh 20 all
-          fi
-          if [ ! -d /usr/lib/gcc/x86_64-linux-gnu/13 ]; then
-            add-apt-repository -y ppa:ubuntu-toolchain-r/test
-            apt-get update -qq
-            apt-get install -y -qq gcc-13 g++-13 libstdc++-13-dev
-          fi
-          clang-20 --version
-          ls /usr/lib/gcc/x86_64-linux-gnu/ | head
-
       - name: Restore ccache
         uses: actions/cache@v4
         with:
-          path: /root/.ccache
+          path: ~/.ccache
           key: tt-metal-${{ steps.pin.outputs.sha }}-clang20-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             tt-metal-${{ steps.pin.outputs.sha }}-clang20-${{ runner.os }}-
@@ -137,8 +107,7 @@ jobs:
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 60
     container:
-      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
-      options: --user root
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     strategy:
       fail-fast: false
       matrix:
@@ -178,31 +147,6 @@ jobs:
           mkdir -p tt-metal/tt_metal/third_party/umd/tests
           cp -r tt-metal/build_emule/_cluster_descs/cluster_descriptor_examples \
                 tt-metal/tt_metal/third_party/umd/tests/
-
-      - name: Install clang-20 + gcc-13 libstdc++ runtime
-        # clang-20 is required at *runtime*: the emulated program runner
-        # (tt_metal/impl/emulation/emulated_program_runner.cpp) JIT-compiles each
-        # kernel source via system(TT_EMULE_CXX_COMPILER ...). That define is
-        # baked into libtt_metal.so at build time as /usr/bin/clang++-20.
-        #
-        # gcc-13's libstdc++ is required because the build job links against
-        # GLIBCXX_3.4.32 symbols (the container ships libstdc++-12 by default).
-        # Mirrors the D2M test workflow's install step.
-        shell: bash
-        run: |
-          set -e
-          apt-get update -qq
-          apt-get install -y -qq wget gnupg lsb-release software-properties-common
-          if ! command -v clang-20 >/dev/null 2>&1; then
-            wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
-            chmod +x /tmp/llvm.sh
-            /tmp/llvm.sh 20 all
-          fi
-          if [ ! -d /usr/lib/gcc/x86_64-linux-gnu/13 ]; then
-            add-apt-repository -y ppa:ubuntu-toolchain-r/test
-            apt-get update -qq
-            apt-get install -y -qq libstdc++6 gcc-13 g++-13 libstdc++-13-dev
-          fi
 
       - name: Install SFPI toolchain
         # tt-metal's JIT kernel compiler (tt_metal/jit_build/build.cpp) looks for

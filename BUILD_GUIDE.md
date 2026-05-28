@@ -17,13 +17,13 @@ A complete, step-by-step guide to building tt-emule and all its dependencies fro
 | Tool | Minimum Version | Check Command |
 |------|----------------|---------------|
 | clang-20 | 20.x | `clang-20 --version` |
-| libstdc++ (gcc-12+) | 12.x | `gcc --version` |
+| libstdc++ (gcc-13+) | 13.x | `gcc --version` |
 | CMake | 3.24 | `cmake --version` |
 | Ninja | 1.10+ | `ninja --version` |
 | Python | 3.10+ | `python3 --version` |
 | Git | 2.x | `git --version` |
 
-> **Ubuntu 22.04**: system default is gcc-11, whose libstdc++ doesn't implement enough of C++20 ranges for tt-metal (`std::ranges::for_each` over a `views::filter` in `levelized_graph.cpp` fails constraint checks). Install `gcc-13` and add `-DCMAKE_C_FLAGS="--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13" -DCMAKE_CXX_FLAGS="--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13"` to the Phase 3 cmake. CI uses this flag — both the metal-regression and D2M jobs run inside the `tt-mlir-ci-ubuntu-22-04` container, where the `Install clang-20 + gcc-13 libstdc++` step adds gcc-13 from `ppa:ubuntu-toolchain-r/test`. The cmake invocation is identical to the local-dev one.
+Ubuntu 24.04 ships gcc-13 / libstdc++-13 natively, matching CI's `tt-mlir-ci-ubuntu-24-04` container. tt-metal's C++20 `std::ranges` code (`levelized_graph.cpp`) requires gcc-13+'s libstdc++ — older distros need to install gcc-13 from a backport PPA.
 
 ### Required System Packages
 
@@ -114,8 +114,6 @@ cd $ROOT/tt-metal
 
 cmake -S . -B build_emule -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE=$ROOT/tt-metal/cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake \
-    -DCMAKE_AR=/usr/bin/llvm-ar-20 \
-    -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
     -DCMAKE_BUILD_TYPE=Release \
     -DTT_METAL_USE_EMULE=ON \
     -DTT_EMULE_PATH=$ROOT/tt-emule \
@@ -264,8 +262,6 @@ source env/activate
 cmake -G Ninja -B build \
     -DCMAKE_C_COMPILER=clang-20 \
     -DCMAKE_CXX_COMPILER=clang++-20 \
-    -DCMAKE_C_FLAGS="-Wno-deprecated-declarations" \
-    -DCMAKE_CXX_FLAGS="-Wno-deprecated-declarations" \
     -DTTMLIR_TTMETAL_SOURCE_DIR=$ROOT/tt-metal \
     -DCMAKE_BUILD_TYPE=Release \
     -DTTMLIR_ENABLE_RUNTIME=ON \
@@ -275,9 +271,7 @@ cmake -G Ninja -B build \
     -DLLVM_USE_LINKER=lld-20
 ```
 
-**Why `-DCMAKE_C/CXX_COMPILER=clang-20` is required:** `env/activate` prepends `/opt/ttmlir-toolchain/bin` to `PATH`. If no compiler is specified, cmake picks up `clang` from the toolchain PATH — which is clang-17. Using clang-17 for tt-mlir while tt-metal uses clang-20 produces an ABI mismatch: clang-20 encodes C++20 `requires` constraints into mangled names (`_ZN4ttnn4fullIfQoosr3std...`), but clang-17 does not (`_ZN4ttnn4fullIfE...`). The linker cannot resolve `ttnn::full<float>` and the build fails with `undefined symbol`.
-
-**Why `-Wno-deprecated-declarations`:** gcc-12's libstdc++ headers declare `std::get_temporary_buffer` with `_GLIBCXX17_DEPRECATED`. MLIR's `Scheduler.cpp` instantiates code that references it, and LLVM's build system sets `-Werror,-Wdeprecated-declarations`. This suppresses that error. (CI machines use `--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13` to point at gcc-13 headers where the declaration was removed; the flag achieves the same effect without needing gcc-13.)
+**Why `-DCMAKE_C/CXX_COMPILER=clang-20` is explicit:** `env/activate` prepends `/opt/ttmlir-toolchain/bin` to `PATH`, which can shadow the system `clang`. Pinning to `clang-20` guarantees tt-mlir and tt-metal mangle C++20 `requires` constraints the same way (`_ZN4ttnn4fullIfQoosr3std...`); a version skew between the two trees would yield `undefined symbol: ttnn::full<float>` at link time.
 
 ### Step 5d-verify-configure: Confirm tt-mlir is using your tt-metal
 
@@ -292,12 +286,31 @@ If `ls -la` shows a real directory instead of a symlink, the override did not ta
 
 ### Step 5d-pre: Block ExternalProject Before Building (MANDATORY)
 
-**Do this before every `cmake --build` on tt-mlir.** tt-mlir wraps tt-metal in `ExternalProject_Add`. During the build step, CMake re-runs `cmake -B build_emule` on your tt-metal tree — without `-DTT_METAL_USE_EMULE=ON` — stripping the emulation code path. Because Phase 3 now produces a *single* `build_emule`, this reconfigure breaks **both** C++ regression and D2M (not just D2M as in the old two-build setup). Pre-touching the stamp files keeps tt-mlir away from `build_emule`:
+**Do this before every `cmake --build` on tt-mlir.** tt-mlir wraps tt-metal in `ExternalProject_Add(tt-metal)`. If left alone, its build step will:
+
+1. Re-configure tt-metal under a *separate* `build_Release/` directory without `-DTT_METAL_USE_EMULE=ON` — producing a stock libtt_metal.so that aborts at runtime with `TT_FATAL: TargetDevice::Emule requires building with TT_METAL_USE_EMULE=ON`.
+2. Build that stock tree.
+3. Create a `<tt-metal>/build -> build_Release` symlink (the `create_build_symlink` step). tt-mlir then bakes that path into `libTTMLIRRuntime.so`'s RUNPATH and bundles the stock libtt_metal.so into the ttrt wheel.
+
+To prevent all three, (a) pre-create the `build_Release` and `build` symlinks yourself pointing at `build_emule`, and (b) pre-touch **every** ExternalProject stamp — not just `configure`/`build`/`install`. Missing any stamp lets that step run.
+
+> `tt-mlir/third_party/CMakeLists.txt` hardcodes `TTMETAL_BUILD_DIR = <tt-metal>/build_${CMAKE_BUILD_TYPE}` (so `build_Release` for our `-DCMAKE_BUILD_TYPE=Release`) and the libTTMLIRRuntime.so RUNPATH bakes in `build_Release/lib`. The ttrt wheel also copies its bundled libtt_metal.so from there. So the *critical* symlink is `build_Release -> build_emule`. The `build` symlink mirrors what ExternalProject's `create_build_symlink` step would create — some downstream scripts (env/activate's `TT_METAL_BUILD_HOME`) reference it.
 
 ```bash
+# (a) Make tt-mlir's hardcoded lookups land on our emule build.
+#     tt-mlir's configure step creates an empty build_Release/ directory
+#     (ExternalProject's BINARY_DIR is populated eagerly), so rm -rf it
+#     before symlinking — otherwise `ln -sfn` creates the link *inside* it.
+rm -rf $ROOT/tt-metal/build_Release
+ln -s build_emule $ROOT/tt-metal/build_Release
+ln -sfn build_emule $ROOT/tt-metal/build
+
+# (b) Pre-touch all 8 ExternalProject stamps so cmake --build skips every step.
 stamp_dir=$ROOT/tt-mlir/third_party/tt-metal/src/tt-metal-stamp
 mkdir -p "$stamp_dir"
-touch "$stamp_dir/tt-metal-configure" "$stamp_dir/tt-metal-build" "$stamp_dir/tt-metal-install"
+for step in mkdir download update patch configure build install create_build_symlink; do
+    touch "$stamp_dir/tt-metal-$step"
+done
 ```
 
 Then build tt-mlir:
@@ -306,14 +319,30 @@ Then build tt-mlir:
 cmake --build build -j$(nproc)
 ```
 
-After the build, verify `TT_METAL_USE_EMULE` survived (one-liner):
+After the build, verify both the source tt-metal build and the ttrt wheel's bundled copy have the emule symbol:
 
 ```bash
+# (1) Source tt-metal build (built in Phase 3).
 nm -DC $ROOT/tt-metal/build_emule/tt_metal/libtt_metal.so | grep emule::execute_program_emulated
-# Must show a T line. If empty, the stamps weren't pre-touched and tt-mlir's
-# ExternalProject reconfigured build_emule without TT_METAL_USE_EMULE=ON.
-# Recover by re-running the Phase 3 cmake configure + build.
+# Must show a T line.
+
+# (2) The libtt_metal.so the ttrt wheel ships — tt-mlir's runtime copies this
+#     from <tt-metal>/build/lib/libtt_metal.so during its build. Must also
+#     contain the emule symbol, otherwise ttrt query will abort.
+nm -DC $ROOT/tt-mlir/build/python_packages/ttrt/runtime/libtt_metal.so | grep emule::execute_program_emulated
+# Must show a T line.
+
+# (3) libTTMLIRRuntime.so's RUNPATH must NOT contain build_Release/lib.
+readelf -d $ROOT/tt-mlir/build/runtime/lib/libTTMLIRRuntime.so | grep -i runpath
+# Expect: [$ORIGIN:$ROOT/tt-metal/build_emule/lib] (via the build symlink).
+# If you see build_Release in the runpath, ExternalProject's create_build_symlink
+# step ran — the stamps were incomplete. Wipe build_Release, redo Step 5d-pre
+# with the full stamp list, and rebuild tt-mlir clean.
 ```
+
+If any of (1), (2), (3) fails:
+- (1) only — re-run the Phase 3 cmake configure + build (build_emule itself got reconfigured).
+- (2) or (3) — wipe `$ROOT/tt-metal/build_Release` and `$ROOT/tt-mlir/build`, redo Step 5d-pre with the full stamp list, and rebuild tt-mlir from scratch.
 
 **Important — `TTMLIR_TTMETAL_SOURCE_DIR`:** without this, tt-mlir fetches its own tt-metal clone and you get the silent PCC=0.0 disaster described above.
 
@@ -331,7 +360,7 @@ If your tt-metal build has `ENABLE_TRACY=ON`, setting `TT_RUNTIME_ENABLE_PERF_TR
 
 | You see | Reason |
 |---|---|
-| `TT_FATAL: TargetDevice::Emule requires building with TT_METAL_USE_EMULE=ON` (at runtime, post-build) | Build was configured without `-DTT_METAL_USE_EMULE=ON`. Usually because tt-mlir's `ExternalProject_Add(tt-metal)` reconfigured `build_emule` — Step 5d-pre's stamp pre-touch prevents this. Recover by re-running the Phase 3 cmake configure + build. |
+| `TT_FATAL: TargetDevice::Emule requires building with TT_METAL_USE_EMULE=ON` (at runtime, post-build) | Either build_emule itself got reconfigured without the flag, or tt-mlir built a stock tt-metal at `build_Release/` and the ttrt wheel bundled that copy. Use the three-check post-build verification to tell which. Fix per Step 5d-pre — pre-create the `build -> build_emule` symlink **and** pre-touch all 8 ExternalProject stamps. |
 | `ImportError: ... libtt_metal.so: undefined symbol: _ZTIN2tt3umd11SWEmuleChipE` | UMD subbuild didn't include `sw_emule_chip.cpp` (i.e. `TT_UMD_BUILD_EMULE` was off). Re-verify `nm -DC build_emule/tt_metal/third_party/umd/lib/libtt-umd.so \| grep SWEmuleChip::` shows symbols. |
 | `ImportError: ... libTTMLIRRuntime.so: undefined symbol: _ZN5tracy8GetTokenEv` | tt-mlir's `TT_RUNTIME_ENABLE_PERF_TRACE=ON` but tt-metal's `ENABLE_TRACY=OFF`. The two flags must be consistent. |
 
@@ -376,11 +405,8 @@ The UMD submodule may require SSH access. Override the URL with `git config subm
 ### Missing libraries in build_emule/lib/
 Create symlinks as described in the "Post-build symlinks" subsection of Phase 3. The build places .so files in subdirectories rather than a flat `lib/` directory.
 
-### `llvm-ar-20: not found` during tt-metal build
-Verify `llvm-ar-20` is installed: `ls /usr/bin/llvm-ar-20`. On Ubuntu, install via `sudo apt-get install llvm-20`. The `llvm-ar-20` and `llvm-ranlib-20` binaries are in the `llvm-20` package.
-
 ### `undefined symbol: ttnn::full<float>` during tt-mlir build
-This is a compiler ABI mismatch: tt-mlir was configured without an explicit `-DCMAKE_CXX_COMPILER=clang-20`, so cmake picked up `clang-17` from the ttmlir-toolchain PATH (`env/activate` prepends `/opt/ttmlir-toolchain/bin`). clang-17 and clang-20 mangle C++20 `requires` constraints differently. Fix by always passing `-DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20` explicitly in the tt-mlir cmake configure command (see Step 5d). Both `build_emule` (tt-metal) and tt-mlir must use the same compiler.
+Compiler ABI mismatch — tt-mlir was configured without an explicit `-DCMAKE_CXX_COMPILER=clang-20`, so cmake picked up a different `clang` from the toolchain PATH (`env/activate` prepends `/opt/ttmlir-toolchain/bin`). Different clang majors mangle C++20 `requires` constraints differently. Fix by always passing `-DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20` explicitly in the tt-mlir cmake configure command (see Step 5d). Both `build_emule` (tt-metal) and tt-mlir must use the same compiler.
 
 ### `ld: unrecognized option '--color-diagnostics'` during tt-mlir build
 GNU ld doesn't support this LLD flag. Add `-DLLVM_USE_LINKER=lld-20` to the tt-mlir cmake configure command.
