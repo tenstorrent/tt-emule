@@ -238,6 +238,61 @@ run_test "ttnn_minmax_both_dims" "$TTNN_BIN" \
     --gtest_filter="MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/*"
 
 # ===========================================================================
+# Tier 6: tt_transformers LLM pytest (single-device N150)
+# ===========================================================================
+#
+# Pytest-driven LLM-layer tests from tt-metal that exercise emule via the
+# stock ttnn Python binding. The build config is expected to ALWAYS provide:
+#   - /opt/ttmlir-toolchain/venv with transformers, huggingface-hub,
+#     torchvision, accelerate, Pillow installed
+#   - HF_MODEL env var set (or default below), with weights either cached
+#     locally under $TT_CACHE_PATH or pullable via HF_TOKEN
+#   - $TT_METAL_DIR/build_emule/ttnn/_ttnn.so symlinked into
+#     $TT_METAL_DIR/ttnn/ttnn/_ttnn.so (post-build symlink from BUILD_GUIDE.md)
+# Missing any of these is a real failure, not a skip — silently skipping
+# this tier hides regressions and produces falsely-green runs.
+
+PYTEST_BIN="${PYTEST_BIN:-/opt/ttmlir-toolchain/venv/bin/pytest}"
+HF_MODEL="${HF_MODEL:-meta-llama/Llama-3.2-1B}"
+TT_CACHE_PATH="${TT_CACHE_PATH:-/localdev/arminale/.tt_cache}"
+
+run_pytest() {
+    local name="$1"; shift
+    local test_path="$1"; shift
+    echo "--- $name ---"
+    # Standard emule + tt_transformers env (mirrors BUILD_GUIDE.md Phase 4b
+    # plus the model-sim bring-up additions).
+    if (
+        export PYTHONPATH="$TT_METAL_DIR/ttnn:$TT_METAL_DIR/tools:$BUILD_DIR/lib:$TT_METAL_DIR:${PYTHONPATH:-}"
+        export LD_LIBRARY_PATH="$BUILD_DIR/lib:${LD_LIBRARY_PATH:-}"
+        export TT_METAL_HOME="$TT_METAL_DIR"
+        export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
+        export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
+        export TT_METAL_EMULE_MODE=1
+        export TT_METAL_SLOW_DISPATCH_MODE=1
+        export MESH_DEVICE=N150
+        export HF_MODEL TT_CACHE_PATH
+        local xml_arg
+        xml_arg="$(_gtest_xml_args "$name")"   # benign; pytest ignores --gtest_output unless JUNIT_ARG is added
+        local junit_args=()
+        if [ -n "$GTEST_XML_DIR" ]; then
+            junit_args=(--junitxml="$GTEST_XML_DIR/${name}.xml")
+        fi
+        timeout 900 "$PYTEST_BIN" "$test_path" -v --tb=short --forked "${junit_args[@]}" "$@" 2>&1 | tail -20
+    ); then
+        echo "  PASS"; PASS=$((PASS + 1))
+    else
+        echo "  FAIL"; FAIL=$((FAIL + 1))
+    fi
+}
+
+echo ""
+echo "== Tier 6: tt_transformers LLM pytest (N150 single-device) =="
+
+run_pytest "tt_transformers_test_embedding" \
+    "$TT_METAL_DIR/models/tt_transformers/tests/test_embedding.py"
+
+# ===========================================================================
 
 echo ""
 echo "========================================"

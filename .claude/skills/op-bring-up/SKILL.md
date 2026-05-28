@@ -3,7 +3,7 @@ name: op-bring-up
 description: Use when bringing up a ttnn op under tt-emule (the Tenstorrent software emulator) so a tt-metal or tt-mlir pytest can exercise that op on a single emulated Wormhole/Blackhole chip. Walks through environment setup, failure-driven LLK gap discovery, shim placement, and iteration to a passing PCC check.
 ---
 
-> **v2 — distilled from two bring-ups (`ttnn.embedding`, then `ttnn.multiply` via the binary_ng scalar kernel).** Stable enough to follow blindly for ops in already-touched families; for ops in new families (reductions, all-gather, sharded matmul, …) treat it as a starting playbook and refine.
+This skill captures the methodology for bringing up a ttnn op under tt-emule. Updated in place after each new bring-up — read the worked examples to see what's been covered and what hasn't.
 
 ## When to use this skill
 
@@ -185,7 +185,7 @@ Write to the notes file *before* each rebuild, not after — captures intent eve
 
 ## Estimate of effort
 
-Cost of a new op is **proportional to what's left in the long tail**, not the op's own algorithmic complexity. As of v2:
+Cost of a new op is **proportional to what's left in the long tail**, not the op's own algorithmic complexity:
 
 | Op family | Cost | Why |
 |---|---|---|
@@ -238,10 +238,10 @@ The drastic difference in cost vs. embedding (1 round vs 3, 30 LoC vs 150) is be
 
 ## Skill maintenance
 
-After each new op bring-up:
+After each new op bring-up, update this skill in place:
 1. Add a "Worked example: `<op>`" subsection if the playbook needed adapting.
 2. If a new gotcha shows up, append to "Common gotchas".
 3. If a new failure category emerges, extend the classification table in Step 4.
-4. If the bring-up was substantially different (e.g. SFPU op, reduction, all-gather, sharded matmul), call out which sections need refinement.
+4. If the bring-up was substantially different (e.g. SFPU op, reduction, all-gather, sharded matmul, collective communication), revise the affected sections.
 
-**v2 → v3 trigger**: bring-up of a fundamentally new family — reduce, all-gather, sharded matmul, or any op that requires new dataflow primitives beyond CB-to-CB. Review whether the "Estimate of effort" table generalizes and the failure-category taxonomy still covers.
+Keep the skill as a single cohesive document. Don't add version markers ("v1", "v2", etc.) — the worked-examples list shows what's been covered, which is the more useful signal.

@@ -389,6 +389,13 @@ ALWI void copy_tile_to_dst_init_short_with_dt(uint32_t, uint32_t, uint32_t = 0) 
 // ---- Reconfig operations (no-ops) ----
 ALWI void reconfig_data_format(uint32_t) {}
 ALWI void reconfig_data_format(uint32_t, uint32_t) {}
+// 4-arg overload — kernels like the layernorm compute kernel call
+//   reconfig_data_format(srca_old_cb, srca_new_cb, srcb_old_cb, srcb_new_cb)
+// to switch both SrcA and SrcB datatypes in one call. Real tt-metal at
+//   tt_metal/hw/inc/api/compute/common.h
+// dispatches to llk_unpack_reconfig_data_format_{srca,srcb}. emule's compute
+// path is format-agnostic at the host level, so this is a no-op.
+ALWI void reconfig_data_format(uint32_t, uint32_t, uint32_t, uint32_t) {}
 template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
 ALWI void reconfig_data_format_srca(uint32_t) {}
 template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
