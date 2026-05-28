@@ -253,6 +253,20 @@ FORCE_INLINE void noc_async_write_tile(
     noc_async_write_page(id, addrgen, src_local_l1_addr, size, offset, noc);
 }
 
+// ---- Free-function get_noc_addr<AddrGen>(id, accessor, offset) ----
+//
+// Mirrors tt-metal's
+//   tt_metal/hw/inc/internal/dataflow/dataflow_api_addrgen.h:430
+// — kernels (e.g. embeddings_tilize.cpp) call this in addition to the
+// AddrGen.get_noc_addr method. Delegates to the AddrGen's method via the
+// has_get_noc_addr_v trait above.
+template <typename AddrGen,
+          typename = std::enable_if_t<has_get_noc_addr_v<AddrGen>>>
+FORCE_INLINE uint64_t get_noc_addr(uint32_t id, const AddrGen& addrgen,
+                                   uint32_t offset = 0, uint8_t noc = 0) {
+    return addrgen.get_noc_addr(id, offset, noc);
+}
+
 // ---- Raw NOC read/write ----
 
 inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
@@ -279,6 +293,19 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
                 (unsigned long long)src_noc_addr, my_x[0], my_y[0],
                 __emule_logical_x, __emule_logical_y);
     }
+}
+
+// Templated overload — kernels (e.g. embeddings_tilize.cpp) call
+//   noc_async_read<input_block_size_bytes>(src, dst, size)
+// where the template arg is the compile-time max page size hint. On Tensix
+// this enables a fast single-packet path; on host the size is dynamic and
+// the memcpy in the non-templated body handles it, so this just forwards.
+// Matches the tt-metal signature at
+//   tt_metal/hw/inc/api/dataflow/dataflow_api.h:551
+template <uint32_t max_page_size, bool enable_noc_tracing = true>
+inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
+                           uint32_t size, uint8_t noc = 0, uint32_t vc = 0) {
+    noc_async_read(src_noc_addr, dst_local_l1_addr, size, noc, vc);  // non-templated overload
 }
 
 inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
