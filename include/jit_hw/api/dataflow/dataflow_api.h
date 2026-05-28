@@ -345,16 +345,17 @@ FORCE_INLINE void noc_async_write_tile(
 // ---- NOC transfer alignment check (gated by TT_METAL_EMULE_ASAN) ----
 // Checks that src and dst lower bits match per the hardware requirement:
 //   L1<->L1: lower 4 bits must match (16-byte granularity)
-//   DRAM read WH: lower 8 bits must match; BH: lower 16 bits must match
-//   DRAM write (WH/BH): lower 4 bits must match
+//   DRAM read WH: lower 5 bits must match (32-byte granularity)
+//   DRAM read BH: lower 6 bits must match (64-byte granularity)
+//   DRAM write (WH/BH): lower 4 bits must match (16-byte granularity)
 inline void __emule_check_noc_read_alignment(uint64_t src_noc_addr, uint32_t dst_local_l1_addr) {
     if (!__emule_asan_enabled()) return;
     uint32_t src_off = static_cast<uint32_t>(src_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
     if (__emule_noc_addr_is_dram(src_noc_addr)) {
 #ifdef ARCH_BLACKHOLE
-        constexpr uint32_t mask = 0xFFFF;
+        constexpr uint32_t mask = 0x3F;  // 64-byte alignment
 #else
-        constexpr uint32_t mask = 0xFF;
+        constexpr uint32_t mask = 0x1F;  // 32-byte alignment
 #endif
         if ((src_off & mask) != (dst_local_l1_addr & mask)) {
             fprintf(stderr,
