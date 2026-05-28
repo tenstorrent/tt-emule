@@ -291,6 +291,11 @@ echo "== Tier 6: tt_transformers LLM pytest (N150 single-device) =="
 
 run_pytest "tt_transformers_test_embedding" \
     "$TT_METAL_DIR/models/tt_transformers/tests/test_embedding.py"
+# rms_norm: PREFILL variant passes; DECODE still fails on layernorm_sharded.cpp
+# JIT compile — gate the run to PREFILL until DECODE is brought up.
+run_pytest "tt_transformers_test_rms_norm_prefill" \
+    "$TT_METAL_DIR/models/tt_transformers/tests/test_rms_norm.py" \
+    -k "PREFILL"
 
 # ===========================================================================
 

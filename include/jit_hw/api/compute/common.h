@@ -176,7 +176,30 @@ inline bool cb_is_32bit_format(uint32_t cb_id) {
 
 // pack_dst_to_buf: PACK row-major DST → nfaces CB with L1 accumulation support.
 // When __emule_l1_acc_enabled, adds DST to existing CB contents instead of overwriting.
+//
+// Guardrail: a CB with page_size=0 cannot accept a tile write. Some kernels
+// pack into a CB that's silently mis-sized by EMULE_TILE_SIZES (emule's
+// `emulated_program_runner.cpp::collect_jit_defines` derives sizes from the
+// first_core's CB impls; CBs allocated on other cores end up with 0). The
+// silent-no-op behavior leaves the CB's L1 region uninitialized, and a
+// subsequent reader (e.g. apply_bcast) pulls NaN bit patterns out of stale
+// memory, propagating NaN through the kernel's downstream math.
+//
+// Fail loudly: abort with a precise message so the misconfigured CB is
+// obvious instead of producing NaN-tainted PCC failures hours of debugging
+// later.
 inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
+    if (cb_page_size(ocb) == 0) {
+        fprintf(stderr,
+                "EMULE BUG: pack_dst_to_buf called on cb=%u with page_size=0. "
+                "The CB is not sized for this kernel — EMULE_TILE_SIZES likely "
+                "missed it (collect_jit_defines only gathers CBs allocated on "
+                "first_core). The kernel that called pack_tile must either use "
+                "a CB allocated on first_core or emule's tile-size emit must "
+                "union all cores' CB assignments.\n",
+                ocb);
+        std::abort();
+    }
     if (cb_is_32bit_format(ocb)) {
         uint32_t n = cb_page_size(ocb) / sizeof(uint32_t);
         if (n > __EMULE_TILE_ELEMS) n = __EMULE_TILE_ELEMS;

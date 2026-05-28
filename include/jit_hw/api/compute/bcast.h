@@ -77,29 +77,34 @@ constexpr uint32_t bcast_rows_src_idx(uint32_t i, uint32_t bcast_row_idx) {
 
 // Common driver: for each i in [0, n), dst[i] = op(a[ni(i)], b[ni(bcast(i))])
 // where ni() is the row-major→nfaces remap.
+// Read element ni from CB `cb` at tile `itile`, converted to float, regardless
+// of the CB's stored format. Mirrors emule's other compute primitives — each
+// CB's format is independent and may differ between icb0 and icb1 (e.g. an
+// fp32 ex2pe tile read alongside a bf16 input tile in the layernorm
+// normalize step).
+inline float __emule_read_cb_elem(uint32_t cb_id, uint8_t* page_base, uint32_t elem_idx) {
+    if (__emule_compute::cb_is_32bit_format(cb_id)) {
+        return reinterpret_cast<const float*>(page_base)[elem_idx];
+    }
+    uint16_t bf = reinterpret_cast<const uint16_t*>(page_base)[elem_idx];
+    return __emule_bf16::to_f32(bf);
+}
+
 template <typename Op, typename BcastFn>
 inline void apply_bcast(
     uint32_t icb0, uint32_t icb1, uint32_t itile0, uint32_t itile1,
     uint32_t idst, BcastFn bcast_fn) {
-    if (__emule_compute::cb_is_32bit_format(icb0)) {
-        const float* buf0 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
-        const float* buf1 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
-        uint32_t n = __emule_compute::cb_page_size(icb0) / sizeof(float);
-        for (uint32_t i = 0; i < n; ++i) {
-            uint32_t ni_a = __emule_nfaces::rowmajor_to_nfaces[i];
-            uint32_t ni_b = __emule_nfaces::rowmajor_to_nfaces[bcast_fn(i)];
-            __emule_dst[idst][i] = Op{}(buf0[ni_a], buf1[ni_b]);
-        }
-    } else {
-        uint16_t* buf0 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
-        uint16_t* buf1 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
-        uint32_t n = __emule_compute::cb_tile_elems(icb0);
-        for (uint32_t i = 0; i < n; ++i) {
-            uint32_t ni_a = __emule_nfaces::rowmajor_to_nfaces[i];
-            uint32_t ni_b = __emule_nfaces::rowmajor_to_nfaces[bcast_fn(i)];
-            __emule_dst[idst][i] = Op{}(__emule_bf16::to_f32(buf0[ni_a]),
-                                        __emule_bf16::to_f32(buf1[ni_b]));
-        }
+    uint8_t* base0 = __emule_compute::cb_read_ptr_at(icb0, itile0);
+    uint8_t* base1 = __emule_compute::cb_read_ptr_at(icb1, itile1);
+    // DST is a 1024-element tile; iterate the full row-major span. Each CB
+    // is read in its own format (bf16 or fp32), promoted to float for the
+    // op, and written into DST (which is always float).
+    for (uint32_t i = 0; i < 1024; ++i) {
+        uint32_t ni_a = __emule_nfaces::rowmajor_to_nfaces[i];
+        uint32_t ni_b = __emule_nfaces::rowmajor_to_nfaces[bcast_fn(i)];
+        float a = __emule_read_cb_elem(icb0, base0, ni_a);
+        float b = __emule_read_cb_elem(icb1, base1, ni_b);
+        __emule_dst[idst][i] = Op{}(a, b);
     }
 }
 
