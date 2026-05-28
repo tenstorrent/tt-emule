@@ -192,7 +192,14 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                 uint32_t read_dist  = (access_page + cb.num_pages - cb.read_idx)  % cb.num_pages;
                 uint32_t reserved = __emule_cb_reserved_pages[cb_id];
                 uint32_t waited   = __emule_cb_waited_pages[cb_id];
-                if (!(write_dist < reserved) && !(read_dist < waited)) {
+                // Only meaningful when the kernel holds an ACTIVE reservation/wait
+                // window. reserved==0 && waited==0 means raw get_write_ptr /
+                // get_read_ptr addressing (globally-allocated/sharded CBs, single-
+                // buffered scratch, output CBs written then DMA'd) — there is no
+                // window to be "outside" of, so it is not a boundary violation.
+                // (A genuine write past the CB's allocated region is still caught
+                // downstream by the OOB-tensor check.)
+                if ((reserved > 0 || waited > 0) && !(write_dist < reserved) && !(read_dist < waited)) {
                     fprintf(stderr,
                             "[ASAN ERROR] CB Boundary Violation: Attempted to access CB %u at offset 0x%x "
                             "(byte %u of %u, page %u of %u). "
@@ -212,14 +219,29 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             return __emule_bridge_l1 + l1_addr;
         }
     }
-    if (__emule_l1_tensor_ranges != nullptr && l1_addr >= __emule_l1_unreserved_base) {
+    // Reduce to the within-slot L1 offset by masking the low 21 bits (2 MB worker
+    // slot). The high bits just encode which core / absolute bridge base the
+    // address came through, while the live tensor/padding ranges are stored as
+    // buffer-relative offsets (buffer.address()). Masking means two addresses that
+    // share their low 21 bits map to the same offset regardless of core — so a
+    // legitimate access isn't flagged just because its high bits differ from this
+    // thread's base. (Per-core L1 bases are 2 MB-aligned, so for an in-slot address
+    // the mask equals base-subtraction but is robust for any high bits.)
+    //
+    // KNOWN LIMITATION (accepted, see review): because the ranges are offset-based
+    // and a sharded tensor occupies the *same* offset on each of its shard cores,
+    // a write to that offset on a core where the tensor is NOT sharded passes this
+    // check (a false negative). Catching it would require per-core shard-placement
+    // tracking, not just offsets.
+    uint32_t l1_off = l1_addr & 0x1FFFFF;  // SLOT_MASK = 2 MB - 1
+    if (__emule_l1_tensor_ranges != nullptr && l1_off >= __emule_l1_unreserved_base) {
         bool in_tensor = false;
         uint64_t matched_packed = 0;
         for (uint32_t i = 0; i < __emule_l1_tensor_ranges_count; ++i) {
             uint64_t packed = __emule_l1_tensor_ranges[i];
             uint32_t r_start = static_cast<uint32_t>(packed >> 32);
             uint32_t r_end = static_cast<uint32_t>(packed);
-            if (l1_addr >= r_start && l1_addr < r_end) {
+            if (l1_off >= r_start && l1_off < r_end) {
                 in_tensor = true;
                 matched_packed = packed;
                 break;
@@ -228,7 +250,7 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
         if (!in_tensor) {
             fprintf(stderr,
                     "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
-                    l1_addr);
+                    l1_off);
             abort();
         }
         if (__emule_l1_resolved_ranges != nullptr &&
@@ -252,10 +274,10 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             uint64_t packed = __emule_l1_padding_ranges[i];
             uint32_t logical_end = static_cast<uint32_t>(packed >> 32);
             uint32_t physical_end = static_cast<uint32_t>(packed);
-            if (l1_addr >= logical_end && l1_addr < physical_end) {
+            if (l1_off >= logical_end && l1_off < physical_end) {
                 fprintf(stderr,
                         "[ASAN ERROR] Tensor Padding Violation: Attempted to write to a padded memory region at address 0x%x (logical_end=0x%x, physical_end=0x%x)\n",
-                        l1_addr, logical_end, physical_end);
+                        l1_off, logical_end, physical_end);
                 abort();
             }
         }
