@@ -128,6 +128,16 @@ clang++-20 -std=c++20 -fPIC -shared -O2 -Wno-c++11-narrowing \
 | `no matching function for call to 'foo(uint32_t, TensorAccessor&)'` | Kernel uses a free-function overload that takes an accessor, but emule only has the method form on the accessor. | Add a free function template constrained by an existing emule type-trait (e.g. `has_get_noc_addr_v`). |
 | `noc_async_read<N>(…)` template undeclared | Kernel uses the templated `<max_page_size>` form; emule has only the non-templated. | Add a `template <uint32_t N, …>` overload that forwards to the existing non-templated body. |
 
+### Runtime PCC-failure patterns (JIT compile clean, but output is wrong)
+
+Once the kernel compiles, the next failure surface is numerical. The bring-up cost of these is often higher than compile-time bugs because the symptom (PCC delta) is far from the cause.
+
+| Symptom | Likely root cause | Strategy |
+|---|---|---|
+| PCC ≈ 0 with `Max ATOL Delta: nan` / `Max RTOL Delta: nan` | A primitive somewhere is producing NaN/inf that propagates downstream. Could be `rsqrt(0)`, division by an uninitialized DST element, or — for ops that chain fp32-intermediate CBs with bf16 inputs — a wrapper that picks a single format for both CBs. | Add `fprintf(stderr, …)` checkpoints at each compute primitive (reduce_tile, mul_unary_tile, rsqrt_tile, pack_tile, apply_bcast, etc.) flagging `is_nan`/`is_inf`. Single run; first checkpoint that fires is the source. **Strip the fprintf before committing.** |
+| PCC < threshold but no NaN | Numerical precision drift. Common when bf16 accumulators in long reductions diverge from the test's PCC threshold (often 0.9999). | Check whether the kernel's reduce path is fp32-accumulated (look for `FLOAT32_REDUCTION` template arg upstream). emule's `reduce_tile` already accumulates in float; if drift is still high, look for bf16 round-trips in intermediate CBs. |
+| Wrapper switches fp32/bf16 path on **one** input's format only | Mixed-format kernel chain (e.g. `apply_bcast(bf16_input, fp32_intermediate, …)` — layernorm's normalization step does this with the rsqrt output cb_ex2pe as fp32). The single-format branch reinterprets the other CB's bytes incorrectly. | Provide a per-CB element reader that dispatches on each CB's own `cb_is_32bit_format(cb_id)`. Call it twice per (icb0, icb1) read. DST is always fp32 in emule. |
+
 ## Step 5 — Place the shim, mirroring tt-metal's path
 
 Decide where the new shim lives by the **path the kernel uses to include it**:
@@ -227,6 +237,39 @@ This is a **fat dispatcher**: one source handles ~15 binary SFPU ops (multiply, 
 
 The drastic difference in cost vs. embedding (1 round vs 3, 30 LoC vs 150) is because the *infrastructure* was already in place. Bringing up a binary SFPU op for the first time would have been the heavy work; multiply was cheap because PR #22 already paid for `eltwise_binary_sfpu.h` et al.
 
+## Worked example #3: `tt_transformers` RMSNorm (PREFILL) via `layernorm.cpp`
+
+Test: `models/tt_transformers/tests/test_rms_norm.py[…-Mode.PREFILL-…]`. Kernel: `ttnn/cpp/ttnn/operations/normalization/layernorm/device/kernels/compute/layernorm.cpp` (RMSNORM section).
+
+JIT compile was already clean after the earlier API-gap closure (the bcast wrappers + `reconfig_data_format` 4-arg overload from the previous bring-up). **PCC failed at runtime** with -0.02 and NaN in the output — the first PCC-failure case in the bring-up sequence.
+
+**Investigation pattern (mirrors the new "Runtime PCC-failure patterns" table above):**
+
+1. Added five `fprintf(stderr, …)` checkpoints in emule's compute primitives (`reduce_tile`, `mul_unary_tile`, `rsqrt_tile`, `pack_tile`, `apply_bcast`) flagging `is_nan`/`is_inf`. Plus a per-call log in `__emule_bf16::to_f32` when it returns NaN.
+2. Single test run identified the first NaN at `apply_bcast` reading `cb_ex2pe` (the rsqrt output). `to_f32(0xFFD0) → NaN` — bf16 bit patterns in the NaN exponent range.
+3. Confirmed `cb_ex2pe` was actually fp32 format at runtime (`page_size=4096`), but `apply_bcast` was reading it as bf16 because `icb0` was bf16 and the branch selector only checked `icb0`'s format.
+
+**Fix** (8 LoC core + a 2-LoC helper):
+
+```cpp
+inline float __emule_read_cb_elem(uint32_t cb_id, uint8_t* page_base, uint32_t elem_idx) {
+    if (__emule_compute::cb_is_32bit_format(cb_id)) {
+        return reinterpret_cast<const float*>(page_base)[elem_idx];
+    }
+    return __emule_bf16::to_f32(reinterpret_cast<const uint16_t*>(page_base)[elem_idx]);
+}
+// apply_bcast now calls __emule_read_cb_elem(icb0, …) and __emule_read_cb_elem(icb1, …)
+// per output position. DST is fp32, so the op composes in fp32 regardless of CB format.
+```
+
+Plus a permanent diagnostic guardrail in `pack_dst_to_buf`: abort loudly if `cb_page_size(ocb) == 0`. Doesn't fire on the rms_norm case (the real bug was format mismatch, not size=0) but is a cheap safety net for the next time a kernel writes to a misconfigured CB.
+
+**Stripped instrumentation** before committing. The committed change is the fix + guardrail only.
+
+**Result:** PREFILL PCC=0.9999963 (threshold 0.9999). Mode.DECODE still fails on `layernorm_sharded.cpp` JIT compile — separate bring-up.
+
+**Total cost: 1 fix round, ~25 LoC across two files. Most of the time spent was in the NaN-bisection phase**, not the fix itself — reinforces the value of having all five fprintf checkpoints landed in one pass.
+
 ## Common gotchas
 
 - **One ttnn op composes multiple kernels** (reader + compute + writer). Each may fail independently. The first JIT error you see is *one* kernel in the pipeline; the next iteration may surface the next kernel.
@@ -235,6 +278,8 @@ The drastic difference in cost vs. embedding (1 round vs 3, 30 LoC vs 150) is be
 - **`if constexpr` branch with template-parameter-dependent args**: discarded branches still need their unqualified names declared. The cleanest workaround is to bypass the upstream `.inl` and write your own template that only instantiates the host-applicable path.
 - **`pytest --forked` hides compiler stderr** — drop it (use `-s` instead) when surfacing JIT errors. Re-enable `--forked` for the final PCC check (clean per-test process state).
 - **Don't bury the LLK source pointer**. Every shim header should carry a comment with the real LLK source path so future-you (or another agent) can compare semantics.
+- **Mixed-format CBs in compute-LLK wrappers**: don't pick a single fp32-vs-bf16 path based on one input. Some kernels chain ops where the *intermediate* CB is fp32 even though inputs are bf16 (e.g. layernorm's rsqrt output `cb_ex2pe`). Read each CB by its own declared format. The rms_norm bring-up burned half a debug round chasing a "NaN in bf16 from inf round-trip" theory before realizing the bf16 path was reading fp32 bytes.
+- **Strip instrumentation before committing**. fprintf NaN-bisection scaffolding is essential for finding the bug but noise in the committed diff. Diagnostic guardrails (loud abort with a precise root-cause hint) are the exception — those stay.
 
 ## Skill maintenance
 
