@@ -26,12 +26,18 @@ D2M_XML_DIR="${D2M_XML_DIR:-}"
 
 SERIAL=0
 PYTEST_EXTRA_ARGS=()
+# --test-file <name> (repeatable) restricts the run to specific test files,
+# bypassing the auto-detected directory enumeration below. Useful for the
+# issue #35 stability sampling and other dev-loop work.
+TEST_FILE_OVERRIDES=()
 
 # Parse arguments
-for arg in "$@"; do
-    case "$arg" in
-        --serial) SERIAL=1 ;;
-        *) PYTEST_EXTRA_ARGS+=("$arg") ;;
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --serial) SERIAL=1 ; shift ;;
+        --test-file) TEST_FILE_OVERRIDES+=("$2") ; shift 2 ;;
+        --test-file=*) TEST_FILE_OVERRIDES+=("${1#--test-file=}") ; shift ;;
+        *) PYTEST_EXTRA_ARGS+=("$1") ; shift ;;
     esac
 done
 
@@ -40,13 +46,19 @@ done
 # test/python/golden/test_metal_*.py (13 files).
 if [ -d "$TT_MLIR_DIR/test/python/golden/d2m" ]; then
     TEST_DIR="$TT_MLIR_DIR/test/python/golden/d2m"
-    mapfile -t TEST_FILES < <(cd "$TEST_DIR" && ls test_*.py 2>/dev/null | sort)
 elif [ -d "$TT_MLIR_DIR/test/python/golden" ]; then
     TEST_DIR="$TT_MLIR_DIR/test/python/golden"
-    mapfile -t TEST_FILES < <(cd "$TEST_DIR" && ls test_metal_*.py 2>/dev/null | sort)
 else
     echo "ERROR: no golden test directory under $TT_MLIR_DIR/test/python/" >&2
     exit 1
+fi
+
+if [ ${#TEST_FILE_OVERRIDES[@]} -gt 0 ]; then
+    TEST_FILES=("${TEST_FILE_OVERRIDES[@]}")
+elif [ "$(basename "$TEST_DIR")" = "d2m" ]; then
+    mapfile -t TEST_FILES < <(cd "$TEST_DIR" && ls test_*.py 2>/dev/null | sort)
+else
+    mapfile -t TEST_FILES < <(cd "$TEST_DIR" && ls test_metal_*.py 2>/dev/null | sort)
 fi
 
 echo "========================================"
@@ -68,8 +80,18 @@ fi
 # Set PYTHONPATH for ttnn (from tt-metal build) and ttmlir_runtime (from tt-mlir build).
 # $TT_METAL_DIR/tools is required because ttnn's __init__.py imports the tracy python
 # module from tt-metal-main/tools/tracy/.
-export PYTHONPATH="$TT_METAL_DIR/ttnn:$TT_METAL_DIR/tools:$BUILD_DIR/lib:$TT_MLIR_DIR/build/python_packages:$TT_MLIR_DIR/build/runtime/python:${PYTHONPATH:-}"
+# $SCRIPT_DIR/scripts is on PYTHONPATH so d2m_seed_plugin can load when enabled
+# (see D2M_SEED_PLUGIN below).
+export PYTHONPATH="$SCRIPT_DIR/scripts:$TT_METAL_DIR/ttnn:$TT_METAL_DIR/tools:$BUILD_DIR/lib:$TT_MLIR_DIR/build/python_packages:$TT_MLIR_DIR/build/runtime/python:${PYTHONPATH:-}"
 export LD_LIBRARY_PATH="$BUILD_DIR/lib:${LD_LIBRARY_PATH:-}"
+
+# Issue #35: deterministic per-test seeding for D2M golden tests. Opt-in via
+# D2M_SEED_PLUGIN=1 so the existing flaky baseline can still be sampled
+# without the fix in place. See scripts/d2m_seed_plugin.py for the rationale.
+if [ "${D2M_SEED_PLUGIN:-0}" = "1" ]; then
+    export PYTEST_PLUGINS="${PYTEST_PLUGINS:+$PYTEST_PLUGINS,}d2m_seed_plugin"
+    echo "D2M seed plugin enabled (per-test deterministic torch/numpy/random seed)"
+fi
 export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
 export TT_MLIR_HOME="$TT_MLIR_DIR"
 
