@@ -85,10 +85,11 @@ fi
 export PYTHONPATH="$SCRIPT_DIR/scripts:$TT_METAL_DIR/ttnn:$TT_METAL_DIR/tools:$BUILD_DIR/lib:$TT_MLIR_DIR/build/python_packages:$TT_MLIR_DIR/build/runtime/python:${PYTHONPATH:-}"
 export LD_LIBRARY_PATH="$BUILD_DIR/lib:${LD_LIBRARY_PATH:-}"
 
-# Issue #35: deterministic per-test seeding for D2M golden tests. Opt-in via
-# D2M_SEED_PLUGIN=1 so the existing flaky baseline can still be sampled
-# without the fix in place. See scripts/d2m_seed_plugin.py for the rationale.
-if [ "${D2M_SEED_PLUGIN:-0}" = "1" ]; then
+# Issue #35: deterministic per-test seeding for D2M golden tests. Default ON
+# because the allowlist was triaged with the plugin enabled; turning it off
+# resurrects the old non-deterministic baseline. Set D2M_SEED_PLUGIN=0 to
+# reproduce the pre-fix flake behaviour for investigation.
+if [ "${D2M_SEED_PLUGIN:-1}" = "1" ]; then
     export PYTEST_PLUGINS="${PYTEST_PLUGINS:+$PYTEST_PLUGINS,}d2m_seed_plugin"
     echo "D2M seed plugin enabled (per-test deterministic torch/numpy/random seed)"
 fi
