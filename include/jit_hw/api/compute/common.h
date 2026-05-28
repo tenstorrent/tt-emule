@@ -40,6 +40,14 @@ enum class EltwiseBinaryReuseDestType { NONE, DEST_TO_SRCA, DEST_TO_SRCB };
 
 } // namespace ckernel
 
+// D2M emits `binary_dest_reuse_tiles<ELWADD, …>(…)` with `ELWADD` as a bare
+// (unqualified) name — apparently inconsistent with its sibling
+// `EltwiseBinaryReuseDestType::DEST_TO_SRCA` which IS qualified. Expose the
+// enum-class values at global scope so the unqualified form resolves.
+inline constexpr ckernel::EltwiseBinaryType ELWADD = ckernel::EltwiseBinaryType::ELWADD;
+inline constexpr ckernel::EltwiseBinaryType ELWSUB = ckernel::EltwiseBinaryType::ELWSUB;
+inline constexpr ckernel::EltwiseBinaryType ELWMUL = ckernel::EltwiseBinaryType::ELWMUL;
+
 // Note: MathFidelity may also be defined in llk_defs.h — guard against redefinition.
 // Values must match tt-metal's enum: LoFi=0, HiFi2=2, HiFi3=3, HiFi4=4.
 #ifndef __EMULE_MATH_FIDELITY_DEFINED
@@ -69,6 +77,13 @@ static constexpr uint32_t __EMULE_TILE_ELEMS = 1024;
 static constexpr uint32_t __EMULE_DST_BYTES = __EMULE_TILE_ELEMS * sizeof(float);
 static thread_local float __emule_dst[__EMULE_DST_TILES][__EMULE_TILE_ELEMS];
 static thread_local bool __emule_l1_acc_enabled = false;
+
+// Emule model of one SRC register bank. Real silicon's UNPACK path
+// routes CB tiles into SRCA/SRCB; for the DEST_TO_SRC{A,B} reuse path
+// (binary_dest_reuse_tiles) we need a working buffer that is NOT a DST
+// slot — otherwise we steal kernel-addressable DST space and go
+// out-of-bounds in fp32 mode. Not addressable by kernels.
+static thread_local float __emule_src_scratch[__EMULE_TILE_ELEMS];
 
 // Assert FULL DEST is not used
 #ifdef FULL_DEST
@@ -109,6 +124,13 @@ inline void __emule_dst_store_i32(uint32_t slot, uint32_t idx, int32_t v) {
 // are owned by api/compute/reg_api.h. Include it transitively so callers
 // that `#include "api/compute/common.h"` still see the symbols.
 #include "jit_hw/api/compute/reg_api.h"
+
+// ---- LLK sync primitives ----
+// `t6_semaphore_*` / `semaphore::*` / `p_stall::*` are referenced by the
+// verbatim-inlined body of `experimental::unpack_stall_on_pack` that D2M
+// emits into compute kernels. Compute kernels generally include common.h
+// but not compute_kernel_hw_startup.h, so route the sync stubs here.
+#include "jit_hw/llk_sync_stubs.h"
 
 // ---- Core logical coordinates (for D2M compute kernels) ----
 // Guarded to avoid conflict with dataflow_api.h if both are included.
@@ -309,11 +331,12 @@ ALWI void pack_tile_block(uint32_t ifrom_dst, uint32_t ocb, uint32_t ntiles) {
     }
 }
 
-// copy_tile: UNPACK CB[icb][itile] → DST[idst] with nfaces→row-major conversion.
-// Format-aware: bf16 (page_size ≤ 2048) or raw 32-bit (page_size > 2048).
-ALWI void copy_tile(uint32_t icb, uint32_t itile, uint32_t idst) {
-    __emule_dst_check(idst, "copy_tile");
-    __emule_dst_mark_dirty(idst);
+// __emule_unpack_cb_tile_to: read CB[icb][itile] into a caller-supplied float
+// buffer, with nfaces→row-major conversion. The destination can be either a
+// DST slot (regular copy_tile path) or __emule_src_scratch (binary_dest_reuse_tiles
+// path); both are layout-identical 1024-element float tiles. Format-aware:
+// bf16 (page_size ≤ 2048) or raw 32-bit (page_size > 2048).
+inline void __emule_unpack_cb_tile_to(uint32_t icb, uint32_t itile, float* out) {
     uint8_t* buf = __emule_compute::cb_read_ptr_at(icb, itile);
     if (__emule_compute::cb_is_32bit_format(icb)) {
         // 32-bit format: UNPACK nfaces→row-major.
@@ -324,15 +347,22 @@ ALWI void copy_tile(uint32_t icb, uint32_t itile, uint32_t idst) {
         if (n > __EMULE_TILE_ELEMS) n = __EMULE_TILE_ELEMS;
         for (uint32_t i = 0; i < n; i++) {
             uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
-            std::memcpy(&__emule_dst[idst][i], &ubuf[ni], sizeof(uint32_t));
+            std::memcpy(&out[i], &ubuf[ni], sizeof(uint32_t));
         }
     } else {
         // bfloat16: UNPACK nfaces→row-major + bf16→f32 conversion
         uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
         uint32_t n = __emule_compute::cb_tile_elems(icb);
         for (uint32_t i = 0; i < n; i++)
-            __emule_dst[idst][i] = __emule_bf16::to_f32(bf[__emule_nfaces::rowmajor_to_nfaces[i]]);
+            out[i] = __emule_bf16::to_f32(bf[__emule_nfaces::rowmajor_to_nfaces[i]]);
     }
+}
+
+// copy_tile: UNPACK CB[icb][itile] → DST[idst].
+ALWI void copy_tile(uint32_t icb, uint32_t itile, uint32_t idst) {
+    __emule_dst_check(idst, "copy_tile");
+    __emule_dst_mark_dirty(idst);
+    __emule_unpack_cb_tile_to(icb, itile, &__emule_dst[idst][0]);
 }
 
 // copy_block_matmul_partials: reload a block of tiles from CB into DST.
@@ -374,11 +404,15 @@ ALWI void pack_reconfig_data_format(uint32_t, uint32_t) {}
 ALWI void llk_pack_relu_config(ReluType) {}
 ALWI void pack_set_relu_threshold(float) {}
 
-// binary_dest_reuse stubs
-template<EltwiseBinaryReuseDestType ReuseType = EltwiseBinaryReuseDestType::NONE>
+// binary_dest_reuse stubs.
+// D2M emits these as `binary_dest_reuse_tiles{,_init}<BinaryType, ReuseType>(...)`
+// — note the template param ORDER is (BinaryType first, ReuseType second). Older
+// signatures here had only one template param. The init takes a single `cb_id`.
+template<EltwiseBinaryType BinaryType = EltwiseBinaryType::ELWADD,
+         EltwiseBinaryReuseDestType ReuseType = EltwiseBinaryReuseDestType::NONE>
 ALWI void binary_dest_reuse_tiles_init(uint32_t = 0, uint32_t = 0, bool = false) {}
 
-template<EltwiseBinaryReuseDestType ReuseType, EltwiseBinaryType BinaryType>
+template<EltwiseBinaryType BinaryType, EltwiseBinaryReuseDestType ReuseType>
 ALWI void binary_dest_reuse_tiles(uint32_t icb0, uint32_t icb1,
                                   uint32_t itile0, uint32_t itile1, uint32_t idst) {
     // Fallback to regular binary op
@@ -388,6 +422,35 @@ ALWI void binary_dest_reuse_tiles(uint32_t icb0, uint32_t icb1,
         sub_tiles(icb0, icb1, itile0, itile1, idst);
     else
         mul_tiles(icb0, icb1, itile0, itile1, idst);
+}
+
+// 3-arg overload for DEST_TO_SRC{A,B} reuse: read in_tile from icb, combine
+// with DST[idst] via BinaryType, write back to DST[idst]. D2M emits the call
+// as `binary_dest_reuse_tiles<BinaryType, ReuseType>(icb, in_tile, idst)`.
+//
+// Real silicon (tt_metal/hw/inc/api/compute/eltwise_binary.h):
+//   llk_unpack_A<…DEST_TO_SRC{A,B}>(in_cb, in_tile)  // CB → one SRC bank,
+//                                                    // DST[idst] → the other
+//   llk_math_eltwise_binary<…DEST_TO_SRC…>(...)      // SRCA op SRCB → DST[idst]
+// DST is never used as scratch — both operands cross SRC registers.
+//
+// Emule mirrors this with __emule_src_scratch standing in for the
+// CB-side SRC bank; DST[idst] stays in place and holds the result.
+template<EltwiseBinaryType BinaryType, EltwiseBinaryReuseDestType ReuseType>
+ALWI void binary_dest_reuse_tiles(uint32_t icb, uint32_t in_tile, uint32_t idst) {
+    __emule_dst_check(idst, "binary_dest_reuse_tiles");
+    __emule_dst_mark_dirty(idst);
+    __emule_unpack_cb_tile_to(icb, in_tile, __emule_src_scratch);
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        float a = __emule_dst[idst][i];
+        float b = __emule_src_scratch[i];
+        if constexpr (BinaryType == EltwiseBinaryType::ELWADD)
+            __emule_dst[idst][i] = a + b;
+        else if constexpr (BinaryType == EltwiseBinaryType::ELWSUB)
+            __emule_dst[idst][i] = (ReuseType == EltwiseBinaryReuseDestType::DEST_TO_SRCB) ? (b - a) : (a - b);
+        else
+            __emule_dst[idst][i] = a * b;
+    }
 }
 
 // state_configure — no-op
@@ -417,3 +480,14 @@ ALWI void release_dst() {
 // Bring ckernel functions into the global namespace (matches real device behavior,
 // where "using namespace ckernel" is pulled in via ckernel.h / risc_common.h).
 using namespace ckernel;
+
+// Some D2M-emitted binary-int kernels call `mul_int_tile_init` (and similar
+// add_int / sub_int variants) without including the per-op
+// `api/compute/{mul,add,sub}_int_sfpu.h` header — tt-mlir's emit chain doesn't
+// always pick the per-op include for these. Make them transitively available
+// via common.h so any kernel that includes common.h (which the D2M wrapper
+// always does) can resolve the symbols. Placed at the END of common.h so
+// `ALWI` / `__EMULE_TILE_ELEMS` / DST helpers are already defined.
+#include "api/compute/add_int_sfpu.h"
+#include "api/compute/sub_int_sfpu.h"
+#include "api/compute/mul_int_sfpu.h"
