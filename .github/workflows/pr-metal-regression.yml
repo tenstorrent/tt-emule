@@ -23,11 +23,21 @@ concurrency:
   group: pr-regression-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # tt-mlir's CI image: ubuntu-22-04 + pre-built /opt/ttmlir-toolchain
+  # (LLVM, StableHLO, Shardy, flatbuffers). Same image PR D2M Regression uses,
+  # which is why both workflows can share the same gcc-13 / clang-20 install
+  # pattern below.
+  TT_MLIR_CI_IMAGE: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+
 jobs:
   build:
     name: Build tt-metal against PR's tt-emule
     runs-on: tt-ubuntu-2204-large-stable
     timeout-minutes: 180
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+      options: --user root
     outputs:
       pin: ${{ steps.pin.outputs.sha }}
     steps:
@@ -38,6 +48,7 @@ jobs:
 
       - name: Resolve pinned tt-metal SHA
         id: pin
+        shell: bash
         run: |
           SHA=$(grep -vE '^\s*(#|$)' tt-emule/tt-metal-pin.txt | head -1 | awk '{print $1}')
           if [ -z "$SHA" ]; then
@@ -57,18 +68,41 @@ jobs:
           submodules: false
 
       - name: Init required tt-metal submodules
+        shell: bash
         run: |
           cd tt-metal
           git submodule update --init --depth=1 tt_metal/third_party/umd
           git submodule update --init --depth=1 tt_metal/third_party/tracy
 
-      - name: Install toolchain
-        run: bash tt-emule/.github/scripts/ci-setup.sh
+      - name: Install clang-20 + gcc-13 libstdc++
+        # tt-mlir's CI container ships clang-17 + gcc-12's libstdc++. We need
+        # clang-20 (because the runtime JIT compile path uses /usr/bin/clang++-20
+        # baked into libtt_metal.so) and gcc-13 (because tt-metal's C++20
+        # std::ranges code in levelized_graph.cpp doesn't compile against
+        # gcc-11/gcc-12 libstdc++ — see BUILD_GUIDE.md). Mirrors the D2M build
+        # workflow's install step.
+        shell: bash
+        run: |
+          set -e
+          apt-get update -qq
+          apt-get install -y -qq wget gnupg lsb-release software-properties-common
+          if ! command -v clang-20 >/dev/null 2>&1; then
+            wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+            chmod +x /tmp/llvm.sh
+            /tmp/llvm.sh 20 all
+          fi
+          if [ ! -d /usr/lib/gcc/x86_64-linux-gnu/13 ]; then
+            add-apt-repository -y ppa:ubuntu-toolchain-r/test
+            apt-get update -qq
+            apt-get install -y -qq gcc-13 g++-13 libstdc++-13-dev
+          fi
+          clang-20 --version
+          ls /usr/lib/gcc/x86_64-linux-gnu/ | head
 
       - name: Restore ccache
         uses: actions/cache@v4
         with:
-          path: ~/.ccache
+          path: /root/.ccache
           key: tt-metal-${{ steps.pin.outputs.sha }}-clang20-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             tt-metal-${{ steps.pin.outputs.sha }}-clang20-${{ runner.os }}-
@@ -78,20 +112,22 @@ jobs:
         env:
           TT_EMULE_DIR: ${{ github.workspace }}/tt-emule
           TT_METAL_DIR: ${{ github.workspace }}/tt-metal
-          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule_clang
+          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule
+        shell: bash
         run: bash tt-emule/.github/scripts/ci-build.sh
 
       - name: Stage cluster descriptors with build artifact
+        shell: bash
         run: |
-          mkdir -p tt-metal/build_emule_clang/_cluster_descs
+          mkdir -p tt-metal/build_emule/_cluster_descs
           cp -r tt-metal/tt_metal/third_party/umd/tests/cluster_descriptor_examples \
-                tt-metal/build_emule_clang/_cluster_descs/
+                tt-metal/build_emule/_cluster_descs/
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: tt-metal-build-${{ github.run_id }}
-          path: tt-metal/build_emule_clang/
+          path: tt-metal/build_emule/
           retention-days: 1
           if-no-files-found: error
 
@@ -100,6 +136,9 @@ jobs:
     needs: build
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 60
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
+      options: --user root
     strategy:
       fail-fast: false
       matrix:
@@ -119,51 +158,51 @@ jobs:
           fetch-depth: 1
           submodules: false
 
-      - name: Restore cluster descriptors from artifact path
-        run: |
-          # The build job staged cluster descriptors inside the build artifact;
-          # restore them under tt-metal's expected path so run_regression.sh's
-          # TT_METAL_MOCK_CLUSTER_DESC_PATH resolves correctly.
-          true   # actual copy happens after download-artifact below
-
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
           name: tt-metal-build-${{ github.run_id }}
-          path: tt-metal/build_emule_clang/
+          path: tt-metal/build_emule/
 
       - name: Restore executable bits on test binaries
         # actions/upload-artifact@v4 strips Unix mode bits — restore +x on the
         # gtest binaries that run_regression.sh invokes.
+        shell: bash
         run: |
-          chmod +x tt-metal/build_emule_clang/test/tt_metal/unit_tests_* 2>/dev/null || true
-          chmod +x tt-metal/build_emule_clang/test/ttnn/unit_tests_* 2>/dev/null || true
+          chmod +x tt-metal/build_emule/test/tt_metal/unit_tests_* 2>/dev/null || true
+          chmod +x tt-metal/build_emule/test/ttnn/unit_tests_* 2>/dev/null || true
 
       - name: Place cluster descriptors
+        shell: bash
         run: |
           mkdir -p tt-metal/tt_metal/third_party/umd/tests
-          cp -r tt-metal/build_emule_clang/_cluster_descs/cluster_descriptor_examples \
+          cp -r tt-metal/build_emule/_cluster_descs/cluster_descriptor_examples \
                 tt-metal/tt_metal/third_party/umd/tests/
 
-      - name: Install Python + libc++ runtime + clang-20
-        # Test binaries are dynamically linked against libc++.so.1 / libc++abi.so.1
-        # (built with tt-metal's libc++ toolchain). Match the build runner's
-        # package install — apt.llvm.org provides libc++-20-dev / libc++abi-20-dev,
-        # which include the runtime .so files. No separate "libc++1-20" pkg exists.
-        #
-        # clang-20 is also required at *runtime*: the emulated program runner
+      - name: Install clang-20 + gcc-13 libstdc++ runtime
+        # clang-20 is required at *runtime*: the emulated program runner
         # (tt_metal/impl/emulation/emulated_program_runner.cpp) JIT-compiles each
         # kernel source via system(TT_EMULE_CXX_COMPILER ...). That define is
-        # baked into libtt_metal.so at build time as /usr/bin/clang++-20, so the
-        # test runner must have it on PATH or every JIT compile returns exit 127
-        # ("command not found", shown as exit 32512 = 127<<8).
+        # baked into libtt_metal.so at build time as /usr/bin/clang++-20.
+        #
+        # gcc-13's libstdc++ is required because the build job links against
+        # GLIBCXX_3.4.32 symbols (the container ships libstdc++-12 by default).
+        # Mirrors the D2M test workflow's install step.
+        shell: bash
         run: |
-          if [ ! -f /etc/apt/sources.list.d/llvm-toolchain-jammy-20.list ]; then
-            wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg
-            echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main" | sudo tee /etc/apt/sources.list.d/llvm-toolchain-jammy-20.list >/dev/null
+          set -e
+          apt-get update -qq
+          apt-get install -y -qq wget gnupg lsb-release software-properties-common
+          if ! command -v clang-20 >/dev/null 2>&1; then
+            wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+            chmod +x /tmp/llvm.sh
+            /tmp/llvm.sh 20 all
           fi
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends python3 clang-20 libc++-20-dev libc++abi-20-dev libnuma1 libhwloc15 libtbb12
+          if [ ! -d /usr/lib/gcc/x86_64-linux-gnu/13 ]; then
+            add-apt-repository -y ppa:ubuntu-toolchain-r/test
+            apt-get update -qq
+            apt-get install -y -qq libstdc++6 gcc-13 g++-13 libstdc++-13-dev
+          fi
 
       - name: Install SFPI toolchain
         # tt-metal's JIT kernel compiler (tt_metal/jit_build/build.cpp) looks for
@@ -175,19 +214,21 @@ jobs:
         # install_dependencies.sh --sfpi which fetches the released .deb from
         # tenstorrent/sfpi and apt-installs it into /opt/tenstorrent/sfpi/,
         # matching tt-metal's own CI flow.
-        run: |
-          sudo bash tt-metal/install_dependencies.sh --sfpi
+        shell: bash
+        run: bash tt-metal/install_dependencies.sh --sfpi
 
       - name: Run regression
         env:
           TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
-          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule_clang
+          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
           TT_EMULE_ARCH: ${{ matrix.arch }}
+        shell: bash
         run: bash tt-emule/.github/scripts/ci-regression.sh
 
       - name: Classify results
         env:
-          BUILD_DIR: ${{ github.workspace }}/tt-metal/build_emule_clang
+          BUILD_DIR: ${{ github.workspace }}/tt-metal/build_emule
+        shell: bash
         run: |
           python3 tt-emule/.github/scripts/classify-results.py \
             --xml-dir "${RUNNER_TEMP}/gtest-xml" \

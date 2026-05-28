@@ -159,22 +159,7 @@ This demonstrates the emulator can run full TTNN-level matmul operations through
 
 ### Clone and Build
 
-```bash
-# Check out repositories
-cd /localdev/$USER
-git clone git@github.com:tenstorrent/tt-metal.git -b arminale/emule-metal-base
-git clone git@github.com:tenstorrent/tt-emule.git
-
-# Initialize required submodules
-cd tt-metal
-git submodule update --init tt_metal/third_party/umd
-git submodule update --init tt_metal/third_party/tracy
-git submodule update --init tt_metal/third_party/tt_llk
-
-# Build and test
-cd ../tt-emule
-./build_and_test.sh
-```
+Follow `BUILD_GUIDE.md` for the canonical clone-and-build flow (Phases 0–4 cover repos, submodules, the single libstdc++ `build_emule` cmake invocation, post-build symlinks, and the per-arch C++ regression scripts).
 
 ### Run Just the Quasar Matmul Demo
 
