@@ -72,17 +72,11 @@ gets a host pointer where it expected a firmware offset.
 | Silicon | Emule |
 |---|---|
 | Single NOC packet broadcast to rectangle of cores via cmd-buf registers | Loop over rectangle and memcpy to each receiver. `noc_async_write_multicast` resolves to `__emule_multicast_write` |
-| `NOC_CMD_BRCST_SRC_INCLUDE` bit controls whether the sender NIU receives its own packet | `__emule_multicast_write(..., bool include_self)` parameter. `false` for non-loopback (silicon clears the bit); `true` for `_loopback_src` variant (silicon sets it). Sender coords come from TLS `my_x[0]`, `my_y[0]`. Wave-7a §1 fix. |
+| `NOC_CMD_BRCST_SRC_INCLUDE` bit controls whether the sender NIU receives its own packet | Current JIT headers expose a 3-argument `__emule_multicast_write(mcast_addr, src, size)` bridge and route both normal and `_loopback_src` variants through it; if loopback/non-loopback semantics matter for a mock, verify the host bridge implementation before relying on distinct include-self behavior. |
 
 The Mcast semantic rewrite pattern used in downstream consumers
 replaces 25+ raw NOC_CMD_BUF register writes with a single
 `noc_async_write_multicast` + `noc_semaphore_set_multicast`.
-
-**Wave-7a fix**: prior to wave-7a, `__emule_multicast_write` always
-iterated the entire rectangle including sender, which diverged from
-silicon non-loopback semantics. Now four call sites in `dataflow_api.h`
-(+ one in `experimental/noc.h`) pass the correct `include_self` based
-on whether their entry point matches a `_loopback_src` API or not.
 
 ---
 
