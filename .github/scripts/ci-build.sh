@@ -72,9 +72,10 @@ cmake -B "$BUILD_DIR" \
 echo ""
 echo "== Building tt-metal =="
 # Build only the specific binaries downstream jobs need: the gtest binaries
-# that run_regression.sh exercises, plus the _ttnn nanobind extension that
-# the ttnn-pytest job imports. cmake transitively builds their deps
-# (libtt_metal.so, _ttnncpp.so, libtt_stl.so, ...).
+# that run_regression.sh exercises, plus the `ttnn` cmake target that produces
+# the _ttnn nanobind extension the ttnn-pytest job imports (`_ttnn.so` is the
+# output file; `ttnn` is the cmake target name). cmake transitively builds
+# their deps (libtt_metal.so, _ttnncpp.so, libtt_stl.so).
 cmake --build "$BUILD_DIR" -j"$(nproc)" --target \
     unit_tests_api \
     unit_tests_integration \
@@ -82,7 +83,7 @@ cmake --build "$BUILD_DIR" -j"$(nproc)" --target \
     unit_tests_data_movement \
     unit_tests_per_core_allocation \
     unit_tests_ttnn \
-    _ttnn
+    ttnn
 
 echo ""
 echo "== Creating post-build symlinks =="
