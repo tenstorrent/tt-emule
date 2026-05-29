@@ -23,8 +23,9 @@ jobs:
     timeout-minutes: 240
     continue-on-error: true
     container:
-      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
-      options: --user root
+      # ubuntu-24-04: ships clang-20 + gcc-13 + /opt/ttmlir-toolchain
+      # pre-baked, so no runtime apt-install (and no --user root) needed.
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     outputs:
       mlir-sha:  ${{ steps.resolve.outputs.mlir }}
       metal-sha: ${{ steps.resolve.outputs.metal }}
@@ -82,29 +83,10 @@ jobs:
           git submodule update --init --depth=1 tt_metal/third_party/umd
           git submodule update --init --depth=1 tt_metal/third_party/tracy
 
-      - name: Install clang-20 + gcc-13 libstdc++
-        shell: bash
-        run: |
-          set -e
-          apt-get update -qq
-          apt-get install -y -qq wget gnupg lsb-release software-properties-common
-          if ! command -v clang-20 >/dev/null 2>&1; then
-            wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
-            chmod +x /tmp/llvm.sh
-            /tmp/llvm.sh 20 all
-          fi
-          if [ ! -d /usr/lib/gcc/x86_64-linux-gnu/13 ]; then
-            add-apt-repository -y ppa:ubuntu-toolchain-r/test
-            apt-get update -qq
-            apt-get install -y -qq gcc-13 g++-13 libstdc++-13-dev
-          fi
-          clang-20 --version
-          ls /usr/lib/gcc/x86_64-linux-gnu/ | head
-
       - name: Restore ccache
         uses: actions/cache@v4
         with:
-          path: /root/.ccache
+          path: ~/.ccache
           key: d2m-mlir-${{ steps.resolve.outputs.mlir }}-metal-${{ steps.resolve.outputs.metal }}-clang20-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             d2m-mlir-${{ steps.resolve.outputs.mlir }}-metal-${{ steps.resolve.outputs.metal }}-clang20-${{ runner.os }}-
@@ -141,8 +123,7 @@ jobs:
     timeout-minutes: 120
     continue-on-error: true
     container:
-      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
-      options: --user root
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     strategy:
       fail-fast: false
       matrix:
@@ -195,19 +176,6 @@ jobs:
         run: |
           chmod +x tt-metal/build/test/tt_metal/unit_tests_* 2>/dev/null || true
           chmod +x tt-metal/build/test/ttnn/unit_tests_* 2>/dev/null || true
-
-      - name: Install gcc-13 libstdc++ runtime
-        shell: bash
-        run: |
-          set -e
-          apt-get update -qq
-          apt-get install -y -qq software-properties-common
-          if [ ! -d /usr/lib/gcc/x86_64-linux-gnu/13 ]; then
-            add-apt-repository -y ppa:ubuntu-toolchain-r/test
-            apt-get update -qq
-            apt-get install -y -qq libstdc++6 gcc-13 g++-13 libstdc++-13-dev
-          fi
-          strings /lib/x86_64-linux-gnu/libstdc++.so.6 | grep -E '^GLIBCXX_3\.4\.(3[0-9])' | sort -u | tail
 
       - name: Install ttrt wheel
         shell: bash
