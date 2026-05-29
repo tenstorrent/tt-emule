@@ -140,6 +140,7 @@ Once the kernel compiles, the next failure surface is numerical. The bring-up co
 | Wrapper switches fp32/bf16 path on **one** input's format only | Mixed-format kernel chain (e.g. `apply_bcast(bf16_input, fp32_intermediate, …)` — layernorm's normalization step does this with the rsqrt output cb_ex2pe as fp32). The single-format branch reinterprets the other CB's bytes incorrectly. | Provide a per-CB element reader that dispatches on each CB's own `cb_is_32bit_format(cb_id)`. Call it twice per (icb0, icb1) read. DST is always fp32 in emule. The shared helper `__emule_read_cb_elem_at(cb, itile, ni)` in `common.h` is now the single source of truth — used by `add/sub/mul/matmul_tiles`, `reduce_tile`, and `apply_bcast`. |
 | Instrumented `reduce_tile` never fires for a `compute_kernel_lib::reduce<SUM\|AVG, REDUCE_ROW>` call | `reduce_uses_matmul<>` (in `ttnn/cpp/ttnn/kernel_lib/reduce_helpers_common.hpp`) returns **true** for SUM/AVG along REDUCE_ROW. Those reduces lower to `matmul_tiles(input × col0-scaler-tile)`, NOT `reduce_tile`. | When chasing a missing reduce, instrument BOTH `reduce_tile` and `matmul_tiles`. Layernorm-family reduces (E[x], E[x²]) hit the matmul path. |
 | PCC ≈ 0 with finite ATOL on a kernel that touches `ttnn.bfloat8_b` weights or activations | Bfp8_b (block-float-8) tiles are 1088 bytes = 64 face-row exponent bytes + 1024 mantissa bytes; emule needs explicit per-element decode + per-face-row encode. Without it, bf16/fp32 readers misinterpret the bytes. | Detect via `cb_is_bfp8_b_format(cb_id)` (`0 < page_size < 2048`). Decode: `__emule_bfp8::to_f32(buf, ni)`. Encode: `__emule_bfp8::encode_face_row(in16, exp_out, mant_out)`. Wire through the single shared `__emule_read_cb_elem_at` helper; `pack_dst_to_buf` needs its own Bfp8_b branch (cannot reuse the helper because pack iterates in nfaces order to share exponents). |
+| **PCC = 0 with finite ATOL** on a ttnn pytest where the input is `ttnn.from_torch(...)` + `ttnn.to_device(..., MemoryConfig(INTERLEAVED, L1/DRAM))` on a non-trivial tensor (multi-tile, e.g. `[2,2,256,512]`) | **Host→device data loss.** The host write went somewhere other than where the kernel's `TensorAccessor(...).get_noc_addr(page_id)` + `noc_async_read` resolves to — so the reader copies zeros into the CB and downstream `copy_tile` loads zero DST. Confirmed on test_untilize during data_movement bring-up. | Two-checkpoint diagnosis: (1) fprintf inside `noc_async_read` after the memcpy, dumping `dst[0..3]` — if zero, the source DRAM region is zero. (2) Confirm `copy_tile(icb, 0, 0)` produces zero DST. **Action: skip the test (mark in running notes), don't try to fix from the kernel side.** This is an emule UMD/banking issue — outside the scope of single-op bring-up. The smaller test_clone parametrizations that pass exercise the same code path with single-tile shapes, so the bank-resolution gap likely manifests only for larger interleaved layouts. |
 
 ## Step 5 — Place the shim, mirroring tt-metal's path
 
@@ -272,6 +273,22 @@ Plus a permanent diagnostic guardrail in `pack_dst_to_buf`: abort loudly if `cb_
 **Result:** PREFILL PCC=0.9999963 (threshold 0.9999). Mode.DECODE still fails on `layernorm_sharded.cpp` JIT compile — separate bring-up.
 
 **Total cost: 1 fix round, ~25 LoC across two files. Most of the time spent was in the NaN-bisection phase**, not the fix itself — reinforces the value of having all five fprintf checkpoints landed in one pass.
+
+## Worked example #4: `ttnn.untilize` JIT compile via `untilize.cpp` (kernel-lib unblock)
+
+Test: `tests/ttnn/unit_tests/operations/data_movement/test_untilize.py`. Kernel: `ttnn/cpp/ttnn/operations/data_movement/untilize/device/kernels/compute/untilize.cpp`, calls `compute_kernel_lib::untilize<...>` from `untilize_helpers.{hpp,inl}`.
+
+First JIT-compile attempt surfaced four clang errors (one round, `-s` to drop `--forked` and read clang stderr):
+
+| # | Error | Fix |
+|---|---|---|
+| 1+2 | `circular_buffer_interface.h: functions that differ only in their return type` and `dataflow_api.h: redefinition of 'CBInterface'` | Redirect shim at `include/jit_hw/internal/circular_buffer_interface.h` that includes emule's `llk_state.h`, preempting the upstream header. |
+| 3 | `use of undeclared identifier 'compute_kernel_hw_startup'` | Pull `#include "jit_hw/api/compute/compute_kernel_hw_startup.h"` into emule's `untilize.h` / `pack_untilize.h`. The function was already defined in emule — the shim header just wasn't including it. |
+| 4 | `untilize_helpers.inl:196: use of undeclared identifier 'pack_untilize_block'` | Add upstream-signature `pack_untilize_block<block_ct_dim, full_ct_dim>(icb, block_rt_dim, ocb, block_c_index=0)` mirroring `tt_metal/hw/inc/api/compute/pack_untilize.h:150`. Don't reuse `experimental::pack_untilize_block` — it has different args. |
+
+**`pack_untilize_block` adapter math** (this is non-obvious): when adapting the upstream signature for emule's `__llk_pack_untilize`-based scatter, set `__llk_pack_block_c = full_ct_dim` (the FULL row width, not the per-pass `block_ct_dim`). Seed `__llk_pack_offset = r * full_ct_dim + block_c_index * block_ct_dim` per row. The existing `experimental::pack_untilize_block` resets offset to 0 because it's called once per full output reservation — but the upstream-shape variant can be called multiple times per row when sub-blocks are needed (`use_block_based_pack` path in `untilize_helpers.inl`).
+
+**Total: 1 round, 3 new files / edits, ~50 LoC.** After Phase 1 lands, the same set of `untilize.cpp`-using tests (test_repeat ROW_MAJOR, test_concat, test_embedding, test_fill_pad families) JIT-compile — but PCC fails because the *input* CB sees zeros. That's a host→device data-loss issue (see the PCC-failure table above), not a compile-time gap.
 
 ## Common gotchas
 
