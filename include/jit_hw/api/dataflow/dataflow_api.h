@@ -26,6 +26,36 @@
 // expect these in scope wherever they include dataflow_api.h; mirror that.
 #include "hostdevcommon/common_values.hpp"
 #include <chrono>
+
+// Defensive memcpy used by every NOC primitive in this file. Both endpoints
+// of a NOC transaction come from address-arithmetic on uint32_t L1 offsets
+// and uint64_t NOC addresses; in emule those get translated to host pointers
+// via __emule_local_l1_to_ptr / __emule_resolve_noc_addr. When the kernel's
+// address arithmetic veers outside an emule-mapped region (typical for
+// experimental CCL-fused kernels that compute pointers as if running on
+// real-Tensix's unified address space), the translated pointer is unmapped.
+// Real Tensix raises a NOC watchdog; emule must NOT just call std::memcpy
+// with a stray pointer — that's a SIGSEGV in the host pytest process.
+//
+// This helper guards both ends, logs the offending arithmetic the first
+// few times per thread for diagnosis, and otherwise short-circuits cleanly.
+// All free-function NOC primitives below go through it so the guards stay
+// in one place.
+inline void __emule_safe_memcpy(uint8_t* dst, uint8_t* src, uint32_t size, const char* tag,
+                                uint32_t src_l1_addr_or_zero, uint64_t dst_noc_addr_or_zero) {
+    if (dst && src) {
+        std::memcpy(dst, src, size);
+        return;
+    }
+    static thread_local int __warn = 0;
+    if (__warn++ < 4) {
+        fprintf(stderr, "EMULE WARN: %s skipped (src=%p l1=0x%x dst=%p noc=0x%llx size=%u) "
+                "[from phys (%u,%u) logical (%u,%u)]\n",
+                tag, (void*)src, src_l1_addr_or_zero, (void*)dst,
+                (unsigned long long)dst_noc_addr_or_zero, size,
+                my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+    }
+}
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -203,14 +233,7 @@ FORCE_INLINE void noc_async_read_page(
     uint64_t noc_addr = addrgen.get_noc_addr(id, offset, noc);
     uint8_t* dst = __emule_local_l1_to_ptr(dst_local_l1_addr);
     uint8_t* src = __emule_resolve_noc_addr(noc_addr);
-    if (src) {
-        std::memcpy(dst, src, page_size);
-    } else {
-        fprintf(stderr, "EMULE WARN: noc_async_read_page failed to resolve addr 0x%llx "
-                "[from phys (%u,%u) logical (%u,%u)]\n",
-                (unsigned long long)noc_addr, my_x[0], my_y[0],
-                __emule_logical_x, __emule_logical_y);
-    }
+    __emule_safe_memcpy(dst, src, page_size, "noc_async_read_page", dst_local_l1_addr, noc_addr);
 }
 
 template<typename AddrGen>
@@ -228,14 +251,7 @@ FORCE_INLINE void noc_async_write_page(
     uint64_t noc_addr = addrgen.get_noc_addr(id, offset, noc);
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     uint8_t* dst = __emule_resolve_noc_addr(noc_addr);
-    if (dst) {
-        std::memcpy(dst, src, sz);
-    } else {
-        fprintf(stderr, "EMULE WARN: noc_async_write_page failed to resolve addr 0x%llx "
-                "[from phys (%u,%u) logical (%u,%u)]\n",
-                (unsigned long long)noc_addr, my_x[0], my_y[0],
-                __emule_logical_x, __emule_logical_y);
-    }
+    __emule_safe_memcpy(dst, src, sz, "noc_async_write_page", src_local_l1_addr, noc_addr);
 }
 
 // noc_async_read_tile — deprecated alias for noc_async_read_page.
@@ -288,14 +304,7 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
                 nx, ny, off, size, (void*)src,
                 __emule_logical_x, __emule_logical_y);
     }
-    if (src) {
-        std::memcpy(dst, src, size);
-    } else {
-        fprintf(stderr, "EMULE WARN: noc_async_read failed to resolve addr 0x%llx "
-                "[from phys (%u,%u) logical (%u,%u)]\n",
-                (unsigned long long)src_noc_addr, my_x[0], my_y[0],
-                __emule_logical_x, __emule_logical_y);
-    }
+    __emule_safe_memcpy(dst, src, size, "noc_async_read", dst_local_l1_addr, src_noc_addr);
 }
 
 // Templated overload — kernels (e.g. embeddings_tilize.cpp) call
@@ -315,25 +324,38 @@ inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
                             uint32_t size, uint8_t noc = 0, uint32_t vc = 0) {
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     uint8_t* dst = __emule_resolve_noc_addr(dst_noc_addr);
-    // Guard BOTH ends. The src L1 resolve can legitimately fail when the
-    // host hands a uint32_t address that's outside L1 range (e.g. for
-    // CCL-fused experimental kernels that pre-compute pointers via
-    // device-side address arithmetic). In that case we must NOT memcpy
-    // from a stray pointer; just warn once and short-circuit. This matches
-    // real Tensix's behaviour where a malformed NOC transaction surfaces
-    // as a watchdog timeout rather than a host segfault.
-    if (!src || !dst) {
-        static thread_local int __warn = 0;
-        if (__warn++ < 2) {
-            fprintf(stderr, "EMULE WARN: noc_async_write skipped (src=%p src_addr=0x%x dst=%p dst_addr=0x%llx size=%u) "
-                    "[from phys (%u,%u) logical (%u,%u)]\n",
-                    (void*)src, src_local_l1_addr, (void*)dst,
-                    (unsigned long long)dst_noc_addr, size,
-                    my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
-        }
-        return;
-    }
-    std::memcpy(dst, src, size);
+    __emule_safe_memcpy(dst, src, size, "noc_async_write", src_local_l1_addr, dst_noc_addr);
+}
+
+// ---- tt_reg_ptr attribute (no-op in emule) ----
+// Real silicon: pointer attribute marking a register-mapped address. Emule
+// kernels run on host; no such attribute exists, so define it away.
+#ifndef tt_reg_ptr
+#define tt_reg_ptr
+#endif
+
+// ---- RISCV debug wall-clock registers ----
+// Real silicon: memory-mapped wall-clock low/high registers used by data_movement
+// kernels' spin() debug helper. In emule, provide static storage that returns 0
+// (kernels using spin() are timing-debug only, never numerical).
+#ifndef RISCV_DEBUG_REG_WALL_CLOCK_L
+inline uint32_t __emule_wall_clock_lo_storage = 0;
+inline uint32_t __emule_wall_clock_hi_storage = 0;
+#define RISCV_DEBUG_REG_WALL_CLOCK_L (reinterpret_cast<uintptr_t>(&__emule_wall_clock_lo_storage))
+#define RISCV_DEBUG_REG_WALL_CLOCK_H (reinterpret_cast<uintptr_t>(&__emule_wall_clock_hi_storage))
+#endif
+
+// ---- One-packet helpers ----
+// Real silicon has these as separate NOC API calls for single-packet (≤ MAX_BURST)
+// transfers — same memcpy semantics in emule, no separate fast path.
+inline void noc_async_read_one_packet(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
+                                       uint32_t size, uint8_t noc = 0) {
+    noc_async_read(src_noc_addr, dst_local_l1_addr, size, noc);
+}
+
+inline void noc_async_write_one_packet(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
+                                        uint32_t size, uint8_t noc = 0) {
+    noc_async_write(src_local_l1_addr, dst_noc_addr, size, noc);
 }
 
 // ---- Multicast write ----

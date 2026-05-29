@@ -43,6 +43,31 @@ inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
 
 using namespace ckernel;
 
+// ---- pack_untilize_block (global scope, templated) ----
+// Matches tt_metal/hw/inc/api/compute/pack_untilize.h:150. Untilizes a
+// block_rt_dim × block_ct_dim block of tiles from icb → ocb at offset
+// block_c_index within the reserved CB region.
+template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim,
+          bool diagonal = false, bool narrow_row = false,
+          uint32_t row_num_datums = 32>
+inline void pack_untilize_block(uint32_t icb, uint32_t block_rt_dim, uint32_t ocb,
+                                uint32_t block_c_index = 0) {
+    // Reuse the experimental variant's row-major scatter (DST → CB) — same
+    // semantics: read block_rt_dim × block_ct_dim tiles from icb, untilize
+    // into ocb at the column offset.
+    __llk_pack_block_c = full_ct_dim;
+    __llk_pack_offset = block_c_index * block_ct_dim;
+    for (uint32_t r = 0; r < block_rt_dim; ++r) {
+        for (uint32_t c = 0; c < block_ct_dim; ++c) {
+            copy_tile(icb, r * block_ct_dim + c, c);
+        }
+        for (uint32_t c = 0; c < block_ct_dim; ++c) {
+            __llk_pack_untilize(c, ocb);
+            __llk_pack_offset++;
+        }
+    }
+}
+
 // ---- experimental::pack_untilize_block ----
 // Implements the DST → row-major CB scatter that D2M-generated untilize
 // kernels expect. Uses copy_tile (CB→DST) + __llk_pack_untilize (DST→CB);

@@ -57,6 +57,23 @@ ALWI void log_tile(uint32_t idst) {
         __emule_dst[idst][i] = std::log(__emule_dst[idst][i]);
 }
 
+// --- power_iterative_tile (integer-power via repeated multiply) ---
+ALWI void power_iterative_tile_init() {}
+ALWI void power_iterative_tile(uint32_t idst, uint32_t pow) {
+    __emule_dst_check(idst, "power_iterative_tile");
+    if (pow == 0) {
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
+            __emule_dst[idst][i] = 1.0f;
+        return;
+    }
+    float base[__EMULE_TILE_ELEMS];
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) base[i] = __emule_dst[idst][i];
+    for (uint32_t p = 1; p < pow; ++p) {
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
+            __emule_dst[idst][i] *= base[i];
+    }
+}
+
 // --- power (x^exponent_packed_float) ---
 ALWI void power_tile_init() {}
 ALWI void power_tile(uint32_t idst, uint32_t exponent_packed = 0) {

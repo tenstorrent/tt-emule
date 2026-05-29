@@ -159,9 +159,10 @@ template <
     uint32_t block_width_tiles,
     uint32_t input_cb,
     uint32_t output_cb,
-    tilize_config::InitUninitMode init_uninit_mode,
-    tilize_config::WaitMode wait_mode,
-    tilize_config::ReconfigureRegisterDatatypeMode reconfig_mode,
+    tilize_config::InitUninitMode init_uninit_mode = tilize_config::InitUninitMode::InitAndUninit,
+    tilize_config::WaitMode wait_mode = tilize_config::WaitMode::WaitBlock,
+    tilize_config::ReconfigureRegisterDatatypeMode reconfig_mode =
+        tilize_config::ReconfigureRegisterDatatypeMode::UnpackAndPackReconfigure,
     tilize_config::Fp32Mode fp32_mode = tilize_config::Fp32Mode::Fast>
 inline void tilize(uint32_t num_blocks, std::optional<uint32_t> total_input_pages = std::nullopt) {
     static_assert(block_width_tiles > 0, "block_width_tiles must be > 0");

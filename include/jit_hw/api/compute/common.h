@@ -26,6 +26,13 @@
 // In emulation, all three share one thread — execute everything.
 #define PACK(x) x
 #define MATH(x) x
+// TRISC_MATH selects #include of llk_math_* headers in upstream API headers
+// like mask.h. Emule maps MATH(x) → x, so those LLK symbols must exist —
+// define TRISC_MATH so upstream pulls them in (and emule's llk_math_*.h
+// shims provide no-op implementations).
+#ifndef TRISC_MATH
+#define TRISC_MATH
+#endif
 #define UNPACK(x) x
 
 #define ALWI FORCE_INLINE
@@ -341,7 +348,8 @@ ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
 
 // pack_tile (templated): used by D2M-generated code.
 // Template param <true> means "use output_offset as the write slot index".
-template <bool UseOutputOffset>
+// Default <false> matches real pack.h:64 semantics — auto-advance.
+template <bool UseOutputOffset = false>
 ALWI void pack_tile(uint32_t idst, uint32_t ocb, uint32_t output_offset = 0) {
     __emule_dst_check(idst, "pack_tile<templated>");
     if constexpr (UseOutputOffset) {

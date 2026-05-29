@@ -38,3 +38,11 @@ template <ckernel::BroadcastType BType = ckernel::BroadcastType::NONE,
           ckernel::EltwiseBinaryReuseDestType binary_reuse_dest = ckernel::EltwiseBinaryReuseDestType::NONE,
           bool unpack_to_dest = false>
 inline void llk_unpack_A(uint32_t /*operand*/, uint32_t /*tile_index*/) {}
+
+// llk_unpack_AB_init: moreh_common.hpp uses this template inside MATH/UNPACK macros.
+namespace ckernel {
+template <BroadcastType BT = BroadcastType::NONE>
+inline void llk_unpack_AB_init(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                                uint32_t /*transpose*/ = 0,
+                                uint32_t /*acc_to_dest*/ = 0) {}
+}
