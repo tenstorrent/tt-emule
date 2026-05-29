@@ -291,6 +291,12 @@ run_pytest "dm_test_creation_arange_tile"     "$DM_TEST_DIR/test_creation.py::te
 run_pytest "dm_test_creation_empty"           "$DM_TEST_DIR/test_creation.py::test_empty"
 run_pytest "dm_test_repeat"                   "$DM_TEST_DIR/test_repeat.py" -k 'not BFLOAT8_B and not test_pc_with_different'
 run_pytest "dm_test_repeat_interleave"        "$DM_TEST_DIR/test_repeat_interleave.py"
+run_pytest "dm_test_concat_iterative"         "$DM_TEST_DIR/test_concat_iterative.py"
+run_pytest "dm_test_gather"                   "$DM_TEST_DIR/test_gather.py" -k 'not test_gather_general'
+run_pytest "dm_test_concat_5d"                "$DM_TEST_DIR/test_concat.py" -k 'test_concat_5d'
+run_pytest "dm_test_concat_many_inputs"       "$DM_TEST_DIR/test_concat.py" -k 'test_concat_many_inputs'
+run_pytest "dm_test_fill_pad_float"           "$DM_TEST_DIR/test_fill_pad.py" -k 'test_fill_pad_float'
+run_pytest "dm_test_fill_pad_int"             "$DM_TEST_DIR/test_fill_pad.py" -k 'test_fill_pad_int'
 
 # ===========================================================================
 
