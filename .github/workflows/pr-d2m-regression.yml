@@ -225,6 +225,21 @@ jobs:
           # subcommand import fails — skip the sanity check and let the actual
           # `ttrt query` in the prepare step be the test of usability.
 
+      - name: Install pytest-timeout
+        # run_d2m_regression.sh enforces a per-test timeout via pytest-timeout.
+        # The toolchain image does not ship it, so install the tt-metal-pinned
+        # version (matches tt-metal/tt_metal/python_env/requirements-dev.txt).
+        shell: bash
+        run: |
+          set -xeo pipefail
+          set +u
+          cd tt-mlir
+          # shellcheck disable=SC1091
+          source env/activate
+          set -u
+          python -m pip install 'pytest-timeout==2.4.0'
+          python -c 'import pytest_timeout; print("pytest_timeout OK")'
+
       - name: Generate ttrt system_desc.ttsys
         env:
           TT_MLIR_DIR:   ${{ github.workspace }}/tt-mlir
