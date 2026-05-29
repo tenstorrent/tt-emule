@@ -22,6 +22,7 @@
 #include "jit_hw/api/cb_api.h"
 #include "jit_hw/internal/dataflow/dataflow_api_addrgen.h"
 #include "jit_hw/api/tensor/tensor_accessor.h"
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -172,6 +173,17 @@ template <typename T>
 inline constexpr bool has_get_noc_addr_v<
     T, std::void_t<decltype(std::declval<T>().get_noc_addr(
            std::declval<uint32_t>(), std::declval<uint32_t>(), std::declval<uint8_t>()))>> = true;
+
+// Free-function get_noc_addr(page_id, accessor) — forwards to the accessor's
+// method form. Required by upstream kernel-lib helpers (e.g.
+// `embedding/device/kernels/dataflow/embeddings_common.hpp::get_token_noc_addr`)
+// that pass a TensorAccessor directly into a free `get_noc_addr` call.
+template <typename AddrGen,
+          typename = std::enable_if_t<has_get_noc_addr_v<AddrGen>>>
+inline uint64_t get_noc_addr(uint32_t page_id, const AddrGen& accessor,
+                             uint32_t offset = 0, uint8_t noc = 0) {
+    return accessor.get_noc_addr(page_id, offset, noc);
+}
 
 template <typename, typename = void>
 inline constexpr bool has_page_size_v = false;
