@@ -237,8 +237,6 @@ run_test "ttnn_minmax_first_dim" "$TTNN_BIN" \
 run_test "ttnn_minmax_both_dims" "$TTNN_BIN" \
     --gtest_filter="MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/*"
 
-# ===========================================================================
-
 echo ""
 echo "========================================"
 echo " Results: $PASS passed, $FAIL failed, $SKIP skipped"

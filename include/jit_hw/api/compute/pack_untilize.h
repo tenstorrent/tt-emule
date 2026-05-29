@@ -4,14 +4,20 @@
 
 #pragma once
 // Emule shim for pack_untilize. Provides emulator implementations of
-// experimental::pack_untilize_block + a no-op surface for the upstream
-// pack_untilize init/dst helpers. The macro define preempts verbatim
-// injection of the experimental_pack_untilize_llks header chain.
+// `pack_untilize_block` (upstream signature) + `experimental::pack_untilize_block`
+// + a no-op surface for the upstream pack_untilize init/dst helpers. The macro
+// define preempts verbatim injection of the experimental_pack_untilize_llks
+// header chain.
+//
+// Real LLK reference:
+//   tt_metal/hw/inc/api/compute/pack_untilize.h (upstream `pack_untilize_block`)
+//   tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_pack_untilize.h (PACK LLK)
 #define TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_PACK_UNTILIZE_LLKS_H
 
 #include "jit_hw/internal/llk_state.h"
 #include "jit_hw/llk_pack.h"
 #include "jit_hw/api/compute/common.h"
+#include "jit_hw/api/compute/compute_kernel_hw_startup.h"
 
 namespace ckernel {
 
@@ -25,6 +31,33 @@ inline void pack_untilize_init(uint32_t /*icb*/, uint32_t /*ocb*/) {}
 inline void pack_untilize_dst_init_short(uint32_t cb_out, uint32_t ct_dim = 0, uint32_t face_r_dim = 0) {}
 inline void pack_untilize_dst(uint32_t cb_out, uint32_t out_subblock_h, uint32_t out_subblock_w,
                               uint32_t block_ct_dim = 0, uint32_t pack_dst_offset = 0) {}
+
+// Upstream signature (tt_metal/hw/inc/api/compute/pack_untilize.h:150).
+// `block_ct_dim` is the column tile-width of one PACK pass (also the DST
+// slot count); `full_ct_dim` is the full row width in tiles. `block_rt_dim`
+// is how many tile rows to process. `block_c_index` selects which
+// `block_ct_dim`-wide column-block within the full row to write to.
+//
+// In emule: DST is row-major float32, so we copy_tile(icb, r*block_ct_dim+c, c)
+// to load block_ct_dim tiles into DST slots, then call __llk_pack_untilize(c, ocb)
+// per slot. `__llk_pack_block_c` is set to `full_ct_dim` so __llk_pack_untilize's
+// row/col math (offset / block_c, offset % block_c) targets the correct tile
+// position in the output CB. cb_reserve_back leaves the output CB un-touched,
+// so we re-seed __llk_pack_offset per call.
+template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim>
+inline void pack_untilize_block(uint32_t icb, uint32_t block_rt_dim, uint32_t ocb, uint32_t block_c_index = 0) {
+    __llk_pack_block_c = full_ct_dim;
+    for (uint32_t r = 0; r < block_rt_dim; ++r) {
+        for (uint32_t c = 0; c < block_ct_dim; ++c) {
+            copy_tile(icb, r * block_ct_dim + c, c);
+        }
+        __llk_pack_offset = r * full_ct_dim + block_c_index * block_ct_dim;
+        for (uint32_t c = 0; c < block_ct_dim; ++c) {
+            __llk_pack_untilize(c, ocb);
+            __llk_pack_offset++;
+        }
+    }
+}
 
 // Template overloads used by bmm_large_block_zm_fused_bias_activation.cpp
 template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim,
