@@ -38,9 +38,15 @@ inline bool get_output_narrow_tile(uint32_t) { return false; }
 inline uint32_t get_output_face_r_dim(uint32_t) { return 16; }
 inline uint32_t get_output_num_faces(uint32_t) { return 4; }
 
-// Format arrays (stub)
-inline uint32_t unpack_src_format[32] = {};
-inline uint32_t unpack_dst_format[32] = {};
+// Format arrays (stub). Real device populates these via JIT codegen with the
+// per-CB DataFormat enum. emule's DST is always fp32 internally; treat every CB
+// as fp32 (== 0) at compile time. Made constexpr so kernel-lib helpers like
+// `constexpr auto format = unpack_src_format[icb]` (in tilize_helpers.inl
+// `is_fp32_input_format()`) can resolve as constant expressions.
+inline constexpr uint32_t unpack_src_format[32] = {};
+inline constexpr uint32_t unpack_dst_format[32] = {};
+inline constexpr uint32_t pack_dst_format[32]   = {};
+inline constexpr uint32_t pack_src_format[32]   = {};
 
 // ---- Tilize/Untilize state ----
 // Unpack state: tracks source CB and tile position for datacopy calls
