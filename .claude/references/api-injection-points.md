@@ -112,16 +112,16 @@ JIT-orchestration code or fundamental device emulation.
 
 Anything that needs to call from JIT-compiled .so back into the host
 process (e.g. to access the chip's core map) goes through a C-linkage
-bridge function declared in `jit_kernel_stubs.hpp` and defined in
+bridge functions declared in the JIT shim headers and defined in
 `emulated_program_runner.cpp`:
 
-```cpp
-// declarations (jit_kernel_stubs.hpp):
-extern "C" uint8_t* __emule_dram_ptr(uint64_t offset);
-extern "C" uint8_t* __emule_noc_resolve(uint32_t x, uint32_t y, uint64_t addr);
-extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
-extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src, uint32_t size);
-```
+    // declarations (jit_kernel_stubs.hpp):
+    extern "C" uint8_t* __emule_dram_ptr(uint64_t offset);
+    extern "C" uint8_t* __emule_noc_resolve(uint32_t x, uint32_t y, uint64_t addr);
+
+    // declarations (api/dataflow/dataflow_api.h and experimental/noc.h):
+    extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
+    extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src, uint32_t size);
 
 These resolve at `dlopen()` time when the kernel .so is loaded into the
 host process's address space (RTLD_GLOBAL'd `libtt_metal.so` provides
