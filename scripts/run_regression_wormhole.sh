@@ -297,6 +297,10 @@ run_pytest "dm_test_concat_5d"                "$DM_TEST_DIR/test_concat.py" -k '
 run_pytest "dm_test_concat_many_inputs"       "$DM_TEST_DIR/test_concat.py" -k 'test_concat_many_inputs'
 run_pytest "dm_test_fill_pad_float"           "$DM_TEST_DIR/test_fill_pad.py" -k 'test_fill_pad_float'
 run_pytest "dm_test_fill_pad_int"             "$DM_TEST_DIR/test_fill_pad.py" -k 'test_fill_pad_int'
+run_pytest "dm_test_embedding_tiled_input"    "$DM_TEST_DIR/test_embedding.py" -k 'test_embedding_tiled_input'
+run_pytest "dm_test_embedding_tiled"          "$DM_TEST_DIR/test_embedding.py" -k 'test_tiled and not test_embedding_tiled'
+run_pytest "dm_test_moe_embedding"            "$DM_TEST_DIR/test_embedding.py" -k 'test_moe_embedding'
+run_pytest "dm_test_embedding_base_case"      "$DM_TEST_DIR/test_embedding.py" -k 'test_base_case'
 
 # ===========================================================================
 
