@@ -289,7 +289,8 @@ run_pytest "dm_test_creation_full"            "$DM_TEST_DIR/test_creation.py::te
 run_pytest "dm_test_creation_arange_defaults" "$DM_TEST_DIR/test_creation.py::test_arange_defaults"
 run_pytest "dm_test_creation_arange_tile"     "$DM_TEST_DIR/test_creation.py::test_arange_tile_layout"
 run_pytest "dm_test_creation_empty"           "$DM_TEST_DIR/test_creation.py::test_empty"
-run_pytest "dm_test_repeat_rm"                "$DM_TEST_DIR/test_repeat.py" -k 'Layout.ROW_MAJOR'
+run_pytest "dm_test_repeat"                   "$DM_TEST_DIR/test_repeat.py" -k 'not BFLOAT8_B and not test_pc_with_different'
+run_pytest "dm_test_repeat_interleave"        "$DM_TEST_DIR/test_repeat_interleave.py"
 
 # ===========================================================================
 

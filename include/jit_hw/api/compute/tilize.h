@@ -30,13 +30,46 @@ inline void tilize_uninit(uint32_t = 0, uint32_t = 0) {
 }
 
 // tilize_block: read `ntiles` row-major tiles from `icb` and write them as
-// nfaces tiles to `ocb`. emule's `pack_tile` already does the row-major→nfaces
-// conversion when `__llk_pack_is_untilize=false` (which is what `tilize_init`
-// sets), so the loop is just copy_tile + pack_tile.
+// nfaces tiles to `ocb`.
+//
+// Direct rowmajor→nfaces conversion. Don't reuse `copy_tile + pack_tile`:
+// copy_tile's unpack ALWAYS applies the nfaces→rowmajor permutation (assumes
+// nfaces input); pack_tile then applies the inverse rowmajor→nfaces. With
+// row-major source data, the unpack permutation produces a scrambled DST,
+// so the round-trip is NOT identity.
 inline void tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb) {
+    const bool icb_is_32bit = __emule_compute::cb_is_32bit_format(icb);
+    const bool ocb_is_32bit = __emule_compute::cb_is_32bit_format(ocb);
     for (uint32_t t = 0; t < ntiles; ++t) {
-        copy_tile(icb, t, 0);
-        pack_tile(0, ocb);
+        uint8_t* in = __emule_compute::cb_read_ptr_at(icb, t);
+        uint8_t* out = __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++);
+        if (icb_is_32bit && ocb_is_32bit) {
+            const uint32_t* in_u = reinterpret_cast<const uint32_t*>(in);
+            uint32_t* out_u = reinterpret_cast<uint32_t*>(out);
+            for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+                std::memcpy(&out_u[__emule_nfaces::rowmajor_to_nfaces[i]], &in_u[i], sizeof(uint32_t));
+            }
+        } else if (!icb_is_32bit && !ocb_is_32bit) {
+            const uint16_t* in_bf = reinterpret_cast<const uint16_t*>(in);
+            uint16_t* out_bf = reinterpret_cast<uint16_t*>(out);
+            for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+                out_bf[__emule_nfaces::rowmajor_to_nfaces[i]] = in_bf[i];
+            }
+        } else if (!icb_is_32bit && ocb_is_32bit) {
+            // bf16 in → fp32 out
+            const uint16_t* in_bf = reinterpret_cast<const uint16_t*>(in);
+            float* out_f = reinterpret_cast<float*>(out);
+            for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+                out_f[__emule_nfaces::rowmajor_to_nfaces[i]] = __emule_bf16::to_f32(in_bf[i]);
+            }
+        } else {
+            // fp32 in → bf16 out
+            const float* in_f = reinterpret_cast<const float*>(in);
+            uint16_t* out_bf = reinterpret_cast<uint16_t*>(out);
+            for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+                out_bf[__emule_nfaces::rowmajor_to_nfaces[i]] = __emule_bf16::from_f32(in_f[i]);
+            }
+        }
     }
 }
 
