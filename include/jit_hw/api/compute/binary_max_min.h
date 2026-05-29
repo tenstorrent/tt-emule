@@ -19,10 +19,19 @@ ALWI void binary_max_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
         __emule_dst[odst][i] = std::max(__emule_dst[idst0][i], __emule_dst[idst1][i]);
 }
+// 4-arg overload: trailing vector_mode (real signature accepts an int
+// VectorMode flag for selective row/column/face application). Emule treats
+// the full tile uniformly — mode flag is ignored.
+ALWI void binary_max_tile(uint32_t idst0, uint32_t idst1, uint32_t odst, int /*vector_mode*/) {
+    binary_max_tile(idst0, idst1, odst);
+}
 
 ALWI void binary_min_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
         __emule_dst[odst][i] = std::min(__emule_dst[idst0][i], __emule_dst[idst1][i]);
+}
+ALWI void binary_min_tile(uint32_t idst0, uint32_t idst1, uint32_t odst, int /*vector_mode*/) {
+    binary_min_tile(idst0, idst1, odst);
 }
 
 template<DataFormat Fmt = DataFormat::Int32>

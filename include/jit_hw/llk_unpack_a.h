@@ -45,4 +45,13 @@ template <BroadcastType BT = BroadcastType::NONE>
 inline void llk_unpack_AB_init(uint32_t /*icb0*/, uint32_t /*icb1*/,
                                 uint32_t /*transpose*/ = 0,
                                 uint32_t /*acc_to_dest*/ = 0) {}
+
+// llk_unpack_A_init: SDPA compute_common.hpp uses this with 4 template args
+// inside UNPACK macros.
+template <BroadcastType BT = BroadcastType::NONE,
+          bool acc_to_dest = false,
+          EltwiseBinaryReuseDestType binary_reuse_dest = EltwiseBinaryReuseDestType::NONE,
+          bool unpack_to_dest = false>
+inline void llk_unpack_A_init(uint32_t /*icb0*/, uint32_t /*transpose*/ = 0,
+                               uint32_t /*acc_to_dest*/ = 0) {}
 }

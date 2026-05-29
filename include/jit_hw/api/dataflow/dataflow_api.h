@@ -217,6 +217,17 @@ template <typename T>
 inline constexpr bool has_log_base_2_of_page_size_v<
     T, std::void_t<decltype(std::declval<T>().log_base_2_of_page_size)>> = true;
 
+template <typename, typename = void>
+inline constexpr bool has_get_aligned_page_size_v = false;
+template <typename T>
+inline constexpr bool has_get_aligned_page_size_v<
+    T, std::void_t<decltype(std::declval<T>().get_aligned_page_size())>> = true;
+
+template <typename T>
+inline constexpr bool has_required_addrgen_traits_v =
+    has_get_noc_addr_v<T> and
+    (has_get_aligned_page_size_v<T> or has_page_size_v<T> or has_log_base_2_of_page_size_v<T>);
+
 // ---- NOC page operations (using addrgen.get_noc_addr) ----
 
 template<typename AddrGen>
