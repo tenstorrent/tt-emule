@@ -22,7 +22,6 @@
 #include "jit_hw/api/cb_api.h"
 #include "jit_hw/internal/dataflow/dataflow_api_addrgen.h"
 #include "jit_hw/api/tensor/tensor_accessor.h"
-#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>

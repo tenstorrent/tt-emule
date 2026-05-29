@@ -8,8 +8,7 @@
 # Runs the subset of tt-metal/tests/ttnn/unit_tests/operations/data_movement/
 # pytest entries that pass cleanly under emule. The list is curated: each
 # entry is either a whole file or a function/-k subset that has been
-# verified all-PASS in standalone runs. Broader file status is tracked in
-# docs/notes/data_movement-bring-up.md (gitignored running notes).
+# verified all-PASS in standalone runs.
 #
 # Required env:
 #   TT_METAL_DIR  — path to tt-metal source tree
@@ -50,7 +49,7 @@ run_pytest() {
         if [ -n "$GTEST_XML_DIR" ]; then
             junit_args=(--junitxml="$GTEST_XML_DIR/${name}.xml")
         fi
-        timeout 900 "$PYTEST_BIN" "$test_path" -v --tb=short --forked "${junit_args[@]}" "$@" 2>&1 | tail -30
+        timeout 900 "$PYTEST_BIN" "$test_path" -v --tb=short --forked "${junit_args[@]}" "$@" 2>&1
     ); then
         echo "  PASS"; PASS=$((PASS + 1))
     else
@@ -67,8 +66,7 @@ echo "  PYTEST_BIN:   $PYTEST_BIN"
 echo "  GTEST_XML_DIR: ${GTEST_XML_DIR:-<unset>}"
 echo ""
 
-# Verified all-PASS in the data_movement bring-up
-# (commits d1b5ce9..4f653d3 on arminale/datamovement-tests).
+# Each entry below was verified all-PASS in standalone runs during bring-up.
 
 # Whole files (no -k filter needed)
 run_pytest "dm_test_non_zero_indices"  "$DM_TEST_DIR/test_non_zero_indices.py"

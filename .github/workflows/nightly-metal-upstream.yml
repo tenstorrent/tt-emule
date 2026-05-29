@@ -192,8 +192,8 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
-  data-movement-pytest:
-    name: data_movement pytest (N150)
+  ttnn-pytest:
+    name: TTNN Pytests
     needs: build
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 60
