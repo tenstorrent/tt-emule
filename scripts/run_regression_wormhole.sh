@@ -238,6 +238,53 @@ run_test "ttnn_minmax_both_dims" "$TTNN_BIN" \
     --gtest_filter="MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/*"
 
 # ===========================================================================
+# Tier 6: ttnn data_movement pytest (single-device N150)
+# ===========================================================================
+#
+# Pytest-driven tests from tt-metal/tests/ttnn/unit_tests/operations/data_movement/
+# that exercise emule via the stock ttnn Python binding. Only the variants that
+# pass cleanly today are listed here — broader file passes track in
+# docs/notes/data_movement-bring-up.md. Sharded variants and tests that depend
+# on host→DRAM transfer of large interleaved tensors are deferred (separate
+# emule path investigation).
+
+PYTEST_BIN="${PYTEST_BIN:-/opt/ttmlir-toolchain/venv/bin/pytest}"
+DM_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/data_movement"
+
+run_pytest() {
+    local name="$1"; shift
+    local test_path="$1"; shift
+    echo "--- $name ---"
+    if (
+        export PYTHONPATH="$TT_METAL_DIR/ttnn:$TT_METAL_DIR/tools:$BUILD_DIR/lib:$TT_METAL_DIR:${PYTHONPATH:-}"
+        export LD_LIBRARY_PATH="$BUILD_DIR/lib:${LD_LIBRARY_PATH:-}"
+        export TT_METAL_HOME="$TT_METAL_DIR"
+        export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
+        export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
+        export TT_METAL_EMULE_MODE=1
+        export TT_METAL_SLOW_DISPATCH_MODE=1
+        export MESH_DEVICE=N150
+        local junit_args=()
+        if [ -n "$GTEST_XML_DIR" ]; then
+            junit_args=(--junitxml="$GTEST_XML_DIR/${name}.xml")
+        fi
+        timeout 600 "$PYTEST_BIN" "$test_path" -v --tb=short --forked "${junit_args[@]}" "$@" 2>&1 | tail -20
+    ); then
+        echo "  PASS"; PASS=$((PASS + 1))
+    else
+        echo "  FAIL"; FAIL=$((FAIL + 1))
+    fi
+}
+
+echo ""
+echo "== Tier 6: data_movement pytest (N150 single-device) =="
+
+run_pytest "dm_test_non_zero_indices" "$DM_TEST_DIR/test_non_zero_indices.py"
+run_pytest "dm_test_clone_shape" "$DM_TEST_DIR/test_clone.py::test_clone_shape"
+run_pytest "dm_test_clone_callback" "$DM_TEST_DIR/test_clone.py::test_clone_callback"
+run_pytest "dm_test_full" "$DM_TEST_DIR/test_full.py"
+
+# ===========================================================================
 
 echo ""
 echo "========================================"
