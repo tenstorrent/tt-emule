@@ -44,7 +44,8 @@ Which architectures are relevant?
 - **Cross-arch comparison wanted** → launch all 3.
 - **emule already mocks X, I want to know if it's right** → at minimum
   launch the arch that matches the active test config
-  (`TT_EMULE_ARCH=blackhole` today; falls back to wormhole otherwise).
+  (`TT_EMULE_ARCH` if explicitly set; otherwise follow the project
+  default of wormhole n150 unless the caller/test specifies another arch).
 
 ## Step 1b — Classify question type (MANDATORY)
 
