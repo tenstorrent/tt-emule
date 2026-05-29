@@ -6,3 +6,4 @@ build/
 Testing/
 generated/
 logs/
+.claude/settings.local.json
