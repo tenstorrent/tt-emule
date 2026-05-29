@@ -21,7 +21,7 @@ case "$TT_EMULE_ARCH" in
     *) echo "ERROR: TT_EMULE_ARCH must be wormhole|blackhole, got '$TT_EMULE_ARCH'" >&2; exit 1 ;;
 esac
 LOG_DIR="/tmp/tt_emule_d2m_logs_$$"
-TIMEOUT="${TIMEOUT:-1800}"
+TIMEOUT="${TIMEOUT:-3600}"
 D2M_XML_DIR="${D2M_XML_DIR:-}"
 
 SERIAL=0

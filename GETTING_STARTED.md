@@ -7,7 +7,7 @@ Quick path: clone, build, verify, then wire up a new ttnn test. Skip to `BUILD_G
 | Tool | Version |
 |------|---------|
 | clang-20 | 20.x |
-| libc++-20-dev | 20.x |
+| libstdc++ (gcc-13+) | 13.x |
 | CMake | ≥ 3.24 |
 | Ninja | ≥ 1.10 |
 
@@ -32,12 +32,12 @@ git submodule update --init tt_metal/third_party/tracy
 
 ## 3. Build
 
+One libstdc++ build covers C++ regression, ttnn pytest, and tt-mlir D2M:
+
 ```bash
 cd "$ROOT/tt-metal"
 cmake -S . -B build_emule -G Ninja \
-  -DCMAKE_TOOLCHAIN_FILE="$ROOT/tt-metal/cmake/x86_64-linux-clang-20-libcpp-toolchain.cmake" \
-  -DCMAKE_AR=/usr/bin/llvm-ar-20 \
-  -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
+  -DCMAKE_TOOLCHAIN_FILE="$ROOT/tt-metal/cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake" \
   -DCMAKE_BUILD_TYPE=Release \
   -DTT_METAL_USE_EMULE=ON \
   -DTT_EMULE_PATH="$ROOT/tt-emule" \
@@ -45,8 +45,21 @@ cmake -S . -B build_emule -G Ninja \
   -DWITH_PYTHON_BINDINGS=ON \
   -DTT_METAL_BUILD_TESTS=ON \
   -DTTNN_BUILD_TESTS=ON \
-  -DENABLE_TRACY=OFF
+  -DENABLE_TRACY=OFF \
+  -DENABLE_DISTRIBUTED=ON
 cmake --build build_emule -j$(nproc)
+```
+
+Then set up symlinks (one-time):
+
+```bash
+ln -sfn "$ROOT/tt-metal/build_emule/ttnn/_ttnn.so" \
+       "$ROOT/tt-metal/ttnn/ttnn/_ttnn.so"
+cd "$ROOT/tt-metal/build_emule/lib"
+ln -sfn ../tt_metal/libtt_metal.so libtt_metal.so
+ln -sfn ../tt_stl/libtt_stl.so libtt_stl.so
+ln -sfn ../ttnn/_ttnncpp.so _ttnncpp.so
+ln -sfn ../ttnn/_ttnn.so _ttnn.so
 ```
 
 ## 4. Verify
@@ -63,6 +76,19 @@ bash scripts/run_regression_quasar.sh
 ```
 
 Baseline: wormhole **30/9**, blackhole **19/0**, quasar **105/9** — failures match `.github/known-failures-{arch}.txt`.
+
+Quick sanity check that ttnn pytest works against the same build (no second toolchain needed):
+
+```bash
+cd "$ROOT/tt-metal"
+export PYTHONPATH=$PWD/ttnn:$PWD/tools:${PYTHONPATH:-}
+export TT_METAL_HOME=$PWD TT_METAL_RUNTIME_ROOT=$PWD
+export TT_METAL_EMULE_MODE=1 TT_METAL_SLOW_DISPATCH_MODE=1
+export TT_METAL_MOCK_CLUSTER_DESC_PATH=$PWD/tt_metal/third_party/umd/tests/cluster_descriptor_examples/wormhole_N150.yaml
+/opt/ttmlir-toolchain/venv/bin/pytest tests/ttnn/unit_tests/base_functionality/test_reshape.py -v | tail -5
+```
+
+No `TT_METAL_USE_EMULE=ON` FATAL means the build is wired correctly.
 
 ## 5. Add a TTNN Test
 
