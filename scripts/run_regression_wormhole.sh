@@ -283,6 +283,13 @@ run_pytest "dm_test_non_zero_indices" "$DM_TEST_DIR/test_non_zero_indices.py"
 run_pytest "dm_test_clone_shape" "$DM_TEST_DIR/test_clone.py::test_clone_shape"
 run_pytest "dm_test_clone_callback" "$DM_TEST_DIR/test_clone.py::test_clone_callback"
 run_pytest "dm_test_full" "$DM_TEST_DIR/test_full.py"
+run_pytest "dm_test_creation_ones"            "$DM_TEST_DIR/test_creation.py::test_ones"
+run_pytest "dm_test_creation_zeros"           "$DM_TEST_DIR/test_creation.py::test_zeros"
+run_pytest "dm_test_creation_full"            "$DM_TEST_DIR/test_creation.py::test_full"
+run_pytest "dm_test_creation_arange_defaults" "$DM_TEST_DIR/test_creation.py::test_arange_defaults"
+run_pytest "dm_test_creation_arange_tile"     "$DM_TEST_DIR/test_creation.py::test_arange_tile_layout"
+run_pytest "dm_test_creation_empty"           "$DM_TEST_DIR/test_creation.py::test_empty"
+run_pytest "dm_test_repeat_rm"                "$DM_TEST_DIR/test_repeat.py" -k 'Layout.ROW_MAJOR'
 
 # ===========================================================================
 
