@@ -238,70 +238,9 @@ run_test "ttnn_minmax_both_dims" "$TTNN_BIN" \
     --gtest_filter="MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/*"
 
 # ===========================================================================
-# Tier 6: ttnn data_movement pytest (single-device N150)
-# ===========================================================================
-#
-# Pytest-driven tests from tt-metal/tests/ttnn/unit_tests/operations/data_movement/
-# that exercise emule via the stock ttnn Python binding. Only the variants that
-# pass cleanly today are listed here — broader file passes track in
-# docs/notes/data_movement-bring-up.md. Sharded variants and tests that depend
-# on host→DRAM transfer of large interleaved tensors are deferred (separate
-# emule path investigation).
-
-PYTEST_BIN="${PYTEST_BIN:-/opt/ttmlir-toolchain/venv/bin/pytest}"
-DM_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/data_movement"
-
-run_pytest() {
-    local name="$1"; shift
-    local test_path="$1"; shift
-    echo "--- $name ---"
-    if (
-        export PYTHONPATH="$TT_METAL_DIR/ttnn:$TT_METAL_DIR/tools:$BUILD_DIR/lib:$TT_METAL_DIR:${PYTHONPATH:-}"
-        export LD_LIBRARY_PATH="$BUILD_DIR/lib:${LD_LIBRARY_PATH:-}"
-        export TT_METAL_HOME="$TT_METAL_DIR"
-        export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
-        export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/wormhole_N150.yaml"
-        export TT_METAL_EMULE_MODE=1
-        export TT_METAL_SLOW_DISPATCH_MODE=1
-        export MESH_DEVICE=N150
-        local junit_args=()
-        if [ -n "$GTEST_XML_DIR" ]; then
-            junit_args=(--junitxml="$GTEST_XML_DIR/${name}.xml")
-        fi
-        timeout 600 "$PYTEST_BIN" "$test_path" -v --tb=short --forked "${junit_args[@]}" "$@" 2>&1 | tail -20
-    ); then
-        echo "  PASS"; PASS=$((PASS + 1))
-    else
-        echo "  FAIL"; FAIL=$((FAIL + 1))
-    fi
-}
-
-echo ""
-echo "== Tier 6: data_movement pytest (N150 single-device) =="
-
-run_pytest "dm_test_non_zero_indices" "$DM_TEST_DIR/test_non_zero_indices.py"
-run_pytest "dm_test_clone_shape" "$DM_TEST_DIR/test_clone.py::test_clone_shape"
-run_pytest "dm_test_clone_callback" "$DM_TEST_DIR/test_clone.py::test_clone_callback"
-run_pytest "dm_test_full" "$DM_TEST_DIR/test_full.py"
-run_pytest "dm_test_creation_ones"            "$DM_TEST_DIR/test_creation.py::test_ones"
-run_pytest "dm_test_creation_zeros"           "$DM_TEST_DIR/test_creation.py::test_zeros"
-run_pytest "dm_test_creation_full"            "$DM_TEST_DIR/test_creation.py::test_full"
-run_pytest "dm_test_creation_arange_defaults" "$DM_TEST_DIR/test_creation.py::test_arange_defaults"
-run_pytest "dm_test_creation_arange_tile"     "$DM_TEST_DIR/test_creation.py::test_arange_tile_layout"
-run_pytest "dm_test_creation_empty"           "$DM_TEST_DIR/test_creation.py::test_empty"
-run_pytest "dm_test_repeat"                   "$DM_TEST_DIR/test_repeat.py" -k 'not BFLOAT8_B and not test_pc_with_different'
-run_pytest "dm_test_repeat_interleave"        "$DM_TEST_DIR/test_repeat_interleave.py"
-run_pytest "dm_test_concat_iterative"         "$DM_TEST_DIR/test_concat_iterative.py"
-run_pytest "dm_test_gather"                   "$DM_TEST_DIR/test_gather.py" -k 'not test_gather_general'
-run_pytest "dm_test_concat_5d"                "$DM_TEST_DIR/test_concat.py" -k 'test_concat_5d'
-run_pytest "dm_test_concat_many_inputs"       "$DM_TEST_DIR/test_concat.py" -k 'test_concat_many_inputs'
-run_pytest "dm_test_fill_pad_float"           "$DM_TEST_DIR/test_fill_pad.py" -k 'test_fill_pad_float'
-run_pytest "dm_test_fill_pad_int"             "$DM_TEST_DIR/test_fill_pad.py" -k 'test_fill_pad_int'
-run_pytest "dm_test_embedding_tiled_input"    "$DM_TEST_DIR/test_embedding.py" -k 'test_embedding_tiled_input'
-run_pytest "dm_test_embedding_tiled"          "$DM_TEST_DIR/test_embedding.py" -k 'test_tiled and not test_embedding_tiled'
-run_pytest "dm_test_moe_embedding"            "$DM_TEST_DIR/test_embedding.py" -k 'test_moe_embedding'
-run_pytest "dm_test_embedding_base_case"      "$DM_TEST_DIR/test_embedding.py" -k 'test_base_case'
-
+# data_movement pytest tier moved to scripts/run_data_movement_pytest.sh
+# (a separate CI job — see .github/workflows/pr-metal-regression.yml).
+# The wormhole gtest suite remains pure C++ regression here.
 # ===========================================================================
 
 echo ""
