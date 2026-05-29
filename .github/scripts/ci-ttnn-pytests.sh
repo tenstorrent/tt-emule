@@ -3,15 +3,15 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# CI wrapper for the data_movement pytest regression.
+# CI wrapper for the TTNN pytest regression.
 #
 # Required env:
 #   TT_METAL_DIR   path to tt-metal source tree (checked out at the pinned SHA)
 #   BUILD_DIR      absolute path to the build tree (containing ttnn/_ttnn.so etc.)
 #
 # Optional env:
-#   GTEST_XML_DIR  default $RUNNER_TEMP/dm-junit-xml (per-entry junit XML)
-#   REGRESSION_LOG default $RUNNER_TEMP/data-movement.log
+#   GTEST_XML_DIR  default $RUNNER_TEMP/ttnn-junit-xml (per-entry junit XML)
+#   REGRESSION_LOG default $RUNNER_TEMP/ttnn-pytests.log
 
 set -euo pipefail
 
@@ -21,8 +21,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TT_EMULE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-export GTEST_XML_DIR="${GTEST_XML_DIR:-${RUNNER_TEMP:-/tmp}/dm-junit-xml}"
-REGRESSION_LOG="${REGRESSION_LOG:-${RUNNER_TEMP:-/tmp}/data-movement.log}"
+export GTEST_XML_DIR="${GTEST_XML_DIR:-${RUNNER_TEMP:-/tmp}/ttnn-junit-xml}"
+REGRESSION_LOG="${REGRESSION_LOG:-${RUNNER_TEMP:-/tmp}/ttnn-pytests.log}"
 
 mkdir -p "$GTEST_XML_DIR"
 rm -f "$GTEST_XML_DIR"/*.xml
@@ -35,7 +35,7 @@ if [ ! -e "$TT_METAL_DIR/ttnn/ttnn/_ttnn.so" ]; then
     ln -sfn "$BUILD_DIR/ttnn/_ttnn.so" "$TT_METAL_DIR/ttnn/ttnn/_ttnn.so"
 fi
 
-echo "== ci-data-movement-pytest.sh =="
+echo "== ci-ttnn-pytests.sh =="
 echo "  TT_EMULE_DIR:   $TT_EMULE_DIR"
 echo "  TT_METAL_DIR:   $TT_METAL_DIR"
 echo "  BUILD_DIR:      $BUILD_DIR"
@@ -44,13 +44,13 @@ echo "  REGRESSION_LOG: $REGRESSION_LOG"
 echo ""
 
 set +e
-bash "$TT_EMULE_DIR/scripts/run_data_movement_pytest.sh" 2>&1 | tee "$REGRESSION_LOG"
+bash "$TT_EMULE_DIR/scripts/run_ttnn_pytests.sh" 2>&1 | tee "$REGRESSION_LOG"
 rc=${PIPESTATUS[0]}
 set -e
 
 xml_count=$(find "$GTEST_XML_DIR" -name '*.xml' 2>/dev/null | wc -l)
 echo ""
-echo "== data_movement pytest done =="
+echo "== TTNN pytest done =="
 echo "  exit code:    $rc"
 echo "  XML files:    $xml_count in $GTEST_XML_DIR"
 echo "  Log:          $REGRESSION_LOG"

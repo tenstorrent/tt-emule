@@ -237,12 +237,6 @@ run_test "ttnn_minmax_first_dim" "$TTNN_BIN" \
 run_test "ttnn_minmax_both_dims" "$TTNN_BIN" \
     --gtest_filter="MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/*"
 
-# ===========================================================================
-# data_movement pytest tier moved to scripts/run_data_movement_pytest.sh
-# (a separate CI job — see .github/workflows/pr-metal-regression.yml).
-# The wormhole gtest suite remains pure C++ regression here.
-# ===========================================================================
-
 echo ""
 echo "========================================"
 echo " Results: $PASS passed, $FAIL failed, $SKIP skipped"

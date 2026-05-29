@@ -3,12 +3,13 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# tt-emule data_movement pytest regression — single-device N150.
+# tt-emule TTNN pytest regression — single-device N150.
 #
-# Runs the subset of tt-metal/tests/ttnn/unit_tests/operations/data_movement/
-# pytest entries that pass cleanly under emule. The list is curated: each
-# entry is either a whole file or a function/-k subset that has been
-# verified all-PASS in standalone runs.
+# Runs the subset of tt-metal/tests/ttnn/unit_tests/ pytest entries that pass
+# cleanly under emule. The list is curated: each entry is either a whole file
+# or a function/-k subset that has been verified all-PASS in standalone runs.
+# Today's coverage is the data_movement suite; new domains can extend the
+# entry list as they come online.
 #
 # Required env:
 #   TT_METAL_DIR  — path to tt-metal source tree
@@ -58,7 +59,7 @@ run_pytest() {
 }
 
 echo "========================================"
-echo " data_movement pytest (N150 single-device)"
+echo " TTNN pytest (N150 single-device)"
 echo "========================================"
 echo "  TT_METAL_DIR: $TT_METAL_DIR"
 echo "  BUILD_DIR:    $BUILD_DIR"

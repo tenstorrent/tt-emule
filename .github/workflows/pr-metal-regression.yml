@@ -229,20 +229,20 @@ jobs:
         shell: bash
         run: bash tt-metal/install_dependencies.sh --sfpi
 
-      - name: Run data_movement pytest
+      - name: Run TTNN pytest
         env:
           TT_METAL_DIR: ${{ github.workspace }}/tt-metal
           BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule
         shell: bash
-        run: bash tt-emule/.github/scripts/ci-data-movement-pytest.sh
+        run: bash tt-emule/.github/scripts/ci-ttnn-pytests.sh
 
-      - name: Upload data_movement artifacts
+      - name: Upload TTNN pytest artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: data-movement-results
+          name: ttnn-pytests-results
           path: |
-            ${{ runner.temp }}/data-movement.log
-            ${{ runner.temp }}/dm-junit-xml/*.xml
+            ${{ runner.temp }}/ttnn-pytests.log
+            ${{ runner.temp }}/ttnn-junit-xml/*.xml
           retention-days: 30
           if-no-files-found: warn
