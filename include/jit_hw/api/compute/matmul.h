@@ -85,22 +85,37 @@ ALWI void mm_block_init_short_with_dt(uint32_t in0_cb = 0, uint32_t in1_cb = 1,
                                       uint32_t old_in1_cb = 0, uint32_t transpose = 0,
                                       uint32_t ct_dim = 1, uint32_t rt_dim = 1,
                                       uint32_t kt_dim = 1) {}
-// matmul_block: compute rt_dim × ct_dim block of output tiles.
-// For each output tile (r, c): DST[idst + r*ct_dim + c] += A[in0_tile + r*kt_dim] * B[in1_tile + c]
+// matmul_block: one outer-product accumulation over a column of in0 and a row
+// of in1, producing a rt_dim × ct_dim block in DST.
+//
+// Real LLK semantics (tt_metal/hw/inc/api/compute/matmul.h: `matmul_block`):
+//   llk_math_matmul<...>(idst, ct_dim, rt_dim)  — math knows nothing of kt_dim.
+//   llk_unpack_AB_matmul(in0_cb, in1_cb, in0_idx, in1_idx, ct_dim, rt_dim, kt_dim)
+//     — kt_dim is the STRIDE for indexing successive rows of in0 (in0[r] lives
+//     at in0_idx + r * kt_dim), NOT a loop count. matmul_block produces
+//     exactly ONE outer product per call.
+//
+// Kernels accumulate the inner dimension by calling matmul_block in a loop,
+// stepping in0_idx by 1 and in1_idx by in1_block_w each iteration (see
+// `bmm_large_block_zm_fused_bias_activation.cpp` line 320). matmul_tiles
+// already accumulates into DST so the outer loop composes correctly.
+//
+// Tile layout for a single call:
+//   in0[in0_tile + r * kt_dim]      — column of in0, row r
+//   in1[in1_tile + c]               — row of in1, col c
+//   dst[idst   + r * ct_dim + c]    — output, +=
 ALWI void matmul_block(uint32_t in0_cb, uint32_t in1_cb,
                        uint32_t in0_tile, uint32_t in1_tile, uint32_t idst,
                        uint32_t transpose = 0, uint32_t ct_dim = 1,
                        uint32_t rt_dim = 1, uint32_t kt_dim = 1) {
     if (rt_dim * ct_dim > 0)
         __emule_dst_check(idst + rt_dim * ct_dim - 1, "matmul_block");
-    uint32_t dst = idst;
     for (uint32_t r = 0; r < rt_dim; r++) {
         for (uint32_t c = 0; c < ct_dim; c++) {
             matmul_tiles(in0_cb, in1_cb,
                          in0_tile + r * kt_dim,
                          in1_tile + c,
-                         dst);
-            dst++;
+                         idst + r * ct_dim + c);
         }
     }
 }

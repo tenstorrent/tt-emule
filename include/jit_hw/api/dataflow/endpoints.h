@@ -18,6 +18,7 @@
 #include "jit_hw/api/dataflow/noc.h"
 
 extern "C" uint8_t* __emule_dram_ptr(uint64_t offset);
+extern "C" uint8_t* __emule_dram_ptr_at(uint32_t bank_id, uint64_t offset);
 extern "C" uint8_t* __emule_local_l1_ptr(uint32_t offset);
 extern uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
 
@@ -134,6 +135,12 @@ struct noc_traits_t<AllocatorBank<AllocatorBankType::L1>> {
 };
 
 // ---- noc_traits_t<AllocatorBank<DRAM>> ----
+//
+// Route through `__emule_dram_ptr_at(bank_id, addr)` so each DRAM bank lands
+// at its own slice of emule's flat DRAM buffer (per
+// `bank_to_dram_offset[]`). Using the bank-agnostic `__emule_dram_ptr`
+// aliased every bank to bank 0's slice — fine for single-bank tensors
+// (Llama-3.2-1B fits) but wrong as soon as anything spans multiple banks.
 
 template <>
 struct noc_traits_t<AllocatorBank<AllocatorBankType::DRAM>> {
@@ -143,12 +150,12 @@ struct noc_traits_t<AllocatorBank<AllocatorBankType::DRAM>> {
     template <Noc::AddressType AT>
     static uintptr_t src_addr(const AllocatorBank<AllocatorBankType::DRAM>&,
                                const Noc&, const src_args_type& args) {
-        return reinterpret_cast<uintptr_t>(__emule_dram_ptr(args.addr));
+        return reinterpret_cast<uintptr_t>(__emule_dram_ptr_at(args.bank_id, args.addr));
     }
 
     template <Noc::AddressType AT>
     static uintptr_t dst_addr(const AllocatorBank<AllocatorBankType::DRAM>&,
                                const Noc&, const dst_args_type& args) {
-        return reinterpret_cast<uintptr_t>(__emule_dram_ptr(args.addr));
+        return reinterpret_cast<uintptr_t>(__emule_dram_ptr_at(args.bank_id, args.addr));
     }
 };
