@@ -6,8 +6,3 @@ build/
 Testing/
 generated/
 logs/
-docs/notes/
-# Personal Claude-Code runtime state lives under .claude/ but the
-# repo-tracked skills are an exception (see .claude/skills/).
-.claude/*
-!.claude/skills/
