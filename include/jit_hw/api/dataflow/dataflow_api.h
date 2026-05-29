@@ -315,14 +315,25 @@ inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
                             uint32_t size, uint8_t noc = 0, uint32_t vc = 0) {
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     uint8_t* dst = __emule_resolve_noc_addr(dst_noc_addr);
-    if (dst) {
-        std::memcpy(dst, src, size);
-    } else {
-        fprintf(stderr, "EMULE WARN: noc_async_write failed to resolve addr 0x%llx "
-                "[from phys (%u,%u) logical (%u,%u)]\n",
-                (unsigned long long)dst_noc_addr, my_x[0], my_y[0],
-                __emule_logical_x, __emule_logical_y);
+    // Guard BOTH ends. The src L1 resolve can legitimately fail when the
+    // host hands a uint32_t address that's outside L1 range (e.g. for
+    // CCL-fused experimental kernels that pre-compute pointers via
+    // device-side address arithmetic). In that case we must NOT memcpy
+    // from a stray pointer; just warn once and short-circuit. This matches
+    // real Tensix's behaviour where a malformed NOC transaction surfaces
+    // as a watchdog timeout rather than a host segfault.
+    if (!src || !dst) {
+        static thread_local int __warn = 0;
+        if (__warn++ < 2) {
+            fprintf(stderr, "EMULE WARN: noc_async_write skipped (src=%p src_addr=0x%x dst=%p dst_addr=0x%llx size=%u) "
+                    "[from phys (%u,%u) logical (%u,%u)]\n",
+                    (void*)src, src_local_l1_addr, (void*)dst,
+                    (unsigned long long)dst_noc_addr, size,
+                    my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+        }
+        return;
     }
+    std::memcpy(dst, src, size);
 }
 
 // ---- Multicast write ----
