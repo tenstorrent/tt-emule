@@ -254,7 +254,7 @@ Validated 4× (RMSNorm, clamped_silu, Mcast, eltwise_mul).
 | Fabric / multichip | All `tt_metal/fabric/hw/inc/**/*.{h,hpp}` shadowed as opaque types — ops PARSE but don't execute. |
 | Real sfpi:: SIMD math | Shim has types only. |
 | Ethernet / socket / D2D / H2D | Same status as fabric. |
-| Quasar architecture | Not mocked. Sage agents kept for cross-arch comparisons. |
+| Quasar architecture | Dedicated regression coverage exists for supported Quasar DFB/compute/semaphore/atomics paths (`TT_EMULE_ARCH=quasar`, `quasar_Q1.yaml`); other Quasar-specific APIs may still need targeted mocks. |
 | Matmul TRISC LLK (`llk_math_custom_mm`, `ckernel_globals`) | Blocks any op using standalone Matmul. |
 | MoE gate SFPU LLK chain (`ckernel_addrmod` → `ckernel_sfpu_deepseek_moe_gate_topk_single_face`) | Blocks MoE gate variants. |
 | Mock cluster DRAM bank shape | "No DRAM bank exists for core 7-0" issues when bank topology doesn't match silicon. |
