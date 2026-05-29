@@ -22,6 +22,9 @@
 #include "jit_hw/api/cb_api.h"
 #include "jit_hw/internal/dataflow/dataflow_api_addrgen.h"
 #include "jit_hw/api/tensor/tensor_accessor.h"
+// Pull in semaphore sentinel constants (VALID / INVALID). Real Tensix kernels
+// expect these in scope wherever they include dataflow_api.h; mirror that.
+#include "hostdevcommon/common_values.hpp"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -389,6 +392,22 @@ inline std::atomic<uint32_t>* __emule_sem_atomic(volatile tt_l1_ptr uint32_t* se
 // addr is a uint32_t L1 address (truncated host pointer).
 inline void noc_semaphore_set(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t val) {
     __emule_sem_atomic(sem_addr)->store(val, std::memory_order_release);
+}
+
+// Send a 4-byte semaphore value from a local L1 address to a remote NOC
+// address. Mirrors real Tensix
+// `tt_metal/hw/inc/api/dataflow/dataflow_api.h::noc_semaphore_set_remote`
+// (a 4-byte unicast NOC write). emule resolves both ends to host pointers
+// and does a relaxed atomic store so the receiver's semaphore_wait observes
+// the value.
+inline void noc_semaphore_set_remote(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
+                                     uint8_t noc = 0) {
+    (void)noc;
+    auto* src = reinterpret_cast<volatile tt_l1_ptr uint32_t*>(__emule_local_l1_to_ptr(src_local_l1_addr));
+    uint8_t* dst_ptr = __emule_resolve_noc_addr(dst_noc_addr);
+    if (!src || !dst_ptr) return;
+    auto* dst = reinterpret_cast<std::atomic<uint32_t>*>(dst_ptr);
+    dst->store(*src, std::memory_order_release);
 }
 
 // Wait for semaphore to reach expected value (spin with exponential backoff + hang detection).

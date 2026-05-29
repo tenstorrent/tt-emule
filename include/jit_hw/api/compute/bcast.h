@@ -33,6 +33,7 @@ inline void sub_tiles_bcast(uint32_t icb0, uint32_t icb1, uint32_t itile0, uint3
 template <EltwiseBinaryType op_type, BroadcastType bcast_type>
 inline void mul_tiles_bcast(uint32_t icb0, uint32_t icb1, uint32_t itile0, uint32_t itile1, uint32_t idst) {}
 
+
 // `unary_bcast<BroadcastType>` — broadcasts a single tile across DST positions.
 // Added by tt-mlir PR #7926 era D2M codegen for scalar/row/col broadcasts.
 // On emule we don't track per-thread DST layout; treat as copy_tile.
@@ -153,6 +154,70 @@ ALWI void sub_tiles_bcast_cols(uint32_t icb0, uint32_t icb1, uint32_t itile0, ui
     __emule_dst_mark_dirty(idst);
     __emule_bcast::apply_bcast<__emule_bcast::__op_sub>(
         icb0, icb1, itile0, itile1, idst, __emule_bcast::bcast_cols_src_idx);
+}
+
+// ---- Single-template-param shorthands (mirror real tt-metal's `template <BroadcastType>` API) ----
+//
+// Real tt_metal/hw/inc/api/compute/bcast.h exposes `add_tiles_bcast<BroadcastType>`,
+// `mul_tiles_bcast<BroadcastType>`, `sub_tiles_bcast<BroadcastType>` as
+// shorthand for the two-param `any_tiles_bcast<ELW{ADD,MUL,SUB}, ...>` form.
+// Kernels like minimal_matmul/compute.cpp call them by the one-param name
+// (e.g. `add_tiles_bcast<BroadcastType::ROW>(...)` for fused bias). emule's
+// existing two-param `add_tiles_bcast<EltwiseBinaryType, BroadcastType>`
+// no-op stub above doesn't match this signature, hence the dispatch here.
+// We route the active paths through the per-CB-format apply_bcast driver,
+// which is correct for the mixed bf16/fp32/Bfp8 CBs Llama exercises.
+template <BroadcastType tBcastDim>
+ALWI void add_tiles_bcast(
+    uint32_t icb0, uint32_t icb1, uint32_t itile0, uint32_t itile1, uint32_t idst, uint32_t bcast_row_idx = 0) {
+    if constexpr (tBcastDim == BroadcastType::ROW) {
+        add_tiles_bcast_rows(icb0, icb1, itile0, itile1, idst, bcast_row_idx);
+    } else if constexpr (tBcastDim == BroadcastType::COL) {
+        __emule_dst_check(idst, "add_tiles_bcast<COL>");
+        __emule_dst_mark_dirty(idst);
+        __emule_bcast::apply_bcast<__emule_bcast::__op_add>(
+            icb0, icb1, itile0, itile1, idst, __emule_bcast::bcast_cols_src_idx);
+    } else {
+        // SCALAR: bcast a single scalar from cb_b across the entire tile.
+        __emule_dst_check(idst, "add_tiles_bcast<SCALAR>");
+        __emule_dst_mark_dirty(idst);
+        __emule_bcast::apply_bcast<__emule_bcast::__op_add>(
+            icb0, icb1, itile0, itile1, idst, [](uint32_t /*i*/) { return 0u; });
+    }
+}
+
+template <BroadcastType tBcastDim>
+ALWI void mul_tiles_bcast(
+    uint32_t icb0, uint32_t icb1, uint32_t itile0, uint32_t itile1, uint32_t idst, uint32_t bcast_row_idx = 0) {
+    if constexpr (tBcastDim == BroadcastType::ROW) {
+        mul_tiles_bcast_rows(icb0, icb1, itile0, itile1, idst, bcast_row_idx);
+    } else if constexpr (tBcastDim == BroadcastType::COL) {
+        mul_tiles_bcast_cols(icb0, icb1, itile0, itile1, idst);
+    } else {
+        __emule_dst_check(idst, "mul_tiles_bcast<SCALAR>");
+        __emule_dst_mark_dirty(idst);
+        __emule_bcast::apply_bcast<__emule_bcast::__op_mul>(
+            icb0, icb1, itile0, itile1, idst, [](uint32_t /*i*/) { return 0u; });
+    }
+}
+
+template <BroadcastType tBcastDim>
+ALWI void sub_tiles_bcast(
+    uint32_t icb0, uint32_t icb1, uint32_t itile0, uint32_t itile1, uint32_t idst, uint32_t bcast_row_idx = 0) {
+    if constexpr (tBcastDim == BroadcastType::COL) {
+        sub_tiles_bcast_cols(icb0, icb1, itile0, itile1, idst);
+    } else if constexpr (tBcastDim == BroadcastType::ROW) {
+        __emule_dst_check(idst, "sub_tiles_bcast<ROW>");
+        __emule_dst_mark_dirty(idst);
+        __emule_bcast::apply_bcast<__emule_bcast::__op_sub>(
+            icb0, icb1, itile0, itile1, idst,
+            [bcast_row_idx](uint32_t i) { return __emule_bcast::bcast_rows_src_idx(i, bcast_row_idx); });
+    } else {
+        __emule_dst_check(idst, "sub_tiles_bcast<SCALAR>");
+        __emule_dst_mark_dirty(idst);
+        __emule_bcast::apply_bcast<__emule_bcast::__op_sub>(
+            icb0, icb1, itile0, itile1, idst, [](uint32_t /*i*/) { return 0u; });
+    }
 }
 
 }  // namespace ckernel
