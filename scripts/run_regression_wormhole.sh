@@ -293,6 +293,12 @@ run_pytest "tt_transformers_test_embedding" \
     "$TT_METAL_DIR/models/tt_transformers/tests/test_embedding.py"
 run_pytest "tt_transformers_test_rms_norm" \
     "$TT_METAL_DIR/models/tt_transformers/tests/test_rms_norm.py"
+# MLP: seq_len=32 (DECODE) passes; PREFILL variants (512/32K/64K) hit a
+# separate minimal_matmul compute kernel that emule doesn't yet shim.
+# Gate to the DECODE variant for now.
+run_pytest "tt_transformers_test_mlp_decode" \
+    "$TT_METAL_DIR/models/tt_transformers/tests/test_mlp.py" \
+    -k "1-32-mesh_device0-False"
 
 # ===========================================================================
 
