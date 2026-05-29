@@ -174,14 +174,6 @@ inline bool cb_is_32bit_format(uint32_t cb_id) {
     return __emule_cbs[cb_id].page_size > 2048;
 }
 
-// Is this CB using the Bfp8_b (block-float-8) format?
-// Bfp8_b tiles = 1088 bytes (64 exp + 1024 mantissa). Detect via page_size
-// strictly between 0 and 2048 (bf16). See include/jit_hw/api/bfloat8.h.
-inline bool cb_is_bfp8_b_format(uint32_t cb_id) {
-    uint32_t ps = __emule_cbs[cb_id].page_size;
-    return ps > 0 && ps < 2048;
-}
-
 // pack_dst_to_buf: PACK row-major DST → nfaces CB with L1 accumulation support.
 // When __emule_l1_acc_enabled, adds DST to existing CB contents instead of overwriting.
 inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
