@@ -28,6 +28,12 @@ inline void pack_untilize_uninit(uint32_t cb_out = 0) {}
 // D2M emits pack_untilize_init<cols_per_dst_pass, total_col_tiles>(icb, ocb)
 template <uint32_t cols_per_dst_pass, uint32_t total_col_tiles>
 inline void pack_untilize_init(uint32_t /*icb*/, uint32_t /*ocb*/) {}
+
+// Skip-BH-DEST-remap variant — emule has no DEST remap state, so this is the
+// same no-op as `pack_untilize_init` above. Required for the kernel-lib's
+// `if constexpr (configure_remap)` else-branch to parse.
+template <uint32_t cols_per_dst_pass, uint32_t total_col_tiles>
+inline void pack_untilize_init_skip_remap(uint32_t /*icb*/, uint32_t /*ocb*/) {}
 inline void pack_untilize_dst_init_short(uint32_t cb_out, uint32_t ct_dim = 0, uint32_t face_r_dim = 0) {}
 inline void pack_untilize_dst(uint32_t cb_out, uint32_t out_subblock_h, uint32_t out_subblock_w,
                               uint32_t block_ct_dim = 0, uint32_t pack_dst_offset = 0) {}
