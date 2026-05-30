@@ -18,5 +18,10 @@
 // `cb_push_back` that the upstream `cb_api.h` declares are already provided
 // at the global scope by `jit_hw/api/cb_api.h` (included transitively via
 // the JIT wrapper).
+//
+// Also pull in `compute/common.h` so a kernel that includes ONLY this
+// header (no other compute API) still sees `ALWI` and the other shared
+// compute macros it expects.
 
+#include "jit_hw/api/compute/common.h"
 #include "jit_hw/api/cb_api.h"

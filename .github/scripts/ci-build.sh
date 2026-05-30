@@ -12,9 +12,9 @@
 #
 # Mirrors the configure + build phase of BUILD_GUIDE.md's Phase 3 so that local
 # and CI runs share the same toolchain (clang-20 + libstdc++) and build dir
-# (build_emule). The CI build is a subset of the guide's flags — Python
-# bindings and distributed support are OFF here because the metal-regression
-# CI only exercises the C++ gtest binaries.
+# (build_emule). Distributed support is OFF here — only the D2M pipeline needs
+# it (see ci-build-mlir.sh) — but Python bindings are ON because the ttnn-
+# pytest job downstream needs to `import ttnn._ttnn`.
 
 set -euo pipefail
 
@@ -61,7 +61,7 @@ cmake -B "$BUILD_DIR" \
     -DCMAKE_BUILD_TYPE=Release \
     -DTT_METAL_USE_EMULE=ON \
     -DTT_EMULE_PATH="$TT_EMULE_DIR" \
-    -DWITH_PYTHON_BINDINGS=OFF \
+    -DWITH_PYTHON_BINDINGS=ON \
     -DENABLE_TRACY=OFF \
     -DENABLE_DISTRIBUTED=OFF \
     -DTT_METAL_BUILD_TESTS=ON \
@@ -71,17 +71,32 @@ cmake -B "$BUILD_DIR" \
 
 echo ""
 echo "== Building tt-metal =="
-# Build only the specific gtest binaries that run_regression.sh exercises.
-# Building "all" pulls in tests like tests/ttnn/tracy/cpp/test_get_programs_perf_data
-# which links against the python-bindings ttnn target — that target doesn't exist
-# under WITH_PYTHON_BINDINGS=OFF, so the link step fails.
+# Build only the specific binaries downstream jobs need: the gtest binaries
+# that run_regression.sh exercises, plus the `ttnn` cmake target that produces
+# the _ttnn nanobind extension the ttnn-pytest job imports (`_ttnn.so` is the
+# output file; `ttnn` is the cmake target name). cmake transitively builds
+# their deps (libtt_metal.so, _ttnncpp.so, libtt_stl.so).
 cmake --build "$BUILD_DIR" -j"$(nproc)" --target \
     unit_tests_api \
     unit_tests_integration \
     unit_tests_legacy \
     unit_tests_data_movement \
     unit_tests_per_core_allocation \
-    unit_tests_ttnn
+    unit_tests_ttnn \
+    ttnn
+
+echo ""
+echo "== Creating post-build symlinks =="
+# Mirror BUILD_GUIDE.md Phase 3's "Post-build symlinks" subsection so the
+# uploaded artifact is self-contained for downstream jobs (no source-tree
+# regeneration needed). actions/upload-artifact@v4 resolves symlinks during
+# upload, so each symlink ends up as a file copy at the symlink path — the
+# .so RPATH (`$ORIGIN/../lib`) then resolves correctly inside the artifact.
+cd "$BUILD_DIR/lib"
+ln -sfn ../tt_metal/libtt_metal.so libtt_metal.so
+ln -sfn ../tt_stl/libtt_stl.so     libtt_stl.so
+ln -sfn ../ttnn/_ttnncpp.so        _ttnncpp.so
+ln -sfn ../ttnn/_ttnn.so           _ttnn.so
 
 echo ""
 echo "== ccache stats =="

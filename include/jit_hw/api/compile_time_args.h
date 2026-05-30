@@ -18,6 +18,10 @@
 
 namespace {
 constexpr uint32_t kernel_compile_time_args_arr[] = {KERNEL_COMPILE_TIME_ARGS};
+// Upstream-name alias. Real `tt_metal/hw/inc/api/compile_time_args.h:23` exposes
+// the array under the name `kernel_compile_time_args` (no `_arr` suffix).
+// Mesh tensor accessor + concat reader kernels reference the unsuffixed name.
+constexpr auto& kernel_compile_time_args = kernel_compile_time_args_arr;
 template<int N>
 constexpr uint32_t get_ct_arg() { return kernel_compile_time_args_arr[N]; }
 } // anonymous namespace
