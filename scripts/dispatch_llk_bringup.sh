@@ -21,13 +21,16 @@ set -euo pipefail
 PARALLEL=1
 TARGETS="all"
 BASE_BRANCH="main"
-MERGE_TARGET=""
+PROMOTION_BRANCH="arminale/mass-llk-bringup"
+NO_PROMOTE=0
 DRY_RUN=0
 RESUME_LOG=""
 # Where to place per-agent worktrees + per-agent logs.
 WORKTREE_ROOT="${LLK_BRINGUP_WORKTREE_ROOT:-/tmp/llk-bringup}"
 RESULTS_DIR="${LLK_BRINGUP_RESULTS_DIR:-$WORKTREE_ROOT/results}"
 BRINGUP_LOG_FILE="docs/notes/llk-bringup-log.md"
+# Serialize cherry-picks into the promotion branch across parallel agents.
+PROMOTION_LOCK="$WORKTREE_ROOT/promotion.lock"
 
 # The Claude CLI binary. Override via $CLAUDE_BIN if installed under a
 # different name (e.g., on machines that have both `claude` and `claude-code`).
@@ -96,8 +99,11 @@ Usage: $(basename "$0") [options]
                              data_movement|reduce|fused|matmul|transformer
                                                   category prefix (matches test_path)
   --base-branch <name>     Branch to base each agent's worktree on. Default: main.
-  --merge-target <name>    Branch to cherry-pick successful agent commits into post-batch.
-                           If unset, leaves agent worktrees in place for review.
+  --promotion-branch <name> Branch to cherry-pick reviewer-APPROVEd commits into.
+                           Default: arminale/mass-llk-bringup. Must already exist
+                           and be checked out in the main worktree (this script's
+                           cwd). Parallel agents serialize via flock.
+  --no-promote             Disable auto-promotion. Agent commits stay in worktrees.
   --dry-run                Print the dispatch table and exit. No agents launched.
   --resume <log-path>      Skip rows whose previous run already passed per <log-path>.
   -h, --help               This help.
@@ -283,10 +289,12 @@ signatures, contain dead code, or touch unrelated files.
 PROMPT
 }
 
-# Run the reviewer. Args: id, test_path, worktree. Echoes the verdict line.
+# Run the reviewer. Args: id, test_path, worktree, [round_suffix].
+# Round suffix lets round-1 and round-2 reviews write to separate logs.
+# Echoes the verdict line.
 review_agent_diff() {
-    local id="$1" test_path="$2" worktree="$3"
-    local review_log="$RESULTS_DIR/agent-${id}.review"
+    local id="$1" test_path="$2" worktree="$3" round_suffix="${4:-}"
+    local review_log="$RESULTS_DIR/agent-${id}.review${round_suffix}"
 
     local prompt
     prompt="$(make_review_prompt "$id" "$test_path" "$worktree")"
@@ -306,6 +314,167 @@ review_agent_diff() {
         verdict="REVIEW: REQUEST_CHANGES|reviewer produced no structured verdict (see $review_log)"
     fi
     echo "$verdict"
+}
+
+# Build the round-2 revision prompt. Args: id, test_path, worktree, feedback.
+# Agent is instructed to amend their existing HEAD (not stack a second commit).
+make_revision_prompt() {
+    local id="$1" test_path="$2" worktree="$3" feedback="$4"
+    cat <<PROMPT
+You are agent #${id} returning for the SINGLE revision round permitted.
+Your previous bring-up commit was reviewed; reviewer asked for changes:
+
+  Reviewer feedback: ${feedback}
+
+Address the feedback by AMENDING your existing commit (not stacking a new one).
+
+1. cd ${worktree}
+2. Re-read the reviewer feedback and make exactly the changes they asked for.
+   Do not add unrelated changes.
+3. Re-run the test to confirm it still passes:
+     export TT_EMULE_JIT_CACHE_DIR=/tmp/tt_emule_jit_cache_llk_bringup_${id}
+     (rest of env per round-1 setup)
+     /opt/ttmlir-toolchain/venv/bin/pytest \\
+       \${TT_METAL_DIR}/tests/ttnn/unit_tests/operations/${test_path} -s --tb=short
+4. If the test still passes:
+     git add <modified files>
+     git commit --amend --no-edit
+5. Emit on stdout exactly ONE final structured line:
+     PASS|${id}|<new_commit_sha>|<num_parametrizations_passed>
+   or:
+     STUCK|${id}|<one-line: why you cannot address the feedback>
+
+This is your ONLY revision attempt. The reviewer will rerun exactly once more.
+If your revision is also rejected, the harness will write a handoff doc and
+will not cycle again. Do not push. Do not modify files outside your worktree.
+PROMPT
+}
+
+# Run the agent's round-2 revision. Args: id, test_path, llk_family, tier,
+# worktree, jit_cache, reviewer_feedback. Echoes the structured agent result.
+dispatch_revision() {
+    local id="$1" test_path="$2" llk_family="$3" tier="$4" worktree="$5"
+    local jit_cache="$6" feedback="$7"
+    local agent_log="$RESULTS_DIR/agent-${id}.log.round2"
+
+    local prompt
+    prompt="$(make_revision_prompt "$id" "$test_path" "$worktree" "$feedback")"
+
+    local rc=0
+    (
+        cd "$worktree"
+        "$CLAUDE_BIN" -p \
+            --add-dir "$worktree" \
+            --add-dir "$TT_METAL_DIR" \
+            --dangerously-skip-permissions \
+            "$prompt"
+    ) > "$agent_log" 2>&1 || rc=$?
+
+    local result
+    result="$(grep -E '^(PASS|STUCK|FAIL)\|' "$agent_log" | tail -1 || true)"
+    if [ -z "$result" ]; then
+        result="STUCK|${id}|round-2 agent produced no structured result (rc=$rc, see $agent_log)"
+    fi
+    echo "$result"
+}
+
+# Serialize cherry-picks into the promotion branch. Args: id, commit_sha.
+# Returns 0 on success (cherry-pick landed); 1 on conflict or wrong branch.
+cherry_pick_into_promotion_branch() {
+    local id="$1" commit_sha="$2"
+
+    # Concurrency: hold an exclusive lock for the duration of the cherry-pick.
+    (
+        flock -x 9
+        local current_branch
+        current_branch="$(git -C "$TT_EMULE_DIR" symbolic-ref --short HEAD 2>/dev/null || echo DETACHED)"
+        if [ "$current_branch" != "$PROMOTION_BRANCH" ]; then
+            echo "[$id] PROMOTION SKIPPED: main worktree on '$current_branch', expected '$PROMOTION_BRANCH'" >&2
+            exit 2
+        fi
+        if git -C "$TT_EMULE_DIR" cherry-pick "$commit_sha" > "$RESULTS_DIR/agent-${id}.cherrypick" 2>&1; then
+            echo "[$id] cherry-picked $commit_sha → $PROMOTION_BRANCH ($(git -C "$TT_EMULE_DIR" rev-parse --short HEAD))"
+            exit 0
+        else
+            git -C "$TT_EMULE_DIR" cherry-pick --abort 2>/dev/null || true
+            echo "[$id] CONFLICT cherry-picking $commit_sha — see $RESULTS_DIR/agent-${id}.cherrypick"
+            exit 1
+        fi
+    ) 9>"$PROMOTION_LOCK"
+}
+
+# Write a handoff doc after two rejected review rounds.
+# Args: id, test_path, llk_family, agent_commit, review1, review2, [agent_round2_result]
+write_handoff_doc() {
+    local id="$1" test_path="$2" llk_family="$3" agent_commit="$4"
+    local review1="$5" review2="$6" agent_round2_result="${7:-}"
+    local doc_path="$TT_EMULE_DIR/docs/notes/llk-bringup-handoff-${id}.md"
+    mkdir -p "$(dirname "$doc_path")"
+
+    {
+        echo "# LLK bring-up handoff: agent #${id}"
+        echo ""
+        echo "Generated by \`scripts/dispatch_llk_bringup.sh\` on $(date -u +%Y-%m-%dT%H:%M:%SZ)."
+        echo ""
+        echo "## Assignment"
+        echo ""
+        echo "- Test: \`tests/ttnn/unit_tests/operations/${test_path}\`"
+        echo "- LLK family (predicted): ${llk_family}"
+        echo "- Promotion branch: \`${PROMOTION_BRANCH}\`"
+        echo ""
+        echo "## Agent's commit"
+        echo ""
+        echo "\`${agent_commit}\` — preserved in object db; cherry-pickable if you"
+        echo "decide to override the reviewer."
+        echo ""
+        echo "\`\`\`"
+        git -C "$TT_EMULE_DIR" show --stat "$agent_commit" 2>/dev/null | head -20
+        echo "\`\`\`"
+        echo ""
+        echo "## Review round 1"
+        echo ""
+        echo "\`${review1}\`"
+        echo ""
+        if [ -n "$agent_round2_result" ]; then
+            echo "## Agent's round-2 revision attempt"
+            echo ""
+            echo "\`${agent_round2_result}\`"
+            echo ""
+            echo "Round-2 log: \`${RESULTS_DIR}/agent-${id}.log.round2\`"
+            echo ""
+        fi
+        echo "## Review round 2"
+        echo ""
+        echo "\`${review2}\`"
+        echo ""
+        echo "## Why this is a handoff and not auto-promoted"
+        echo ""
+        echo "After two review cycles, the diff still does not meet the harness's"
+        echo "acceptance criteria (scope / shim correctness / promotion / no overreach)."
+        echo "The harness does not cycle further."
+        echo ""
+        echo "## Recommended next actions"
+        echo ""
+        echo "1. Read the round-2 reviewer feedback above. Decide whether it's:"
+        echo "   - A real concern → address manually and cherry-pick yourself."
+        echo "   - Overly strict → cherry-pick \`${agent_commit}\` into \`${PROMOTION_BRANCH}\`"
+        echo "     and document the override here."
+        echo "2. If the agent's approach is fundamentally wrong, this op may need a"
+        echo "   different bring-up strategy (split shims, defer until upstream lands,"
+        echo "   etc.). Update the manifest accordingly."
+        echo ""
+        echo "## Logs"
+        echo ""
+        echo "- Agent round 1: \`${RESULTS_DIR}/agent-${id}.log\`"
+        echo "- Review round 1: \`${RESULTS_DIR}/agent-${id}.review\`"
+        if [ -n "$agent_round2_result" ]; then
+            echo "- Agent round 2: \`${RESULTS_DIR}/agent-${id}.log.round2\`"
+            echo "- Review round 2: \`${RESULTS_DIR}/agent-${id}.review.round2\`"
+        fi
+        echo "- Agent worktree: \`${WORKTREE_ROOT}/agent-${id}\` (still on disk for inspection)"
+    } > "$doc_path"
+
+    echo "[$id] handoff doc: $doc_path"
 }
 
 # Dispatch one agent. Args: id.
@@ -364,21 +533,74 @@ dispatch_one() {
         agent_result="FAIL|${id}|no structured result line in agent output (rc=$rc, see $agent_log)"
     fi
 
-    # If the agent PASSed, dispatch an independent reviewer against the agent's
-    # HEAD commit. The PASS only stands if the reviewer also APPROVEs.
-    local final="$agent_result"
-    if [[ "$agent_result" == PASS\|* ]]; then
-        echo "[$id] agent PASS — dispatching reviewer"
-        local verdict
-        verdict="$(review_agent_diff "$id" "$test_path" "$worktree")"
-        echo "[$id] reviewer: $verdict"
-        if [[ "$verdict" == REVIEW:\ APPROVE\|* ]]; then
-            : # PASS stands as-is.
+    # STUCK / FAIL agents: no review, no cycle, no promotion.
+    if [[ "$agent_result" != PASS\|* ]]; then
+        echo "$agent_result" > "$result_line"
+        echo "[$id] $agent_result"
+        return 0
+    fi
+
+    # Extract round-1 commit SHA from the PASS line: PASS|id|sha|parametrizations
+    local round1_sha
+    round1_sha="$(echo "$agent_result" | awk -F'|' '{print $3}')"
+
+    # ====== Review round 1 ======
+    echo "[$id] agent PASS (round 1) — dispatching reviewer"
+    local verdict1
+    verdict1="$(review_agent_diff "$id" "$test_path" "$worktree" "")"
+    echo "[$id] reviewer (round 1): $verdict1"
+
+    local final
+    if [[ "$verdict1" == REVIEW:\ APPROVE\|* ]]; then
+        # Auto-promote unless --no-promote.
+        if [ "$NO_PROMOTE" = "1" ]; then
+            final="$agent_result"
+        elif cherry_pick_into_promotion_branch "$id" "$round1_sha"; then
+            final="$agent_result"
         else
-            # Demote to STUCK so the harness summary + log capture the rejection.
-            local reason="${verdict#REVIEW: }"
-            final="STUCK|${id}|review demoted: ${reason}"
+            final="STUCK|${id}|round-1 APPROVE but promotion cherry-pick failed (see agent-${id}.cherrypick)"
         fi
+        echo "$final" > "$result_line"
+        echo "[$id] $final"
+        return 0
+    fi
+
+    # ====== Round 2: re-dispatch agent with feedback, then re-review ======
+    local feedback="${verdict1#REVIEW: REQUEST_CHANGES|}"
+    echo "[$id] reviewer REQUEST_CHANGES — dispatching round-2 revision"
+    local round2_result
+    round2_result="$(dispatch_revision "$id" "$test_path" "$llk_family" "$tier" "$worktree" "$jit_cache" "$feedback")"
+    echo "[$id] agent (round 2): $round2_result"
+
+    if [[ "$round2_result" != PASS\|* ]]; then
+        # Agent couldn't address the feedback; handoff doc + done.
+        write_handoff_doc "$id" "$test_path" "$llk_family" "$round1_sha" "$verdict1" "(no round-2 review — agent failed to revise)" "$round2_result"
+        final="STUCK|${id}|round-2 agent failed to address review feedback (handoff doc written)"
+        echo "$final" > "$result_line"
+        echo "[$id] $final"
+        return 0
+    fi
+
+    local round2_sha
+    round2_sha="$(echo "$round2_result" | awk -F'|' '{print $3}')"
+
+    echo "[$id] round-2 agent PASS — dispatching reviewer (round 2)"
+    local verdict2
+    verdict2="$(review_agent_diff "$id" "$test_path" "$worktree" ".round2")"
+    echo "[$id] reviewer (round 2): $verdict2"
+
+    if [[ "$verdict2" == REVIEW:\ APPROVE\|* ]]; then
+        if [ "$NO_PROMOTE" = "1" ]; then
+            final="$round2_result"
+        elif cherry_pick_into_promotion_branch "$id" "$round2_sha"; then
+            final="$round2_result"
+        else
+            final="STUCK|${id}|round-2 APPROVE but promotion cherry-pick failed (see agent-${id}.cherrypick)"
+        fi
+    else
+        # Two rejections; handoff doc + STUCK.
+        write_handoff_doc "$id" "$test_path" "$llk_family" "$round2_sha" "$verdict1" "$verdict2" "$round2_result"
+        final="STUCK|${id}|reviewer rejected both rounds (handoff doc written)"
     fi
 
     echo "$final" > "$result_line"
@@ -444,46 +666,29 @@ HEADER
     echo "  appended ${pass} + ${stuck} + ${fail} rows to $log_path"
 }
 
-# Optional cherry-pick of PASS commits into --merge-target.
-maybe_merge_pass_commits() {
-    [ -z "$MERGE_TARGET" ] && return 0
+# Cherry-pick promotion is now per-agent (see cherry_pick_into_promotion_branch +
+# the dispatch_one APPROVE path). This post-batch hook prints the final state
+# of the promotion branch so the summary tells the user where to find the work.
+summarize_promotion_branch_state() {
     [ "$DRY_RUN" = "1" ] && return 0
-
+    [ "$NO_PROMOTE" = "1" ] && return 0
     echo ""
     echo "============================================================"
-    echo " Merging PASS agent commits into $MERGE_TARGET"
+    echo " Promotion branch: $PROMOTION_BRANCH"
     echo "============================================================"
-
-    # Create or check out merge target.
-    if git show-ref --quiet "refs/heads/$MERGE_TARGET"; then
-        git switch "$MERGE_TARGET"
-    else
-        git switch -c "$MERGE_TARGET" "$BASE_BRANCH"
+    local current_branch
+    current_branch="$(git -C "$TT_EMULE_DIR" symbolic-ref --short HEAD 2>/dev/null || echo DETACHED)"
+    if [ "$current_branch" != "$PROMOTION_BRANCH" ]; then
+        echo "  WARNING: main worktree is on '$current_branch', not '$PROMOTION_BRANCH'."
+        echo "  No commits were auto-promoted. Each PASS agent's commit is preserved"
+        echo "  in object db; cherry-pick manually if you want them on the promotion branch."
+        return 0
     fi
-
-    local picked=0 skipped=0
-    for r in "$RESULTS_DIR"/*.result; do
-        [ -f "$r" ] || continue
-        local line; line="$(cat "$r")"
-        [[ "$line" == PASS\|* ]] || continue
-        IFS='|' read -r _ id commit _ <<<"$line"
-        if [ -z "$commit" ] || [ "$commit" = "-" ]; then
-            echo "  [agent $id] no commit SHA in result line; skipping"
-            skipped=$((skipped+1))
-            continue
-        fi
-        if git cherry-pick "$commit" 2>/dev/null; then
-            picked=$((picked+1))
-            echo "  [agent $id] cherry-picked $commit"
-        else
-            git cherry-pick --abort 2>/dev/null || true
-            echo "  [agent $id] CONFLICT cherry-picking $commit — left for manual review"
-            skipped=$((skipped+1))
-        fi
-    done
-    echo ""
-    echo "  merged: $picked  conflicts/skipped: $skipped"
-    echo "  branch: $MERGE_TARGET (HEAD: $(git rev-parse --short HEAD))"
+    echo "  HEAD: $(git -C "$TT_EMULE_DIR" rev-parse --short HEAD)"
+    local commits_ahead
+    commits_ahead="$(git -C "$TT_EMULE_DIR" rev-list --count "$BASE_BRANCH"..HEAD)"
+    echo "  Commits ahead of $BASE_BRANCH: $commits_ahead"
+    git -C "$TT_EMULE_DIR" log --oneline "$BASE_BRANCH"..HEAD | sed 's/^/  /'
 }
 
 # ============================================================================
@@ -491,14 +696,16 @@ maybe_merge_pass_commits() {
 # ============================================================================
 while [ $# -gt 0 ]; do
     case "$1" in
-        --parallel)      PARALLEL="$2"; shift 2 ;;
-        --targets)       TARGETS="$2"; shift 2 ;;
-        --base-branch)   BASE_BRANCH="$2"; shift 2 ;;
-        --merge-target)  MERGE_TARGET="$2"; shift 2 ;;
-        --dry-run)       DRY_RUN=1; shift ;;
-        --resume)        RESUME_LOG="$2"; shift 2 ;;
-        -h|--help)       usage; exit 0 ;;
-        *)               echo "Unknown flag: $1" >&2; usage; exit 1 ;;
+        --parallel)         PARALLEL="$2"; shift 2 ;;
+        --targets)          TARGETS="$2"; shift 2 ;;
+        --base-branch)      BASE_BRANCH="$2"; shift 2 ;;
+        --promotion-branch) PROMOTION_BRANCH="$2"; shift 2 ;;
+        --merge-target)     PROMOTION_BRANCH="$2"; shift 2 ;;  # legacy alias
+        --no-promote)       NO_PROMOTE=1; shift ;;
+        --dry-run)          DRY_RUN=1; shift ;;
+        --resume)           RESUME_LOG="$2"; shift 2 ;;
+        -h|--help)          usage; exit 0 ;;
+        *)                  echo "Unknown flag: $1" >&2; usage; exit 1 ;;
     esac
 done
 
@@ -515,9 +722,13 @@ echo "build:      $BUILD_DIR"
 echo "base:       $BASE_BRANCH"
 echo "parallel:   $PARALLEL"
 echo "targets:    $TARGETS"
-[ -n "$MERGE_TARGET" ] && echo "merge into: $MERGE_TARGET"
-[ -n "$RESUME_LOG" ]   && echo "resume log: $RESUME_LOG"
-[ "$DRY_RUN" = "1" ]   && echo "(dry-run)"
+if [ "$NO_PROMOTE" = "1" ]; then
+    echo "promotion: disabled (--no-promote)"
+else
+    echo "promote into: $PROMOTION_BRANCH"
+fi
+[ -n "$RESUME_LOG" ] && echo "resume log: $RESUME_LOG"
+[ "$DRY_RUN" = "1" ] && echo "(dry-run)"
 echo ""
 
 # Build the list of IDs to dispatch.
@@ -546,7 +757,8 @@ fi
 
 # Export everything dispatch_one needs into a subshell for xargs -P.
 export -f dispatch_one make_prompt make_review_prompt review_agent_diff manifest_row
-export MANIFEST WORKTREE_ROOT RESULTS_DIR DRY_RUN BASE_BRANCH
+export -f make_revision_prompt dispatch_revision cherry_pick_into_promotion_branch write_handoff_doc
+export MANIFEST WORKTREE_ROOT RESULTS_DIR DRY_RUN BASE_BRANCH PROMOTION_BRANCH NO_PROMOTE PROMOTION_LOCK
 export TT_EMULE_DIR TT_METAL_DIR BUILD_DIR CLAUDE_BIN RESUME_LOG
 
 # Dispatch in parallel. xargs -I{} reads one input per invocation; -P sets
@@ -556,5 +768,5 @@ echo "$IDS" | xargs -P "$PARALLEL" -I{} bash -c 'dispatch_one "$@"' _ {}
 # Aggregate + log + optional merge.
 if [ "$DRY_RUN" = "0" ]; then
     summarize_batch
-    maybe_merge_pass_commits
+    summarize_promotion_branch_state
 fi
