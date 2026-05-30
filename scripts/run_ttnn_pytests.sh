@@ -122,6 +122,7 @@ run_pytest "bf_test_unsqueeze"                              "$BF_TEST_DIR/test_u
 run_pytest "bf_test_view"                                   "$BF_TEST_DIR/test_view.py"
 run_pytest "bf_test_torch_conversion"     "$BF_TEST_DIR/test_torch_conversion.py"
 run_pytest "bf_test_untilize_bfloat8_b"   "$BF_TEST_DIR/test_untilize_bfloat8_b.py"
+run_pytest "bf_test_comparison_mode"      "$BF_TEST_DIR/test_comparison_mode.py"
 
 # Partial-pass entries: -k filters exclude known-failing variants (test_chunk
 # and test_multi_device intentionally omitted).
