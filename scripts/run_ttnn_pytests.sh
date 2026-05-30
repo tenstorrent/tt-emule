@@ -145,15 +145,21 @@ run_pytest "bf_test_to_and_from_device"    "$BF_TEST_DIR/test_to_and_from_device
 run_pytest "bf_test_graph_trace_utils"     "$BF_TEST_DIR/test_graph_trace_utils.py" \
     -k 'not test_no_dispatch_vs_normal_mode_comparison and not test_normal_mode_shows_real_addresses'
 
-# test_graph_capture: 10 PASS / 8 FAIL.  test_graph_capture / test_duration_captured
-# / test_graph_capture_topk are mixed — excluding them sacrifices their passing variants.
+# test_graph_capture: 16 PASS / 2 FAIL after llk-gaps branch (eltwise_sfpu /
+# eltwise_binary_sfpu_no_bcast / bmm / softmax / moreh_dot / topk / writer_full
+# closures). Remaining 2 are halo_gather.cpp (experimental NoC, deferred) and
+# one SIGFPE crash (cluster E, out of scope).
+# pytest -k can't filter the SIGFPE variant's full test ID
+# `test_graph_capture[mode=RunMode.NORMAL-size=64-scalar=3]` because `=` / `.`
+# aren't valid -k tokens; use --deselect-by-id to drop it exactly.
 run_pytest "bf_test_graph_capture"         "$BF_TEST_DIR/test_graph_capture.py" \
-    -k 'not test_graph_capture_without_dtype and not test_graph_capture_without_memory_config and not test_program_cache_invalidation_across_dispatch_modes and not test_duration_captured and not test_graph_capture_topk and not (test_graph_capture and not test_graph_capture_inactive and not test_graph_capture_with_all_parameters)'
+    -k 'not test_program_cache_invalidation_across_dispatch_modes' \
+    --deselect 'tests/ttnn/unit_tests/base_functionality/test_graph_capture.py::test_graph_capture[mode=RunMode.NORMAL-size=64-scalar=3]'
 
-# test_graph_report: 93 PASS / 13 FAIL — exclude failing test classes; sacrifices
-# TestReportVersion::test_version_constant_exposed (1 passing) due to class collision.
+# test_graph_report: 101 PASS / 5 FAIL after the bmm + matmul-related closures.
+# Remaining 5 are 4 SIGFPE crashes (cluster E) and 1 resnet50 e2e (out of scope).
 run_pytest "bf_test_graph_report"          "$BF_TEST_DIR/test_graph_report.py" \
-    -k 'not TestDurationExtraction and not TestFastOperationGraphTracking and not TestGraphCaptureToFile and not TestGraphReportImport and not TestLinearModelE2E and not TestReportVersion and not test_resnet50_e2e_graph_capture'
+    -k 'not TestDurationExtraction and not TestFastOperationGraphTracking and not test_resnet50_e2e_graph_capture'
 
 # test_reshape: 259 PASS / 61 FAIL — exclude sharded variants; test_reshape_tile
 # is mixed (excluded entirely, sacrificing some passing variants).
