@@ -310,9 +310,14 @@ ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
         __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++), idst, ocb);
 }
 
-// pack_tile (templated): used by D2M-generated code.
+// pack_tile (templated): used by D2M-generated code and by upstream kernels that
+// call the 3-arg form without an explicit template parameter (e.g.
+// `pack_tile(0, ocb, 0)` in ttnn/cpp/ttnn/operations/rand/device/kernels/compute_uniform.cpp).
 // Template param <true> means "use output_offset as the write slot index".
-template <bool UseOutputOffset>
+// Default is `true` to match upstream pack.h, where
+// `template <bool out_of_order_output = false>` always passes
+// `output_tile_index` through to the LLK regardless of the template arg.
+template <bool UseOutputOffset = true>
 ALWI void pack_tile(uint32_t idst, uint32_t ocb, uint32_t output_offset = 0) {
     __emule_dst_check(idst, "pack_tile<templated>");
     if constexpr (UseOutputOffset) {
