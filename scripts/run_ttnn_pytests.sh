@@ -152,6 +152,13 @@ run_pytest "bf_test_graph_trace_utils"     "$BF_TEST_DIR/test_graph_trace_utils.
 # pytest -k can't filter the SIGFPE variant's full test ID
 # `test_graph_capture[mode=RunMode.NORMAL-size=64-scalar=3]` because `=` / `.`
 # aren't valid -k tokens; use --deselect-by-id to drop it exactly.
+#
+# IMPORTANT: --deselect matches against pytest's *collected nodeid*, which is
+# always rootdir-relative regardless of how the test-file argument is passed
+# (relative or absolute). The rootdir is fixed by tt-metal's pytest.ini at
+# /localdev/arminale/tt-metal, so the rootdir-relative path here is stable.
+# Passing the absolute $BF_TEST_DIR path here silently fails to match (verified
+# locally: 18→17 selected instead of 18→16).
 run_pytest "bf_test_graph_capture"         "$BF_TEST_DIR/test_graph_capture.py" \
     -k 'not test_program_cache_invalidation_across_dispatch_modes' \
     --deselect 'tests/ttnn/unit_tests/base_functionality/test_graph_capture.py::test_graph_capture[mode=RunMode.NORMAL-size=64-scalar=3]'
