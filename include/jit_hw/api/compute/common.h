@@ -58,6 +58,19 @@ enum class MathFidelity : uint8_t { LoFi = 0, HiFi2 = 2, HiFi3 = 3, HiFi4 = 4 };
 
 enum class ReluType { NO_RELU, ZERO_RELU, MIN_THRESHOLD_RELU, MAX_THRESHOLD_RELU };
 
+// p_dim_stride_target: reconfig behaviour for dim and stride. Defined upstream
+// at tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_unpack_common.h:25. Used
+// as a template arg on llk_unpack_reconfig_data_format_* (LLK functions emule
+// stubs as no-ops). reduce_helpers_compute.inl in upstream references
+// `p_dim_stride_target::IGNORE` directly, so the enum must be in scope when
+// that .inl is parsed by any kernel that pulls it in (softmax, moreh_dot,
+// etc.). Placed at global scope (not inside `ckernel`) to match upstream's
+// usage `p_dim_stride_target::IGNORE`.
+enum class p_dim_stride_target {
+    IGNORE,         // do not modify dim/stride
+    FACE_ROW_MAJOR  // set dim/stride for unpacking face in row-major format
+};
+
 // DST_ACCUM_MODE: On real device, this is a compile-time integer define.
 // In emulation, provide it as a constexpr if not already defined as a macro.
 #ifndef DST_ACCUM_MODE

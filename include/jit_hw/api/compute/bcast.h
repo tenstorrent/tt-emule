@@ -44,6 +44,24 @@ inline void unary_bcast(uint32_t icb, uint32_t in_tile_index, uint32_t idst) {
     copy_tile(icb, in_tile_index, idst);
 }
 
+// Single-template-arg overloads matching upstream bcast.h:408-412 — the
+// `template <BroadcastType tBcastDim>` form, op_type implicit:
+// upstream's signature is `mul_tiles_bcast<COL>(...)` which forwards to
+// `any_tiles_bcast<EltwiseBinaryType::ELWMUL, COL>(...)`. softmax.cpp:303
+// calls this form.
+template <BroadcastType BCAST_T>
+ALWI void add_tiles_bcast(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                          uint32_t /*itile0*/, uint32_t /*itile1*/,
+                          uint32_t /*idst*/, uint32_t /*bcast_row_idx*/ = 0) {}
+template <BroadcastType BCAST_T>
+ALWI void sub_tiles_bcast(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                          uint32_t /*itile0*/, uint32_t /*itile1*/,
+                          uint32_t /*idst*/, uint32_t /*bcast_row_idx*/ = 0) {}
+template <BroadcastType BCAST_T>
+ALWI void mul_tiles_bcast(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                          uint32_t /*itile0*/, uint32_t /*itile1*/,
+                          uint32_t /*idst*/, uint32_t /*bcast_row_idx*/ = 0) {}
+
 // ---- Non-templated row/col/scalar variants (upstream signatures) ----
 //
 // Upstream tt_metal/hw/inc/api/compute/bcast.h provides specific entry points
