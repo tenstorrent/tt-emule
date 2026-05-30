@@ -3,26 +3,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// No-op shim mirroring tt_metal/hw/inc/api/compute/atan2.h.
-//
-// atan2 is one of ~15 binary SFPU op headers transitively #included by
-// eltwise_sfpu fat-dispatcher kernels (eltwise_binary_sfpu_no_bcast.cpp,
-// eltwise_binary_sfpu_scalar.cpp). Each JIT instantiation selects exactly one
-// op via the BINARY_SFPU_OP define; the unselected op headers are dead code
-// but still parsed by C++. Upstream's atan2.h references undefined `APPROX`
-// and unstubbed `llk_math_eltwise_binary_sfpu_atan2*`, so the real header
-// can't compile on host — emule provides empty bodies that parse and never
-// execute.
-//
-// If a future kernel ever selects atan2 (BINARY_SFPU_OP=atan2 or similar),
-// PCC will fail at that test — implement the real semantics here then.
+// Real impl mirroring tt_metal/hw/inc/api/compute/atan2.h.
+// Upstream sfpu reference: tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_sfpu/ckernel_sfpu_atan2.h
+//   _sfpu_atan2_(y, x) - first arg is y, second is x, returns atan2(y, x).
+// The kernel-side wrapper (compute/atan2.h) preserves this ordering when
+// dispatching from `atan2_binary_tile(idst0, idst1, odst)`.
 
 #include <cstdint>
+#include <cmath>
 #include "jit_hw/api/compute/common.h"
 
 namespace ckernel {
 
-ALWI void atan2_binary_tile(uint32_t /*idst0*/, uint32_t /*idst1*/, uint32_t /*odst*/) {}
+ALWI void atan2_binary_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
+    __emule_dst_check(idst0, "atan2_binary_tile.y");
+    __emule_dst_check(idst1, "atan2_binary_tile.x");
+    __emule_dst_check(odst, "atan2_binary_tile.out");
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; ++i) {
+        __emule_dst[odst][i] = std::atan2(__emule_dst[idst0][i], __emule_dst[idst1][i]);
+    }
+}
 ALWI void atan2_binary_tile_init() {}
 
 } // namespace ckernel
