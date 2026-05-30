@@ -118,4 +118,19 @@ ALWI void sfpu_reduce(Ts...) {}
 template <typename ...Ts>
 ALWI void sfpu_reduce_init(Ts...) {}
 
+// --- topk (used by ttnn.topk via reduction/topk/device/kernels/compute/topk.cpp).
+// Stubs: real semantics would require an SFPU-side bitonic sort emulation.
+// Compiles cleanly; tests that exercise topk's correctness (rather than just
+// graph capture) will surface PCC failures — implement real semantics then.
+ALWI void topk_tile_init() {}
+template <bool stable_sort = false>
+ALWI void topk_local_sort(uint32_t /*idst*/, int /*idir*/, int /*i_end_phase*/,
+                          int /*i_start_phase*/ = 0, int /*i_end_step*/ = 0,
+                          int /*i_start_step*/ = 0) {}
+template <bool idir = false, bool stable_sort = false>
+ALWI void topk_merge(uint32_t /*idst*/, int /*m_iter*/, int /*k*/) {}
+template <bool stable_sort = false>
+ALWI void topk_rebuild(uint32_t /*idst*/, bool /*idir*/, int /*m_iter*/, int /*k*/,
+                       int /*logk*/, int /*skip_second*/) {}
+
 } // namespace ckernel
