@@ -310,14 +310,21 @@ ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
         __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++), idst, ocb);
 }
 
-// pack_tile (templated): used by D2M-generated code and by upstream kernels that
-// call the 3-arg form without an explicit template parameter (e.g.
+// pack_tile (templated): used by D2M-generated code and by upstream kernels
+// that call the 3-arg form without an explicit template parameter (e.g.
 // `pack_tile(0, ocb, 0)` in ttnn/cpp/ttnn/operations/rand/device/kernels/compute_uniform.cpp).
-// Template param <true> means "use output_offset as the write slot index".
-// Default is `true` to match upstream pack.h, where
-// `template <bool out_of_order_output = false>` always passes
-// `output_tile_index` through to the LLK regardless of the template arg.
-template <bool UseOutputOffset = true>
+//
+// Default is `UseOutputOffset = false` to match upstream:
+// `tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_pack_common_api.h:70-74`
+// shows that when `out_of_order_output=false` (the upstream default), the
+// real LLK *ignores* `output_tile_index` and writes to
+// `fifo_wr_ptr + fifo_wr_tile_ptr`, then advances `fifo_wr_tile_ptr` by
+// `fifo_page_size`. Auto-advance is the upstream default, not explicit
+// slot — emule's 2-arg overload is the right semantic for it, and the
+// templated 3-arg `<false>` branch falls through to that. Use
+// `pack_tile<true>(idst, ocb, slot)` for explicit slot (the `out_of_order_output=true`
+// path), as upstream does.
+template <bool UseOutputOffset = false>
 ALWI void pack_tile(uint32_t idst, uint32_t ocb, uint32_t output_offset = 0) {
     __emule_dst_check(idst, "pack_tile<templated>");
     if constexpr (UseOutputOffset) {
