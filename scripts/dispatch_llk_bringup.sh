@@ -20,8 +20,11 @@ set -euo pipefail
 # ============================================================================
 PARALLEL=1
 TARGETS="all"
-BASE_BRANCH="main"
+# Default: agents base their worktrees off the promotion branch so each agent
+# inherits prior successful bring-ups (their shims + curated entries) and
+# doesn't redo work that already landed.
 PROMOTION_BRANCH="arminale/mass-llk-bringup"
+BASE_BRANCH="$PROMOTION_BRANCH"
 NO_PROMOTE=0
 DRY_RUN=0
 RESUME_LOG=""
@@ -98,7 +101,9 @@ Usage: $(basename "$0") [options]
                              N,N,N or N-M         explicit IDs / ranges
                              data_movement|reduce|fused|matmul|transformer
                                                   category prefix (matches test_path)
-  --base-branch <name>     Branch to base each agent's worktree on. Default: main.
+  --base-branch <name>     Branch to base each agent's worktree on.
+                           Default: same as --promotion-branch (so each agent
+                           inherits prior successful bring-ups).
   --promotion-branch <name> Branch to cherry-pick reviewer-APPROVEd commits into.
                            Default: arminale/mass-llk-bringup. Must already exist
                            and be checked out in the main worktree (this script's
@@ -179,9 +184,27 @@ Assignment:
   JIT cache dir:            ${jit_cache}
 
 Your job: bring up ONE ttnn op end-to-end by following the
-.claude/skills/op-bring-up/SKILL.md loop. Steps:
+.claude/skills/op-bring-up/SKILL.md loop.
+
+WORKTREE BOUNDARY — read this carefully:
+You are running in PARALLEL with other bring-up agents. Each agent owns
+exactly ONE git worktree:
+  YOUR worktree (writable):  ${worktree}
+  Other agents' worktrees:   /tmp/llk-bringup/agent-* (NOT yours; HANDS OFF)
+  Main tt-emule worktree:    ${TT_EMULE_DIR} (NOT yours; HANDS OFF)
+  tt-metal source:           ${TT_METAL_DIR} (READ-ONLY; for cross-checks)
+The harness has --dangerously-skip-permissions, so the filesystem will
+not enforce this — YOU must enforce it. Every Edit/Write/Bash tool call
+must operate on paths under ${worktree} (or read-only on ${TT_METAL_DIR}).
+Never use absolute paths starting with /localdev/arminale/tt-emule/ —
+that's the main worktree and writes there corrupt parallel agents and
+break the harness's cherry-pick step.
+
+Steps:
 
 1. Verify cwd is ${worktree}. The tt-emule worktree is already set up.
+   This worktree is on a DETACHED HEAD at the promotion branch's tip.
+   You inherit all prior bring-ups' shims and curated entries.
 2. Set up env:
      export TT_METAL_DIR=${TT_METAL_DIR}
      export BUILD_DIR=${BUILD_DIR}
@@ -509,7 +532,12 @@ dispatch_one() {
     if [ -e "$worktree" ]; then
         git worktree remove --force "$worktree" 2>/dev/null || rm -rf "$worktree"
     fi
-    git worktree add --quiet "$worktree" "$BASE_BRANCH"
+    # --detach: each agent gets an isolated HEAD pointing at $BASE_BRANCH's commit,
+    # NOT a shared branch ref. If we used "git worktree add $worktree $BASE_BRANCH"
+    # without --detach, agents would all share the same branch — when one commits,
+    # all others' HEADs silently advance, and parallel cherry-picks see a corrupt
+    # state. --detach makes each agent's commits independent.
+    git worktree add --quiet --detach "$worktree" "$BASE_BRANCH"
 
     # Build prompt + dispatch.
     local prompt
