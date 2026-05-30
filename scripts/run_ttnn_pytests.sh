@@ -165,6 +165,12 @@ run_pytest "bf_test_to_memory_config"      "$BF_TEST_DIR/test_to_memory_config.p
 run_pytest "bf_test_copy"                  "$BF_TEST_DIR/test_copy.py" \
     -k '((test_copy_rm_interleaved_to_legacy_2D_sharded_large_row or test_copy_uint16) and not test_copy_uint16_to_memory_config) or (test_copy and not test_copy_)'
 
+# indexed_fill: HEIGHT_SHARDED L1 tests that pass with current emule.
+# B4/B2 excluded: program factory missing mode CTA arg causes TensorAccessorArgs static_assert.
+# tile_layout/dim tests excluded: compute_uniform.cpp needs pack_tile 3-arg (fixed in common.h).
+# block_sharded excluded: cb_reserve_back overflow due to same program factory regression.
+run_pytest "dm_test_indexed_fill_sharded"   "$DM_TEST_DIR/test_indexed_fill.py::test_indexed_fill_sharded" -k 'B8-b3-D64 or B6-b4-D128'
+
 # reduce/test_sum: test_sum function only (192 parametrizations all pass).
 # test_sum_global excluded: BF16 multi-tile accumulation (batch_size=16)
 # has a numeric gap unrelated to the reduce LLK shims.
