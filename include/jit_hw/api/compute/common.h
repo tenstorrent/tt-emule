@@ -15,6 +15,7 @@
 #include "jit_hw/api/cb_api.h"
 #include "jit_hw/api/compute/common_globals.h"
 #include "jit_hw/api/compute/nfaces.h"
+#include "jit_hw/api/compute/bfp8.h"
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
@@ -174,9 +175,44 @@ inline bool cb_is_32bit_format(uint32_t cb_id) {
     return __emule_cbs[cb_id].page_size > 2048;
 }
 
+// Is this CB using Bfp8_b? Bfp8_b tile = 64 face-row exponents + 1024
+// mantissa bytes = 1088 bytes for a 32x32 tile. Any positive page size below
+// the bf16 size (2048) is Bfp8_b on Wormhole-class architectures; we encode
+// the constraint as a half-open range to leave room for future smaller-tile
+// configurations without changing the predicate's intent.
+inline bool cb_is_bfp8_b_format(uint32_t cb_id) {
+    const uint32_t ps = __emule_cbs[cb_id].page_size;
+    return ps > 0 && ps < 2048;
+}
+
 // pack_dst_to_buf: PACK row-major DST → nfaces CB with L1 accumulation support.
 // When __emule_l1_acc_enabled, adds DST to existing CB contents instead of overwriting.
 inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
+    if (cb_is_bfp8_b_format(ocb)) {
+        // Bfp8_b: iterate in nfaces order so each face-row of 16 contiguous
+        // mantissa bytes shares one exponent byte. DST is row-major fp32.
+        // Mapping: nfaces index → row-major index uses the same LUT every
+        // other compute primitive does, just inverted (here we *consume*
+        // row-major DST and write nfaces output, so we look up the row-major
+        // index for each nfaces position).
+        uint8_t* exp_base  = buf;          // 64 face-row exponents
+        uint8_t* mant_base = buf + 64;     // 1024 mantissa bytes (face-major)
+        for (uint32_t fr = 0; fr < 64; ++fr) {
+            float row16[16];
+            for (uint32_t k = 0; k < 16; ++k) {
+                const uint32_t ni = fr * 16 + k;
+                const uint32_t rm = __emule_nfaces::nfaces_to_rowmajor[ni];
+                row16[k] = __emule_dst[dst_slot][rm];
+            }
+            uint8_t mant_row[16];
+            __emule_bfp8::encode_face_row(row16, exp_base[fr], mant_row);
+            std::memcpy(&mant_base[fr * 16], mant_row, 16);
+        }
+        // L1 accumulation for Bfp8_b is rare and would require decoding the
+        // existing tile, adding DST, then re-encoding — defer until a test
+        // exposes the path (op-bring-up skill convention).
+        return;
+    }
     if (cb_is_32bit_format(ocb)) {
         uint32_t n = cb_page_size(ocb) / sizeof(uint32_t);
         if (n > __EMULE_TILE_ELEMS) n = __EMULE_TILE_ELEMS;
@@ -350,6 +386,16 @@ ALWI void pack_tile_block(uint32_t ifrom_dst, uint32_t ocb, uint32_t ntiles) {
 // bf16 (page_size ≤ 2048) or raw 32-bit (page_size > 2048).
 inline void __emule_unpack_cb_tile_to(uint32_t icb, uint32_t itile, float* out) {
     uint8_t* buf = __emule_compute::cb_read_ptr_at(icb, itile);
+    if (__emule_compute::cb_is_bfp8_b_format(icb)) {
+        // Bfp8_b: UNPACK nfaces→row-major + decode shared exponent + 7-bit
+        // raw mantissa to fp32. Decoder is symmetric with pack_dst_to_buf's
+        // Bfp8_b branch.
+        const uint32_t n = __EMULE_TILE_ELEMS;
+        for (uint32_t i = 0; i < n; i++) {
+            out[i] = __emule_bfp8::to_f32(buf, __emule_nfaces::rowmajor_to_nfaces[i]);
+        }
+        return;
+    }
     if (__emule_compute::cb_is_32bit_format(icb)) {
         // 32-bit format: UNPACK nfaces→row-major.
         // Use memcpy per element to preserve INT32 bit patterns (small positive
