@@ -222,6 +222,92 @@ exceed 5 shim iterations without emitting STUCK.
 PROMPT
 }
 
+# Build the post-commit review prompt. Args: id, test_path, worktree.
+# The reviewer is an independent claude -p invocation; it reads the agent's
+# HEAD commit and decides APPROVE / REQUEST_CHANGES.
+make_review_prompt() {
+    local id="$1" test_path="$2" worktree="$3"
+    cat <<PROMPT
+You are a code reviewer for the commit produced by agent #${id}, which
+was assigned to make this pytest pass under tt-emule by following
+.claude/skills/op-bring-up/SKILL.md:
+  tests/ttnn/unit_tests/operations/${test_path}
+
+The agent's worktree is ${worktree}; their commit is HEAD.
+Upstream tt-metal source for cross-checks: ${TT_METAL_DIR}.
+
+Your job: review the agent's commit. Acceptance criteria:
+
+1. SCOPE — the diff is minimal. Only files needed to (a) close the
+   specific JIT-compile or PCC gap that broke this test, and (b)
+   promote the test by adding an entry to scripts/run_ttnn_pytests.sh.
+   NO unrelated refactors. NO .claude/ edits. NO doc churn. NO
+   commented-out blocks. NO speculative changes for hypothetical
+   future tests.
+
+2. SHIM CORRECTNESS — any new files under include/jit_hw/ should:
+   - Mirror an existing upstream path (e.g.
+     include/jit_hw/api/compute/X.h shimming
+     ${TT_METAL_DIR}/tt_metal/hw/inc/api/compute/X.h). Verify the
+     upstream header exists at the mirrored path.
+   - Have function signatures (template params, arg types, return
+     type, default args) matching upstream's declarations. Verify by
+     reading upstream's header.
+   - Be no-op stubs only when emule semantically does not need the
+     primitive (sync, remap-configure, packer-init are fine as no-ops).
+     Be functional implementations when the LLK actually shapes data.
+
+3. PROMOTION — scripts/run_ttnn_pytests.sh has a new run_pytest line
+   for this test. Any -k filter is justified — typically excludes
+   sharded / requires_fast_runtime_mode_off / host→DRAM-only variants
+   per the methodology. Excluded variants should be principled, not
+   arbitrary.
+
+4. NO OVERREACH — agent did not modify files outside its worktree, did
+   not push to remote, did not bypass safety checks.
+
+Read the diff: \`git -C ${worktree} show HEAD\`. Read any new shim
+files in full. Cross-check signatures against upstream headers under
+${TT_METAL_DIR}/tt_metal/hw/inc/ and ${TT_METAL_DIR}/ttnn/cpp/ttnn/
+kernel_lib/.
+
+Emit on stdout exactly ONE final structured line:
+  REVIEW: APPROVE|<one-line justification, ≤120 chars>
+or:
+  REVIEW: REQUEST_CHANGES|<actionable feedback, ≤200 chars>
+
+Be lenient on genuinely-trivial diffs (e.g. a one-line type fix to
+suppress a signed/unsigned warning is fine — that IS the minimum).
+Be strict on shims that don't mirror upstream paths, have wrong
+signatures, contain dead code, or touch unrelated files.
+PROMPT
+}
+
+# Run the reviewer. Args: id, test_path, worktree. Echoes the verdict line.
+review_agent_diff() {
+    local id="$1" test_path="$2" worktree="$3"
+    local review_log="$RESULTS_DIR/agent-${id}.review"
+
+    local prompt
+    prompt="$(make_review_prompt "$id" "$test_path" "$worktree")"
+
+    (
+        cd "$worktree"
+        "$CLAUDE_BIN" -p \
+            --add-dir "$worktree" \
+            --add-dir "$TT_METAL_DIR" \
+            --dangerously-skip-permissions \
+            "$prompt"
+    ) > "$review_log" 2>&1 || true
+
+    local verdict
+    verdict="$(grep -E '^REVIEW:' "$review_log" | tail -1 || true)"
+    if [ -z "$verdict" ]; then
+        verdict="REVIEW: REQUEST_CHANGES|reviewer produced no structured verdict (see $review_log)"
+    fi
+    echo "$verdict"
+}
+
 # Dispatch one agent. Args: id.
 dispatch_one() {
     local id="$1"
@@ -271,14 +357,32 @@ dispatch_one() {
             "$prompt"
     ) > "$agent_log" 2>&1 || rc=$?
 
-    # Last non-empty line should be the structured result.
-    local last
-    last="$(grep -E '^(PASS|STUCK|FAIL)\|' "$agent_log" | tail -1 || true)"
-    if [ -z "$last" ]; then
-        last="FAIL|${id}|no structured result line in agent output (rc=$rc, see $agent_log)"
+    # Last structured agent line.
+    local agent_result
+    agent_result="$(grep -E '^(PASS|STUCK|FAIL)\|' "$agent_log" | tail -1 || true)"
+    if [ -z "$agent_result" ]; then
+        agent_result="FAIL|${id}|no structured result line in agent output (rc=$rc, see $agent_log)"
     fi
-    echo "$last" > "$result_line"
-    echo "[$id] $last"
+
+    # If the agent PASSed, dispatch an independent reviewer against the agent's
+    # HEAD commit. The PASS only stands if the reviewer also APPROVEs.
+    local final="$agent_result"
+    if [[ "$agent_result" == PASS\|* ]]; then
+        echo "[$id] agent PASS — dispatching reviewer"
+        local verdict
+        verdict="$(review_agent_diff "$id" "$test_path" "$worktree")"
+        echo "[$id] reviewer: $verdict"
+        if [[ "$verdict" == REVIEW:\ APPROVE\|* ]]; then
+            : # PASS stands as-is.
+        else
+            # Demote to STUCK so the harness summary + log capture the rejection.
+            local reason="${verdict#REVIEW: }"
+            final="STUCK|${id}|review demoted: ${reason}"
+        fi
+    fi
+
+    echo "$final" > "$result_line"
+    echo "[$id] $final"
 }
 
 # Post-batch summary + log append.
@@ -441,7 +545,7 @@ if [ "${#INVALID[@]}" -gt 0 ]; then
 fi
 
 # Export everything dispatch_one needs into a subshell for xargs -P.
-export -f dispatch_one make_prompt manifest_row
+export -f dispatch_one make_prompt make_review_prompt review_agent_diff manifest_row
 export MANIFEST WORKTREE_ROOT RESULTS_DIR DRY_RUN BASE_BRANCH
 export TT_EMULE_DIR TT_METAL_DIR BUILD_DIR CLAUDE_BIN RESUME_LOG
 
