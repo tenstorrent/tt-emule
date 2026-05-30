@@ -98,6 +98,7 @@ run_pytest "dm_test_embedding_tiled_input"   "$DM_TEST_DIR/test_embedding.py" -k
 run_pytest "dm_test_embedding_tiled"         "$DM_TEST_DIR/test_embedding.py" -k 'test_tiled and not test_embedding_tiled'
 run_pytest "dm_test_moe_embedding"           "$DM_TEST_DIR/test_embedding.py" -k 'test_moe_embedding'
 run_pytest "dm_test_embedding_base_case"     "$DM_TEST_DIR/test_embedding.py" -k 'test_base_case'
+run_pytest "dm_test_full_like"               "$DM_TEST_DIR/test_full_like.py" -k 'not sharded'
 
 # tests/ttnn/unit_tests/base_functionality/ — whole-file all-pass entries.
 run_pytest "bf_test_as_tensor"                              "$BF_TEST_DIR/test_as_tensor.py"
