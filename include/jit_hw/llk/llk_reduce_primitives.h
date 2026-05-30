@@ -24,6 +24,15 @@ enum class ReduceDim : uint8_t;
 // in common.h.
 enum class p_dim_stride_target;
 
+// p_dim_stride_target: mirrors tt_llk_wormhole_b0/llk_lib/llk_unpack_common.h.
+// Used as a non-type template parameter in llk_unpack_reconfig_data_format_srca.
+// In emulation both values are no-ops; the enum is defined here so the template
+// can be instantiated with p_dim_stride_target::IGNORE in reduce_helpers_compute.inl.
+enum class p_dim_stride_target {
+    IGNORE,
+    FACE_ROW_MAJOR
+};
+
 // constexpr defaults; only fall back to #define if the kernel source has
 // already #defined them (some upstream prologs do this), to avoid a redefinition.
 #ifndef MM_THROTTLE
@@ -60,13 +69,17 @@ inline void llk_unpack_AB_matmul_init(Args... /*ignored*/) {}
 // like `llk_unpack_reconfig_data_format_srca<DST_ACCUM_MODE, p_dim_stride_target::IGNORE>(...)`
 // resolve without surfacing the prior `<int Mode, typename... Args>` parameter-
 // kind mismatch (enum value can't bind to a typename pack).
-template <bool is_fp32_dest_acc_en, p_dim_stride_target dim_stride_target,
+template <bool is_fp32_dest_acc_en,
+          p_dim_stride_target dim_stride_target = p_dim_stride_target::IGNORE,
           bool to_from_int8 = false>
 inline void llk_unpack_reconfig_data_format_srca(uint32_t /*srca_new*/) {}
-template <bool is_fp32_dest_acc_en, p_dim_stride_target dim_stride_target,
+template <bool is_fp32_dest_acc_en,
+          p_dim_stride_target dim_stride_target = p_dim_stride_target::IGNORE,
           bool to_from_int8 = false>
 inline void llk_unpack_reconfig_data_format_srca(uint32_t /*srca_old*/,
                                                   uint32_t /*srca_new*/) {}
+template <bool is_fp32_dest_acc_en, bool to_from_int8 = false>
+inline void llk_math_reconfig_data_format_srca(uint32_t /*srca_new*/) {}
 template <bool is_fp32_dest_acc_en, bool to_from_int8 = false>
 inline void llk_math_reconfig_data_format_srca(uint32_t /*srca_old*/,
                                                uint32_t /*srca_new*/) {}

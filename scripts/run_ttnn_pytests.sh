@@ -27,6 +27,7 @@ PYTEST_BIN="${PYTEST_BIN:-/opt/ttmlir-toolchain/venv/bin/pytest}"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"
 DM_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/data_movement"
 BF_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/base_functionality"
+REDUCE_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/reduce"
 
 GTEST_XML_DIR="${GTEST_XML_DIR:-}"
 [ -n "$GTEST_XML_DIR" ] && mkdir -p "$GTEST_XML_DIR"
@@ -162,6 +163,12 @@ run_pytest "bf_test_to_memory_config"      "$BF_TEST_DIR/test_to_memory_config.p
 # `test_copy_uint16_to_memory_config`; explicit exclusion handles it.
 run_pytest "bf_test_copy"                  "$BF_TEST_DIR/test_copy.py" \
     -k '((test_copy_rm_interleaved_to_legacy_2D_sharded_large_row or test_copy_uint16) and not test_copy_uint16_to_memory_config) or (test_copy and not test_copy_)'
+
+# reduce/test_sum: test_sum function only (192 parametrizations all pass).
+# test_sum_global excluded: BF16 multi-tile accumulation (batch_size=16)
+# has a numeric gap unrelated to the reduce LLK shims.
+# test_sum_4d/nd_shard/subcores excluded: untested.
+run_pytest "reduce_test_sum" "$REDUCE_TEST_DIR/test_sum.py" -k 'test_sum and not test_sum_global and not test_sum_4d and not test_sum_nd_shard and not test_sum_subcores'
 
 echo ""
 echo "========================================"

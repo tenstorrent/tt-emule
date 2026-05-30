@@ -16,6 +16,7 @@
 
 #include "jit_hw/api/compute/common.h"
 #include "jit_hw/api/compute/nfaces.h"
+#include "jit_hw/api/compute/compute_kernel_hw_startup.h"
 #include "jit_hw/llk_defs.h"
 #include <algorithm>
 #include <limits>
