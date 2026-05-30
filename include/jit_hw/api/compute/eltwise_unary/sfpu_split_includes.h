@@ -3,22 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// Conditional SFPU includes for emulation. Mirrors upstream
-//   tt_metal/hw/inc/api/compute/eltwise_unary/sfpu_split_includes.h
-// — same SFPU_OP_*_INCLUDE guards, same header paths. emule only conditionally
-// includes the subset of headers it has shims for. Other guards' headers are
-// genuine LLK gaps tracked per-op; the guard simply not firing here means a
-// kernel that triggers it will surface the gap at JIT-compile time.
-//
-// The guards are JIT-time #defines emitted by upstream's
-//   unary_op_utils::get_macro_definition()
-// when the host lowers a specific SFPU op into the eltwise_sfpu / eltwise_sfpu
-// fat-dispatcher kernels (compute/eltwise_sfpu.cpp + binary_sfpu_*.cpp). The
-// kernel calls into the op's `_tile` / `_tile_init` symbols which only exist
-// when this header pulls the right op header in.
-//
-// Adding a missing guard here unblocks every kernel that ever JIT-instantiates
-// that op family without needing to touch the kernels themselves.
+// Conditional SFPU includes; mirrors upstream sfpu_split_includes.h's
+// guard list, restricted to op headers emule has shims for. Guards whose
+// header isn't shimmed surface at JIT-compile time on the triggering kernel.
 
 #if SFPU_OP_EXP_INCLUDE
 #include "api/compute/eltwise_unary/exp.h"

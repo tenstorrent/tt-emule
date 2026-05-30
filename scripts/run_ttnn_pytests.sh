@@ -98,13 +98,7 @@ run_pytest "dm_test_embedding_tiled"         "$DM_TEST_DIR/test_embedding.py" -k
 run_pytest "dm_test_moe_embedding"           "$DM_TEST_DIR/test_embedding.py" -k 'test_moe_embedding'
 run_pytest "dm_test_embedding_base_case"     "$DM_TEST_DIR/test_embedding.py" -k 'test_base_case'
 
-# tests/ttnn/unit_tests/base_functionality/ — verified all-PASS in the full
-# base_functionality replay on this branch (1h14m, 2352 PASS / 2121 FAIL),
-# filtered to whole-file 100%-pass entries plus the two newly-unblocked files
-# (test_torch_conversion and test_untilize_bfloat8_b).
-# The replay was post-pack_tile-fix; the Bfp8_b codec change after the replay
-# is strictly additive for bf8_b CBs (page_size < 2048), so the bf16/fp32
-# paths these 21 100%-pass files exercise are unchanged.
+# tests/ttnn/unit_tests/base_functionality/ — whole-file all-pass entries.
 run_pytest "bf_test_as_tensor"                              "$BF_TEST_DIR/test_as_tensor.py"
 run_pytest "bf_test_cluster"                                "$BF_TEST_DIR/test_cluster.py"
 run_pytest "bf_test_database"                               "$BF_TEST_DIR/test_database.py"
@@ -126,72 +120,45 @@ run_pytest "bf_test_to_and_from_torch"                      "$BF_TEST_DIR/test_t
 run_pytest "bf_test_to_dtype"                               "$BF_TEST_DIR/test_to_dtype.py"
 run_pytest "bf_test_unsqueeze"                              "$BF_TEST_DIR/test_unsqueeze.py"
 run_pytest "bf_test_view"                                   "$BF_TEST_DIR/test_view.py"
-# Newly unblocked on this branch:
-run_pytest "bf_test_torch_conversion"     "$BF_TEST_DIR/test_torch_conversion.py"     # compute_uniform.cpp gap closed (commit 0b26fdb): 1063 PASS / 37 SKIP
-run_pytest "bf_test_untilize_bfloat8_b"   "$BF_TEST_DIR/test_untilize_bfloat8_b.py"   # Bfp8_b codec landed: 176 PASS
+run_pytest "bf_test_torch_conversion"     "$BF_TEST_DIR/test_torch_conversion.py"
+run_pytest "bf_test_untilize_bfloat8_b"   "$BF_TEST_DIR/test_untilize_bfloat8_b.py"
 
-# Partial-pass entries: file has both passing and failing variants; each filter
-# was derived from the per-file recheck logs in /tmp/bf_recheck/<file>.log on
-# this branch by excluding the fail-only and mixed-result test function names.
-# Some passing variants of mixed-result functions are sacrificed (substring
-# matching collisions); that is acceptable for the CI-locking-in purpose.
-# test_chunk and test_multi_device are intentionally excluded.
+# Partial-pass entries: -k filters exclude known-failing variants (test_chunk
+# and test_multi_device intentionally omitted).
 
-# test_to_and_from_device: 19 PASS / 1 FAIL  (single failing function)
 run_pytest "bf_test_to_and_from_device"    "$BF_TEST_DIR/test_to_and_from_device.py" \
     -k 'not test_to_and_from_multiple_times'
 
-# test_graph_trace_utils: 12 PASS / 2 FAIL  (two failing functions)
 run_pytest "bf_test_graph_trace_utils"     "$BF_TEST_DIR/test_graph_trace_utils.py" \
     -k 'not test_no_dispatch_vs_normal_mode_comparison and not test_normal_mode_shows_real_addresses'
 
-# test_graph_capture: 16 PASS / 2 FAIL after llk-gaps branch (eltwise_sfpu /
-# eltwise_binary_sfpu_no_bcast / bmm / softmax / moreh_dot / topk / writer_full
-# closures). Remaining 2 are halo_gather.cpp (experimental NoC, deferred) and
-# one SIGFPE crash (cluster E, out of scope).
-# pytest -k can't filter the SIGFPE variant's full test ID
-# `test_graph_capture[mode=RunMode.NORMAL-size=64-scalar=3]` because `=` / `.`
-# aren't valid -k tokens; use --deselect-by-id to drop it exactly.
-#
-# IMPORTANT: --deselect matches against pytest's *collected nodeid*, which is
-# always rootdir-relative regardless of how the test-file argument is passed
-# (relative or absolute). The rootdir is fixed by tt-metal's pytest.ini at
-# /localdev/arminale/tt-metal, so the rootdir-relative path here is stable.
-# Passing the absolute $BF_TEST_DIR path here silently fails to match (verified
-# locally: 18→17 selected instead of 18→16).
+# pytest -k can't match `=`/`.` in parametrize names, so the SIGFPE variant
+# is dropped via --deselect (rootdir-relative nodeid — absolute path doesn't
+# match, verified locally).
 run_pytest "bf_test_graph_capture"         "$BF_TEST_DIR/test_graph_capture.py" \
     -k 'not test_program_cache_invalidation_across_dispatch_modes' \
     --deselect 'tests/ttnn/unit_tests/base_functionality/test_graph_capture.py::test_graph_capture[mode=RunMode.NORMAL-size=64-scalar=3]'
 
-# test_graph_report: 101 PASS / 5 FAIL after the bmm + matmul-related closures.
-# Remaining 5 are 4 SIGFPE crashes (cluster E) and 1 resnet50 e2e (out of scope).
 run_pytest "bf_test_graph_report"          "$BF_TEST_DIR/test_graph_report.py" \
     -k 'not TestDurationExtraction and not TestFastOperationGraphTracking and not test_resnet50_e2e_graph_capture'
 
-# test_reshape: 259 PASS / 61 FAIL — exclude sharded variants; test_reshape_tile
-# is mixed (excluded entirely, sacrificing some passing variants).
 run_pytest "bf_test_reshape"               "$BF_TEST_DIR/test_reshape.py" \
     -k 'not test_reshape_block_shard and not test_reshape_cw_div2_rm and not test_reshape_cw_mul2_rm and not test_reshape_height_shard and not test_reshape_hw_div2_rm and not test_reshape_hw_mul2_rm and not test_reshape_hw_rm_with_program_cache and not test_reshape_sharded_permute_rm and not test_reshape_sharded_rm and not test_reshape_width_shard and not test_reshape_tile'
 
-# test_roll: 9 PASS / 16 FAIL — only test_roll_tile_padding is pure-pass.
 run_pytest "bf_test_roll"                  "$BF_TEST_DIR/test_roll.py" \
     -k 'test_roll_tile_padding'
 
-# test_tilize_untilize_2D: 88 PASS / 152 FAIL — only test_untilize_with_unpadding_2D is pure-pass.
 run_pytest "bf_test_tilize_untilize_2D"    "$BF_TEST_DIR/test_tilize_untilize_2D.py" \
     -k 'test_untilize_with_unpadding_2D'
 
-# test_to_layout: 242 PASS / 366 FAIL — positive selector for pass-only function names.
 run_pytest "bf_test_to_layout"             "$BF_TEST_DIR/test_to_layout.py" \
     -k 'test_int_untilize or test_tensor_to_tile_layout_shape_verification or test_to_from_01d or test_to_layout_low_perf or test_to_layout_pad_value_on_host or test_to_layout_page_error or test_to_layout_wide_tensor or test_untilize_w1 or test_untilize_w2 or test_untilize_w3 or test_untilize_w4 or test_wan22_failure'
 
-# test_to_memory_config: 27 PASS / 515 FAIL — positive selector for pass-only function names.
 run_pytest "bf_test_to_memory_config"      "$BF_TEST_DIR/test_to_memory_config.py" \
     -k '(test_to_memory_config_block_sharded or test_to_memory_config_rm_interleaved_to_legacy_2D_sharded_large_row or test_to_memory_config_uint16) or (test_to_memory_config and not test_to_memory_config_)'
 
-# test_copy: 22 PASS / 520 FAIL — positive selector for the 3 pass-only function names.
-# `test_copy_uint16` substring also matches the failing `test_copy_uint16_to_memory_config`;
-# explicit exclusion handles the collision.
+# `test_copy_uint16` substring also matches the failing
+# `test_copy_uint16_to_memory_config`; explicit exclusion handles it.
 run_pytest "bf_test_copy"                  "$BF_TEST_DIR/test_copy.py" \
     -k '((test_copy_rm_interleaved_to_legacy_2D_sharded_large_row or test_copy_uint16) and not test_copy_uint16_to_memory_config) or (test_copy and not test_copy_)'
 

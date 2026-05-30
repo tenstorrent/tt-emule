@@ -359,20 +359,9 @@ ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
         __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++), idst, ocb);
 }
 
-// pack_tile (templated): used by D2M-generated code and by upstream kernels
-// that call the 3-arg form without an explicit template parameter (e.g.
-// `pack_tile(0, ocb, 0)` in ttnn/cpp/ttnn/operations/rand/device/kernels/compute_uniform.cpp).
-//
-// Default is `UseOutputOffset = false` to match upstream:
-// `tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_pack_common_api.h:70-74`
-// shows that when `out_of_order_output=false` (the upstream default), the
-// real LLK *ignores* `output_tile_index` and writes to
-// `fifo_wr_ptr + fifo_wr_tile_ptr`, then advances `fifo_wr_tile_ptr` by
-// `fifo_page_size`. Auto-advance is the upstream default, not explicit
-// slot — emule's 2-arg overload is the right semantic for it, and the
-// templated 3-arg `<false>` branch falls through to that. Use
-// `pack_tile<true>(idst, ocb, slot)` for explicit slot (the `out_of_order_output=true`
-// path), as upstream does.
+// pack_tile (templated 3-arg form). Default `false` matches upstream's
+// `out_of_order_output = false` (llk_pack_common_api.h:70-74): the explicit
+// offset is ignored, slot auto-advances. `<true>` honours the offset.
 template <bool UseOutputOffset = false>
 ALWI void pack_tile(uint32_t idst, uint32_t ocb, uint32_t output_offset = 0) {
     __emule_dst_check(idst, "pack_tile<templated>");
@@ -460,10 +449,7 @@ ALWI void copy_tile_to_dst_init_short_with_dt(uint32_t, uint32_t, uint32_t = 0) 
 // ---- Reconfig operations (no-ops) ----
 ALWI void reconfig_data_format(uint32_t) {}
 ALWI void reconfig_data_format(uint32_t, uint32_t) {}
-// 4-arg form used by upstream's
-// tt_metal/hw/inc/api/compute/reconfig_data_format.h line 29-44 — takes
-// `(srca_old, srca_new, srcb_old, srcb_new)`. Host doesn't model TRISC
-// register data-format reconfig, so this is a no-op like the other arities.
+// 4-arg form: (srca_old, srca_new, srcb_old, srcb_new). No-op.
 ALWI void reconfig_data_format(uint32_t, uint32_t, uint32_t, uint32_t) {}
 template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
 ALWI void reconfig_data_format_srca(uint32_t) {}
