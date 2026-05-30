@@ -44,4 +44,65 @@ inline void unary_bcast(uint32_t icb, uint32_t in_tile_index, uint32_t idst) {
     copy_tile(icb, in_tile_index, idst);
 }
 
+// ---- Non-templated row/col/scalar variants (upstream signatures) ----
+//
+// Upstream tt_metal/hw/inc/api/compute/bcast.h provides specific entry points
+// like `add_tiles_bcast_rows(icb0, icb1, itile0, itile1, idst)` and
+// `add_bcast_rows_init_short(icb0, icb1, call_line)` that kernels call
+// WITHOUT a template arg (bmm_large_block_zm_fused_bias_activation.cpp lines
+// 455, 474). The generic templated forms above can't deduce template args
+// from those call sites — clang reports "couldn't infer template argument
+// 'op_type'". Add the specific non-templated variants matching upstream
+// signatures; bodies are no-ops because host doesn't model bcast.
+
+ALWI void add_bcast_rows_init_short(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                                    uint32_t /*call_line*/ = 0) {}
+ALWI void sub_bcast_rows_init_short(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                                    uint32_t /*call_line*/ = 0) {}
+ALWI void mul_bcast_rows_init_short(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                                    uint32_t /*call_line*/ = 0) {}
+ALWI void add_bcast_cols_init_short(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                                    uint32_t /*call_line*/ = 0) {}
+ALWI void sub_bcast_cols_init_short(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                                    uint32_t /*call_line*/ = 0) {}
+ALWI void mul_bcast_cols_init_short(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                                    uint32_t /*call_line*/ = 0) {}
+ALWI void add_bcast_scalar_init_short(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                                      uint32_t /*call_line*/ = 0) {}
+ALWI void mul_tiles_bcast_scalar_init_short(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                                            uint32_t /*call_line*/ = 0) {}
+ALWI void sub_tiles_bcast_scalar_init_short(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                                            uint32_t /*call_line*/ = 0) {}
+
+ALWI void add_tiles_bcast_rows(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                               uint32_t /*itile0*/, uint32_t /*itile1*/,
+                               uint32_t /*idst*/,
+                               uint32_t /*bcast_row_idx*/ = 0) {}
+ALWI void sub_tiles_bcast_rows(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                               uint32_t /*itile0*/, uint32_t /*itile1*/,
+                               uint32_t /*idst*/,
+                               uint32_t /*bcast_row_idx*/ = 0) {}
+ALWI void mul_tiles_bcast_rows(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                               uint32_t /*itile0*/, uint32_t /*itile1*/,
+                               uint32_t /*idst*/,
+                               uint32_t /*bcast_row_idx*/ = 0) {}
+ALWI void add_tiles_bcast_cols(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                               uint32_t /*itile0*/, uint32_t /*itile1*/,
+                               uint32_t /*idst*/) {}
+ALWI void sub_tiles_bcast_cols(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                               uint32_t /*itile0*/, uint32_t /*itile1*/,
+                               uint32_t /*idst*/) {}
+ALWI void mul_tiles_bcast_cols(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                               uint32_t /*itile0*/, uint32_t /*itile1*/,
+                               uint32_t /*idst*/) {}
+ALWI void add_tiles_bcast_scalar(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                                 uint32_t /*itile0*/, uint32_t /*itile1*/,
+                                 uint32_t /*idst*/) {}
+ALWI void sub_tiles_bcast_scalar(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                                 uint32_t /*itile0*/, uint32_t /*itile1*/,
+                                 uint32_t /*idst*/) {}
+ALWI void mul_tiles_bcast_scalar(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                                 uint32_t /*itile0*/, uint32_t /*itile1*/,
+                                 uint32_t /*idst*/) {}
+
 }  // namespace ckernel

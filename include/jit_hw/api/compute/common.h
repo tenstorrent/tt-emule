@@ -447,6 +447,11 @@ ALWI void copy_tile_to_dst_init_short_with_dt(uint32_t, uint32_t, uint32_t = 0) 
 // ---- Reconfig operations (no-ops) ----
 ALWI void reconfig_data_format(uint32_t) {}
 ALWI void reconfig_data_format(uint32_t, uint32_t) {}
+// 4-arg form used by upstream's
+// tt_metal/hw/inc/api/compute/reconfig_data_format.h line 29-44 — takes
+// `(srca_old, srca_new, srcb_old, srcb_new)`. Host doesn't model TRISC
+// register data-format reconfig, so this is a no-op like the other arities.
+ALWI void reconfig_data_format(uint32_t, uint32_t, uint32_t, uint32_t) {}
 template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
 ALWI void reconfig_data_format_srca(uint32_t) {}
 template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
