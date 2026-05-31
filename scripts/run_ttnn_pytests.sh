@@ -182,6 +182,9 @@ run_pytest "reduce_test_sum" "$REDUCE_TEST_DIR/test_sum.py" -k 'test_sum and not
 # all out of scope for routine LLK bring-up.
 run_pytest "dm_test_tilize_fp32_truncation" "$DM_TEST_DIR/test_tilize.py" -k 'test_tilize_fp32_truncation'
 
+# test_tilizer: single bfloat16 -> bfloat8_b device tilizer test; 1/1 PASS.
+run_pytest "dm_test_tilizer" "$DM_TEST_DIR/test_tilizer.py"
+
 echo ""
 echo "========================================"
 echo " Results: $PASS passed, $FAIL failed"
