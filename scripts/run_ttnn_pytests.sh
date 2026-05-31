@@ -177,6 +177,11 @@ run_pytest "dm_test_indexed_fill_sharded"   "$DM_TEST_DIR/test_indexed_fill.py::
 # test_sum_4d/nd_shard/subcores excluded: untested.
 run_pytest "reduce_test_sum" "$REDUCE_TEST_DIR/test_sum.py" -k 'test_sum and not test_sum_global and not test_sum_4d and not test_sum_nd_shard and not test_sum_subcores'
 
+# test_tilize: only test_tilize_fp32_truncation passes cleanly today (4/4 PASS).
+# Other variants fail on sharded TensorAccessor (40+), bfp4 conversion, or large-row PCC —
+# all out of scope for routine LLK bring-up.
+run_pytest "dm_test_tilize_fp32_truncation" "$DM_TEST_DIR/test_tilize.py" -k 'test_tilize_fp32_truncation'
+
 echo ""
 echo "========================================"
 echo " Results: $PASS passed, $FAIL failed"
