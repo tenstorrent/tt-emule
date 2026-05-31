@@ -208,6 +208,22 @@ run_pytest "dm_test_dropout" "$DM_TEST_DIR/test_dropout.py"
 # allocation tracking gap, deferred separately.
 run_pytest "dm_test_reallocate" "$DM_TEST_DIR/test_reallocate.py" -k 'DRAM or sharded'
 
+# test_creation: additional functions cleanly pass post-DRAM-fix.
+# test_arange is the bulk (177 cases); the *_like functions are small.
+# `-k 'not sharded'` filters out sharded variants in those that have them.
+run_pytest "dm_test_creation_arange"      "$DM_TEST_DIR/test_creation.py::test_arange" -k 'not sharded'
+run_pytest "dm_test_creation_full_with_opt"   "$DM_TEST_DIR/test_creation.py::test_full_with_opt_tensor" -k 'not sharded'
+run_pytest "dm_test_creation_full_like"   "$DM_TEST_DIR/test_creation.py::test_full_like" -k 'not sharded'
+run_pytest "dm_test_creation_full_like_bf8b" "$DM_TEST_DIR/test_creation.py::test_full_like_bf8b" -k 'not sharded'
+run_pytest "dm_test_creation_empty_like"  "$DM_TEST_DIR/test_creation.py::test_empty_like" -k 'not sharded'
+run_pytest "dm_test_creation_zeros_like"  "$DM_TEST_DIR/test_creation.py::test_zeros_like" -k 'not sharded'
+run_pytest "dm_test_creation_ones_like"   "$DM_TEST_DIR/test_creation.py::test_ones_like" -k 'not sharded'
+run_pytest "dm_test_creation_zeros_bfp8"  "$DM_TEST_DIR/test_creation.py::test_zeros_bfp8" -k 'not sharded'
+run_pytest "dm_test_creation_zeros_bfp4"  "$DM_TEST_DIR/test_creation.py::test_zeros_bfp4" -k 'not sharded'
+
+# test_concat_size_switches: single-case program-cache regression test.
+run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
+
 # test_tosa_gather: 6/10 small-C shapes pass. C >= 96 (multi-tile C-dim)
 # gathers diverge — likely a multi-tile gather kernel issue, deferred.
 # --deselect IDs must be rootdir-relative (the form pytest reports). Using
