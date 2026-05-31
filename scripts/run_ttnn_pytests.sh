@@ -203,6 +203,11 @@ run_pytest "dm_test_tilizer" "$DM_TEST_DIR/test_tilizer.py"
 # (jit_hw/api/compute/eltwise_unary/dropout.h, xorshift32 PRNG).
 run_pytest "dm_test_dropout" "$DM_TEST_DIR/test_dropout.py"
 
+# test_reallocate: DRAM-interleaved and sharded variants all pass (17/17 with
+# this filter). L1-interleaved with num_allocs in {2,3,4} fails — multi-alloc L1
+# allocation tracking gap, deferred separately.
+run_pytest "dm_test_reallocate" "$DM_TEST_DIR/test_reallocate.py" -k 'DRAM or sharded'
+
 # test_tosa_gather: 6/10 small-C shapes pass. C >= 96 (multi-tile C-dim)
 # gathers diverge — likely a multi-tile gather kernel issue, deferred.
 # --deselect IDs must be rootdir-relative (the form pytest reports). Using
