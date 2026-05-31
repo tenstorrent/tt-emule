@@ -9,6 +9,8 @@
 #include "tile_counter.hpp"
 #include "dst_register_file.hpp"
 #include <array>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -89,7 +91,21 @@ public:
 
     DstRegisterFile& dst() { return dst_; }
 
-    uint8_t* l1_ptr(uint32_t offset) { return l1_ + offset; }
+    // Accepts uint64_t so DRAM banks (≤ 4 GB on BH, ≤ 2 GB on WH views) can be
+    // addressed without uint32 truncation. Loud bounds check converts what was
+    // previously silent UB into a clear failure during testing.
+    uint8_t* l1_ptr(uint64_t offset) {
+        if (offset >= l1_size_) {
+            std::fprintf(stderr,
+                "[EMULE] Core::l1_ptr OOB: role=%s coord=(%zu,%zu) offset=0x%llx size=0x%zx\n",
+                role_ == CoreRole::DRAM ? "DRAM" : "WORKER",
+                coord_.x, coord_.y,
+                static_cast<unsigned long long>(offset),
+                l1_size_);
+            std::abort();
+        }
+        return l1_ + offset;
+    }
 
     // Raw pointer to start of memory region (L1 or DRAM backing).
     uint8_t* l1_data() { return l1_; }
