@@ -33,12 +33,24 @@ MATMUL_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/matmul"
 GTEST_XML_DIR="${GTEST_XML_DIR:-}"
 [ -n "$GTEST_XML_DIR" ] && mkdir -p "$GTEST_XML_DIR"
 
+# Sharding — round-robin over run_pytest invocations. SHARD_INDEX is 1-based.
+# Round-robin (not contiguous block) so that slow entries like reduce_test_max
+# and reduce_test_sum distribute across shards rather than bunching together.
+SHARD_INDEX="${SHARD_INDEX:-1}"
+SHARD_COUNT="${SHARD_COUNT:-1}"
+ENTRY_NUM=0
+
 PASS=0
 FAIL=0
 
 run_pytest() {
     local name="$1"; shift
     local test_path="$1"; shift
+    ENTRY_NUM=$((ENTRY_NUM + 1))
+    # Skip entries not assigned to this shard.
+    if [ $(( (ENTRY_NUM - 1) % SHARD_COUNT + 1 )) -ne "$SHARD_INDEX" ]; then
+        return
+    fi
     echo "--- $name ---"
     if (
         export PYTHONPATH="$TT_METAL_DIR/ttnn:$TT_METAL_DIR/tools:$BUILD_DIR/lib:$TT_METAL_DIR:${PYTHONPATH:-}"
@@ -68,6 +80,7 @@ echo "  TT_METAL_DIR: $TT_METAL_DIR"
 echo "  BUILD_DIR:    $BUILD_DIR"
 echo "  PYTEST_BIN:   $PYTEST_BIN"
 echo "  GTEST_XML_DIR: ${GTEST_XML_DIR:-<unset>}"
+echo "  SHARD:        $SHARD_INDEX of $SHARD_COUNT"
 echo ""
 
 # Each entry below was verified all-PASS in standalone runs during bring-up.
