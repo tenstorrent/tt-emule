@@ -193,6 +193,10 @@ run_pytest "dm_test_tosa_gather" "$DM_TEST_DIR/test_tosa_gather.py" \
     --deselect "$DM_TEST_DIR/test_tosa_gather.py::test_tosa_gather_general[N=64-K=128-C=256-W=128]" \
     --deselect "$DM_TEST_DIR/test_tosa_gather.py::test_tosa_gather_general[N=128-K=128-C=128-W=64]"
 
+# reduce/test_max: all 228 parametrizations across test_max, test_max_4d,
+# test_max_2d, test_max_global, test_max_dim pass cleanly with no filter.
+run_pytest "reduce_test_max" "$REDUCE_TEST_DIR/test_max.py"
+
 echo ""
 echo "========================================"
 echo " Results: $PASS passed, $FAIL failed"
