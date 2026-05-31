@@ -188,11 +188,13 @@ run_pytest "dm_test_tilizer" "$DM_TEST_DIR/test_tilizer.py"
 
 # test_tosa_gather: 6/10 small-C shapes pass. C >= 96 (multi-tile C-dim)
 # gathers diverge — likely a multi-tile gather kernel issue, deferred.
+# --deselect IDs must be rootdir-relative (the form pytest reports). Using
+# $DM_TEST_DIR (absolute) prefix here silently fails to deselect.
 run_pytest "dm_test_tosa_gather" "$DM_TEST_DIR/test_tosa_gather.py" \
-    --deselect "$DM_TEST_DIR/test_tosa_gather.py::test_tosa_gather_general[N=128-K=64-C=128-W=32]" \
-    --deselect "$DM_TEST_DIR/test_tosa_gather.py::test_tosa_gather_general[N=2-K=32-C=96-W=32]" \
-    --deselect "$DM_TEST_DIR/test_tosa_gather.py::test_tosa_gather_general[N=64-K=128-C=256-W=128]" \
-    --deselect "$DM_TEST_DIR/test_tosa_gather.py::test_tosa_gather_general[N=128-K=128-C=128-W=64]"
+    --deselect "tests/ttnn/unit_tests/operations/data_movement/test_tosa_gather.py::test_tosa_gather_general[N=128-K=64-C=128-W=32]" \
+    --deselect "tests/ttnn/unit_tests/operations/data_movement/test_tosa_gather.py::test_tosa_gather_general[N=2-K=32-C=96-W=32]" \
+    --deselect "tests/ttnn/unit_tests/operations/data_movement/test_tosa_gather.py::test_tosa_gather_general[N=64-K=128-C=256-W=128]" \
+    --deselect "tests/ttnn/unit_tests/operations/data_movement/test_tosa_gather.py::test_tosa_gather_general[N=128-K=128-C=128-W=64]"
 
 # reduce/test_max: all 228 parametrizations across test_max, test_max_4d,
 # test_max_2d, test_max_global, test_max_dim pass cleanly with no filter.
