@@ -186,6 +186,10 @@ run_pytest "dm_test_tilize_fp32_truncation" "$DM_TEST_DIR/test_tilize.py" -k 'te
 # test_tilizer: single bfloat16 -> bfloat8_b device tilizer test; 1/1 PASS.
 run_pytest "dm_test_tilizer" "$DM_TEST_DIR/test_tilizer.py"
 
+# test_dropout: 2/2 pass with the new emule dropout shim
+# (jit_hw/api/compute/eltwise_unary/dropout.h, xorshift32 PRNG).
+run_pytest "dm_test_dropout" "$DM_TEST_DIR/test_dropout.py"
+
 # test_tosa_gather: 6/10 small-C shapes pass. C >= 96 (multi-tile C-dim)
 # gathers diverge — likely a multi-tile gather kernel issue, deferred.
 # --deselect IDs must be rootdir-relative (the form pytest reports). Using
