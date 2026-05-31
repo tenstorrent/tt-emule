@@ -28,6 +28,7 @@ CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descripto
 DM_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/data_movement"
 BF_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/base_functionality"
 REDUCE_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/reduce"
+MATMUL_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/matmul"
 
 GTEST_XML_DIR="${GTEST_XML_DIR:-}"
 [ -n "$GTEST_XML_DIR" ] && mkdir -p "$GTEST_XML_DIR"
@@ -196,6 +197,12 @@ run_pytest "dm_test_tosa_gather" "$DM_TEST_DIR/test_tosa_gather.py" \
 # reduce/test_max: all 228 parametrizations across test_max, test_max_4d,
 # test_max_2d, test_max_global, test_max_dim pass cleanly with no filter.
 run_pytest "reduce_test_max" "$REDUCE_TEST_DIR/test_max.py"
+
+# matmul/test_linear: only the two non-sharded, non-broadcast-bias functions
+# pass uniformly today (17/17). The other 19 functions fail on dram-sharded,
+# width-sharded, bias-broadcast/batched, or core-grid configs that emule
+# doesn't model — separate from routine LLK bring-up.
+run_pytest "matmul_test_linear" "$MATMUL_TEST_DIR/test_linear.py" -k 'test_linear_fp32_acc or test_vector_linear'
 
 echo ""
 echo "========================================"
