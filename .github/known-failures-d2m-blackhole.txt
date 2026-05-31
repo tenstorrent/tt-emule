@@ -10,8 +10,6 @@
 #
 # Regenerated from local run against pinned tt-mlir SHA with TT_EMULE_ARCH=blackhole.
 
-test_bfp8_typecast.py::test_cos_bf16[ttmetal-shape0]
-test_bfp8_typecast.py::test_exp_f32[ttmetal-shape0]
 test_bfp8_typecast.py::test_matmul_f32[ttmetal-False-1024x1024x1024]
 test_bfp8_typecast.py::test_matmul_f32[ttmetal-False-1024x1024x2048]
 test_bfp8_typecast.py::test_matmul_f32[ttmetal-False-512x1024x1024]
@@ -22,7 +20,6 @@ test_bfp8_typecast.py::test_matmul_f32[ttmetal-True-1024x1024x2048]
 test_bfp8_typecast.py::test_matmul_f32[ttmetal-True-512x1024x1024]
 test_bfp8_typecast.py::test_matmul_f32[ttmetal-True-512x1024x2048]
 test_bfp8_typecast.py::test_matmul_f32[ttmetal-True-512x512x512]
-test_bfp8_typecast.py::test_triple_exp_f32[ttmetal-shape0]
 test_binary.py::test_binary_ops_broadcast_shard_dims[add-ttmetal-f32-1x1x32x32-1x1x32x1]
 test_binary.py::test_binary_ops_broadcast_shard_dims[add-ttmetal-f32-1x2x32x32-1x2x1x32]
 test_binary.py::test_binary_ops_broadcast_shard_dims[add-ttmetal-f32-1x4x64x128-1x4x1x128]
