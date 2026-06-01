@@ -94,6 +94,7 @@ run_pytest "dm_test_concat_iterative"  "$DM_TEST_DIR/test_concat_iterative.py"
 # Single-function entries (full pass within the function)
 run_pytest "dm_test_clone_shape"                "$DM_TEST_DIR/test_clone.py::test_clone_shape"
 run_pytest "dm_test_clone_callback"             "$DM_TEST_DIR/test_clone.py::test_clone_callback"
+run_pytest "dm_test_clone_dtype_conversion"     "$DM_TEST_DIR/test_clone.py::test_clone_dtype_conversion"
 run_pytest "dm_test_creation_ones"              "$DM_TEST_DIR/test_creation.py::test_ones"
 run_pytest "dm_test_creation_zeros"             "$DM_TEST_DIR/test_creation.py::test_zeros"
 run_pytest "dm_test_creation_full"              "$DM_TEST_DIR/test_creation.py::test_full"
