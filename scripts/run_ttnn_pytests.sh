@@ -221,6 +221,7 @@ run_pytest "dm_test_creation_zeros_like"  "$DM_TEST_DIR/test_creation.py::test_z
 run_pytest "dm_test_creation_ones_like"   "$DM_TEST_DIR/test_creation.py::test_ones_like" -k 'not sharded'
 run_pytest "dm_test_creation_zeros_bfp8"  "$DM_TEST_DIR/test_creation.py::test_zeros_bfp8" -k 'not sharded'
 run_pytest "dm_test_creation_zeros_bfp4"  "$DM_TEST_DIR/test_creation.py::test_zeros_bfp4" -k 'not sharded'
+run_pytest "dm_test_creation_full_like_opt_rm" "$DM_TEST_DIR/test_creation.py::test_full_like_opt_tensor" -k 'ROW_MAJOR'
 
 # test_concat_size_switches: single-case program-cache regression test.
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
