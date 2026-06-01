@@ -26,6 +26,7 @@ BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule}"
 PYTEST_BIN="${PYTEST_BIN:-/opt/ttmlir-toolchain/venv/bin/pytest}"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"
 DM_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/data_movement"
+BF_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/base_functionality"
 
 GTEST_XML_DIR="${GTEST_XML_DIR:-}"
 [ -n "$GTEST_XML_DIR" ] && mkdir -p "$GTEST_XML_DIR"
@@ -96,6 +97,71 @@ run_pytest "dm_test_embedding_tiled_input"   "$DM_TEST_DIR/test_embedding.py" -k
 run_pytest "dm_test_embedding_tiled"         "$DM_TEST_DIR/test_embedding.py" -k 'test_tiled and not test_embedding_tiled'
 run_pytest "dm_test_moe_embedding"           "$DM_TEST_DIR/test_embedding.py" -k 'test_moe_embedding'
 run_pytest "dm_test_embedding_base_case"     "$DM_TEST_DIR/test_embedding.py" -k 'test_base_case'
+
+# tests/ttnn/unit_tests/base_functionality/ — whole-file all-pass entries.
+run_pytest "bf_test_as_tensor"                              "$BF_TEST_DIR/test_as_tensor.py"
+run_pytest "bf_test_cluster"                                "$BF_TEST_DIR/test_cluster.py"
+run_pytest "bf_test_database"                               "$BF_TEST_DIR/test_database.py"
+run_pytest "bf_test_device"                                 "$BF_TEST_DIR/test_device.py"
+run_pytest "bf_test_device_synchronize"                     "$BF_TEST_DIR/test_device_synchronize.py"
+run_pytest "bf_test_dump_and_load"                          "$BF_TEST_DIR/test_dump_and_load.py"
+run_pytest "bf_test_expand"                                 "$BF_TEST_DIR/test_expand.py"
+run_pytest "bf_test_get_optimal_worker_cores_for_sharded"   "$BF_TEST_DIR/test_get_optimal_worker_cores_for_sharded_tensor.py"
+run_pytest "bf_test_getitem"                                "$BF_TEST_DIR/test_getitem.py"
+run_pytest "bf_test_global_circular_buffer"                 "$BF_TEST_DIR/test_global_circular_buffer.py"
+run_pytest "bf_test_global_semaphore"                       "$BF_TEST_DIR/test_global_semaphore.py"
+run_pytest "bf_test_grid_to_cores"                          "$BF_TEST_DIR/test_grid_to_cores.py"
+run_pytest "bf_test_item"                                   "$BF_TEST_DIR/test_item.py"
+run_pytest "bf_test_narrow"                                 "$BF_TEST_DIR/test_narrow.py"
+run_pytest "bf_test_print_tensor"                           "$BF_TEST_DIR/test_print_tensor.py"
+run_pytest "bf_test_shape"                                  "$BF_TEST_DIR/test_shape.py"
+run_pytest "bf_test_squeeze"                                "$BF_TEST_DIR/test_squeeze.py"
+run_pytest "bf_test_to_and_from_torch"                      "$BF_TEST_DIR/test_to_and_from_torch.py"
+run_pytest "bf_test_to_dtype"                               "$BF_TEST_DIR/test_to_dtype.py"
+run_pytest "bf_test_unsqueeze"                              "$BF_TEST_DIR/test_unsqueeze.py"
+run_pytest "bf_test_view"                                   "$BF_TEST_DIR/test_view.py"
+run_pytest "bf_test_torch_conversion"     "$BF_TEST_DIR/test_torch_conversion.py"
+run_pytest "bf_test_untilize_bfloat8_b"   "$BF_TEST_DIR/test_untilize_bfloat8_b.py"
+run_pytest "bf_test_comparison_mode"      "$BF_TEST_DIR/test_comparison_mode.py"
+
+# Partial-pass entries: -k filters exclude known-failing variants (test_chunk
+# and test_multi_device intentionally omitted).
+
+run_pytest "bf_test_to_and_from_device"    "$BF_TEST_DIR/test_to_and_from_device.py" \
+    -k 'not test_to_and_from_multiple_times'
+
+run_pytest "bf_test_graph_trace_utils"     "$BF_TEST_DIR/test_graph_trace_utils.py" \
+    -k 'not test_no_dispatch_vs_normal_mode_comparison and not test_normal_mode_shows_real_addresses'
+
+# pytest -k can't match `=`/`.` in parametrize names, so the SIGFPE variant
+# is dropped via --deselect (rootdir-relative nodeid — absolute path doesn't
+# match, verified locally).
+run_pytest "bf_test_graph_capture"         "$BF_TEST_DIR/test_graph_capture.py" \
+    -k 'not test_program_cache_invalidation_across_dispatch_modes' \
+    --deselect 'tests/ttnn/unit_tests/base_functionality/test_graph_capture.py::test_graph_capture[mode=RunMode.NORMAL-size=64-scalar=3]'
+
+run_pytest "bf_test_graph_report"          "$BF_TEST_DIR/test_graph_report.py" \
+    -k 'not TestDurationExtraction and not TestFastOperationGraphTracking and not test_resnet50_e2e_graph_capture'
+
+run_pytest "bf_test_reshape"               "$BF_TEST_DIR/test_reshape.py" \
+    -k 'not test_reshape_block_shard and not test_reshape_cw_div2_rm and not test_reshape_cw_mul2_rm and not test_reshape_height_shard and not test_reshape_hw_div2_rm and not test_reshape_hw_mul2_rm and not test_reshape_hw_rm_with_program_cache and not test_reshape_sharded_permute_rm and not test_reshape_sharded_rm and not test_reshape_width_shard and not test_reshape_tile'
+
+run_pytest "bf_test_roll"                  "$BF_TEST_DIR/test_roll.py" \
+    -k 'test_roll_tile_padding'
+
+run_pytest "bf_test_tilize_untilize_2D"    "$BF_TEST_DIR/test_tilize_untilize_2D.py" \
+    -k 'test_untilize_with_unpadding_2D'
+
+run_pytest "bf_test_to_layout"             "$BF_TEST_DIR/test_to_layout.py" \
+    -k 'test_int_untilize or test_tensor_to_tile_layout_shape_verification or test_to_from_01d or test_to_layout_low_perf or test_to_layout_pad_value_on_host or test_to_layout_page_error or test_to_layout_wide_tensor or test_untilize_w1 or test_untilize_w2 or test_untilize_w3 or test_untilize_w4 or test_wan22_failure'
+
+run_pytest "bf_test_to_memory_config"      "$BF_TEST_DIR/test_to_memory_config.py" \
+    -k '(test_to_memory_config_block_sharded or test_to_memory_config_rm_interleaved_to_legacy_2D_sharded_large_row or test_to_memory_config_uint16) or (test_to_memory_config and not test_to_memory_config_)'
+
+# `test_copy_uint16` substring also matches the failing
+# `test_copy_uint16_to_memory_config`; explicit exclusion handles it.
+run_pytest "bf_test_copy"                  "$BF_TEST_DIR/test_copy.py" \
+    -k '((test_copy_rm_interleaved_to_legacy_2D_sharded_large_row or test_copy_uint16) and not test_copy_uint16_to_memory_config) or (test_copy and not test_copy_)'
 
 echo ""
 echo "========================================"

@@ -40,4 +40,18 @@ constexpr std::array<uint32_t, 1024> make_rowmajor_to_nfaces() {
 
 inline constexpr auto rowmajor_to_nfaces = make_rowmajor_to_nfaces();
 
+// Inverse permutation: nfaces_to_rowmajor[ni] gives the row-major offset for
+// the element stored at nfaces offset ni. Needed by pack paths that iterate
+// in nfaces order (e.g. Bfp8_b face-row encode, which must share an exponent
+// across each contiguous 16-element nfaces face-row).
+constexpr std::array<uint32_t, 1024> make_nfaces_to_rowmajor() {
+    std::array<uint32_t, 1024> lut{};
+    for (uint32_t i = 0; i < 1024; i++) {
+        lut[rowmajor_to_nfaces[i]] = i;
+    }
+    return lut;
+}
+
+inline constexpr auto nfaces_to_rowmajor = make_nfaces_to_rowmajor();
+
 } // namespace __emule_nfaces

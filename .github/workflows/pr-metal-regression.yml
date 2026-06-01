@@ -194,7 +194,7 @@ jobs:
     name: TTNN Pytests
     needs: build
     runs-on: tt-ubuntu-2204-xlarge-stable
-    timeout-minutes: 60
+    timeout-minutes: 90
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     steps:
