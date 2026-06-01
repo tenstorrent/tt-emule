@@ -19,9 +19,6 @@ that previously failed JIT-compile under tt-emule.
 | softplus parameter ordering | suspected mismatch | verified order matches upstream; no fix needed (cat C). |
 | `.claude/skills/compute-llk-bringup/SKILL.md` | not present | new — codifies the compute-shim bring-up workflow (triage path, shim template, build+test loop, PCC failure budget, anti-patterns) as a specialization of `/implement-mock`. The parallel-dispatch primitive lives in its own skill at `.claude/skills/parallel-mock-implementation/`. |
 | `scripts/run_ttnn_pytests.sh` | a few seed entries (data_movement basics) | ~200 new entries promoted from the campaign: data_movement (clone, creation, repeat, gather, concat variants, fill_pad, embedding, full_like, reduce, pad, permute, untilize, tilize, indexed_fill_sharded), reduce (sum, mean, min, max), creation (full_like_opt_tensor), dropout, reallocate, tilizer, linear, addmm input-validation. |
-| Failure-category catalog | implicit | `~/.claude/plans/vivid-foraging-nebula.md` records A-K categorization. Round 7 (cat A: sharded TensorAccessor) and rounds beyond are tracked there. |
-| Parallel agent harness | not in tree | `scripts/dispatch_llk_bringup.sh` added during round 5 (4 commits), then reverted at end of round 6 — shelved due to simultaneous SIGTERMs at parallelism≥4, worktree-only guardrail leaks, hung post-PASS claude processes, and off-scope spelunking. Each agent required nearly as much in-session monitoring as direct bring-up. Commits stay in history as a record; the script is removed from the final tree state. |
-
 ---
 
 ## v12 → v13 (2026-05-26)
