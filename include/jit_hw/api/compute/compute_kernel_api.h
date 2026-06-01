@@ -96,6 +96,16 @@ ALWI void sign_tile(uint32_t idst) {
     }
 }
 
+// --- tanh (upstream's compute_kernel_api.h catch-all defines tanh_tile so
+//     kernels that include only compute_kernel_api.h have tanh available).
+//     We forward to the same std::tanh impl used by trigonometry.h. ---
+ALWI void tanh_tile_init() {}
+ALWI void tanh_tile(uint32_t idst) {
+    __emule_dst_check(idst, "tanh_tile");
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
+        __emule_dst[idst][i] = std::tanh(__emule_dst[idst][i]);
+}
+
 // --- heaviside (step function; param0 is fp32 bit-pattern returned at x==0) ---
 ALWI void heaviside_tile_init() {}
 ALWI void heaviside_tile(uint32_t idst, uint32_t param0) {

@@ -336,6 +336,30 @@ After agents return, **orchestrator** (you) handles centrally:
 5. Promote 100%-pass functions into the regression script.
 6. For partial passes, decide: pytest `-k` filter, or defer.
 
+## Composed ops (no standalone upstream `<name>_tile`)
+
+Some activation-style ops are not standalone SFPU primitives — they're
+composed in-kernel from underlying primitives. If a sub-agent returns STUCK
+because "upstream has no `<name>_tile`," that's correct behavior. The
+upstream op chain typically looks like:
+
+| Op | Composition | Kernel source |
+|---|---|---|
+| `hardswish` | `hardsigmoid_tile + mul_binary_tile` | `ttnn/.../unary/device/kernels/compute/hardswish_kernel.cpp` |
+| `tanhshrink` | `tanh_tile + sub_binary_tile` | `tanhshrink_kernel.cpp` |
+| `swish` | alias for `silu_tile` (primitive, not a composition) | n/a |
+
+**Diagnosing a composed-op failure:** when the JIT compile fails on
+`<name>_kernel.cpp`, check whether the kernel calls into primitives we
+already have. If yes, the gap is in the primitive (or in
+`compute_kernel_api.h`'s coverage of it) — not a missing `<name>_tile`.
+
+**Worked example (round 6 Cat F):** `tanhshrink_kernel.cpp` called
+`tanh_tile()`. emule's `eltwise_unary/trigonometry.h` had `tanh_tile`, but the
+kernel only included `compute_kernel_api.h` (not trigonometry.h), and emule's
+`compute_kernel_api.h` was missing `tanh_tile`. Fix: add `tanh_tile` to
+`compute_kernel_api.h` (upstream defines it there as a catch-all).
+
 ## Anti-patterns (consolidated)
 
 1. **Don't read host code.** `tt_metal/llrt/`, `tt_metal/impl/dispatch/`,

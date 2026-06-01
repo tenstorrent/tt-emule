@@ -261,6 +261,13 @@ run_pytest "elt_test_xielu"           "$ELT_TEST_DIR/test_activation.py::test_xi
 run_pytest "elt_test_digamma"         "$ELT_TEST_DIR/test_math.py::test_digamma"
 run_pytest "elt_test_polygamma"       "$ELT_TEST_DIR/test_math.py::test_polygamma"
 
+# Round 6 Cat F — composed ops (hardswish/swish/tanhshrink). These decompose
+# in-kernel to primitives we already have; the tanh_tile addition to
+# compute_kernel_api.h unblocked tanhshrink (which composes tanh + sub_binary).
+run_pytest "elt_test_hardswish"   "$ELT_TEST_DIR/test_activation.py::test_hardswish"
+run_pytest "elt_test_swish"       "$ELT_TEST_DIR/test_activation.py::test_swish"
+run_pytest "elt_test_tanhshrink"  "$ELT_TEST_DIR/test_activation.py::test_tanhshrink"
+
 # test_concat_size_switches: single-case program-cache regression test.
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
 
