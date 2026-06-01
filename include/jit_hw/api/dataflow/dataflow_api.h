@@ -337,6 +337,51 @@ inline void noc_async_write_one_packet(uint32_t src_local_l1_addr, uint64_t dst_
                                        uint32_t size, uint8_t noc = 0) {
     noc_async_write(src_local_l1_addr, dst_noc_addr, size, noc);
 }
+
+// Stateful one-packet read: silicon programs the NOC with size + base in
+// `set_state`, then reuses that state for `with_state` calls (e.g.
+// `reader_unary_transpose_hc_sharded_rm.cpp`). Emule is synchronous, so we
+// just memoize the size and use it in the read.
+inline thread_local uint32_t __emule_one_packet_state_size = 0;
+template <bool use_vc = false>
+inline void noc_async_read_one_packet_set_state(uint64_t /*src_noc_addr*/,
+                                                uint32_t size,
+                                                uint32_t /*vc*/ = 0,
+                                                uint8_t /*noc*/ = 0) {
+    __emule_one_packet_state_size = size;
+}
+template <bool inc_num_issued = true, bool use_vc = false>
+inline void noc_async_read_one_packet_with_state(uint64_t src_noc_addr,
+                                                 uint32_t dst_local_l1_addr,
+                                                 uint32_t /*vc*/ = 0,
+                                                 uint8_t noc = 0) {
+    noc_async_read(src_noc_addr, dst_local_l1_addr,
+                   __emule_one_packet_state_size, noc);
+}
+
+// Write-side counterpart used by sharded writer kernels (e.g.
+// `writer_unary_transpose_wh_sharded_rm.cpp`). Silicon stores the dst
+// NOC address + packet size in the NOC cmd-buf state; `with_state`
+// then issues writes that reuse that state. Emule fans the state out
+// to a thread_local and uses noc_async_write for the actual transfer.
+inline thread_local uint64_t __emule_write_one_packet_state_dst = 0;
+inline thread_local uint32_t __emule_write_one_packet_state_size = 0;
+template <bool posted = false>
+inline void noc_async_write_one_packet_set_state(uint64_t dst_noc_addr,
+                                                 uint32_t size,
+                                                 uint8_t /*noc*/ = 0,
+                                                 uint8_t /*vc*/ = 0) {
+    __emule_write_one_packet_state_dst = dst_noc_addr;
+    __emule_write_one_packet_state_size = size;
+}
+template <bool posted = false>
+inline void noc_async_write_one_packet_with_state(uint32_t src_local_l1_addr,
+                                                  uint32_t /*dst_local_l1_addr*/,
+                                                  uint8_t noc = 0) {
+    noc_async_write(src_local_l1_addr,
+                    __emule_write_one_packet_state_dst,
+                    __emule_write_one_packet_state_size, noc);
+}
 template <uint32_t max_page_size>
 inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr, uint32_t size,
                            uint8_t noc = 0, uint32_t vc = 0) {
