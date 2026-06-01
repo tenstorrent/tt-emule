@@ -29,6 +29,7 @@ DM_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/data_movement"
 BF_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/base_functionality"
 REDUCE_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/reduce"
 MATMUL_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/matmul"
+ELT_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/eltwise"
 
 GTEST_XML_DIR="${GTEST_XML_DIR:-}"
 [ -n "$GTEST_XML_DIR" ] && mkdir -p "$GTEST_XML_DIR"
@@ -222,6 +223,18 @@ run_pytest "dm_test_creation_ones_like"   "$DM_TEST_DIR/test_creation.py::test_o
 run_pytest "dm_test_creation_zeros_bfp8"  "$DM_TEST_DIR/test_creation.py::test_zeros_bfp8" -k 'not sharded'
 run_pytest "dm_test_creation_zeros_bfp4"  "$DM_TEST_DIR/test_creation.py::test_zeros_bfp4" -k 'not sharded'
 run_pytest "dm_test_creation_full_like_opt_rm" "$DM_TEST_DIR/test_creation.py::test_full_like_opt_tensor" -k 'ROW_MAJOR'
+
+# Round 5 — eltwise activations + SFPU ops unblocked by Wave 1/1b shim writes.
+# Each is the strictly-passing subset of its test function.
+run_pytest "elt_test_hardtanh"        "$ELT_TEST_DIR/test_activation.py::test_hardtanh"
+run_pytest "elt_test_log_sigmoid"     "$ELT_TEST_DIR/test_activation.py::test_log_sigmoid"
+run_pytest "elt_test_threshold"       "$ELT_TEST_DIR/test_activation.py::test_threshold"
+run_pytest "elt_test_cbrt"            "$ELT_TEST_DIR/test_math.py::test_cbrt"
+run_pytest "elt_test_i0"              "$ELT_TEST_DIR/test_math.py::test_i0"
+run_pytest "elt_test_erfinv"          "$ELT_TEST_DIR/test_math.py::test_erfinv"
+run_pytest "elt_test_elu_allclose"    "$ELT_TEST_DIR/test_elu.py::test_elu_allclose"
+run_pytest "elt_test_elu_arange_mask" "$ELT_TEST_DIR/test_elu.py::test_elu_arange_masking"
+run_pytest "elt_test_i1_zero"         "$ELT_TEST_DIR/test_unary_i1.py::test_i1_zero"
 
 # test_concat_size_switches: single-case program-cache regression test.
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
