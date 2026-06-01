@@ -3,25 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// Emule shim for `api/compute/eltwise_unary/xielu.h`. Intercepts the upstream
-// include path which pulls in `ckernel_sfpu_xielu.h` (an LLK-only header that
-// references SFPI/SFPU intrinsics).
-//
-// xIELU (Expanded Integral of ELU): trainable activation with learnable
-// alpha_p / alpha_n parameters. Reference paper:
-//   "Deriving Activation Functions Using Integration" (arXiv:2411.13010)
-//
-// Piecewise formula (beta is hard-coded to 0.5 in the LLK):
-//   x > 0 : alpha_p * x * x + beta * x
-//   x <= 0: alpha_n * (expm1(min(x, eps)) - x) + beta * x
-// where eps = -1e-6 clamps the argument of expm1 away from 0 to match the
-// LLK piecewise structure (very-small-negative branch uses expm1(eps)).
-//
-// alpha_p / alpha_n are passed as uint32 bit-patterns of fp32 values.
-//
-// Real LLK reference:
-//   tt_metal/hw/inc/api/compute/eltwise_unary/xielu.h
-//   tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_sfpu/ckernel_sfpu_xielu.h
+// Emule shim for `api/compute/eltwise_unary/xielu.h`. xIELU (Expanded
+// Integral of ELU; arXiv:2411.13010), beta hard-coded to 0.5:
+//   x > 0 : alpha_p * x^2 + beta * x
+//   x <= 0: alpha_n * (expm1(min(x, -1e-6)) - x) + beta * x
+// alpha_p / alpha_n are uint32 bit-patterns of fp32.
+// Real LLK: tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_sfpu/ckernel_sfpu_xielu.h
 
 #include <cmath>
 #include <cstdint>

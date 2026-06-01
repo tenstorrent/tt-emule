@@ -3,17 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// Emule shim for `api/compute/eltwise_unary/hardtanh.h`. Intercepts the upstream
-// include path which pulls in `llk_math_eltwise_unary_sfpu_hardtanh.h` (an
-// LLK-only header that references SFPU intrinsics).
-//
-// `param0` and `param1` are uint32 bit-patterns of fp32 low/high bounds,
-// matching the host program factory's reinterpret-as-uint32 encoding of the
-// hardtanh linear-region endpoints.
-//
-// Real LLK reference:
-//   tt_metal/hw/inc/api/compute/eltwise_unary/hardtanh.h
-//   tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_math_eltwise_unary_sfpu_hardtanh.h
+// Emule shim for `api/compute/eltwise_unary/hardtanh.h`.
+// `param0`/`param1` are uint32 bit-patterns of fp32 low/high bounds.
+// Real LLK: tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_math_eltwise_unary_sfpu_hardtanh.h
 #include <cstdint>
 #include <cstring>
 

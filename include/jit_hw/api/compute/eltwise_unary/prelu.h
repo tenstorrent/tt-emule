@@ -3,16 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// Emule shim for `api/compute/eltwise_unary/prelu.h`. Intercepts the upstream
-// include path which pulls in `ckernel_sfpu_prelu.h` (an LLK-only header that
-// references SFPU intrinsics).
-//
-// `param0` is the uint32 bit-pattern of an fp32 slope (alpha). Per-element
-// semantics: output = x >= 0 ? x : slope * x.
-//
-// Real LLK reference:
-//   tt_metal/hw/inc/api/compute/eltwise_unary/prelu.h
-//   tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_math_eltwise_unary_sfpu_prelu.h
+// Emule shim for `api/compute/eltwise_unary/prelu.h`. `param0` is the uint32
+// bit-pattern of an fp32 slope (alpha). Per element: x >= 0 ? x : slope * x.
+// Real LLK: tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_math_eltwise_unary_sfpu_prelu.h
 #include <cstdint>
 #include <cstring>
 

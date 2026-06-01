@@ -3,16 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// Emule shim for `api/compute/eltwise_unary/rsub.h`. Intercepts the upstream
-// include path which pulls in `llk_math_eltwise_unary_sfpu_binop_with_scalar.h`
-// (an LLK-only header that references SFPU intrinsics).
-//
-// `param0` is the uint32 bit-pattern of an fp32 scalar; semantics are
-// rsub(x, scalar) = scalar - x, applied element-wise to the tile in DST.
-//
-// Real LLK reference:
-//   tt_metal/hw/inc/api/compute/eltwise_unary/rsub.h
-//   tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_math_eltwise_unary_sfpu_rsub.h
+// Emule shim for `api/compute/eltwise_unary/rsub.h`. `param0` is the uint32
+// bit-pattern of an fp32 scalar; output = scalar - x.
+// Real LLK: tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_math_eltwise_unary_sfpu_rsub.h
 #include <cstdint>
 #include <cstring>
 

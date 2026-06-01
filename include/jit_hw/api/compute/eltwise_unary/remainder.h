@@ -3,17 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// Emule shim for `api/compute/eltwise_unary/remainder.h`. Intercepts the
-// upstream include path which pulls in `ckernel_sfpu_remainder.h` (an LLK-only
-// header that references SFPU intrinsics).
-//
-// `param0` is the uint32 bit-pattern of the fp32 divisor.
-// `param1` is the uint32 bit-pattern of the fp32 reciprocal of the divisor
-// (precomputed on-host by silicon; unused here since std::remainder operates
-// directly on the divisor with IEEE 754 semantics).
-//
-// Real LLK reference:
-//   tt_metal/hw/inc/api/compute/eltwise_unary/remainder.h
+// Emule shim for `api/compute/eltwise_unary/remainder.h`.
+// `param0` is the uint32 bit-pattern of the fp32 divisor; `param1` is the
+// reciprocal (silicon fast-path hint, unused by std::remainder).
 #include <cmath>
 #include <cstdint>
 #include <cstring>

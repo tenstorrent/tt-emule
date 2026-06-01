@@ -3,17 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// Emule shim for `api/compute/eltwise_unary/dropout.h`. Intercepts the upstream
-// include path which pulls in `ckernel_sfpu_dropout.h` (an LLK-only header that
-// references SFPU intrinsics).
-//
-// `int_probability` is INT_MAX * prob (matches the host program factory's
-// `prob_int = static_cast<uint32_t>(INT_MAX * args.prob)` encoding).
+// Emule shim for `api/compute/eltwise_unary/dropout.h`.
+// `int_probability` is INT_MAX * prob (host encodes as `(uint32_t)(INT_MAX * prob)`).
 // `scale_factor` is the uint32 bit-pattern of an fp32 scale value.
-//
-// Real LLK reference:
-//   tt_metal/hw/inc/api/compute/eltwise_unary/dropout.h
-//   tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_math_eltwise_unary_sfpu_dropout.h
+// Real LLK: tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_math_eltwise_unary_sfpu_dropout.h
 #include <cstdint>
 #include <cstring>
 

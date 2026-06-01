@@ -3,17 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// Emule shim for `api/compute/eltwise_unary/threshold.h`. Intercepts the
-// upstream include path which pulls in `llk_math_eltwise_unary_sfpu_threshold.h`
-// (an LLK-only header that references SFPU intrinsics).
-//
-// `param0` is the uint32 bit-pattern of an fp32 threshold value.
-// `param1` is the uint32 bit-pattern of an fp32 replacement value.
+// Emule shim for `api/compute/eltwise_unary/threshold.h`.
+// `param0`/`param1` are uint32 bit-patterns of fp32 threshold/replacement.
 // Per element: output = x > threshold ? x : value.
-//
-// Real LLK reference:
-//   tt_metal/hw/inc/api/compute/eltwise_unary/threshold.h
-//   tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_math_eltwise_unary_sfpu_threshold.h
+// Real LLK: tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_math_eltwise_unary_sfpu_threshold.h
 #include <cstdint>
 #include <cstring>
 

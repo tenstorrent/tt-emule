@@ -3,20 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// Emule shim for `api/compute/cumsum.h`. Intercepts the upstream include path
-// which pulls in `llk_math_eltwise_unary_sfpu_cumsum.h` (LLK-only header that
-// uses SFPU intrinsics via SFPTRANSP/SFPADD replay).
-//
-// Cumulative sum is computed columnwise (top-to-bottom within a tile). For
-// multi-tile cumsum, tiles arrive in NWH order and `first` is set true only
-// for tiles in the first H row — `first=false` continues accumulation from
-// the previous tile's last row, per column. That makes the per-column
-// running sum thread_local state that survives across tile invocations and
-// resets on `first=true`.
-//
-// Real LLK reference:
-//   tt_metal/hw/inc/api/compute/cumsum.h
-//   tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_sfpu/ckernel_sfpu_cumsum.h
+// Emule shim for `api/compute/cumsum.h`. Columnwise prefix sum within a tile.
+// Multi-tile cumsum arrives in NWH order; `first=true` resets the per-column
+// accumulator at H=0, `first=false` continues from the previous tile.
+// Real LLK: tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_sfpu/ckernel_sfpu_cumsum.h
 #include <cstdint>
 
 #include "jit_hw/api/compute/common.h"

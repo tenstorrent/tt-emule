@@ -3,24 +3,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// Emule shim for `api/compute/eltwise_unary/softplus.h`. Intercepts the
-// upstream include path which pulls in `ckernel_sfpu_softplus.h` (an LLK-only
-// header that references SFPU intrinsics).
-//
-// Semantics (per element, mirrors upstream ckernel_sfpu_softplus.h):
+// Emule shim for `api/compute/eltwise_unary/softplus.h`. Mirrors upstream:
 //   t = beta * x
 //   if (t > threshold): out = x   (pass-through)
 //   else:
-//     a = |t|
-//     residual = degree-8 Horner poly of ln(1+exp(-a)) on [0, 5]
-//     if (a > 5):
-//       e = exp(-a)
-//       residual = e * (1 + e*(-1/2 + e/3))   // 3-term Taylor of ln(1+e)
-//     sp = max(0, t) + residual               // softplus identity
-//     out = beta_reciprocal * sp
-//
-// Real LLK reference:
-//   tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_sfpu/ckernel_sfpu_softplus.h
+//     a = |t|; residual = degree-8 Horner of ln(1+exp(-a)) on [0, 5]
+//     if (a > 5): residual = exp(-a) * (1 + exp(-a)*(-1/2 + exp(-a)/3))
+//     out = beta_reciprocal * (max(0, t) + residual)
+// Real LLK: tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_sfpu/ckernel_sfpu_softplus.h
 #include <cmath>
 #include <cstdint>
 #include <cstring>

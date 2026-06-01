@@ -3,30 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// Emule shim for `api/compute/eltwise_unary/polygamma.h`. Intercepts the
-// upstream include path which pulls in `ckernel_sfpu_polygamma.h` (an
-// LLK-only header that references SFPU intrinsics).
-//
-// Computes the polygamma function psi^(n)(x) using the same finite-sum +
-// Euler-Maclaurin tail formula the SFPU kernel implements (see
-// tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_sfpu/ckernel_sfpu_polygamma.h):
-//
-//   psi^(n)(x) ~= (-1)^(n+1) * n! * [ sum_{k=0}^{10} 1/(x+k)^(n+1) + R_EM(z, n) ]
-//
-// with z = x + 11 and Euler-Maclaurin remainder
-//
-//   R_EM = 1/(n * z^n) + 1/(2 * z^(n+1))
-//        + (n+1)/12         * 1/z^(n+2)
-//        - (n+1)(n+2)(n+3)/720 * 1/z^(n+4)
-//        + (n+1)(n+2)(n+3)(n+4)(n+5)/30240 * 1/z^(n+6)
-//
-// Parameters n_packed and scale_packed are uint32 bit patterns of fp32 values
-// (n as float, scale = (-1)^(n+1) * n!), matching the upstream calling
-// convention.
-//
-// Real LLK reference:
-//   tt_metal/hw/inc/api/compute/eltwise_unary/polygamma.h
-//   tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_sfpu/ckernel_sfpu_polygamma.h
+// Emule shim for `api/compute/eltwise_unary/polygamma.h`.
+//   psi^(n)(x) ~= (-1)^(n+1) * n! * [ sum_{k=0}^{10} 1/(x+k)^(n+1) + R_EM(z=x+11, n) ]
+// `n_packed` / `scale_packed` are uint32 bit-patterns of fp32 (n as float,
+// scale = (-1)^(n+1) * n!).
+// Real LLK: tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_sfpu/ckernel_sfpu_polygamma.h
 
 #include <cstdint>
 #include <cstring>

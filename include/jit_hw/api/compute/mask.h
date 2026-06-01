@@ -3,16 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// Emule shim for `api/compute/mask.h`. Intercepts the upstream include path
-// which pulls in `llk_math_eltwise_unary_sfpu_mask.h` (an LLK-only header that
-// references SFPU intrinsics).
-//
-// mask_tile:        if mask element == 0, zero out the data element.
-// mask_posinf_tile: if mask element == 0, set the data element to +inf.
-//
-// Real LLK reference:
-//   tt_metal/hw/inc/api/compute/mask.h
-//   tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_math_eltwise_unary_sfpu_mask.h
+// Emule shim for `api/compute/mask.h`. Per element: mask==0 zeros the data
+// element (mask_tile) or sets it to +inf (mask_posinf_tile).
+// Real LLK: tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_math_eltwise_unary_sfpu_mask.h
 
 #include <cstdint>
 #include <limits>

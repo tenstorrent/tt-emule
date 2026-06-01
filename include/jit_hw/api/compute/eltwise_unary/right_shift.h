@@ -3,18 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// Emule shim for `api/compute/eltwise_unary/right_shift.h`. Intercepts the
-// upstream include path which pulls in `ckernel_sfpu_right_shift.h` (an
-// LLK-only header that references SFPU intrinsics).
-//
-// Semantics: each int32 element of DST tile `idst` is arithmetically
-// right-shifted by `param0` bits. DST is signed int32 for this op, so we
-// load/store via the int32 accessors and use C++ signed `>>` which is
-// arithmetic on standard implementations.
-//
-// Real LLK reference:
-//   tt_metal/hw/inc/api/compute/eltwise_unary/right_shift.h
-//   tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_math_eltwise_unary_sfpu_right_shift.h
+// Emule shim for `api/compute/eltwise_unary/right_shift.h`.
+// Arithmetic right shift on int32 DST by `param0` bits.
+// Real LLK: tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_math_eltwise_unary_sfpu_right_shift.h
 #include <cstdint>
 
 #include "jit_hw/api/compute/common.h"

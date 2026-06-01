@@ -62,7 +62,6 @@ ALWI void i1_tile(uint32_t idst) {
         float out;
         if (ax <= REGION_SPLIT) {
             float t = x * x;
-            // p(t) = ((((((c6*t + c5)*t + c4)*t + c3)*t + c2)*t + c1)*t + c0)
             float p = c6;
             p = p * t + c5;
             p = p * t + c4;
@@ -70,7 +69,6 @@ ALWI void i1_tile(uint32_t idst) {
             p = p * t + c2;
             p = p * t + c1;
             p = p * t + c0;
-            // q(t) = ((((((d7*t + d6)*t + d5)*t + d4)*t + d3)*t + d2)*t + d1)*t + d0
             float q = d7;
             q = q * t + d6;
             q = q * t + d5;
@@ -82,7 +80,6 @@ ALWI void i1_tile(uint32_t idst) {
             out = x * (p / q);
         } else {
             float y = 1.0f / ax;
-            // P(y) = ((((a5*y + a4)*y + a3)*y + a2)*y + a1)*y + a0
             float P = a5;
             P = P * y + a4;
             P = P * y + a3;

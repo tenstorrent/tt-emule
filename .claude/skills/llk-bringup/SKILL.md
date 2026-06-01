@@ -119,6 +119,24 @@ Some common patterns and representative shims:
 | Composed re-export (no own logic) | `softmax.h` |
 | Ported upstream polynomial (region split + Horner form) | `eltwise_unary/i1.h`, `eltwise_unary/lgamma.h` |
 
+**Keep comments brief.** Per project convention (see `CLAUDE.md`): default to
+no comments, write one only when the *why* is non-obvious. Concretely for
+shims:
+
+- The file path already tells the reader what's being shimmed — no need to
+  spell out "Intercepts the upstream include path which pulls in
+  `<llk_header>.h` (an LLK-only header that references SFPU intrinsics)".
+- Don't restate the math the loop body already does (no `// p(t) =
+  (((c2*t + c1)*t + c0)` running commentary on a Horner expansion).
+- Don't restate accessor semantics (no `// Spill mean to DST[mean_dst_idx]`
+  next to a `std::memcpy` that obviously spills).
+- DO keep: a one-line "what this op computes" or "what the encoded params
+  mean" if the function signature alone is ambiguous; a single `Real LLK:`
+  pointer to the silicon source-of-truth for math-heavy ports.
+
+Target header docblock for a typical shim is **2–4 lines**: one-line op
+summary, one-line encoded-param note if any, one `Real LLK:` line.
+
 ## Step 5 — Wire-up
 
 If upstream has a corresponding `SFPU_OP_<NAME>_INCLUDE` guard in

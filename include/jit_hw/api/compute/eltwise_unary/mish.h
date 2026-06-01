@@ -3,19 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// Emule shim for `api/compute/eltwise_unary/mish.h`. Intercepts the upstream
-// include path which pulls in `llk_math_eltwise_unary_sfpu_mish.h` (an LLK-only
-// header that references SFPU intrinsics).
-//
-// Semantics (per element), matching upstream's fused algebraic identity:
-//   u       = exp(x)
-//   numer   = u * (u + 2)
-//   denom   = u^2 + 2u + 2   (i.e. (1 + u)^2 + 1)
-//   mish(x) = x * numer / denom
-// Saturation: for x >= 8.0f, mish(x) ≈ x.
-//
-// Real LLK reference:
-//   tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_sfpu/ckernel_sfpu_mish.h
+// Emule shim for `api/compute/eltwise_unary/mish.h`. Upstream's fused form:
+//   u = exp(x); mish(x) = x * u * (u + 2) / (u^2 + 2u + 2). x>=8.0 saturates.
+// Real LLK: tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_sfpu/ckernel_sfpu_mish.h
 #include <cstdint>
 #include <cmath>
 
