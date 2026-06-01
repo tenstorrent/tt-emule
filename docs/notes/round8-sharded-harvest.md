@@ -190,7 +190,7 @@ routine bring-up scope until someone budgets the time for that trace.
 
 ---
 
-### B8.2 — test_interleaved_to_sharded: `tensix_types.h` include gap
+### B8.2 — test_interleaved_to_sharded: `tensix_types.h` include gap  **[CLOSED in Round 9, see `round9-closeout.md`]**
 
 **Reproducer:**
 ```bash
@@ -327,7 +327,7 @@ this one.
 ---
 
 ### B8.3 — test_permute sharded: transpose kernels miss
-`noc_async_read_one_packet_with_state` family
+`noc_async_read_one_packet_with_state` family  **[JIT half CLOSED in Round 9; PCC tier (6 of 8) deferred to Round 10, see `round9-closeout.md`]**
 
 **Reproducer:**
 ```bash
@@ -530,7 +530,7 @@ Each of those points to a different root cause:
 ---
 
 ### B8.5 — `noc_async_read_one_packet_set_state` / `_with_state`
-missing (cross-reference)
+missing (cross-reference)  **[CLOSED in Round 9, see `round9-closeout.md`]**
 
 Cross-reference of the JIT-compile-only sub-cause of B8.3. Trivial fix
 (2 stubs, ~10 lines):

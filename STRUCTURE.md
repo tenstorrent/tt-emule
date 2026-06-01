@@ -4,13 +4,9 @@ Index of source files under `src/` and `include/` and their top-level symbols.
 This is a navigation map only — **no behavioral or design docs**. For those, see
 `IMPLEMENTATION_REPORT.md`, `docs/`, and the per-file comments.
 
-Each line is `path — symbols`: list **every** top-level symbol the file
-*defines* — classes, structs, enums, free functions, macros, globals — not a
-representative sample. Do **not** list `#include`s or other imported/re-exported
-headers; an entry names only what its own file defines (a file that defines no
-symbols is marked `empty shim` / `forwarding header`). Grep this file for a
-symbol name to find its file. Generated artifacts (`generated/`, `*.log`) and
-non-source trees are intentionally absent.
+Each line is `path — symbols` (classes, structs, enums, free functions, key
+macros, globals). Grep this file for a symbol name to find its file. Generated
+artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 
 ---
 
@@ -50,14 +46,14 @@ non-source trees are intentionally absent.
 - `include/jit_hw/emule_cb_state.h` — `using __emule_cb_state = tt_emule::CBSyncState`; `extern thread_local __emule_cbs`
 - `include/jit_hw/emule_dfb_state.h` — `using __emule_dfb_iface = tt_emule::EmuleDFBInterface`; `extern thread_local __emule_dfbs`, `__emule_tc_array`
 - `include/jit_hw/jit_kernel_stubs.hpp` — `__EMULE_JIT_MODE`; fwd `tt_emule::Core`/`Device`; `extern "C"` `__emule_dram_ptr`, `__emule_local_l1_to_ptr`; `get_arg_addr`, `get_common_arg_addr`
-- `include/jit_hw/llk_defs.h` — aggregator header; no own symbols
+- `include/jit_hw/llk_defs.h` — aggregator: includes `llk_types.h`, `api/compute/common.h`, `nfaces.h`, `firmware_common.h`, `llk_state.h`
 - `include/jit_hw/llk_math_eltwise_binary.h` — empty shim (pragma-once only)
 - `include/jit_hw/llk_math_eltwise_unary_datacopy.h` — `enum class DataCopyType`; `copy_tile` datacopy helper
 - `include/jit_hw/llk_pack.h` — `__llk_pack_tiled`, `__llk_pack_untilize`
 - `include/jit_hw/llk_sync_stubs.h` — `llk_wait_tiles`/`llk_pop_tiles`/`llk_push_tiles`/`llk_wait_for_free_tiles`; `namespace p_stall`, `semaphore`
 - `include/jit_hw/llk_types.h` — `enum class DstSync`, `MathFidelity`, `PoolType`, `ReduceDim`, `DataCopyType`; macros `FACE_R_DIM`, `TILE_C_DIM`
 - `include/jit_hw/llk_unpack_a.h` — `llk_unpack_tilize_block`; unpack tilize/untilize state setters
-- `include/jit_hw/risc_common.h` — forwarding header; no own symbols
+- `include/jit_hw/risc_common.h` — includes `internal/firmware_common.h`
 
 ## include/jit_hw/api/
 
@@ -80,10 +76,10 @@ non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/binary_max_min.h` — `ckernel::` `binary_max/min_tile`, `_int32_`, `_uint32_` variants (+`_init`)
 - `include/jit_hw/api/compute/binary_remainder.h` — `ckernel::` `remainder_binary_tile`, `remainder_int32_tile` (+`_init`)
 - `include/jit_hw/api/compute/binary_shift.h` — `ckernel::` `binary_left_shift_tile`, `binary_right_shift_tile`, `binary_logical_right_shift_tile`, `binary_shift_tile_init`
-- `include/jit_hw/api/compute/cb_api.h` — forwarding header; no own symbols
-- `include/jit_hw/api/compute/common.h` — macros `PACK`/`MATH`/`UNPACK`/`ALWI`, `DST_ACCUM_MODE`; `namespace __emule_compute`, `ckernel`; `enum class EltwiseBinaryType`/`BroadcastType`/`ReluType`/`EltwiseBinaryReuseDestType`/`p_dim_stride_target`/`MathFidelity`; `pack_tile`/`pack_tile_block`, `copy_tile`/`copy_tile_init`, `add_tiles`/`sub_tiles`/`mul_tiles`, `binary_tiles_init`, `binary_dest_reuse_tiles`, `__emule_dst_active_tiles`
+- `include/jit_hw/api/compute/cb_api.h` — includes `compute/common.h` + `api/cb_api.h` (shim)
+- `include/jit_hw/api/compute/common.h` — macros `PACK`/`MATH`/`UNPACK`/`ALWI`, `DST_ACCUM_MODE`; `namespace __emule_compute`, `ckernel`; `enum class EltwiseBinaryType`/`BroadcastType`/`ReluType`/`EltwiseBinaryReuseDestType`/`p_dim_stride_target`/`MathFidelity`; tile/face constants `TILE_WIDTH`/`TILE_HEIGHT`/`TILE_HW`/`FACE_WIDTH`/`FACE_HEIGHT`/`FACE_HW`/`TILE_C_DIM` (mirror of `tt::constants`, exposed in `ckernel` so unqualified bare-name uses in upstream compute kernels resolve); `pack_tile`/`pack_tile_block`, `copy_tile`/`copy_tile_init`, `add_tiles`/`sub_tiles`/`mul_tiles`, `binary_tiles_init`, `binary_dest_reuse_tiles`, `__emule_dst_active_tiles`
 - `include/jit_hw/api/compute/common_globals.h` — `enum class DataFormat`; DST dirty/fresh tracking globals
-- `include/jit_hw/api/compute/compute_kernel_api.h` — `ckernel::` `square_tile`/`sigmoid_tile`/`sign_tile`/`signbit_tile`/`silu_tile`/`log_tile`/`exp2_tile`/`expm1_tile`/`power_tile`/`heaviside_tile` (+`_init`), `sfpu_reduce_init`, `topk_tile_init`; `namespace __emule_topk`; `struct RowView`
+- `include/jit_hw/api/compute/compute_kernel_api.h` — `ckernel::` `square_tile`/`sigmoid_tile`/`sign_tile`/`signbit_tile`/`silu_tile`/`log_tile`/`exp2_tile`/`expm1_tile`/`power_tile` (+`_init`), `sfpu_reduce_init`, `topk_tile_init`; `namespace __emule_topk`; `struct RowView`
 - `include/jit_hw/api/compute/compute_kernel_hw_startup.h` — `compute_kernel_hw_startup` (2-arg + 3-arg)
 - `include/jit_hw/api/compute/copy_dest_values.h` — `copy_block` (global scope); `ckernel::` `copy_dest_values`, `copy_dest_values_init`
 - `include/jit_hw/api/compute/cumprod.h` — `ckernel::` `cumprod_tile`, `cumprod_tile_init`; TLS `__emule_cumprod_acc`/`__emule_cumprod_acc_initialized`, `__emule_cumprod_reset_acc`
@@ -103,14 +99,14 @@ non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/pack.h` — empty shim (pragma-once only)
 - `include/jit_hw/api/compute/pack_untilize.h` — `ckernel::`/`experimental::` `pack_untilize_block`, `pack_untilize_init`, `pack_untilize_dest_init`
 - `include/jit_hw/api/compute/quantization.h` — `ckernel::` `quant_tile`, `dequant_tile`, `requant_tile` (+`_init`)
-- `include/jit_hw/api/compute/reconfig_data_format.h` — forwarding header; no own symbols
+- `include/jit_hw/api/compute/reconfig_data_format.h` — forwarding shim → `api/compute/common.h`
 - `include/jit_hw/api/compute/reduce.h` — `ckernel::` `reduce_tile`, `reduce_init`; `REDUCE_OP`/`REDUCE_DIM`
 - `include/jit_hw/api/compute/reg_api.h` — `tile_regs_acquire`/`tile_regs_commit`/`tile_regs_wait`/`tile_regs_release`; `ALWI` macro; `__emule_dst_active_tiles`
 - `include/jit_hw/api/compute/remainder_int32.h` — `ckernel::` `remainder_int32_tile`, `remainder_int32_tile_init`
 - `include/jit_hw/api/compute/reshuffle.h` — `ckernel::` `reshuffle_rows_tile`, `reshuffle_rows_tile_init`
-- `include/jit_hw/api/compute/softmax.h` — forwarding header; no own symbols
+- `include/jit_hw/api/compute/softmax.h` — re-export of `eltwise_unary/exp.h` + `eltwise_unary/recip.h` (no own symbols)
 - `include/jit_hw/api/compute/sub_int_sfpu.h` — `ckernel::` `sub_int_tile`, `rsub_int_tile` (+`_init`)
-- `include/jit_hw/api/compute/tile_move_copy.h` — forwarding header; no own symbols
+- `include/jit_hw/api/compute/tile_move_copy.h` — forwarding shim → `api/compute/common.h`
 - `include/jit_hw/api/compute/tilize.h` — `tilize_block`, `tilize_init`, `fast_tilize_block`, `fast_tilize_init`
 - `include/jit_hw/api/compute/transpose_wh.h` — `ckernel::` `transpose_wh_tile`, `transpose_wh_init`, `copy_tile`
 - `include/jit_hw/api/compute/untilize.h` — `untilize_block`, `untilize_init`, `copy_tile`
@@ -164,7 +160,7 @@ non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/eltwise_unary/rsqrt.h` — `ckernel::` `rsqrt_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/rsub.h` — `ckernel::` `rsub_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/selu.h` — `ckernel::` `selu_tile` (+`_init`)
-- `include/jit_hw/api/compute/eltwise_unary/sfpu_split_includes.h` — conditional-include wiring; no own symbols
+- `include/jit_hw/api/compute/eltwise_unary/sfpu_split_includes.h` — conditional includes under `SFPU_OP_*_INCLUDE` guards (no own symbols)
 - `include/jit_hw/api/compute/eltwise_unary/softplus.h` — `ckernel::` `softplus_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/sqrt.h` — `ckernel::` `sqrt_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/threshold.h` — `ckernel::` `threshold_tile` (+`_init`)
@@ -182,7 +178,8 @@ non-source trees are intentionally absent.
 ## include/jit_hw/api/dataflow/
 
 - `include/jit_hw/api/dataflow/circular_buffer.h` — `class CircularBuffer`, `struct CircularBufferView`; `enum class AddrSelector`; `noc_traits_t<CircularBuffer>` + `noc_traits_t<CircularBufferView>` specializations
-- `include/jit_hw/api/dataflow/dataflow_api.h` — `noc_async_read`/`noc_async_write` (+ `_one_packet`, `_tile`, `_page`), `noc_async_write_multicast`/`_multicast_loopback_src`, `noc_async_read_barrier`/`noc_async_write_barrier`/`noc_async_writes_flushed`/`noc_async_atomic_barrier`/`noc_async_full_barrier`, `noc_async_{read,write}_barrier_with_trid`/`noc_async_write_flushed_with_trid`/`noc_async_{read,write}_set_trid`, `ncrisc_noc_read_with_transaction_id_flushed`/`ncrisc_noc_nonposted_write_with_transaction_id_{flushed,sent}`, `noc_semaphore_set`/`_wait`/`_wait_min`/`_inc`/`_set_multicast`, `noc_inline_dw_write`, `dram_barrier`; `get_noc_addr`/`get_dram_noc_addr`/`get_l1_noc_addr`/`get_noc_multicast_addr`, `get_semaphore`; SFINAE traits `has_get_noc_addr_v`/`has_page_size_v`/`has_log_base_2_of_page_size_v`/`has_get_aligned_page_size_v`; `__emule_addr_to_offset`/`__emule_fixup_noc_addr`/`__emule_resolve_noc_addr`/`__emule_local_l1_to_ptr`; `struct CBInterface`, `__emule_dw_state`; NOC VC/burst macros, `EMULE_SEM_BASE`
+- `include/jit_hw/api/dataflow/dataflow_api.h` — `noc_async_read`/`noc_async_write` (+ `_one_packet`, `_tile`, `_page`), `noc_async_{read,write}_one_packet_{set_state,with_state}`, `noc_async_write_multicast`/`_multicast_loopback_src`, `noc_async_read_barrier`/`noc_async_write_barrier`/`noc_async_writes_flushed`/`noc_async_atomic_barrier`/`noc_async_full_barrier`, `noc_async_{read,write}_barrier_with_trid`/`noc_async_write_flushed_with_trid`/`noc_async_{read,write}_set_trid`, `ncrisc_noc_read_with_transaction_id_flushed`/`ncrisc_noc_nonposted_write_with_transaction_id_{flushed,sent}`, `noc_semaphore_set`/`_wait`/`_wait_min`/`_inc`/`_set_multicast`, `noc_inline_dw_write`, `dram_barrier`; `get_noc_addr`/`get_dram_noc_addr`/`get_l1_noc_addr`/`get_noc_multicast_addr`, `get_semaphore`; SFINAE traits `has_get_noc_addr_v`/`has_page_size_v`/`has_log_base_2_of_page_size_v`/`has_get_aligned_page_size_v`; thread-local state `__emule_one_packet_state_size`/`__emule_write_one_packet_state_{dst,size}`; `__emule_addr_to_offset`/`__emule_fixup_noc_addr`/`__emule_resolve_noc_addr`/`__emule_local_l1_to_ptr`; `struct CBInterface`, `__emule_dw_state`; NOC VC/burst macros, `EMULE_SEM_BASE`
+- `include/jit_hw/tensix_types.h` — intentionally empty shim that satisfies `#include "tensix_types.h"` in sharded data-movement kernels (`reader_unary_sharded_blocks_interleaved_start_id.cpp`, ...) which include it defensively but use no symbols from it. See file for the rationale on why we don't forward to upstream's wormhole_b0_defines/tensix_types.h.
 - `include/jit_hw/api/dataflow/dataflow_buffer.h` — `class DataflowBuffer` (get_write_ptr/get_read_ptr methods), `struct DFBAccessor`; `noc_traits_t<DataflowBuffer>` specialization
 - `include/jit_hw/api/dataflow/endpoints.h` — `struct UnicastEndpoint`, `MulticastEndpoint`, `AllocatorBank`; `enum class AllocatorBankType`; `noc_traits_t` specializations for each (`get_noc_unicast_addr`/`get_noc_multicast_addr` are endpoint methods)
 - `include/jit_hw/api/dataflow/noc.h` — `class Noc` (async_read/async_write/barriers/inline_dw_write methods); `enum class AddressType`/`BarrierMode`/`McastMode`/`ResponseMode`/`TxnIdMode`/`VcSelection`; `struct DataflowBufferArgs`; primary `noc_traits_t` template
@@ -201,7 +198,7 @@ non-source trees are intentionally absent.
 
 ## include/jit_hw/cpp/ttnn/operations/data_movement/common/kernels/
 
-- `include/jit_hw/cpp/ttnn/operations/data_movement/common/kernels/common.hpp` — forwarding header; no own symbols
+- `include/jit_hw/cpp/ttnn/operations/data_movement/common/kernels/common.hpp` — forwarding shim → `ttnn/operations/data_movement/common/kernels/common.hpp`
 
 ## include/jit_hw/experimental/
 
@@ -221,7 +218,7 @@ non-source trees are intentionally absent.
 
 ## include/jit_hw/internal/
 
-- `include/jit_hw/internal/circular_buffer_interface.h` — forwarding header; no own symbols
+- `include/jit_hw/internal/circular_buffer_interface.h` — forwarding shim → `jit_hw/internal/llk_state.h`
 - `include/jit_hw/internal/firmware_common.h` — `WAYPOINT` macro; cache-op stubs
 - `include/jit_hw/internal/llk_state.h` — `struct CbInterface`; `get_local_cb_interface`, `get_operand_narrow_tile`, `get_output_narrow_tile`
 - `include/jit_hw/internal/mod_div_lib.h` — `mulsi3`; `fast_udiv_<N>` for N = 7, 12, 20, 48, 56, 63, 70, 72, 80, 94, 108, 110, 117, 120, 124, 126, 130, 140
@@ -241,7 +238,7 @@ non-source trees are intentionally absent.
 
 ## include/jit_hw/noc/
 
-- `include/jit_hw/noc/noc_parameters.h` — forwarding header; no own symbols
+- `include/jit_hw/noc/noc_parameters.h` — re-exports `tt_metal/hw/inc/internal/tt-1xx/wormhole/noc/noc_parameters.h` (`NOC_X_SIZE`/`NOC_Y_SIZE`/`NOC_CMD_*`/`NOC_ADDR_*` macros)
 
 ## include/jit_hw/tools/profiler/
 
