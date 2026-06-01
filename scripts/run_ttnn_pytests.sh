@@ -254,11 +254,11 @@ run_pytest "elt_test_i1_range"    "$ELT_TEST_DIR/test_unary_i1.py::test_i1_range
 
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
 
-run_pytest "dm_test_pad_tile"               "$DM_TEST_DIR/test_pad.py::test_pad_tile" -k 'not sharded and not sub_core'
-run_pytest "dm_test_pad_rm"                 "$DM_TEST_DIR/test_pad.py::test_pad_rm" -k 'not sharded and not sub_core'
-run_pytest "dm_test_pad_rm_small_to_large"  "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width" -k 'not sharded'
-run_pytest "dm_test_pad_rm_small_to_large_pc" "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width_with_program_cache" -k 'not sharded'
-run_pytest "dm_test_pad_with_program_cache" "$DM_TEST_DIR/test_pad.py::test_pad_with_program_cache" -k 'not sharded and not sub_core'
+run_pytest "dm_test_pad_tile"               "$DM_TEST_DIR/test_pad.py::test_pad_tile" -k 'not sub_core'
+run_pytest "dm_test_pad_rm"                 "$DM_TEST_DIR/test_pad.py::test_pad_rm" -k 'not sub_core'
+run_pytest "dm_test_pad_rm_small_to_large"  "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width"
+run_pytest "dm_test_pad_rm_small_to_large_pc" "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width_with_program_cache"
+run_pytest "dm_test_pad_with_program_cache" "$DM_TEST_DIR/test_pad.py::test_pad_with_program_cache" -k 'not sub_core'
 run_pytest "dm_test_pad_pc_hit_updates"     "$DM_TEST_DIR/test_pad.py::test_pad_program_cache_hit_updates_pad_value_buffer"
 run_pytest "dm_test_pad_validation_front"   "$DM_TEST_DIR/test_pad.py::test_pad_padding_validation_front_pad_not_supported"
 run_pytest "dm_test_pad_validation_length"  "$DM_TEST_DIR/test_pad.py::test_pad_padding_validation_length"
