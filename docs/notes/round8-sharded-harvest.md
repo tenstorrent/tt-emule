@@ -131,8 +131,59 @@ Likely needs an emule-internal NOC-loopback / CB-base trace
 when source xy == this core's xy). 2-3 attempts not yet spent. Out of
 routine bring-up scope until someone budgets the time for that trace.
 
+**Instrumentation recipe (Round 9 starting point):**
+
+1. Re-create the env-var-gated NOC trace that Round 7 used and then
+   reverted (referenced in `round7-tensor-accessor-bringup.md`
+   §"Tooling infrastructure"):
+   ```cpp
+   // In tt_metal/impl/emulation/emulated_program_runner.cpp,
+   // alongside the existing __emule_resolve_noc_addr definition.
+   static thread_local FILE* __emule_noc_trace_fp = []() {
+       const char* p = std::getenv("TT_EMULE_TRACE_NOC");
+       return p ? std::fopen(p, "a") : nullptr;
+   }();
+   // Then at the top of __emule_resolve_noc_addr:
+   if (__emule_noc_trace_fp) {
+       uint32_t x = (noc_addr >> NOC_ADDR_LOCAL_BITS) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+       uint32_t y = (noc_addr >> (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+       uint32_t off = static_cast<uint32_t>(noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
+       bool self = (x == my_x[0] && y == my_y[0]);
+       std::fprintf(__emule_noc_trace_fp,
+           "resolve noc=(%u,%u) off=0x%x self=%d size=%u from=(%u,%u)\n",
+           x, y, off, self ? 1 : 0, /*size=*/0, my_x[0], my_y[0]);
+       std::fflush(__emule_noc_trace_fp);
+   }
+   ```
+
+2. Run one canonical failing variant with the trace on:
+   ```bash
+   TT_EMULE_TRACE_NOC=/tmp/round9-trace.log \
+   /opt/ttmlir-toolchain/venv/bin/pytest \
+     'tests/ttnn/unit_tests/operations/data_movement/test_pad.py::test_pad_rm_sharded_stickwise[dtype=DataType.INT32-input_shape=(1, 1, 2, 4)-pad_to_shape=(1, 1, 4, 8)-input_tensor_start=(0, 0, 0, 0)-pad_value=3.0-input_sharded_memory_config_args={"core_grid": ttnn.CoreGrid(x=1, y=2), "strategy": <ShardStrategy.HEIGHT: 1>}]' \
+     --forked --tb=line -q
+   ```
+
+3. **What to look for in the trace:**
+   - Lines where `self=1` (source xy == calling core's xy). These are
+     the in-kernel `noc_async_read(get_noc_addr(scratch + offset),
+     dest, ...)` operations.
+   - The `off` (offset) should match `scratch_write_addrs[slot] +
+     aligned_offset` from the kernel — within L1, not into a DRAM bank
+     and not into another core's L1.
+   - Compare against the resolved pointer: does it correspond to the
+     L1 region that was JUST written by the prior
+     `noc_async_read(src_dram, scratch[slot], aligned_block_width_bytes)`?
+     If not, you've found the routing miss.
+
+4. Also instrument the existing emule debug paths (already in
+   `dataflow_api.h:362-365` for multicast) so you can correlate
+   `EMULE WARN: noc_async_read failed to resolve` with the trace.
+
 **Blast radius:**
-- 23 / 23 of `test_pad.py` `-k 'sharded'` failures.
+- 23 / 23 of `test_pad.py` `-k 'sharded'` failures (all
+  `test_pad_rm_sharded_stickwise` / `test_pad_nd_sharded_to_interleaved` /
+  `test_pad_legacy_sharded_to_interleaved`).
 - 16 of the 20 stick-layout failures in `test_interleaved_to_sharded.py`
   (the other 4 now pass — these 16 likely share this same root cause).
 - Total: ~39 sharded tests gated on this single emule bug.
@@ -209,10 +260,69 @@ expose vs leave undefined. ~30 min of design + implementation, plus a
 follow-up re-run to expose whatever's next. Out of scope for the
 current harvest commit; targeted for Round 8 follow-up.
 
+**Symbol audit (Round 9 starting point):**
+
+Grep'd the failing kernel for direct references to anything declared in
+`tensix_types.h`:
+
+```bash
+grep -oE 'xmov_direction|MOVER0|MOVER1|TDMA_MOVER|relu_mode|math_fidelity_t|stochastic_round|packer_config|fifo_ctl|mover_config|tile_descriptor|TileHeader|SectionHeader|DataFormat|io_queue_pointers|BUFFER_TYPE' \
+  ttnn/cpp/ttnn/operations/data_movement/sharded/device/kernels/dataflow/reader_unary_sharded_blocks_interleaved_start_id.cpp
+```
+→ **no matches.** The kernel includes `tensix_types.h` defensively
+but doesn't reference any of its symbols directly. Nor do the emule
+shims it pulls before that point (`api/dataflow/{dataflow_api,
+circular_buffer,noc}.h`, `api/tensor/noc_traits.h`) — they're already
+self-contained.
+
+The include is satisfying the include directive itself, not pulling in
+symbols.
+
+**Recommended shim design:**
+
+Two options, ordered by safety-vs-effort tradeoff:
+
+1. **Forwarding shim** (recommended): create
+   `include/jit_hw/tensix_types.h` that pre-defines `TENSIX_FIRMWARE`
+   and then includes the upstream header (which guards the `fmt/core.h`
+   include behind `#ifndef TENSIX_FIRMWARE`):
+   ```cpp
+   #pragma once
+   // Suppress upstream's host-side <fmt/core.h> include, which is not
+   // on the JIT compile path. The actual struct/enum definitions in
+   // tensix_types.h are pure C++ and compile fine without fmt.
+   #ifndef TENSIX_FIRMWARE
+   #define TENSIX_FIRMWARE
+   #endif
+   #include "internal/tt-1xx/wormhole/wormhole_b0_defines/tensix_types.h"
+   ```
+   Also requires `get_extra_include_flags()` in
+   `tt_metal/impl/emulation/emulated_program_runner.cpp:912` to add
+   the `wormhole_b0_defines/` directory to -I, or use the existing
+   `tt_metal/hw/inc` -I and adjust the include path string accordingly.
+
+   Pro: kernels that DO use DataFormat / packer_config_t etc.
+   automatically get them. Future-proof for other sharded kernels.
+   Con: pulls in unused symbols (mild compile-time cost).
+
+2. **Empty stub**: `#pragma once` + nothing else. This kernel works
+   with it (zero symbols needed). Other kernels that reference real
+   tensix_types symbols would still fail, but those would be diagnosed
+   one at a time.
+
+Pick (1). The kernel also uses metal2 idioms (`Noc noc;
+noc.async_read(s, cb_in, ...)`, `CircularBuffer cb_in;
+cb_in.reserve_back(...)`), so after the shim lands, a re-run will
+surface whether the metal2 NOC/CB integration with TensorAccessor is
+already covered by Round 7 shims or if there's a second gap behind
+this one.
+
 **Blast radius:**
 - 68 / 84 i2s failures gated on this single root cause.
 - May overlap with other sharded-output families that pull this
-  kernel — needs an audit.
+  kernel — needs an audit. Specifically `test_concat` sharded
+  variants (the concat kernels `reader_height_sharded_*` include
+  `tensix_types.h` too — see kernel file list grep'd during B8.5).
 
 ---
 
@@ -239,40 +349,63 @@ on the transpose RM kernel + 6 PCC mismatches.
 - 6 PCC failures: data-correctness gaps on permute paths that *do*
   compile.
 
-**Where it points:**
-- Kernel uses:
-  ```cpp
-  noc_async_read_one_packet_set_state(noc_read_addr, stick_size_bytes);
-  ...
-  noc_async_read_one_packet_with_state(noc_read_addr, l1_write_addr);
-  ```
-- Upstream definitions at
-  `tt_metal/hw/inc/api/dataflow/dataflow_api.h:594` (`set_state`) and
-  `:627` (`with_state`).
-- Emule has `noc_async_read_one_packet` (full args) but no `set_state` +
-  `with_state` pair.
+**Where it points (two distinct JIT sub-causes + a PCC tier):**
+
+The 8 failing test cases all share `dtype=BFLOAT16-layout=ROW_MAJOR-shape=[16,8,224,224]`
+and split by `(input_sharding, output_sharding) × perm`:
+
+| `input_sharding` | `output_sharding` | `perm` permutations | count |
+|---|---|---|---|
+| None | HEIGHT | [0,2,3,1] / [0,3,2,1] / [1,2,3,0] / [1,3,2,0] | 4 |
+| HEIGHT | HEIGHT | same 4 perms | 4 |
+
+Two distinct kernels fail to JIT-compile (one occurrence each):
+
+1. **Reader kernel `reader_unary_transpose_hc_sharded_rm.cpp`** uses
+   ```cpp
+   noc_async_read_one_packet_set_state(noc_read_addr, stick_size_bytes);
+   ...
+   noc_async_read_one_packet_with_state(noc_read_addr, l1_write_addr);
+   ```
+   Upstream definitions at
+   `tt_metal/hw/inc/api/dataflow/dataflow_api.h:594` (`set_state`) and
+   `:627` (`with_state`). Emule has `noc_async_read_one_packet` (full
+   args) but no `set_state`/`with_state` pair.
+
+2. **Compute kernel `compute/transpose_wh_rm.cpp`** uses LLK shims
+   `transpose_wh_init_short`, `transpose_wh_tile`, plus
+   `pack_untilize_dest_init<Ht, Ht, use_narrow_row, row_size>` and
+   `pack_untilize_dest<Ht, Ht, false, use_narrow_row, row_size>`.
+   It includes `api/compute/transpose_wh.h` and
+   `api/compute/pack_untilize.h`. Check via the
+   `/compute-llk-bringup` skill which of those shims is missing or
+   has mismatched template signatures.
+
+The remaining ~6 cases that do JIT-compile likely fail PCC — exact
+breakdown wasn't captured (the `--tb=line` summary clumps errors at
+end). Re-run with `--tb=long` on the 8 failing IDs above to map
+each to its sub-cause.
 
 **Suspected root cause:**
-- 2 JIT: tier 1, missing shim pair. Easy fix — store the
-  packet_size in a thread-local on `set_state`, use it on `with_state`
-  to memcpy.
-- 6 PCC: separate gap. Trace would be needed to characterize whether
-  it's an addressing bug, a CB-binding bug, or a layout-conversion
-  issue in the permute kernels.
+
+| Sub-cause | Tier | Effort | Tests unblocked (estimate) |
+|---|---|---|---|
+| Missing `noc_async_read_one_packet_{set,with}_state` | 1 | ~5 min | 1-2 of 8 |
+| `transpose_wh.h` / `pack_untilize.h` LLK shim gap | 1 | ~30 min, may chain | 1-2 of 8 |
+| PCC: permute interleaved↔sharded layout conversion | 3 | hours | 4-6 of 8 |
 
 **What was tried:**
 Diagnosed only. No fix attempted.
 
 **Why deferred:**
-Smaller blast radius than B8.1 / B8.2 — 8 tests total. Bundled into
-Round 8 for future cleanup. Adding the `set_state`/`with_state` pair is
-trivial; should be done alongside any future TRID-state work since the
-APIs are related.
+Smaller blast radius than B8.1 / B8.2 — 8 tests total. The two JIT
+sub-causes are trivial to fix; the PCC tier likely shares root cause
+with B8.4 (untilize ATOL≈3.25) since both touch interleaved↔sharded
+layout conversions.
 
 **Blast radius:**
-- 8 / 8 permute sharded failures (2 JIT + 6 PCC). The 6 PCC may share
-  root cause with B8.4 (untilize ATOL≈3.25) since both touch
-  interleaved↔sharded layout conversions.
+- 8 / 8 permute sharded failures (2 distinct JIT root causes + 6 PCC).
+- The 6 PCC likely overlap with B8.4 — fixing B8.4 may close them too.
 
 ---
 
@@ -336,6 +469,57 @@ tensor) to characterize: is the ATOL constant or proportional? Is it
 per-tile or per-face? Where in the output does the error appear? Once
 characterized, the fix is likely a single arithmetic correction
 somewhere in the addressing or packing path.
+
+**Canonical smallest reproducer (Round 9 starting point):**
+
+The smallest tensor in any failing `test_untilize_single_core_interleaved_to_sharded`
+variant is `[2, 2, 256, 512]` (BFLOAT16, 4 cores). Pick the
+HEIGHT_SHARDED + ROW_MAJOR-orientation node ID:
+```
+tests/ttnn/unit_tests/operations/data_movement/test_untilize.py::test_untilize_single_core_interleaved_to_sharded[num_shard_cores=4-standard_shard_core_grid={[0-0 - 0-3]}-block_shard_core_grid={[0-0 - 1-1]}-output_shard_orientation=ShardOrientation.ROW_MAJOR-output_memory_layout=TensorMemoryLayout.HEIGHT_SHARDED-tensor_shape=[2, 2, 256, 512]-dtype=DataType.BFLOAT16]
+```
+
+**Characterization trace (write this in test_untilize.py temp instrumentation):**
+
+The test compares torch reference against ttnn output. Inject prints
+around the assertion:
+```python
+# In the failing assertion site of test_untilize.py:
+diff = (tt_output - torch_output).abs()
+import torch as _t
+print(f"max ATOL: {diff.max().item()}, indices: {_t.nonzero(diff > 1e-3)[:20]}")
+print(f"first 8 tt rows: {tt_output.flatten()[:32]}")
+print(f"first 8 torch rows: {torch_output.flatten()[:32]}")
+```
+
+Questions to answer:
+1. Is the ATOL constant (every wrong element = 3.25) or varying?
+2. Are the wrong elements clustered at specific positions (e.g.
+   every 16th value, every 32nd, last column of each face)?
+3. Are wrong values shifted versions of correct values, or unrelated?
+
+Each of those points to a different root cause:
+- Constant ATOL on specific positions → face-layout / nfaces conversion
+  bug.
+- Shifted values → off-by-one in addressing.
+- Unrelated values → wrong buffer read entirely.
+
+**Three candidate root causes ranked by likelihood:**
+
+1. **(most likely)** `nfaces`↔row-major tile-layout conversion table
+   mis-indexed on the interleaved-side write path. Sharded↔sharded
+   doesn't go through this table; interleaved↔sharded does. Find the
+   table in `include/jit_hw/` and check whether the index expression
+   matches upstream's silicon-side equivalent.
+2. Page-offset arithmetic gap in
+   `InterleavedPow2AddrGenFast::get_noc_addr` (Round 7 commit
+   `7509e39`) for non-tile-aligned access patterns. Test sharded↔interleaved
+   with `tensor_shape=[2, 2, 256, 512]` against a known-good
+   interleaved-only test — if the latter passes, the bug is in the
+   sharded-side handoff, not the pow2 addrgen.
+3. A `reset_l1_bump` / MEM_ZEROS interaction taintng a different
+   region — different from #59. Less likely since #59 was uneven
+   shards only and these are even shards.
 
 **Blast radius:**
 - 196 / 196 untilize sharded failures.
