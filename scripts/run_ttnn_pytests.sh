@@ -263,6 +263,20 @@ run_pytest "dm_test_transpose_wh_uint32"    "$DM_TEST_DIR/test_permute.py::test_
 # discriminator. Other functions fail on multicore-interleaved corner cases.
 run_pytest "dm_test_untilize_same_volume"   "$DM_TEST_DIR/test_untilize.py::test_untilize_same_volume_different_shapes"
 
+# reduce: per-function entries that uniformly pass.
+# test_mean and test_min are the bulk; mean has 128+ cases across dims.
+# test_std, test_prod, test_var, test_sum_{3..8}d are partial-pass / mostly-fail, deferred.
+run_pytest "reduce_test_mean"               "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean"                  -k 'not sharded'
+run_pytest "reduce_test_mean_2d"            "$REDUCE_TEST_DIR/test_reduction.py::test_mean_2d_tensor_dims"   -k 'not sharded'
+run_pytest "reduce_test_mean_3d"            "$REDUCE_TEST_DIR/test_reduction.py::test_mean_3d_tensor_dims"   -k 'not sharded'
+run_pytest "reduce_test_mean_4d"            "$REDUCE_TEST_DIR/test_reduction.py::test_mean_4d_tensor_dims"   -k 'not sharded'
+run_pytest "reduce_test_mean_scaling"       "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean_scaling"
+run_pytest "reduce_test_mean_scaling_factor" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean_scaling_factor"
+run_pytest "reduce_test_min"                "$REDUCE_TEST_DIR/test_reduction_min.py::test_min"                    -k 'not sharded'
+run_pytest "reduce_test_min_global"         "$REDUCE_TEST_DIR/test_reduction_min.py::test_min_global"             -k 'not sharded'
+run_pytest "reduce_test_sum_2d"             "$REDUCE_TEST_DIR/test_reduction.py::test_sum_2d_tensor_dims"         -k 'not sharded'
+run_pytest "reduce_test_torch_compat"       "$REDUCE_TEST_DIR/test_reduction.py::test_torch_compatibility"
+
 # test_tosa_gather: 6/10 small-C shapes pass. C >= 96 (multi-tile C-dim)
 # gathers diverge — likely a multi-tile gather kernel issue, deferred.
 # --deselect IDs must be rootdir-relative (the form pytest reports). Using
