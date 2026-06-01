@@ -241,7 +241,7 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 
 ### Test Results
 
-The emulated C++ regression runs as three parallel CI matrix jobs (`wormhole`, `blackhole`, `quasar`), driven by the per-arch scripts under `scripts/`. A separate `ttnn-pytest` CI job runs stock tt-metal ttnn pytests against the emulated build (`scripts/run_ttnn_pytests.sh`). The D2M golden-test regression runs through `run_d2m_regression.sh`. All four are wired in `.github/workflows/pr-metal-regression.yml` and `pr-d2m-regression.yml`.
+The emulated C++ regression runs as three parallel CI matrix jobs (`wormhole`, `blackhole`, `quasar`), driven by the per-arch `scripts/run_regression_<arch>.sh` (invoked in CI via `.github/scripts/ci-regression.sh`). A separate `ttnn-pytest` CI job runs stock tt-metal ttnn pytests against the emulated build (`scripts/run_ttnn_pytests.sh`, invoked via `.github/scripts/ci-ttnn-pytests.sh`). The D2M golden-test regression runs through `run_d2m_regression.sh`. The three arch jobs and the `ttnn-pytest` job live in `.github/workflows/pr-metal-regression.yml`; the D2M regression is in `pr-d2m-regression.yml`.
 
 Authoritative state lives outside this report so it stays in sync:
 
