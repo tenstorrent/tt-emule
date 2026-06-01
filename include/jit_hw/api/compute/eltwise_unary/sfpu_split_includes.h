@@ -190,3 +190,19 @@
 #if SFPU_OP_PRELU_INCLUDE
 #include "api/compute/eltwise_unary/prelu.h"
 #endif
+
+#if SFPU_OP_XIELU_INCLUDE
+#include "api/compute/eltwise_unary/xielu.h"
+#endif
+
+#if SFPU_OP_HARDMISH_INCLUDE
+#include "api/compute/eltwise_unary/hardmish.h"
+#endif
+
+#if SFPU_OP_DIGAMMA_INCLUDE
+#include "api/compute/eltwise_unary/digamma.h"
+#endif
+
+#if SFPU_OP_POLYGAMMA_INCLUDE
+#include "api/compute/eltwise_unary/polygamma.h"
+#endif

@@ -251,6 +251,16 @@ run_pytest "reduce_test_cumprod_backward"      "$REDUCE_TEST_DIR/test_cumprod.py
 run_pytest "reduce_test_cumprod_failing"       "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_failing_cases"
 run_pytest "reduce_test_cumsum_failing"        "$REDUCE_TEST_DIR/test_cumsum.py::test_cumsum_failing_cases"
 
+# Round 5 Wave 3 — wins via the new quantization/xielu/hardmish/digamma/polygamma
+# shims and the celu/hardshrink/softshrink additions to activations.h.
+run_pytest "elt_test_celu_allclose"   "$ELT_TEST_DIR/test_celu_21f.py::test_celu_allclose"
+run_pytest "elt_test_celu_arange"     "$ELT_TEST_DIR/test_celu_21f.py::test_celu_arange"
+run_pytest "elt_test_scalarB_hardshrink" "$ELT_TEST_DIR/test_activation.py::test_scalarB_hardshrink"
+run_pytest "elt_test_scalarB_softshrink" "$ELT_TEST_DIR/test_activation.py::test_scalarB_softshrink"
+run_pytest "elt_test_xielu"           "$ELT_TEST_DIR/test_activation.py::test_xielu"
+run_pytest "elt_test_digamma"         "$ELT_TEST_DIR/test_math.py::test_digamma"
+run_pytest "elt_test_polygamma"       "$ELT_TEST_DIR/test_math.py::test_polygamma"
+
 # test_concat_size_switches: single-case program-cache regression test.
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
 
