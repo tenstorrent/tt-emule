@@ -90,3 +90,59 @@ public:
             dram_host_ptr(dst, args.page_id, args.offset_bytes, noc.get_noc_id()));
     }
 };
+
+// ---- noc_traits_t<tensor_accessor::Page> ---------------------------------
+// Iterator-yielded Page carries a pre-baked uint64_t NOC address. To use it
+// as a NOC src/dst, resolve `Page::noc_addr() + offset_bytes` through the
+// same __emule_resolve_noc_addr that the TensorAccessor specialization uses.
+
+template <>
+struct noc_traits_t<tensor_accessor::Page> {
+    struct src_args_type { uint32_t offset_bytes = 0; };
+    struct dst_args_type { uint32_t offset_bytes = 0; };
+
+    template <Noc::AddressType address_type>
+    static uintptr_t src_addr(const tensor_accessor::Page& src, const Noc&,
+                              const src_args_type& args) {
+        uint64_t noc_addr = src.noc_addr() + args.offset_bytes;
+        return reinterpret_cast<uintptr_t>(__emule_resolve_noc_addr(noc_addr));
+    }
+
+    template <Noc::AddressType address_type>
+    static uintptr_t dst_addr(const tensor_accessor::Page& dst, const Noc&,
+                              const dst_args_type& args) {
+        uint64_t noc_addr = dst.noc_addr() + args.offset_bytes;
+        return reinterpret_cast<uintptr_t>(__emule_resolve_noc_addr(noc_addr));
+    }
+};
+
+// ---- noc_traits_t<ShardView<Accessor>> -----------------------------------
+// Accessor variant that addresses by shard_id rather than page_id. Delegates
+// to acc.get_shard_noc_addr() — which upstream's TensorAccessor provides
+// for free post-shim-removal.
+
+template <typename Accessor>
+struct noc_traits_t<ShardView<Accessor>> {
+    struct src_args_type {
+        uint32_t shard_id{};
+        uint32_t offset_bytes = 0;
+    };
+    struct dst_args_type {
+        uint32_t shard_id{};
+        uint32_t offset_bytes = 0;
+    };
+
+    template <Noc::AddressType address_type>
+    static uintptr_t src_addr(const ShardView<Accessor>& src, const Noc& noc,
+                              const src_args_type& args) {
+        uint64_t noc_addr = src.get_noc_addr(args.shard_id, args.offset_bytes, noc.get_noc_id());
+        return reinterpret_cast<uintptr_t>(__emule_resolve_noc_addr(noc_addr));
+    }
+
+    template <Noc::AddressType address_type>
+    static uintptr_t dst_addr(const ShardView<Accessor>& dst, const Noc& noc,
+                              const dst_args_type& args) {
+        uint64_t noc_addr = dst.get_noc_addr(args.shard_id, args.offset_bytes, noc.get_noc_id());
+        return reinterpret_cast<uintptr_t>(__emule_resolve_noc_addr(noc_addr));
+    }
+};
