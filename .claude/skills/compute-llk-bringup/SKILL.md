@@ -1,9 +1,19 @@
 ---
-name: llk-bringup
-description: Use when bringing up an emule LLK shim — write a new mock implementation of an upstream tt-metal compute-kernel API under `include/jit_hw/api/compute/`, wire it into the regression suite, and address PCC/divergence failures.
+name: compute-llk-bringup
+description: Specialization of `/implement-mock` for compute-kernel LLK shims (`<op>_tile` / `<op>_tile_init` under `include/jit_hw/api/compute/`). Use when bringing up a missing compute op or addressing its PCC failures.
 ---
 
-# LLK bring-up — emule shim authoring skill
+# Compute LLK bring-up
+
+This skill is a **specialization** of `/implement-mock` — specifically,
+Strategy A (stub in `jit_hw/`) applied to compute-kernel ops. The
+mechanics here all assume the silicon API lives at
+`tt_metal/hw/inc/api/compute/<path>.h` and produces a header-only shim
+under `include/jit_hw/api/compute/`.
+
+For mock work outside compute (NOC, dataflow, dispatch, fabric, tensor),
+use `/implement-mock` for the broader strategy-picking flow. For batch
+bring-up (≥4 shims at once), see `/parallel-mock-implementation`.
 
 ## When to invoke
 
@@ -205,7 +215,7 @@ Caveats on `pytest -k`:
 Commit per bring-up with a concise message:
 ```bash
 git add include/jit_hw/<files> STRUCTURE.md scripts/run_ttnn_pytests.sh
-git commit -m "llk-bringup: <one-line summary> (<n>/<n> pass)"
+git commit -m "<shim-name>: <one-line summary> (<n>/<n> pass)"
 ```
 
 ## Step 8 — PCC failure triage
@@ -235,83 +245,6 @@ When PCC fails, check in order:
 If none of those: defer with a one-paragraph note in the test entry's
 comment in `scripts/run_ttnn_pytests.sh` and move on. PCC-fix work
 deserves its own focused round.
-
-## Parallel sub-agent dispatch
-
-When bringing up many shims at once (≥4), use the `Workflow` tool with
-parallel `agent()` calls. Each agent writes one file in isolation.
-
-### Worker prompt skeleton
-
-```
-You are implementing an emule LLK shim for tt-emule. Write exactly ONE header file.
-
-TARGET FILE: include/jit_hw/api/compute/<path>.h
-UPSTREAM REFERENCE (read-only): tt_metal/hw/inc/api/compute/<path>.h
-LLK REF (read-only, only if upstream signatures unclear): tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_sfpu/ckernel_sfpu_<name>.h
-REFERENCE EMULE SHIMS (read for boilerplate):
-  include/jit_hw/api/compute/eltwise_unary/relu.h
-  include/jit_hw/api/compute/eltwise_unary/dropout.h
-
-REQUIRED SIGNATURES (mirror upstream — if upstream differs, follow upstream):
-<list>
-
-SEMANTICS (per element):
-<formula>
-
-HARD CONSTRAINTS:
-- Do NOT read tt_metal/llrt/, tt_metal/impl/dispatch/, tt_metal/soc_descriptors/.
-- Do NOT modify any file other than the TARGET FILE.
-- Do NOT touch sfpu_split_includes.h.
-- Do NOT run pytest, build, or commit.
-- Read at most 3 files: upstream header, LLK impl (optional), one reference shim.
-
-OUTPUT: write the file, return status=DONE with file=<relative path> and lines=<count>.
-If signature is ambiguous or upstream missing, return status=STUCK with one-sentence reason.
-Do NOT invent signatures.
-```
-
-### Result schema
-
-```js
-const SHIM_RESULT_SCHEMA = {
-  type: 'object',
-  properties: {
-    status: { type: 'string', enum: ['DONE', 'STUCK'] },
-    file: { type: 'string' },
-    lines: { type: 'integer' },
-    reason: { type: 'string' },
-  },
-  required: ['status', 'file'],
-  additionalProperties: false,
-}
-```
-
-### Orchestration
-
-```js
-phase('Write shims')
-const results = await parallel(SHIMS.map(s => () =>
-  agent(makePrompt(s), {
-    label: `shim:${s.name}`,
-    phase: 'Write shims',
-    schema: SHIM_RESULT_SCHEMA,
-  }).then(r => ({ shim: s.name, ...(r || {status: 'NULL'}) }))
-))
-const done = results.filter(r => r.status === 'DONE')
-const stuck = results.filter(r => r.status !== 'DONE')
-log(`${done.length}/${SHIMS.length} DONE; ${stuck.length} STUCK`)
-return { done, stuck }
-```
-
-After agents return, the **orchestrator** (you) handles centrally:
-1. Visual diff each new file.
-2. Wire `SFPU_OP_*_INCLUDE` branches.
-3. Update `STRUCTURE.md` with one line per new file.
-4. Rebuild.
-5. Run targeted tests for each op (also parallel-able with one pytest call per op).
-6. Promote 100%-pass functions into the regression script.
-7. For partial passes, decide: pytest `-k` filter, or defer.
 
 ## Separate kernel chain not shimmed
 
@@ -395,17 +328,22 @@ verify before assuming.
    have no standalone API.
 5. **Don't iterate PCC failures more than a few times.** ~3 attempts max
    per shim, then document and move on.
-6. **Don't have parallel sub-agents touch shared files.** Each agent gets a
-   unique path. The orchestrator handles `sfpu_split_includes.h`,
-   `STRUCTURE.md`, and other centralized wiring after agents return.
+## Batch mode
+
+For sweeps that bring up ≥4 shims at once, dispatch one sub-agent per
+shim via `/parallel-mock-implementation`. The orchestrator (you)
+handles `sfpu_split_includes.h` wiring, `STRUCTURE.md` updates, build,
+and per-op test runs centrally after the workers return.
 
 ## References
 
-- `CLAUDE.md` — project conventions (clang-20, wormhole N150, slow dispatch,
-  jit_hw shim discipline, STRUCTURE.md upkeep).
+- `/implement-mock` — the broader strategy-picking flow this skill
+  specializes (Strategy A for compute shims).
+- `/parallel-mock-implementation` — Workflow-tool dispatch pattern for
+  batch shim authoring.
 - `STRUCTURE.md` — file-level index of `src/` + `include/` with top-level
-  symbols. Grep this first when triaging.
-- `BUILD_GUIDE.md` — build, test, and env-var setup (Phase 3 build, Phase 4b
-  ttnn pytest smoke).
-- `IMPLEMENTATION_REPORT.md` — high-level emulator architecture and the
-  JIT Kernel API Coverage table.
+  symbols. Grep first when triaging.
+- `IMPLEMENTATION_REPORT.md` §JIT Kernel API Coverage — what's currently
+  shimmed.
+- See `/implement-mock` References for the broader project conventions
+  (`CLAUDE.md`, `BUILD_GUIDE.md`).
