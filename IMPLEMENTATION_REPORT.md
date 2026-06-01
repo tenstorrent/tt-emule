@@ -205,6 +205,8 @@ tt-emule/
 └── docs/                DFB_EMULATION.md, QUASAR_EMULATION.md, changelog.md, etc.
 ```
 
+The tree above is a high-level overview. For an authoritative, complete file-level index — every file under `src/` and `include/` with the top-level symbols it contains — see [STRUCTURE.md](STRUCTURE.md). It is kept in sync with the source as files and symbols change.
+
 ### JIT Kernel API Coverage
 
 The `jit_hw/` directory provides stub implementations covering:
