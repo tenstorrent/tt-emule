@@ -198,6 +198,15 @@ template <typename T>
 inline constexpr bool has_log_base_2_of_page_size_v<
     T, std::void_t<decltype(std::declval<T>().log_base_2_of_page_size)>> = true;
 
+// TensorAccessor exposes the page size via get_aligned_page_size() rather than
+// a `page_size` member or `log_base_2_of_page_size` field.  Matches upstream
+// dataflow_api.h's 3-way dispatch (get_aligned_page_size → page_size → log2).
+template <typename, typename = void>
+inline constexpr bool has_get_aligned_page_size_v = false;
+template <typename T>
+inline constexpr bool has_get_aligned_page_size_v<
+    T, std::void_t<decltype(std::declval<T>().get_aligned_page_size())>> = true;
+
 // ---- NOC page operations (using addrgen.get_noc_addr) ----
 
 template<typename AddrGen>
@@ -206,7 +215,9 @@ FORCE_INLINE void noc_async_read_page(
         uint32_t dst_local_l1_addr,
         uint32_t offset = 0, uint8_t noc = 0) {
     uint32_t page_size;
-    if constexpr (has_page_size_v<AddrGen>) {
+    if constexpr (has_get_aligned_page_size_v<AddrGen>) {
+        page_size = addrgen.get_aligned_page_size();
+    } else if constexpr (has_page_size_v<AddrGen>) {
         page_size = addrgen.page_size;
     } else {
         page_size = (1u << addrgen.log_base_2_of_page_size);
@@ -230,7 +241,9 @@ FORCE_INLINE void noc_async_write_page(
         uint32_t src_local_l1_addr,
         uint32_t size = 0, uint32_t offset = 0, uint8_t noc = 0) {
     uint32_t page_size;
-    if constexpr (has_page_size_v<AddrGen>) {
+    if constexpr (has_get_aligned_page_size_v<AddrGen>) {
+        page_size = addrgen.get_aligned_page_size();
+    } else if constexpr (has_page_size_v<AddrGen>) {
         page_size = addrgen.page_size;
     } else {
         page_size = (1u << addrgen.log_base_2_of_page_size);
@@ -367,9 +380,24 @@ inline void noc_async_read_barrier(uint8_t noc = 0) {}
 inline void noc_async_write_barrier(uint8_t noc = 0) {}
 inline void noc_async_writes_flushed(uint8_t noc = 0) {}
 inline void noc_async_posted_writes_flushed(uint8_t noc = 0) {}
+// TRID family: silicon overlaps multiple async NOC reads/writes on the same
+// NOC by tagging each with a transaction id, then polling per-tag completion.
+// Emule executes every NOC op inline before returning, so:
+//   - set_trid stores nothing (no in-flight transactions to label)
+//   - barriers/flushed/sent return immediately (everything completed at issue)
+//   - *_with_transaction_id_flushed/sent probes always report "true"
+// noc_async_read_one_packet_with_state_with_trid is intentionally omitted —
+// its only call sites are experimental kernels (ccl/deepseek/prefetcher) not
+// in the routine bring-up regression scope, and adding it would also require
+// noc_async_read_one_packet_set_state / _with_state which are a separate gap.
 inline void noc_async_read_barrier_with_trid(uint32_t trid, uint8_t noc = 0) {}
 inline void noc_async_write_barrier_with_trid(uint32_t trid, uint8_t noc = 0) {}
 inline void noc_async_write_flushed_with_trid(uint32_t trid, uint8_t noc = 0) {}
+inline void noc_async_read_set_trid(uint32_t trid = 0, uint8_t noc = 0) {}
+inline void noc_async_write_set_trid(uint32_t trid = 0, uint8_t noc = 0) {}
+inline bool ncrisc_noc_read_with_transaction_id_flushed(uint32_t noc, uint32_t trid) { return true; }
+inline bool ncrisc_noc_nonposted_write_with_transaction_id_sent(uint32_t noc, uint32_t trid) { return true; }
+inline bool ncrisc_noc_nonposted_write_with_transaction_id_flushed(uint32_t noc, uint32_t trid) { return true; }
 inline void noc_async_atomic_barrier(uint8_t noc = 0) {}
 inline void noc_async_full_barrier(uint8_t noc = 0) {}
 
