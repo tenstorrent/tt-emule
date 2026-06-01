@@ -23,7 +23,7 @@
 //   to __emule_dram_ptr() which maps it to the backing host memory.
 
 #include "jit_hw/api/dataflow/noc.h"          // noc_traits_t primary template, Noc
-#include "jit_hw/api/tensor/tensor_accessor.h" // TensorAccessor<DSpecT>
+#include "api/tensor/tensor_accessor.h" // TensorAccessor<DSpecT>
 #include "jit_hw/api/dataflow/dataflow_api.h"  // __emule_dram_ptr
 
 // NOC_ADDR_LOCAL_BITS is the bit-width of the local address portion of a NOC

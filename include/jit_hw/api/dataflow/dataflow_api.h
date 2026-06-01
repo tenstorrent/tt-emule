@@ -21,7 +21,10 @@
 #include "jit_hw/jit_kernel_stubs.hpp"
 #include "jit_hw/api/cb_api.h"
 #include "jit_hw/internal/dataflow/dataflow_api_addrgen.h"
-#include "jit_hw/api/tensor/tensor_accessor.h"
+// noc_parameters.h must be in scope before tensor_accessor.h so that the
+// NOC_UNICAST_ADDR_X/Y macros (used at upstream tensor_accessor.h:235) resolve.
+#include "noc/noc_parameters.h"
+#include "api/tensor/tensor_accessor.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>

@@ -109,7 +109,10 @@ static inline uintptr_t get_arg_addr(int arg_idx) {
     return reinterpret_cast<uintptr_t>(&__rt_args[arg_idx]);
 }
 
-// get_common_arg_addr(idx) — pointer to common runtime arg.
+// get_common_arg_addr(idx) — pointer to common runtime arg. Returns
+// `uintptr_t` to match upstream's forward declaration in
+// `tt_metal/hw/inc/internal/tensor/dspec.h:16` (only active when
+// KERNEL_BUILD is defined — emule sets this in the JIT compile defines).
 static inline uintptr_t get_common_arg_addr(int arg_idx) {
     return reinterpret_cast<uintptr_t>(&__common_rt_args[arg_idx]);
 }

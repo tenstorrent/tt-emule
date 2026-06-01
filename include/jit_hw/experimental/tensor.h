@@ -13,7 +13,7 @@
 // __emule_resolve_noc_addr() to get a host-accessible pointer.
 
 #include "jit_hw/experimental/noc.h"
-#include "jit_hw/api/tensor/tensor_accessor.h"
+#include "api/tensor/tensor_accessor.h"
 
 extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
 
