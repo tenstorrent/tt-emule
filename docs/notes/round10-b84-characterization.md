@@ -117,24 +117,112 @@ diagnostic edits reverted).
 
 ## Round 11 starting point — focused next steps
 
-1. **Test (C1) directly**: add a single fprintf inside
-   `include/jit_hw/llk_pack.h::__llk_pack_untilize` after the
-   `base = cb_write_ptr_at(ocb, 0)` call, dumping the base ptr.
-   Compare against `get_read_ptr(ocb)` from the writer kernel's first
-   call (gated on `TT_EMULE_TRACE_CB`). If pointers differ → (C1)
-   confirmed; fix is to align the CB write/read ptr semantics on
-   emule's shared L1Pool.
-2. **If (C1) is ruled out, test (C2)**: add a fprintf in
-   `copy_tile` to verify the input tile data reaches DST. If DST is
-   zeros after `copy_tile`, (C2) is the bug — investigate emule's
-   `copy_tile` for output to per-thread DST array.
-3. **(C3) last**: requires reading the L1Pool / Core L1 management
-   code for cross-thread visibility.
+**Update after a second instrumentation pass (TT_EMULE_TRACE_CB
+in copy_tile + get_write_ptr + noc_async_read; TT_EMULE_TRACE_NOC
+in write_to_device):** the bug is NOT (C1), (C2), or (C3) as
+originally hypothesized. The real cause is a **bank-count mismatch
+between host and kernel for INTERLEAVED L1 buffers** — the same
+family of bug as Round 7's `IS_NOT_POW2_NUM_DRAM_BANKS`, but for L1.
 
-The diagnostic recipe is the same `TT_EMULE_TRACE_NOC` /
-`TT_EMULE_TRACE_WRITE` env-var fprintf pattern used in this round —
-the runner already has the trace infra; just add a `_CB` variant
-gated on `TT_EMULE_TRACE_CB` in `llk_pack.h` and `copy_tile`.
+### Evidence
+
+Within ONE run (same mmap layout):
+- `from_torch` (via `SWEmuleChip::write_to_device`) writes the
+  input tensor across **many worker cores** — (18,18), (19,18),
+  (20,18), (21,18), (22,18), (23,18), (24,18), (25,18), ... Each
+  gets ~9 writes. Distribution matches the host buffer allocator's
+  bank list.
+- Kernel reader's `s.get_noc_addr(page_id)` for the INTERLEAVED L1
+  input returns NOC addresses pointing **only to core (0,0)**.
+  Reader fires 512 NOC reads, all to (0,0) at offsets
+  `0x16a000`..`0x16e800`.
+- `__emule_resolve_noc_addr((0,0), 0x16a000)` returns `src_ptr =
+  0x7f618a1d0000` — a 64-bit address in the DRAM-style mmap range.
+  That memory is empty.
+- Reader's memcpy writes zeros into the input CB; compute reads
+  zeros; output is zeros.
+
+The wrapper.cpp JIT defines confirm:
+```
+#define NUM_DRAM_BANKS 12
+#define NUM_L1_BANKS 1     ← here's the bug
+```
+
+The kernel-side `interleaved_addr_gen::get_bank_index<L1>(id)`
+computes `id % NUM_L1_BANKS = 0` for every page, so all NOC reads
+target a single bank → a single core → a non-existent input
+location.
+
+The host (`SWEmuleChip::write_to_device`) takes the buffer's actual
+`cores()` list from the allocator (many worker cores) and writes
+correctly. So the round-trip `from_torch → to_torch` works
+(both sides use the allocator's bank list). But the kernel-side
+addrgen uses the JIT-emitted `NUM_L1_BANKS=1`, so it disagrees.
+
+### Why sharded↔sharded works
+
+Sharded `TensorAccessor` doesn't use `interleaved_addr_gen` —
+it uses the shard spec's `bank_coords` directly. So sharded paths
+bypass the broken L1-interleaved addrgen.
+
+### Why test_full_like / test_pad / test_permute don't hit this
+
+Those tests' inputs are sharded or DRAM. Only **INTERLEAVED L1
+input + sharded L1 output** combinations route through the broken
+interleaved-L1 reader path. test_untilize's
+`test_untilize_single_core_interleaved_to_sharded` is the canonical
+failing shape; the other 195 untilize failures all share the same
+input-side memory_config.
+
+### Fix
+
+Same shape as Round 7's `IS_NOT_POW2_NUM_DRAM_BANKS`:
+
+1. Emit `NUM_L1_BANKS = N` matching the host's real L1 bank count
+   in `build_kernel_defines`
+   (`tt_metal/impl/emulation/emulated_program_runner.cpp:961`).
+2. Emit the matching `bank_to_l1_offset` and `l1_bank_to_noc_xy`
+   arrays so the kernel-side addrgen targets the same cores the
+   host allocator distributed pages to.
+3. Verify against the SOC descriptor's L1 bank list for WH-N150.
+
+Expected impact: **all 196 test_untilize sharded failures clear**,
+since they all share the broken interleaved-L1 reader path.
+
+### Cross-reference: tt-umd PR #2743 (does NOT fix this)
+
+[tenstorrent/tt-umd#2743](https://github.com/tenstorrent/tt-umd/pull/2743)
+fixes two related-but-different issues:
+- **Fix 1**: `is_dram_core()` misses on Blackhole because
+  `soc.get_dram_cores()` returns NOC0 coords but the chip driver
+  receives TRANSLATED. Wormhole-unaffected (NOC0 == TRANSLATED
+  for WH DRAM).
+- **Fix 2**: Drop `static_cast<uint32_t>(l1_dest)` truncation in
+  `write_to_device`/`read_from_device`. Latent landmine; per the
+  PR, "correctness-preserving at today's sizes."
+
+B8.4 is on Wormhole, and the truncation isn't biting. PR #2743 is
+independently valuable for Blackhole DRAM correctness, but does
+NOT move B8.4 numbers on WH-N150. Round 11's fix is the
+host/kernel L1-bank-count agreement described above.
+
+### Diagnostic recipe (for future rounds)
+
+The trace pattern used this round, recreatable in ~5 min of edits:
+
+1. `emulated_program_runner.cpp:__emule_resolve_noc_addr` — env-var
+   gated fprintf showing noc_addr → core_obj + host ptr.
+2. `sw_emule_chip.cpp:write_to_device` / `read_from_device` — env-
+   var gated fprintf showing host-side core + l1_dest + first bytes.
+3. `dataflow_api.h:noc_async_read` / `noc_async_write` — env-var
+   gated fprintf showing src/dst ptrs + first bytes (proves the
+   memcpy source/destination data).
+4. `llk_pack.h:__llk_pack_untilize` / `common.h:copy_tile` —
+   env-var gated fprintf showing CB read ptr + tile data + DST
+   contents (proves the data flow through the compute kernel).
+
+Each layer reveals where the data is vs. where the kernel thinks
+it should be. Stop at the first layer where the two diverge.
 
 ## Files / artifacts produced
 
