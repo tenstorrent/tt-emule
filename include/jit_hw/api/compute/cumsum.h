@@ -34,6 +34,7 @@ ALWI void cumsum_tile_init() {
 }
 
 ALWI void cumsum_tile(uint32_t idst, bool first = true) {
+    __emule_dst_check(idst, "cumsum_tile");
     if (first) {
         for (uint32_t c = 0; c < 32; c++) {
             __emule_cumsum_acc[c] = 0.0f;

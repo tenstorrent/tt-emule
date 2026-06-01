@@ -55,6 +55,7 @@ ALWI void welford_clear() { __emule_welford_clear(); }
 template <uint32_t reciprocal_size>
 ALWI void welford_update(
     uint32_t input_dst_idx, uint32_t start_idx, const std::array<uint32_t, reciprocal_size>& reciprocal_lut) {
+    __emule_dst_check(input_dst_idx, "welford_update");
     (void)start_idx;
     (void)reciprocal_lut;
     // One sample per welford_update call across all 1024 lanes.
@@ -76,6 +77,7 @@ ALWI void welford_update_rows(
     uint32_t start_row,
     uint32_t num_rows,
     const std::array<uint32_t, reciprocal_size>& reciprocal_lut) {
+    __emule_dst_check(input_dst_idx, "welford_update_rows");
     (void)start_idx;
     (void)reciprocal_lut;
     // Partial-tile flavour: only rows [start_row, start_row + num_rows) are
@@ -97,12 +99,16 @@ ALWI void welford_update_rows(
 }
 
 ALWI void welford_save_state(uint32_t mean_dst_idx) {
+    __emule_dst_check(mean_dst_idx, "welford_save_state");
+    __emule_dst_check(mean_dst_idx + 1, "welford_save_state");
     // Spill mean to DST[mean_dst_idx] and M2 to DST[mean_dst_idx + 1].
     std::memcpy(__emule_dst[mean_dst_idx], __emule_welford_mean, __EMULE_DST_BYTES);
     std::memcpy(__emule_dst[mean_dst_idx + 1], __emule_welford_m2, __EMULE_DST_BYTES);
 }
 
 ALWI void welford_restore_state(uint32_t mean_dst_idx) {
+    __emule_dst_check(mean_dst_idx, "welford_restore_state");
+    __emule_dst_check(mean_dst_idx + 1, "welford_restore_state");
     std::memcpy(__emule_welford_mean, __emule_dst[mean_dst_idx], __EMULE_DST_BYTES);
     std::memcpy(__emule_welford_m2, __emule_dst[mean_dst_idx + 1], __EMULE_DST_BYTES);
 }
@@ -110,6 +116,8 @@ ALWI void welford_restore_state(uint32_t mean_dst_idx) {
 template <std::size_t reciprocal_size>
 ALWI void welford_finalize_to_row(
     uint32_t mean_dst_idx, uint32_t scale_idx, const std::array<uint32_t, reciprocal_size>& reciprocal_lut) {
+    __emule_dst_check(mean_dst_idx, "welford_finalize_to_row");
+    __emule_dst_check(mean_dst_idx + 1, "welford_finalize_to_row");
     (void)scale_idx;
     (void)reciprocal_lut;
     // Convert M2 → variance using accumulated sample count, then store the
@@ -131,6 +139,8 @@ ALWI void welford_finalize_to_row(
 template <std::size_t reciprocal_size>
 ALWI void welford_finalize_to_face(
     uint32_t mean_dst_idx, uint32_t scale_idx, const std::array<uint32_t, reciprocal_size>& reciprocal_lut) {
+    __emule_dst_check(mean_dst_idx, "welford_finalize_to_face");
+    __emule_dst_check(mean_dst_idx + 1, "welford_finalize_to_face");
     (void)scale_idx;
     (void)reciprocal_lut;
     // Raw face format: mean / variance occupy the first four rows of the

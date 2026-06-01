@@ -40,6 +40,14 @@ GTEST_XML_DIR="${GTEST_XML_DIR:-}"
 # and reduce_test_sum distribute across shards rather than bunching together.
 SHARD_INDEX="${SHARD_INDEX:-1}"
 SHARD_COUNT="${SHARD_COUNT:-1}"
+if ! [[ "$SHARD_COUNT" =~ ^[0-9]+$ ]] || [ "$SHARD_COUNT" -lt 1 ]; then
+    echo "ERROR: SHARD_COUNT must be a positive integer (got '$SHARD_COUNT')" >&2
+    exit 2
+fi
+if ! [[ "$SHARD_INDEX" =~ ^[0-9]+$ ]] || [ "$SHARD_INDEX" -lt 1 ] || [ "$SHARD_INDEX" -gt "$SHARD_COUNT" ]; then
+    echo "ERROR: SHARD_INDEX must be in [1, $SHARD_COUNT] (got '$SHARD_INDEX')" >&2
+    exit 2
+fi
 ENTRY_NUM=0
 
 PASS=0

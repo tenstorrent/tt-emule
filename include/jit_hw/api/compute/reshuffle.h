@@ -9,8 +9,9 @@
 //
 // Semantics: for each row r in [0, 32), copy input row indices[r] into output
 // row r. The `addr` argument is a uint32 L1 address holding 32 uint32 row
-// indices. We treat the address as a raw host pointer (matches dataflow_api's
-// L1 access pattern) and use a temp buffer + memcpy to avoid in-place
+// indices. Route through __emule_local_l1_to_ptr so both truncated host
+// pointers (the get_read_ptr pattern) and firmware-style L1 offsets resolve
+// to the right host memory. We use a temp buffer + memcpy to avoid in-place
 // aliasing when an index maps to a different row.
 //
 // Real LLK reference:
@@ -21,13 +22,14 @@
 #include <cstring>
 
 #include "jit_hw/api/compute/common.h"
+#include "jit_hw/jit_kernel_stubs.hpp"  // __emule_local_l1_to_ptr
 
 namespace ckernel {
 
 ALWI void reshuffle_rows_tile_init() {}
 
 ALWI void reshuffle_rows_tile(uint32_t idst, uint32_t addr) {
-    const uint32_t* indices = reinterpret_cast<const uint32_t*>(static_cast<uintptr_t>(addr));
+    const uint32_t* indices = reinterpret_cast<const uint32_t*>(__emule_local_l1_to_ptr(addr));
 
     // Snapshot source rows into a temp buffer so an out-of-order permutation
     // (e.g. indices[r] != r for multiple r) cannot clobber rows we still
