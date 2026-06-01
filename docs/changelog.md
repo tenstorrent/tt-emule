@@ -4,6 +4,26 @@ Historical per-version diffs of the implementation report. Latest entry first.
 
 ---
 
+## v13 → v14 (2026-06-01)
+
+LLK bring-up campaign across rounds 1-6. Closes the long tail of ttnn ops
+that previously failed JIT-compile under tt-emule.
+
+| Aspect | v13 | v14 |
+|--------|-----|-----|
+| `include/jit_hw/api/compute/eltwise_unary/` shims | ~12 op headers (existing) | + mish, polygamma, prelu, remainder, right_shift, rsub, softplus, threshold, xielu (9 new). Extended sfpu_split_includes.h guard list to match upstream more closely. |
+| Composed-activation ops | hardswish/swish/tanhshrink unsupported | composed in-kernel from primitives; promoted (cat F). |
+| Transcendental polynomials | partial — several ops PCC-failed against torch | i1/lgamma/mish/softplus ports landed (i1 PASS 14/14; mish/softplus/lgamma still PCC-failed and deferred — cat B partial). |
+| `noc/noc_parameters.h` shim | not present | added, re-exporting the wormhole header (cat E). Unblocks the moreh_softmax alternate-kernel chain. moreh_softmax `dim=1` still gated on cat A (sharded TensorAccessor — out of this PR's scope). |
+| cumsum/cumprod | `cumsum_tile` shim absent; ttnn.cumsum thought to be blocked | investigation: ttnn.cumsum doesn't use `cumsum_tile` (host permutes + add_binary_tile path). PCC failures are in the permute/tile-padding chain. Deferred (cat D). |
+| softplus parameter ordering | suspected mismatch | verified order matches upstream; no fix needed (cat C). |
+| `.claude/skills/llk-bringup/SKILL.md` | not present | new — codifies the bring-up workflow (triage path, shim template, build+test loop, PCC failure budget, parallel agent dispatch pattern, anti-patterns) distilled from rounds 1-5, kept current through round 6. |
+| `scripts/run_ttnn_pytests.sh` | a few seed entries (data_movement basics) | ~200 new entries promoted from the campaign: data_movement (clone, creation, repeat, gather, concat variants, fill_pad, embedding, full_like, reduce, pad, permute, untilize, tilize, indexed_fill_sharded), reduce (sum, mean, min, max), creation (full_like_opt_tensor), dropout, reallocate, tilizer, linear, addmm input-validation. |
+| Failure-category catalog | implicit | `~/.claude/plans/vivid-foraging-nebula.md` records A-K categorization. Round 7 (cat A: sharded TensorAccessor) and rounds beyond are tracked there. |
+| Parallel agent harness | not in tree | `scripts/dispatch_llk_bringup.sh` added during round 5 (4 commits), then reverted at end of round 6 — shelved due to simultaneous SIGTERMs at parallelism≥4, worktree-only guardrail leaks, hung post-PASS claude processes, and off-scope spelunking. Each agent required nearly as much in-session monitoring as direct bring-up. Commits stay in history as a record; the script is removed from the final tree state. |
+
+---
+
 ## v12 → v13 (2026-05-26)
 
 | Aspect | v12 | v13 |
