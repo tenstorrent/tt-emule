@@ -8,11 +8,9 @@
 // LLK-only header that references SFPU intrinsics).
 //
 // Semantics: for each row r in [0, 32), copy input row indices[r] into output
-// row r. The `addr` argument is a uint32 L1 address holding 32 uint32 row
-// indices. Route through __emule_local_l1_to_ptr so both truncated host
-// pointers (the get_read_ptr pattern) and firmware-style L1 offsets resolve
-// to the right host memory. We use a temp buffer + memcpy to avoid in-place
-// aliasing when an index maps to a different row.
+// row r. `addr` is a uint32 L1 address holding 32 uint32 row indices. Temp
+// buffer + memcpy avoids in-place aliasing when an index maps to a different
+// row.
 //
 // Real LLK reference:
 //   tt_metal/hw/inc/api/compute/reshuffle.h

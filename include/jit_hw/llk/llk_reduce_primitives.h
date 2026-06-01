@@ -18,10 +18,7 @@ enum class MathFidelity : uint8_t;
 }
 enum class PoolType  : uint8_t;
 enum class ReduceDim : uint8_t;
-// `p_dim_stride_target` is defined in jit_hw/api/compute/common.h; pulled in
-// here so the llk_unpack_reconfig_data_format_srca template's default arg
-// (`= p_dim_stride_target::IGNORE`) can name the enumerator.
-#include "jit_hw/api/compute/common.h"
+#include "jit_hw/api/compute/common.h"  // p_dim_stride_target (template default)
 
 // constexpr defaults; only fall back to #define if the kernel source has
 // already #defined them (some upstream prologs do this), to avoid a redefinition.
