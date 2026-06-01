@@ -224,6 +224,38 @@ run_pytest "dm_test_creation_zeros_bfp4"  "$DM_TEST_DIR/test_creation.py::test_z
 # test_concat_size_switches: single-case program-cache regression test.
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
 
+# test_pad: per-function entries. test_pad and test_pad_back_to_back fail in some
+# variants; the entries below are the strictly-100%-pass subset (379 cases).
+run_pytest "dm_test_pad_tile"               "$DM_TEST_DIR/test_pad.py::test_pad_tile" -k 'not sharded and not sub_core'
+run_pytest "dm_test_pad_rm"                 "$DM_TEST_DIR/test_pad.py::test_pad_rm" -k 'not sharded and not sub_core'
+run_pytest "dm_test_pad_rm_small_to_large"  "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width" -k 'not sharded'
+run_pytest "dm_test_pad_rm_small_to_large_pc" "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width_with_program_cache" -k 'not sharded'
+run_pytest "dm_test_pad_with_program_cache" "$DM_TEST_DIR/test_pad.py::test_pad_with_program_cache" -k 'not sharded and not sub_core'
+run_pytest "dm_test_pad_pc_hit_updates"     "$DM_TEST_DIR/test_pad.py::test_pad_program_cache_hit_updates_pad_value_buffer"
+run_pytest "dm_test_pad_validation_front"   "$DM_TEST_DIR/test_pad.py::test_pad_padding_validation_front_pad_not_supported"
+run_pytest "dm_test_pad_validation_length"  "$DM_TEST_DIR/test_pad.py::test_pad_padding_validation_length"
+
+# test_permute: per-function entries that pass uniformly (279 cases).
+# test_permute, test_transpose, test_permute_3D, test_permute_5d_width, and
+# several other permute variants have partial pass and are deferred.
+run_pytest "dm_test_permute_4d_fixed_w"     "$DM_TEST_DIR/test_permute.py::test_permute_4d_fixed_w" -k 'not sharded'
+run_pytest "dm_test_permute_4d_cn"          "$DM_TEST_DIR/test_permute.py::test_permute_4d_cn" -k 'not sharded'
+run_pytest "dm_test_permute_4d_cnwh"        "$DM_TEST_DIR/test_permute.py::test_permute_4d_cnwh" -k 'not sharded'
+run_pytest "dm_test_permute_4d_wh"          "$DM_TEST_DIR/test_permute.py::test_permute_4d_wh" -k 'not sharded'
+run_pytest "dm_test_permute_5d"             "$DM_TEST_DIR/test_permute.py::test_permute_5d" -k 'not sharded'
+run_pytest "dm_test_permute_5d_wyh"         "$DM_TEST_DIR/test_permute.py::test_permute_5d_wyh" -k 'not sharded'
+run_pytest "dm_test_permute_5d_xh_pad"      "$DM_TEST_DIR/test_permute.py::test_permute_5d_xh_pad" -k 'not sharded'
+run_pytest "dm_test_permute_5d_tiled_basic" "$DM_TEST_DIR/test_permute.py::test_permute_5d_tiled_basic"
+run_pytest "dm_test_permute_5d_tiled_swap"  "$DM_TEST_DIR/test_permute.py::test_permute_5d_tiled_swap"
+run_pytest "dm_test_permute_8d_swapped"     "$DM_TEST_DIR/test_permute.py::test_permute_8d_swapped" -k 'not sharded'
+run_pytest "dm_test_permutations_5d_fixed_w" "$DM_TEST_DIR/test_permute.py::test_permutations_5d_fixed_w" -k 'not sharded'
+run_pytest "dm_test_permute_squeeze"        "$DM_TEST_DIR/test_permute.py::test_permute_squeeze"
+run_pytest "dm_test_permute_identity"       "$DM_TEST_DIR/test_permute.py::test_permute_identity" -k 'not sharded'
+run_pytest "dm_test_permute_for_specific"   "$DM_TEST_DIR/test_permute.py::test_permute_for_specific_case"
+run_pytest "dm_test_permute_4d_smaller_tup" "$DM_TEST_DIR/test_permute.py::test_permute_on_4D_tensor_with_smaller_tuple_size"
+run_pytest "dm_test_nil_volume_permute"     "$DM_TEST_DIR/test_permute.py::test_nil_volume_permute"
+run_pytest "dm_test_transpose_wh_uint32"    "$DM_TEST_DIR/test_permute.py::test_transpose_wh_tiled_uint32"
+
 # test_tosa_gather: 6/10 small-C shapes pass. C >= 96 (multi-tile C-dim)
 # gathers diverge — likely a multi-tile gather kernel issue, deferred.
 # --deselect IDs must be rootdir-relative (the form pytest reports). Using
