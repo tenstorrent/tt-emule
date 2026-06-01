@@ -366,6 +366,32 @@ kernel only included `compute_kernel_api.h` (not trigonometry.h), and emule's
 `compute_kernel_api.h` was missing `tanh_tile`. Fix: add `tanh_tile` to
 `compute_kernel_api.h` (upstream defines it there as a catch-all).
 
+## Stateful ops & `first` flag — confirm the shim is even used
+
+A shim file's existence doesn't imply ttnn uses it. The host op may
+preprocess inputs (permute, reshape) so a *different* kernel chain runs.
+
+**Worked example (round 6 Cat D):** `cumsum.h` defines `cumsum_tile(idst,
+first)` matching upstream. The actual `ttnn.cumsum` op:
+
+1. Host-side: permutes the cumsum axis to dim 0
+   (`accumulation_common.cpp:43-50`), reshapes to 4D, then sends to the
+   compute kernel.
+2. Compute kernel `accumulation_compute.cpp` doesn't call `cumsum_tile` —
+   it uses `add_binary_tile(DST_IN, DST_ACC, DST_ACC)` per tile in a
+   cross-tile loop. The shim file was never reached.
+3. PCC failures came from the wider chain (likely permute or tile-padding
+   handling on small shapes), not from `cumsum_tile`.
+
+**Diagnostic:** before debugging a stateful-op shim's math, dump the JIT
+wrapper (`TT_EMULE_KEEP_JIT_SRC=1`), grep the kept `patched_kernel.cpp`
+for the shim function name. If it's not there, the failure is upstream
+of your shim — chase the actual primitives the kernel does call.
+
+For ops that DO use stateful per-tile primitives (like `dropout_tile` —
+PRNG state survives across calls), the `thread_local` accumulator pattern
+from `dropout.h` is correct. But verify before assuming.
+
 ## Anti-patterns (consolidated)
 
 1. **Don't read host code.** `tt_metal/llrt/`, `tt_metal/impl/dispatch/`,
