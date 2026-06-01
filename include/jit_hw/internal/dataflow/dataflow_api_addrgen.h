@@ -12,10 +12,15 @@
 
 // Bank mapping arrays — populated by emulated_program_runner.cpp, resolved at dlopen.
 // Declared with C++ linkage (matching firmware declarations in dataflow_api_common.h).
-extern uint16_t dram_bank_to_noc_xy[2][32];
-extern int32_t bank_to_dram_offset[32];
-extern uint16_t l1_bank_to_noc_xy[2][32];
-extern int32_t bank_to_l1_offset[32];
+// Sized via JIT defines (NUM_DRAM_BANKS / NUM_L1_BANKS) so we match upstream's
+// `dataflow_api_common.h` extern declarations exactly — multiple-extern type-
+// mismatch errors fire otherwise.  Runtime backing storage in
+// `tt_metal/impl/emulation/emulated_program_runner.cpp` is sized by
+// MAX_NUM_BANKS (256, oversized).
+extern uint16_t dram_bank_to_noc_xy[2][NUM_DRAM_BANKS];
+extern int32_t bank_to_dram_offset[NUM_DRAM_BANKS];
+extern uint16_t l1_bank_to_noc_xy[2][NUM_L1_BANKS];
+extern int32_t bank_to_l1_offset[NUM_L1_BANKS];
 
 // Core coordinates (set per kernel thread by program runner).
 extern thread_local uint8_t my_x[2];

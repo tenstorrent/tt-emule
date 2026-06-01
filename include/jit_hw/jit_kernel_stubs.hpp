@@ -68,11 +68,13 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
 #endif
 
 // Bank mapping arrays — populated by emulated_program_runner, resolved at dlopen.
-// Match firmware declarations from dataflow_api_common.h / firmware_common.h.
-extern uint16_t dram_bank_to_noc_xy[2][32];
-extern int32_t bank_to_dram_offset[32];
-extern uint16_t l1_bank_to_noc_xy[2][32];
-extern int32_t bank_to_l1_offset[32];
+// Match firmware declarations from dataflow_api_common.h / firmware_common.h —
+// sized by the same NUM_*_BANKS JIT defines so multi-extern type-mismatch
+// errors don't fire when this header and dataflow_api_addrgen.h coexist.
+extern uint16_t dram_bank_to_noc_xy[2][NUM_DRAM_BANKS];
+extern int32_t bank_to_dram_offset[NUM_DRAM_BANKS];
+extern uint16_t l1_bank_to_noc_xy[2][NUM_L1_BANKS];
+extern int32_t bank_to_l1_offset[NUM_L1_BANKS];
 
 // Per-core NOC coordinates (set per kernel thread by program runner).
 extern thread_local uint8_t my_x[2];
