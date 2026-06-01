@@ -9,4 +9,7 @@
 
 #define DEVICE_PRINT(format, ...)
 #define DEVICE_PRINT_UNPACK(format, ...)
+#define DEVICE_PRINT_MATH(format, ...)
 #define DEVICE_PRINT_PACK(format, ...)
+#define DEVICE_PRINT_DATA0(format, ...)
+#define DEVICE_PRINT_DATA1(format, ...)

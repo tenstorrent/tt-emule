@@ -261,6 +261,17 @@ inline constexpr bool has_get_noc_addr_v<
     T, std::void_t<decltype(std::declval<T>().get_noc_addr(
            std::declval<uint32_t>(), std::declval<uint32_t>(), std::declval<uint8_t>()))>> = true;
 
+// Free-function get_noc_addr(page_id, accessor) — forwards to the accessor's
+// method form. Required by upstream kernel-lib helpers (e.g.
+// `embedding/device/kernels/dataflow/embeddings_common.hpp::get_token_noc_addr`)
+// that pass a TensorAccessor directly into a free `get_noc_addr` call.
+template <typename AddrGen,
+          typename = std::enable_if_t<has_get_noc_addr_v<AddrGen>>>
+inline uint64_t get_noc_addr(uint32_t page_id, const AddrGen& accessor,
+                             uint32_t offset = 0, uint8_t noc = 0) {
+    return accessor.get_noc_addr(page_id, offset, noc);
+}
+
 template <typename, typename = void>
 inline constexpr bool has_page_size_v = false;
 template <typename T>
@@ -428,6 +439,32 @@ inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
                 (unsigned long long)dst_noc_addr, my_x[0], my_y[0],
                 __emule_logical_x, __emule_logical_y);
     }
+}
+
+// ---- Single-packet + templated aliases ----
+// On real hardware these are fast-path variants for transfers ≤ NOC_MAX_BURST_SIZE
+// that elide the multi-packet command-buffer split. In emule, all NOC ops are
+// synchronous memcpy regardless of size, so these alias to the non-templated form.
+// Required by `ttnn/cpp/ttnn/operations/data_movement/common/kernels/common.hpp`
+// (used by tt::data_movement::common::enhanced_noc_async_{read,write} +
+// tt_memmove<>, which select the variant via `max_transfer_size` template arg).
+inline void noc_async_read_one_packet(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
+                                      uint32_t size, uint8_t noc = 0) {
+    noc_async_read(src_noc_addr, dst_local_l1_addr, size, noc);
+}
+inline void noc_async_write_one_packet(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
+                                       uint32_t size, uint8_t noc = 0) {
+    noc_async_write(src_local_l1_addr, dst_noc_addr, size, noc);
+}
+template <uint32_t max_page_size>
+inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr, uint32_t size,
+                           uint8_t noc = 0, uint32_t vc = 0) {
+    noc_async_read(src_noc_addr, dst_local_l1_addr, size, noc, vc);
+}
+template <uint32_t max_page_size>
+inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr, uint32_t size,
+                            uint8_t noc = 0, uint32_t vc = 0) {
+    noc_async_write(src_local_l1_addr, dst_noc_addr, size, noc, vc);
 }
 
 // ---- Multicast write ----

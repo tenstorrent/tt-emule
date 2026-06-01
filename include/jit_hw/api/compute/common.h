@@ -15,6 +15,7 @@
 #include "jit_hw/api/cb_api.h"
 #include "jit_hw/api/compute/common_globals.h"
 #include "jit_hw/api/compute/nfaces.h"
+#include "jit_hw/api/compute/bfp8.h"
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
@@ -56,6 +57,19 @@ enum class MathFidelity : uint8_t { LoFi = 0, HiFi2 = 2, HiFi3 = 3, HiFi4 = 4 };
 #endif
 
 enum class ReluType { NO_RELU, ZERO_RELU, MIN_THRESHOLD_RELU, MAX_THRESHOLD_RELU };
+
+// p_dim_stride_target: reconfig behaviour for dim and stride. Defined upstream
+// at tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_unpack_common.h:25. Used
+// as a template arg on llk_unpack_reconfig_data_format_* (LLK functions emule
+// stubs as no-ops). reduce_helpers_compute.inl in upstream references
+// `p_dim_stride_target::IGNORE` directly, so the enum must be in scope when
+// that .inl is parsed by any kernel that pulls it in (softmax, moreh_dot,
+// etc.). Placed at global scope (not inside `ckernel`) to match upstream's
+// usage `p_dim_stride_target::IGNORE`.
+enum class p_dim_stride_target {
+    IGNORE,         // do not modify dim/stride
+    FACE_ROW_MAJOR  // set dim/stride for unpacking face in row-major format
+};
 
 // DST_ACCUM_MODE: On real device, this is a compile-time integer define.
 // In emulation, provide it as a constexpr if not already defined as a macro.
@@ -174,9 +188,44 @@ inline bool cb_is_32bit_format(uint32_t cb_id) {
     return __emule_cbs[cb_id].page_size > 2048;
 }
 
+// Is this CB using Bfp8_b? Bfp8_b tile = 64 face-row exponents + 1024
+// mantissa bytes = 1088 bytes for a 32x32 tile. Any positive page size below
+// the bf16 size (2048) is Bfp8_b on Wormhole-class architectures; we encode
+// the constraint as a half-open range to leave room for future smaller-tile
+// configurations without changing the predicate's intent.
+inline bool cb_is_bfp8_b_format(uint32_t cb_id) {
+    const uint32_t ps = __emule_cbs[cb_id].page_size;
+    return ps > 0 && ps < 2048;
+}
+
 // pack_dst_to_buf: PACK row-major DST → nfaces CB with L1 accumulation support.
 // When __emule_l1_acc_enabled, adds DST to existing CB contents instead of overwriting.
 inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
+    if (cb_is_bfp8_b_format(ocb)) {
+        // Bfp8_b: iterate in nfaces order so each face-row of 16 contiguous
+        // mantissa bytes shares one exponent byte. DST is row-major fp32.
+        // Mapping: nfaces index → row-major index uses the same LUT every
+        // other compute primitive does, just inverted (here we *consume*
+        // row-major DST and write nfaces output, so we look up the row-major
+        // index for each nfaces position).
+        uint8_t* exp_base  = buf;          // 64 face-row exponents
+        uint8_t* mant_base = buf + 64;     // 1024 mantissa bytes (face-major)
+        for (uint32_t fr = 0; fr < 64; ++fr) {
+            float row16[16];
+            for (uint32_t k = 0; k < 16; ++k) {
+                const uint32_t ni = fr * 16 + k;
+                const uint32_t rm = __emule_nfaces::nfaces_to_rowmajor[ni];
+                row16[k] = __emule_dst[dst_slot][rm];
+            }
+            uint8_t mant_row[16];
+            __emule_bfp8::encode_face_row(row16, exp_base[fr], mant_row);
+            std::memcpy(&mant_base[fr * 16], mant_row, 16);
+        }
+        // L1 accumulation for Bfp8_b is rare and would require decoding the
+        // existing tile, adding DST, then re-encoding — defer until a test
+        // exposes the path (op-bring-up skill convention).
+        return;
+    }
     if (cb_is_32bit_format(ocb)) {
         uint32_t n = cb_page_size(ocb) / sizeof(uint32_t);
         if (n > __EMULE_TILE_ELEMS) n = __EMULE_TILE_ELEMS;
@@ -310,9 +359,10 @@ ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
         __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++), idst, ocb);
 }
 
-// pack_tile (templated): used by D2M-generated code.
-// Template param <true> means "use output_offset as the write slot index".
-template <bool UseOutputOffset>
+// pack_tile (templated 3-arg form). Default `false` matches upstream's
+// `out_of_order_output = false` (llk_pack_common_api.h:70-74): the explicit
+// offset is ignored, slot auto-advances. `<true>` honours the offset.
+template <bool UseOutputOffset = false>
 ALWI void pack_tile(uint32_t idst, uint32_t ocb, uint32_t output_offset = 0) {
     __emule_dst_check(idst, "pack_tile<templated>");
     if constexpr (UseOutputOffset) {
@@ -338,6 +388,16 @@ ALWI void pack_tile_block(uint32_t ifrom_dst, uint32_t ocb, uint32_t ntiles) {
 // bf16 (page_size ≤ 2048) or raw 32-bit (page_size > 2048).
 inline void __emule_unpack_cb_tile_to(uint32_t icb, uint32_t itile, float* out) {
     uint8_t* buf = __emule_compute::cb_read_ptr_at(icb, itile);
+    if (__emule_compute::cb_is_bfp8_b_format(icb)) {
+        // Bfp8_b: UNPACK nfaces→row-major + decode shared exponent + 7-bit
+        // raw mantissa to fp32. Decoder is symmetric with pack_dst_to_buf's
+        // Bfp8_b branch.
+        const uint32_t n = __EMULE_TILE_ELEMS;
+        for (uint32_t i = 0; i < n; i++) {
+            out[i] = __emule_bfp8::to_f32(buf, __emule_nfaces::rowmajor_to_nfaces[i]);
+        }
+        return;
+    }
     if (__emule_compute::cb_is_32bit_format(icb)) {
         // 32-bit format: UNPACK nfaces→row-major.
         // Use memcpy per element to preserve INT32 bit patterns (small positive
@@ -389,6 +449,8 @@ ALWI void copy_tile_to_dst_init_short_with_dt(uint32_t, uint32_t, uint32_t = 0) 
 // ---- Reconfig operations (no-ops) ----
 ALWI void reconfig_data_format(uint32_t) {}
 ALWI void reconfig_data_format(uint32_t, uint32_t) {}
+// 4-arg form: (srca_old, srca_new, srcb_old, srcb_new). No-op.
+ALWI void reconfig_data_format(uint32_t, uint32_t, uint32_t, uint32_t) {}
 template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
 ALWI void reconfig_data_format_srca(uint32_t) {}
 template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>

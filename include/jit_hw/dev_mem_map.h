@@ -27,8 +27,12 @@ constexpr uint32_t NUM_DM_CORES = 8;
 // constexpr (not #define) so we don't accidentally shadow the upstream
 // dev_mem_map.h declarations if jit_hw is ever linked into a target that also
 // pulls in the real headers.
+// MEM_ZEROS_SIZE is typed `int` to match upstream's `#define MEM_ZEROS_SIZE 512`
+// (which defaults to int). full_kernel_common.hpp's `std::min(bytes, MEM_ZEROS_SIZE)`
+// where `bytes` is `int` reports a deduction ambiguity if MEM_ZEROS_SIZE is
+// `uint32_t` here.
 #ifndef MEM_ZEROS_SIZE
-constexpr uint32_t MEM_ZEROS_SIZE = 512;
+constexpr int MEM_ZEROS_SIZE = 512;
 #endif
 #ifndef MEM_ZEROS_BASE
 constexpr uint32_t MEM_ZEROS_BASE = 0xFFE00;  // 1 MiB - 512 bytes
