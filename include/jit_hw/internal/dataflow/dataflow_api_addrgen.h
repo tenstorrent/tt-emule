@@ -184,6 +184,29 @@ struct InterleavedPow2AddrGen {
     }
 };
 
+// InterleavedPow2AddrGenFast — pow2-page variant of InterleavedAddrGenFast.
+// Used by sharded-CCL kernels (e.g. ttnn/cpp/ttnn/operations/ccl/kernel_common/
+// sharding_addrgen.hpp line 345) when KERNEL_BUILD is defined and the
+// `get_contiguous_noc_addr(id, InterleavedPow2AddrGenFast<>)` overload is
+// reachable from the include chain.
+template <bool DRAM>
+struct InterleavedPow2AddrGenFast {
+    static constexpr bool is_dram = DRAM;
+    uint32_t bank_base_address;
+    const uint32_t log_base_2_of_page_size;
+
+    inline uint64_t get_noc_addr(const uint32_t id, const uint32_t offset = 0, uint8_t noc = 0) const {
+        uint32_t bank_offset_index = interleaved_addr_gen::get_bank_offset_index<DRAM>(id);
+        uint32_t bank_index = interleaved_addr_gen::get_bank_index<DRAM>(id, bank_offset_index);
+        uint32_t page_size = 1u << log_base_2_of_page_size;
+        uint32_t aligned = align_power_of_2(page_size, interleaved_addr_gen::get_allocator_alignment<DRAM>());
+        uint32_t addr = (bank_offset_index * aligned) + bank_base_address + offset +
+                        interleaved_addr_gen::get_bank_offset<DRAM>(bank_index);
+        uint32_t noc_xy = interleaved_addr_gen::get_noc_xy<DRAM>(bank_index, noc);
+        return get_noc_addr_helper(noc_xy, addr);
+    }
+};
+
 // InterleavedAddrGenFast — matches real firmware (simplified: same as InterleavedAddrGen).
 template <bool DRAM, uint32_t tile_hw = 1024>
 struct InterleavedAddrGenFast {
