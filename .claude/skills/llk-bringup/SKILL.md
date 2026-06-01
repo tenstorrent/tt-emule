@@ -241,6 +241,12 @@ Hard cap: **3 iterations per shim**. Past that, defer with a written note.
 
 When PCC fails, check in order:
 
+0. **Verify upstream signatures literally before anything else.** Open the
+   upstream header (`tt_metal/hw/inc/api/compute/eltwise_unary/<name>.h`) and
+   compare the `<name>_tile` signature byte-for-byte against the emule shim.
+   Sub-agents' inline notes about parameter ordering can be wrong; the
+   committed upstream code is the source of truth.
+
 1. **Polynomial approximation gap**. `<cmath>` ≠ upstream LLK. Read
    `tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_sfpu/ckernel_sfpu_<name>.h`
    for the actual coefficients. Port them.
