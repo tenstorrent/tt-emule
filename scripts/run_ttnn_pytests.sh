@@ -160,9 +160,7 @@ run_pytest "bf_test_to_and_from_device"    "$BF_TEST_DIR/test_to_and_from_device
 run_pytest "bf_test_graph_trace_utils"     "$BF_TEST_DIR/test_graph_trace_utils.py" \
     -k 'not test_no_dispatch_vs_normal_mode_comparison and not test_normal_mode_shows_real_addresses'
 
-# pytest -k can't match `=`/`.` in parametrize names, so the SIGFPE variant
-# is dropped via --deselect (rootdir-relative nodeid — absolute path doesn't
-# match, verified locally).
+# pytest -k can't match `=`/`.` in parametrize names
 run_pytest "bf_test_graph_capture"         "$BF_TEST_DIR/test_graph_capture.py" \
     -k 'not test_program_cache_invalidation_across_dispatch_modes' \
     --deselect 'tests/ttnn/unit_tests/base_functionality/test_graph_capture.py::test_graph_capture[mode=RunMode.NORMAL-size=64-scalar=3]'
@@ -185,43 +183,21 @@ run_pytest "bf_test_to_layout"             "$BF_TEST_DIR/test_to_layout.py" \
 run_pytest "bf_test_to_memory_config"      "$BF_TEST_DIR/test_to_memory_config.py" \
     -k '(test_to_memory_config_block_sharded or test_to_memory_config_rm_interleaved_to_legacy_2D_sharded_large_row or test_to_memory_config_uint16) or (test_to_memory_config and not test_to_memory_config_)'
 
-# `test_copy_uint16` substring also matches the failing
-# `test_copy_uint16_to_memory_config`; explicit exclusion handles it.
 run_pytest "bf_test_copy"                  "$BF_TEST_DIR/test_copy.py" \
     -k '((test_copy_rm_interleaved_to_legacy_2D_sharded_large_row or test_copy_uint16) and not test_copy_uint16_to_memory_config) or (test_copy and not test_copy_)'
 
-# indexed_fill: HEIGHT_SHARDED L1 tests that pass with current emule.
-# B4/B2 excluded: program factory missing mode CTA arg causes TensorAccessorArgs static_assert.
-# tile_layout/dim tests excluded: compute_uniform.cpp needs pack_tile 3-arg (fixed in common.h).
-# block_sharded excluded: cb_reserve_back overflow due to same program factory regression.
 run_pytest "dm_test_indexed_fill_sharded"   "$DM_TEST_DIR/test_indexed_fill.py::test_indexed_fill_sharded" -k 'B8-b3-D64 or B6-b4-D128'
 
-# reduce/test_sum: test_sum function only (192 parametrizations all pass).
-# test_sum_global excluded: BF16 multi-tile accumulation (batch_size=16)
-# has a numeric gap unrelated to the reduce LLK shims.
-# test_sum_4d/nd_shard/subcores excluded: untested.
 run_pytest "reduce_test_sum" "$REDUCE_TEST_DIR/test_sum.py" -k 'test_sum and not test_sum_global and not test_sum_4d and not test_sum_nd_shard and not test_sum_subcores'
 
-# test_tilize: only test_tilize_fp32_truncation passes cleanly today (4/4 PASS).
-# Other variants fail on sharded TensorAccessor (40+), bfp4 conversion, or large-row PCC —
-# all out of scope for routine LLK bring-up.
 run_pytest "dm_test_tilize_fp32_truncation" "$DM_TEST_DIR/test_tilize.py" -k 'test_tilize_fp32_truncation'
 
-# test_tilizer: single bfloat16 -> bfloat8_b device tilizer test; 1/1 PASS.
 run_pytest "dm_test_tilizer" "$DM_TEST_DIR/test_tilizer.py"
 
-# test_dropout: 2/2 pass with the new emule dropout shim
-# (jit_hw/api/compute/eltwise_unary/dropout.h, xorshift32 PRNG).
 run_pytest "dm_test_dropout" "$DM_TEST_DIR/test_dropout.py"
 
-# test_reallocate: DRAM-interleaved and sharded variants all pass (17/17 with
-# this filter). L1-interleaved with num_allocs in {2,3,4} fails — multi-alloc L1
-# allocation tracking gap, deferred separately.
 run_pytest "dm_test_reallocate" "$DM_TEST_DIR/test_reallocate.py" -k 'DRAM or sharded'
 
-# test_creation: additional functions cleanly pass post-DRAM-fix.
-# test_arange is the bulk (177 cases); the *_like functions are small.
-# `-k 'not sharded'` filters out sharded variants in those that have them.
 run_pytest "dm_test_creation_arange"      "$DM_TEST_DIR/test_creation.py::test_arange" -k 'not sharded'
 run_pytest "dm_test_creation_full_with_opt"   "$DM_TEST_DIR/test_creation.py::test_full_with_opt_tensor" -k 'not sharded'
 run_pytest "dm_test_creation_full_like"   "$DM_TEST_DIR/test_creation.py::test_full_like" -k 'not sharded'
@@ -233,8 +209,6 @@ run_pytest "dm_test_creation_zeros_bfp8"  "$DM_TEST_DIR/test_creation.py::test_z
 run_pytest "dm_test_creation_zeros_bfp4"  "$DM_TEST_DIR/test_creation.py::test_zeros_bfp4" -k 'not sharded'
 run_pytest "dm_test_creation_full_like_opt_rm" "$DM_TEST_DIR/test_creation.py::test_full_like_opt_tensor" -k 'ROW_MAJOR'
 
-# Round 5 — eltwise activations + SFPU ops unblocked by Wave 1/1b shim writes.
-# Each is the strictly-passing subset of its test function.
 run_pytest "elt_test_hardtanh"        "$ELT_TEST_DIR/test_activation.py::test_hardtanh"
 run_pytest "elt_test_log_sigmoid"     "$ELT_TEST_DIR/test_activation.py::test_log_sigmoid"
 run_pytest "elt_test_threshold"       "$ELT_TEST_DIR/test_activation.py::test_threshold"
@@ -245,8 +219,6 @@ run_pytest "elt_test_elu_allclose"    "$ELT_TEST_DIR/test_elu.py::test_elu_allcl
 run_pytest "elt_test_elu_arange_mask" "$ELT_TEST_DIR/test_elu.py::test_elu_arange_masking"
 run_pytest "elt_test_i1_zero"         "$ELT_TEST_DIR/test_unary_i1.py::test_i1_zero"
 
-# Round 5 Wave 2 — fused softmax and reductions unblocked by the new softmax,
-# cumsum, cumprod, mask, reshuffle, welford shims under include/jit_hw/api/compute/.
 run_pytest "fused_test_large_fill_softmax"     "$FUSED_TEST_DIR/test_softmax.py::test_large_fill_softmax"
 run_pytest "fused_test_softmax_accuracy"       "$FUSED_TEST_DIR/test_softmax.py::test_softmax_accuracy"
 run_pytest "fused_test_softmax_stable_neg"     "$FUSED_TEST_DIR/test_softmax.py::test_softmax_stable_neg_values"
@@ -259,8 +231,6 @@ run_pytest "reduce_test_cumprod_backward"      "$REDUCE_TEST_DIR/test_cumprod.py
 run_pytest "reduce_test_cumprod_failing"       "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_failing_cases"
 run_pytest "reduce_test_cumsum_failing"        "$REDUCE_TEST_DIR/test_cumsum.py::test_cumsum_failing_cases"
 
-# Round 5 Wave 3 — wins via the new quantization/xielu/hardmish/digamma/polygamma
-# shims and the celu/hardshrink/softshrink additions to activations.h.
 run_pytest "elt_test_celu_allclose"   "$ELT_TEST_DIR/test_celu_21f.py::test_celu_allclose"
 run_pytest "elt_test_celu_arange"     "$ELT_TEST_DIR/test_celu_21f.py::test_celu_arange"
 run_pytest "elt_test_scalarB_hardshrink" "$ELT_TEST_DIR/test_activation.py::test_scalarB_hardshrink"
@@ -269,24 +239,16 @@ run_pytest "elt_test_xielu"           "$ELT_TEST_DIR/test_activation.py::test_xi
 run_pytest "elt_test_digamma"         "$ELT_TEST_DIR/test_math.py::test_digamma"
 run_pytest "elt_test_polygamma"       "$ELT_TEST_DIR/test_math.py::test_polygamma"
 
-# Round 6 Cat F — composed ops (hardswish/swish/tanhshrink). These decompose
-# in-kernel to primitives we already have; the tanh_tile addition to
-# compute_kernel_api.h unblocked tanhshrink (which composes tanh + sub_binary).
 run_pytest "elt_test_hardswish"   "$ELT_TEST_DIR/test_activation.py::test_hardswish"
 run_pytest "elt_test_swish"       "$ELT_TEST_DIR/test_activation.py::test_swish"
 run_pytest "elt_test_tanhshrink"  "$ELT_TEST_DIR/test_activation.py::test_tanhshrink"
 
-# Round 6 Cat B — i1 fully unblocked by porting upstream's two-region
-# rational+asymptotic polynomial (was std::cyl_bessel_i). 14/14 PASS.
 run_pytest "elt_test_i1_clamp"    "$ELT_TEST_DIR/test_unary_i1.py::test_i1_clamp_boundary"
 run_pytest "elt_test_i1_ood"      "$ELT_TEST_DIR/test_unary_i1.py::test_i1_ood"
 run_pytest "elt_test_i1_range"    "$ELT_TEST_DIR/test_unary_i1.py::test_i1_range"
 
-# test_concat_size_switches: single-case program-cache regression test.
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
 
-# test_pad: per-function entries. test_pad and test_pad_back_to_back fail in some
-# variants; the entries below are the strictly-100%-pass subset (379 cases).
 run_pytest "dm_test_pad_tile"               "$DM_TEST_DIR/test_pad.py::test_pad_tile" -k 'not sharded and not sub_core'
 run_pytest "dm_test_pad_rm"                 "$DM_TEST_DIR/test_pad.py::test_pad_rm" -k 'not sharded and not sub_core'
 run_pytest "dm_test_pad_rm_small_to_large"  "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width" -k 'not sharded'
@@ -296,9 +258,6 @@ run_pytest "dm_test_pad_pc_hit_updates"     "$DM_TEST_DIR/test_pad.py::test_pad_
 run_pytest "dm_test_pad_validation_front"   "$DM_TEST_DIR/test_pad.py::test_pad_padding_validation_front_pad_not_supported"
 run_pytest "dm_test_pad_validation_length"  "$DM_TEST_DIR/test_pad.py::test_pad_padding_validation_length"
 
-# test_permute: per-function entries that pass uniformly (279 cases).
-# test_permute, test_transpose, test_permute_3D, test_permute_5d_width, and
-# several other permute variants have partial pass and are deferred.
 run_pytest "dm_test_permute_4d_fixed_w"     "$DM_TEST_DIR/test_permute.py::test_permute_4d_fixed_w" -k 'not sharded'
 run_pytest "dm_test_permute_4d_cn"          "$DM_TEST_DIR/test_permute.py::test_permute_4d_cn" -k 'not sharded'
 run_pytest "dm_test_permute_4d_cnwh"        "$DM_TEST_DIR/test_permute.py::test_permute_4d_cnwh" -k 'not sharded'
@@ -317,15 +276,8 @@ run_pytest "dm_test_permute_4d_smaller_tup" "$DM_TEST_DIR/test_permute.py::test_
 run_pytest "dm_test_nil_volume_permute"     "$DM_TEST_DIR/test_permute.py::test_nil_volume_permute"
 run_pytest "dm_test_transpose_wh_uint32"    "$DM_TEST_DIR/test_permute.py::test_transpose_wh_tiled_uint32"
 
-# test_untilize: of ~15 functions, only test_untilize_same_volume_different_shapes
-# is uniformly passing (8/8). nd_shard_to_same_shard_spec_uneven_input_shard_spec
-# is 32/36 but the 4 failures (shard_core_grid 3x3) don't have a clean pytest -k
-# discriminator. Other functions fail on multicore-interleaved corner cases.
 run_pytest "dm_test_untilize_same_volume"   "$DM_TEST_DIR/test_untilize.py::test_untilize_same_volume_different_shapes"
 
-# reduce: per-function entries that uniformly pass.
-# test_mean and test_min are the bulk; mean has 128+ cases across dims.
-# test_std, test_prod, test_var, test_sum_{3..8}d are partial-pass / mostly-fail, deferred.
 run_pytest "reduce_test_mean"               "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean"                  -k 'not sharded'
 run_pytest "reduce_test_mean_2d"            "$REDUCE_TEST_DIR/test_reduction.py::test_mean_2d_tensor_dims"   -k 'not sharded'
 run_pytest "reduce_test_mean_3d"            "$REDUCE_TEST_DIR/test_reduction.py::test_mean_3d_tensor_dims"   -k 'not sharded'
@@ -337,31 +289,16 @@ run_pytest "reduce_test_min_global"         "$REDUCE_TEST_DIR/test_reduction_min
 run_pytest "reduce_test_sum_2d"             "$REDUCE_TEST_DIR/test_reduction.py::test_sum_2d_tensor_dims"         -k 'not sharded'
 run_pytest "reduce_test_torch_compat"       "$REDUCE_TEST_DIR/test_reduction.py::test_torch_compatibility"
 
-# test_tosa_gather: 6/10 small-C shapes pass. C >= 96 (multi-tile C-dim)
-# gathers diverge — likely a multi-tile gather kernel issue, deferred.
-# --deselect IDs must be rootdir-relative (the form pytest reports). Using
-# $DM_TEST_DIR (absolute) prefix here silently fails to deselect.
 run_pytest "dm_test_tosa_gather" "$DM_TEST_DIR/test_tosa_gather.py" \
     --deselect "tests/ttnn/unit_tests/operations/data_movement/test_tosa_gather.py::test_tosa_gather_general[N=128-K=64-C=128-W=32]" \
     --deselect "tests/ttnn/unit_tests/operations/data_movement/test_tosa_gather.py::test_tosa_gather_general[N=2-K=32-C=96-W=32]" \
     --deselect "tests/ttnn/unit_tests/operations/data_movement/test_tosa_gather.py::test_tosa_gather_general[N=64-K=128-C=256-W=128]" \
     --deselect "tests/ttnn/unit_tests/operations/data_movement/test_tosa_gather.py::test_tosa_gather_general[N=128-K=128-C=128-W=64]"
 
-# reduce/test_max: all 228 parametrizations across test_max, test_max_4d,
-# test_max_2d, test_max_global, test_max_dim pass cleanly with no filter.
 run_pytest "reduce_test_max" "$REDUCE_TEST_DIR/test_max.py"
 
-# matmul/test_linear: only the two non-sharded, non-broadcast-bias functions
-# pass uniformly today (17/17). The other 19 functions fail on dram-sharded,
-# width-sharded, bias-broadcast/batched, or core-grid configs that emule
-# doesn't model — separate from routine LLK bring-up.
 run_pytest "matmul_test_linear" "$MATMUL_TEST_DIR/test_linear.py" -k 'test_linear_fp32_acc or test_vector_linear'
 
-# matmul/test_addmm: only the four input-validation/negative tests pass
-# uniformly (4/4). The parametric tests (square_matrices, alpha_beta,
-# rectangular_matrices, etc.) have ~4.5% pass rate today — primarily small
-# matrix-size PCC sensitivity and dtype coverage gaps that need a separate
-# investigation, not routine LLK bring-up.
 run_pytest "matmul_test_addmm" "$MATMUL_TEST_DIR/test_addmm.py" \
     -k 'test_alpha_zero_should_throw_error or test_input_tensor_with_invalid_shape or test_unsupported_dtype_should_throw_error'
 
