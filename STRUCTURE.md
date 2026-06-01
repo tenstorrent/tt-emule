@@ -82,6 +82,8 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/compute_kernel_api.h` — `ckernel::` `square_tile`/`sigmoid_tile`/`sign_tile`/`signbit_tile`/`silu_tile`/`log_tile`/`exp2_tile`/`expm1_tile`/`power_tile` (+`_init`), `sfpu_reduce_init`, `topk_tile_init`; `namespace __emule_topk`; `struct RowView`
 - `include/jit_hw/api/compute/compute_kernel_hw_startup.h` — `compute_kernel_hw_startup` (2-arg + 3-arg)
 - `include/jit_hw/api/compute/copy_dest_values.h` — `copy_block` (global scope); `ckernel::` `copy_dest_values`, `copy_dest_values_init`
+- `include/jit_hw/api/compute/cumprod.h` — `ckernel::` `cumprod_tile`, `cumprod_tile_init`; TLS `__emule_cumprod_acc`/`__emule_cumprod_acc_initialized`, `__emule_cumprod_reset_acc`
+- `include/jit_hw/api/compute/cumsum.h` — `ckernel::` `cumsum_tile`, `cumsum_tile_init`; TLS `__emule_cumsum_acc`
 - `include/jit_hw/api/compute/div_int32_floor.h` — `ckernel::` `div_int32_floor_tile`, `div_int32_trunc_tile` (+`_init`)
 - `include/jit_hw/api/compute/div_int32_sfpu.h` — `ckernel::` `div_int32_tile`, `div_int32_tile_init`
 - `include/jit_hw/api/compute/eltwise_binary.h` — `ckernel::` `add_tiles_init`, `sub_tiles_init`, `mul_tiles_init`
@@ -89,6 +91,8 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/gcd.h` — `ckernel::` `gcd_tile`, `gcd_tile_init`
 - `include/jit_hw/api/compute/isclose.h` — `ckernel::` `isclose_binary_tile`, `isclose_binary_tile_init`
 - `include/jit_hw/api/compute/lcm.h` — `ckernel::` `lcm_tile`, `lcm_tile_init`
+- `include/jit_hw/api/compute/logsigmoid.h` — `ckernel::` `logsigmoid_tile` (3-arg in0/in1/out), `logsigmoid_tile_init`
+- `include/jit_hw/api/compute/mask.h` — `ckernel::` `mask_tile`, `mask_posinf_tile` (+`_init`)
 - `include/jit_hw/api/compute/matmul.h` — `ckernel::` `matmul_tiles`, `matmul_block`, `mm_init`, `mm_block_init`; `EMULE_MATMUL_USE_AVX2`
 - `include/jit_hw/api/compute/mul_int_sfpu.h` — `ckernel::` `mul_int_tile`, `mul_int_tile_init`
 - `include/jit_hw/api/compute/nfaces.h` — `namespace __emule_nfaces`: `rowmajor_to_nfaces[]`, `nfaces_to_rowmajor[]` LUTs
@@ -99,42 +103,71 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/reduce.h` — `ckernel::` `reduce_tile`, `reduce_init`; `REDUCE_OP`/`REDUCE_DIM`
 - `include/jit_hw/api/compute/reg_api.h` — `tile_regs_acquire`/`tile_regs_commit`/`tile_regs_wait`/`tile_regs_release`; `ALWI` macro; `__emule_dst_active_tiles`
 - `include/jit_hw/api/compute/remainder_int32.h` — `ckernel::` `remainder_int32_tile`, `remainder_int32_tile_init`
+- `include/jit_hw/api/compute/reshuffle.h` — `ckernel::` `reshuffle_rows_tile`, `reshuffle_rows_tile_init`
+- `include/jit_hw/api/compute/softmax.h` — re-export of `eltwise_unary/exp.h` + `eltwise_unary/recip.h` (no own symbols)
 - `include/jit_hw/api/compute/sub_int_sfpu.h` — `ckernel::` `sub_int_tile`, `rsub_int_tile` (+`_init`)
 - `include/jit_hw/api/compute/tile_move_copy.h` — forwarding shim → `api/compute/common.h`
 - `include/jit_hw/api/compute/tilize.h` — `tilize_block`, `tilize_init`, `fast_tilize_block`, `fast_tilize_init`
 - `include/jit_hw/api/compute/transpose_wh.h` — `ckernel::` `transpose_wh_tile`, `transpose_wh_init`, `copy_tile`
 - `include/jit_hw/api/compute/untilize.h` — `untilize_block`, `untilize_init`, `copy_tile`
 - `include/jit_hw/api/compute/vector_mode.h` — `ckernel::` `enum class VectorMode`
+- `include/jit_hw/api/compute/welford.h` — `ckernel::` `welford_init`, `welford_reinit`, `welford_clear`; TLS `__emule_welford_mean`/`__emule_welford_m2`/`__emule_welford_count`, `__emule_welford_clear`
 - `include/jit_hw/api/compute/xlogy.h` — `ckernel::` `xlogy_binary_tile`, `xlogy_binary_tile_init`
 
 ## include/jit_hw/api/compute/eltwise_unary/
 
 - `include/jit_hw/api/compute/eltwise_unary/activations.h` — `ckernel::` `abs_tile`, `abs_tile_int32`, `hardsigmoid_tile`, `softsign_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/binop_with_scalar.h` — `ckernel::` `add/sub/mul/div/rsub_unary_tile`, `add_unary_tile_int32`, `sub_unary_tile_int32`, `binop_with_scalar_tile_init`
+- `include/jit_hw/api/compute/eltwise_unary/bitwise_and.h` — `ckernel::` `bitwise_and_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/bitwise_not.h` — `ckernel::` `bitwise_not_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/bitwise_or.h` — `ckernel::` `bitwise_or_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/bitwise_xor.h` — `ckernel::` `bitwise_xor_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/cbrt.h` — `ckernel::` `cbrt_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/clamp.h` — `ckernel::` `clamp_tile`, `clamp_tile_int32` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/comp.h` — `ckernel::` `eqz/nez/ltz/lez/gtz/gez_tile`, `unary_eq/ne/lt/le/gt/ge_tile` (+`_init`); `_int32` variants of all, plus `eqz/nez_tile_uint16`/`_uint32`
+- `include/jit_hw/api/compute/eltwise_unary/digamma.h` — `ckernel::` `digamma_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/dropout.h` — `ckernel::` `dropout_tile`, `dropout_kernel_init`; TLS `__emule_dropout_rng_state`, `__emule_dropout_next` (xorshift32)
 - `include/jit_hw/api/compute/eltwise_unary/eltwise_unary.h` — `ckernel::` `init_sfpu`; aggregates eltwise_unary headers
+- `include/jit_hw/api/compute/eltwise_unary/elu.h` — `ckernel::` `elu_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/erf_erfc.h` — `ckernel::` `erf_tile`, `erfc_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/erfinv.h` — `ckernel::` `erfinv_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/exp.h` — `ckernel::` `exp_tile` (+`_init`); `enum class InputClamping`; `namespace p_sfpu`
 - `include/jit_hw/api/compute/eltwise_unary/fill.h` — `ckernel::` `fill_tile`, `fill_tile_int`, `fill_tile_bitcast` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/fmod.h` — `ckernel::` `fmod_tile`, `fmod_tile_init`
 - `include/jit_hw/api/compute/eltwise_unary/gelu.h` — `ckernel::` `gelu_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/hardmish.h` — `ckernel::` `hardmish_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/hardtanh.h` — `ckernel::` `hardtanh_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/i0.h` — `ckernel::` `i0_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/i1.h` — `ckernel::` `i1_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/identity.h` — `ckernel::` `identity_tile`, `identity_tile_uint32` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/isinf_isnan.h` — `ckernel::` `isinf_tile`, `isnan_tile`, `isfinite_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/left_shift.h` — `ckernel::` `left_shift_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/lgamma.h` — `ckernel::` `lgamma_stirling_tile`, `lgamma_stirling_float_tile` (+`_init`); anon-ns `lgamma_eval_z`
 - `include/jit_hw/api/compute/eltwise_unary/log1p.h` — `ckernel::` `log1p_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/logical_not.h` — `ckernel::` `logical_not_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/mish.h` — `ckernel::` `mish_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/negative.h` — `ckernel::` `negative_tile`, `negative_tile_int32` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/polygamma.h` — `ckernel::` `polygamma_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/prelu.h` — `ckernel::` `prelu_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/rand.h` — `ckernel::` `rand_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/rdiv.h` — empty stub
 - `include/jit_hw/api/compute/eltwise_unary/recip.h` — `ckernel::` `recip_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/relu.h` — `ckernel::` `relu_tile`, `relu_tile_int32` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/remainder.h` — `ckernel::` `remainder_tile`, `remainder_tile_init`
+- `include/jit_hw/api/compute/eltwise_unary/right_shift.h` — `ckernel::` `right_shift_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/rounding.h` — `ckernel::` `floor_tile`, `ceil_tile`, `trunc_tile`, `frac_tile`, `rounding_op_tile_init`
 - `include/jit_hw/api/compute/eltwise_unary/rpow.h` — empty stub
 - `include/jit_hw/api/compute/eltwise_unary/rsqrt.h` — `ckernel::` `rsqrt_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/rsub.h` — `ckernel::` `rsub_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/selu.h` — `ckernel::` `selu_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/sfpu_split_includes.h` — conditional includes under `SFPU_OP_*_INCLUDE` guards (no own symbols)
+- `include/jit_hw/api/compute/eltwise_unary/softplus.h` — `ckernel::` `softplus_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/sqrt.h` — `ckernel::` `sqrt_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/threshold.h` — `ckernel::` `threshold_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/trigonometry.h` — `ckernel::` `sin/cos/tan/tanh/asin/acos/atan_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/typecast.h` — `ckernel::` `typecast_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/where.h` — `ckernel::` `where_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/xielu.h` — `ckernel::` `xielu_tile` (+`_init`)
 
 ## include/jit_hw/api/compute/experimental/
 
@@ -201,6 +234,10 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 ## include/jit_hw/llk/
 
 - `include/jit_hw/llk/llk_reduce_primitives.h` — `struct __emule_matmul_bridge`; `enum class PoolType`/`ReduceDim`/`MathFidelity`/`p_dim_stride_target`; `llk_math_matmul_init`, `llk_math_reduce_init`, `matmul_tiles`; `MATH_FIDELITY`
+
+## include/jit_hw/noc/
+
+- `include/jit_hw/noc/noc_parameters.h` — re-exports `tt_metal/hw/inc/internal/tt-1xx/wormhole/noc/noc_parameters.h` (`NOC_X_SIZE`/`NOC_Y_SIZE`/`NOC_CMD_*`/`NOC_ADDR_*` macros)
 
 ## include/jit_hw/tools/profiler/
 
