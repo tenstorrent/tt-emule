@@ -366,6 +366,40 @@ kernel only included `compute_kernel_api.h` (not trigonometry.h), and emule's
 `compute_kernel_api.h` was missing `tanh_tile`. Fix: add `tanh_tile` to
 `compute_kernel_api.h` (upstream defines it there as a catch-all).
 
+## Porting upstream polynomials (PCC triage)
+
+When `<cmath>` numerics drift past atol/ULP tolerance, port the exact polynomial
+form from `tt_metal/hw/ckernels/wormhole_b0/metal/llk_api/llk_sfpu/ckernel_sfpu_<name>.h`.
+
+**Process:**
+1. Open the upstream `ckernel_sfpu_<name>.h`. Identify regions (e.g. range
+   split, saturation thresholds), coefficient arrays (Horner-form polynomial),
+   and boundary branches.
+2. Copy the coefficient constants **verbatim** as `constexpr float`. Don't
+   round, don't reformat.
+3. Translate the SFPI vector eval (`sfpi::vFloat`, `v_if/v_endif`) to scalar
+   per-element math: `if (cond) {…} else {…}` inside the `__EMULE_TILE_ELEMS`
+   loop.
+4. Use only `<cmath>` builtins (std::exp, std::log, std::sqrt, std::fabs,
+   std::nearbyint, std::ldexp, std::copysign). No platform intrinsics.
+
+**Worked example (round 6 Cat B, i1):** replaced `std::cyl_bessel_i(1, x)` with
+two-region rational `p(t)/q(t)` (|x|≤10) plus asymptotic `exp(|x|)/sqrt(|x|)·P(1/|x|)`
+(|x|>10). 7-coefficient numerator + 8-coefficient denominator + 6-coefficient
+asymptotic minimax, all from `ckernel_sfpu_i1.h:62-126`. Result: 0/12 fail → 14/14 PASS.
+
+**Caveat (round 6 Cat B, celu):** I attempted to port the Cody-Waite expm1 from
+`ckernel_sfpu_expm1_cw.h`. The implementation was numerically off enough to
+regress test_celu_allclose / test_celu_arange — the simpler `std::exp(x*ar)-1`
+form had been passing those. Reverted. Lessons:
+
+- **A polynomial port is not guaranteed to pass PCC.** If your port regresses
+  cases that were passing, the new form has a bug or differs from upstream
+  somewhere subtle (e.g. wrong reconstruction step). Revert before chasing.
+- **Don't replace a working simple form unless tests are demonstrably failing
+  on it.** celu PCC was already at the boundary; the new form moved it the
+  wrong way.
+
 ## Stateful ops & `first` flag — confirm the shim is even used
 
 A shim file's existence doesn't imply ttnn uses it. The host op may

@@ -52,8 +52,11 @@ ALWI void softsign_tile(uint32_t idst) {
     }
 }
 
-// celu: max(0, x) + min(0, alpha * (exp(x/alpha) - 1))
+// celu: max(0, x) + min(0, alpha * (exp(x/alpha) - 1)).
 // alpha and alpha_recip arrive as uint32_t bit-patterns of fp32.
+// We tried porting the upstream Cody-Waite expm1 form in round 6 but it
+// regressed test_celu_allclose / test_celu_arange — reverted to the simpler
+// formulation that the original round-5 shim used.
 ALWI void celu_tile_init() {}
 
 ALWI void celu_tile(uint32_t idst, uint32_t alpha, uint32_t alpha_recip) {

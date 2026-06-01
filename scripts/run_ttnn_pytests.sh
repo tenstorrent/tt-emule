@@ -268,6 +268,12 @@ run_pytest "elt_test_hardswish"   "$ELT_TEST_DIR/test_activation.py::test_hardsw
 run_pytest "elt_test_swish"       "$ELT_TEST_DIR/test_activation.py::test_swish"
 run_pytest "elt_test_tanhshrink"  "$ELT_TEST_DIR/test_activation.py::test_tanhshrink"
 
+# Round 6 Cat B — i1 fully unblocked by porting upstream's two-region
+# rational+asymptotic polynomial (was std::cyl_bessel_i). 14/14 PASS.
+run_pytest "elt_test_i1_clamp"    "$ELT_TEST_DIR/test_unary_i1.py::test_i1_clamp_boundary"
+run_pytest "elt_test_i1_ood"      "$ELT_TEST_DIR/test_unary_i1.py::test_i1_ood"
+run_pytest "elt_test_i1_range"    "$ELT_TEST_DIR/test_unary_i1.py::test_i1_range"
+
 # test_concat_size_switches: single-case program-cache regression test.
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
 
