@@ -39,6 +39,21 @@ enum class EltwiseBinaryType { ELWADD, ELWSUB, ELWMUL };
 enum class BroadcastType { NONE, COL, ROW, SCALAR };
 enum class EltwiseBinaryReuseDestType { NONE, DEST_TO_SRCA, DEST_TO_SRCB };
 
+// Tile/face dimension constants. Upstream exposes these in ckernel via
+// `tt_llk_wormhole_b0/common/inc/ckernel_defs.h:89`; emule already has
+// the values in `tt::constants` (include/jit_hw/tt-metalium/constants.hpp)
+// but compute kernels reference the bare names (e.g.
+// `transpose_wh_rm.cpp` does `last_output_row_num_datums < TILE_WIDTH`).
+// `using namespace ckernel;` at the bottom of this file pulls them to
+// global scope for those bare references.
+constexpr uint32_t TILE_WIDTH  = 32;
+constexpr uint32_t TILE_HEIGHT = 32;
+constexpr uint32_t TILE_HW     = TILE_WIDTH * TILE_HEIGHT;
+constexpr uint32_t FACE_WIDTH  = 16;
+constexpr uint32_t FACE_HEIGHT = 16;
+constexpr uint32_t FACE_HW     = FACE_WIDTH * FACE_HEIGHT;
+constexpr uint32_t TILE_C_DIM  = TILE_WIDTH;
+
 } // namespace ckernel
 
 // D2M emits `binary_dest_reuse_tiles<ELWADD, …>(…)` with `ELWADD` as a bare
