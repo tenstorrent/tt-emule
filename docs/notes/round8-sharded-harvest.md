@@ -63,7 +63,7 @@ Each entry is the cold-pickup brief for one residual failure cluster:
 **reproducer**, **what you see**, **where it points**, **suspected
 root cause**, **what was tried**, **why deferred**, **blast radius**.
 
-### B8.1 — test_pad sharded stick-layout: post-TRID data mismatch
+### B8.1 — test_pad sharded stick-layout: post-TRID data mismatch  **[CLOSED in Round 11 as side effect of NUM_L1_BANKS fix, see `round11-closeout.md`]**
 
 **Reproducer (canonical):**
 ```bash
@@ -409,7 +409,7 @@ layout conversions.
 
 ---
 
-### B8.4 — test_untilize sharded: interleaved↔sharded ATOL ≈ 3.25
+### B8.4 — test_untilize sharded: interleaved↔sharded ATOL ≈ 3.25  **[CLOSED in Round 11, see `round11-closeout.md` — root cause was NUM_L1_BANKS=1 vs host's bank distribution; 188 of 196 now pass; 8 residuals on sharded→interleaved writer become new B12.1]**
 
 **Reproducer:**
 ```bash
