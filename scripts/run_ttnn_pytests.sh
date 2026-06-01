@@ -30,6 +30,7 @@ BF_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/base_functionality"
 REDUCE_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/reduce"
 MATMUL_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/matmul"
 ELT_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/eltwise"
+FUSED_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/fused"
 
 GTEST_XML_DIR="${GTEST_XML_DIR:-}"
 [ -n "$GTEST_XML_DIR" ] && mkdir -p "$GTEST_XML_DIR"
@@ -235,6 +236,20 @@ run_pytest "elt_test_erfinv"          "$ELT_TEST_DIR/test_math.py::test_erfinv"
 run_pytest "elt_test_elu_allclose"    "$ELT_TEST_DIR/test_elu.py::test_elu_allclose"
 run_pytest "elt_test_elu_arange_mask" "$ELT_TEST_DIR/test_elu.py::test_elu_arange_masking"
 run_pytest "elt_test_i1_zero"         "$ELT_TEST_DIR/test_unary_i1.py::test_i1_zero"
+
+# Round 5 Wave 2 — fused softmax and reductions unblocked by the new softmax,
+# cumsum, cumprod, mask, reshuffle, welford shims under include/jit_hw/api/compute/.
+run_pytest "fused_test_large_fill_softmax"     "$FUSED_TEST_DIR/test_softmax.py::test_large_fill_softmax"
+run_pytest "fused_test_softmax_accuracy"       "$FUSED_TEST_DIR/test_softmax.py::test_softmax_accuracy"
+run_pytest "fused_test_softmax_stable_neg"     "$FUSED_TEST_DIR/test_softmax.py::test_softmax_stable_neg_values"
+run_pytest "fused_test_softmax_4096x4096_fp32" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_4096x4096_fp32"
+run_pytest "fused_test_softmax_lk_block_size"  "$FUSED_TEST_DIR/test_softmax.py::test_softmax_large_kernel_block_size"
+run_pytest "fused_test_softmax_3D"             "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_3D"
+run_pytest "fused_test_softmax_pad_tile"       "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout"
+run_pytest "fused_test_softmax_pad_tile_large" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout_large"
+run_pytest "reduce_test_cumprod_backward"      "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_backward"
+run_pytest "reduce_test_cumprod_failing"       "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_failing_cases"
+run_pytest "reduce_test_cumsum_failing"        "$REDUCE_TEST_DIR/test_cumsum.py::test_cumsum_failing_cases"
 
 # test_concat_size_switches: single-case program-cache regression test.
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
