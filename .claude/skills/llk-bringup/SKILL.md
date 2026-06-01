@@ -342,6 +342,43 @@ After agents return, **orchestrator** (you) handles centrally:
 5. Promote 100%-pass functions into the regression script.
 6. For partial passes, decide: pytest `-k` filter, or defer.
 
+## Separate kernel chain not shimmed (moreh, ttnn/kernel/, ttnn/kernel_lib/)
+
+Some ttnn ops dispatch to alternate kernel implementations (moreh, fused, deepseek,
+etc.) that live outside the standard `eltwise_unary/` API surface. These kernels
+often include headers under `ttnn/cpp/ttnn/kernel/`, `ttnn/cpp/ttnn/kernel_lib/`,
+or arch-specific paths like `noc/noc_parameters.h` (which lives at
+`tt_metal/hw/inc/internal/tt-Nxx/<arch>/noc/`).
+
+**Diagnostic pattern:** JIT compile fails not in `eltwise_unary/<name>.h` but in
+some other kernel chain. Capture the failing kernel via `TT_EMULE_KEEP_JIT_SRC=1`,
+look at its `#include` list, identify the missing header.
+
+**Common missing pieces:**
+- `noc/noc_parameters.h` — wormhole copy at
+  `tt_metal/hw/inc/internal/tt-1xx/wormhole/noc/noc_parameters.h`. A 1-line
+  shim under `include/jit_hw/noc/noc_parameters.h` that re-`#include`s the
+  wormhole copy works for single-arch emule. Watch for `NOC_MAX_BURST_SIZE`
+  macro-redefinition warning from `dataflow_api.h` — silence with
+  `-Wno-macro-redefined` or align the macros.
+- `ttnn/kernel/dataflow/moreh_common.hpp` — pulls in noc_parameters.h plus
+  its own helpers. Direct upstream include works once noc_parameters is shimmed.
+- `ttnn/cpp/ttnn/kernel_lib/reduce_helpers_compute.hpp` / `reduce_helpers_dataflow.hpp`
+  — moreh-specific reduce templates. Direct upstream include works if their
+  internal LLK references resolve via existing emule shims.
+
+**Caveat:** if the alternate kernel uses `TensorAccessorArgs<CTA_OFFSET>` for
+sharded inputs, you'll hit "constexpr variable must be initialized by a constant
+expression" errors in `tensor_accessor_args.h`. That's the **sharded
+TensorAccessor gap** (separate cross-cutting effort) — shimming the per-kernel
+include chain alone is not enough.
+
+**Worked example (round 6 Cat E, moreh_softmax dim=1):** added
+`include/jit_hw/noc/noc_parameters.h` re-exporting the wormhole copy. Resolved
+the include error but exposed a downstream tensor_accessor_args.h constexpr
+failure — fully unblocking moreh_softmax needs sharded TensorAccessor (Cat A).
+Cat E is gated on Cat A.
+
 ## Composed ops (no standalone upstream `<name>_tile`)
 
 Some activation-style ops are not standalone SFPU primitives — they're
