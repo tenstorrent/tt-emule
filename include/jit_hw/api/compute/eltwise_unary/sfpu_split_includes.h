@@ -100,3 +100,93 @@
 // upstream routes through the default arm of unary_op_utils::get_macro_definition.
 #include "api/compute/compute_kernel_api.h"
 #endif
+
+// Round 5: ops with their own SFPU_OP_*_INCLUDE branch upstream.
+
+#if SFPU_OP_HARDTANH_INCLUDE
+#include "api/compute/eltwise_unary/hardtanh.h"
+#endif
+
+#if SFPU_OP_MISH_INCLUDE
+#include "api/compute/eltwise_unary/mish.h"
+#endif
+
+#if SFPU_OP_IDENTITY_INCLUDE
+#include "api/compute/eltwise_unary/identity.h"
+#endif
+
+#if SFPU_OP_CBRT_INCLUDE
+#include "api/compute/eltwise_unary/cbrt.h"
+#endif
+
+#if SFPU_OP_LOGSIGMOID_INCLUDE
+#include "api/compute/logsigmoid.h"
+#endif
+
+#if SFPU_OP_ELU_INCLUDE
+#include "api/compute/eltwise_unary/elu.h"
+#endif
+
+#if SFPU_OP_SOFTPLUS_INCLUDE
+#include "api/compute/eltwise_unary/softplus.h"
+#endif
+
+#if SFPU_OP_FMOD_INCLUDE
+#include "api/compute/eltwise_unary/fmod.h"
+#endif
+
+#if SFPU_OP_REMAINDER_INCLUDE
+#include "api/compute/eltwise_unary/remainder.h"
+#endif
+
+#if SFPU_OP_RSUB_INCLUDE
+#include "api/compute/eltwise_unary/rsub.h"
+#endif
+
+#if SFPU_OP_LGAMMA_INCLUDE
+#include "api/compute/eltwise_unary/lgamma.h"
+#endif
+
+#if SFPU_OP_ISINF_ISNAN_INCLUDE
+#include "api/compute/eltwise_unary/isinf_isnan.h"
+#endif
+
+#if SFPU_OP_I0_INCLUDE
+#include "api/compute/eltwise_unary/i0.h"
+#endif
+
+#if SFPU_OP_I1_INCLUDE
+#include "api/compute/eltwise_unary/i1.h"
+#endif
+
+#if SFPU_OP_ERFINV_INCLUDE
+#include "api/compute/eltwise_unary/erfinv.h"
+#endif
+
+#if SFPU_OP_BITWISE_AND_INCLUDE
+#include "api/compute/eltwise_unary/bitwise_and.h"
+#endif
+
+#if SFPU_OP_BITWISE_OR_INCLUDE
+#include "api/compute/eltwise_unary/bitwise_or.h"
+#endif
+
+#if SFPU_OP_BITWISE_XOR_INCLUDE
+#include "api/compute/eltwise_unary/bitwise_xor.h"
+#endif
+
+#if SFPU_OP_LEFT_SHIFT_INCLUDE
+#include "api/compute/eltwise_unary/left_shift.h"
+#endif
+
+#if SFPU_OP_RIGHT_SHIFT_INCLUDE
+#include "api/compute/eltwise_unary/right_shift.h"
+#endif
+
+#if SFPU_OP_THRESHOLD_INCLUDE
+#include "api/compute/eltwise_unary/threshold.h"
+#endif
+
+#if SFPU_OP_PRELU_INCLUDE
+#include "api/compute/eltwise_unary/prelu.h"
+#endif

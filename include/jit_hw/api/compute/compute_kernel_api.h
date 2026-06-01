@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <cstdint>
 #include <utility>
 
@@ -92,6 +93,20 @@ ALWI void sign_tile(uint32_t idst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
         float x = __emule_dst[idst][i];
         __emule_dst[idst][i] = (x > 0.0f) - (x < 0.0f);
+    }
+}
+
+// --- heaviside (step function; param0 is fp32 bit-pattern returned at x==0) ---
+ALWI void heaviside_tile_init() {}
+ALWI void heaviside_tile(uint32_t idst, uint32_t param0) {
+    __emule_dst_check(idst, "heaviside_tile");
+    float value;
+    std::memcpy(&value, &param0, sizeof(float));
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        float x = __emule_dst[idst][i];
+        if (x < 0.0f) { __emule_dst[idst][i] = 0.0f; }
+        else if (x > 0.0f) { __emule_dst[idst][i] = 1.0f; }
+        else { __emule_dst[idst][i] = value; }
     }
 }
 
