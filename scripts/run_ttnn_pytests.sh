@@ -256,6 +256,12 @@ run_pytest "dm_test_permute_4d_smaller_tup" "$DM_TEST_DIR/test_permute.py::test_
 run_pytest "dm_test_nil_volume_permute"     "$DM_TEST_DIR/test_permute.py::test_nil_volume_permute"
 run_pytest "dm_test_transpose_wh_uint32"    "$DM_TEST_DIR/test_permute.py::test_transpose_wh_tiled_uint32"
 
+# test_untilize: of ~15 functions, only test_untilize_same_volume_different_shapes
+# is uniformly passing (8/8). nd_shard_to_same_shard_spec_uneven_input_shard_spec
+# is 32/36 but the 4 failures (shard_core_grid 3x3) don't have a clean pytest -k
+# discriminator. Other functions fail on multicore-interleaved corner cases.
+run_pytest "dm_test_untilize_same_volume"   "$DM_TEST_DIR/test_untilize.py::test_untilize_same_volume_different_shapes"
+
 # test_tosa_gather: 6/10 small-C shapes pass. C >= 96 (multi-tile C-dim)
 # gathers diverge — likely a multi-tile gather kernel issue, deferred.
 # --deselect IDs must be rootdir-relative (the form pytest reports). Using
