@@ -123,7 +123,8 @@ run_pytest "dm_test_embedding_tiled_input"   "$DM_TEST_DIR/test_embedding.py" -k
 run_pytest "dm_test_embedding_tiled"         "$DM_TEST_DIR/test_embedding.py" -k 'test_tiled and not test_embedding_tiled'
 run_pytest "dm_test_moe_embedding"           "$DM_TEST_DIR/test_embedding.py" -k 'test_moe_embedding'
 run_pytest "dm_test_embedding_base_case"     "$DM_TEST_DIR/test_embedding.py" -k 'test_base_case'
-run_pytest "dm_test_full_like"               "$DM_TEST_DIR/test_full_like.py" -k 'not sharded'
+run_pytest "dm_test_full_like"               "$DM_TEST_DIR/test_full_like.py"
+run_pytest "dm_test_sharded_to_interleaved_oob" "$DM_TEST_DIR/test_sharded_to_interleaved_oob.py"
 
 # tests/ttnn/unit_tests/base_functionality/ — whole-file all-pass entries.
 run_pytest "bf_test_as_tensor"                              "$BF_TEST_DIR/test_as_tensor.py"
@@ -202,15 +203,15 @@ run_pytest "dm_test_dropout" "$DM_TEST_DIR/test_dropout.py"
 
 run_pytest "dm_test_reallocate" "$DM_TEST_DIR/test_reallocate.py" -k 'DRAM or sharded'
 
-run_pytest "dm_test_creation_arange"      "$DM_TEST_DIR/test_creation.py::test_arange" -k 'not sharded'
-run_pytest "dm_test_creation_full_with_opt"   "$DM_TEST_DIR/test_creation.py::test_full_with_opt_tensor" -k 'not sharded'
-run_pytest "dm_test_creation_full_like"   "$DM_TEST_DIR/test_creation.py::test_full_like" -k 'not sharded'
-run_pytest "dm_test_creation_full_like_bf8b" "$DM_TEST_DIR/test_creation.py::test_full_like_bf8b" -k 'not sharded'
-run_pytest "dm_test_creation_empty_like"  "$DM_TEST_DIR/test_creation.py::test_empty_like" -k 'not sharded'
-run_pytest "dm_test_creation_zeros_like"  "$DM_TEST_DIR/test_creation.py::test_zeros_like" -k 'not sharded'
-run_pytest "dm_test_creation_ones_like"   "$DM_TEST_DIR/test_creation.py::test_ones_like" -k 'not sharded'
-run_pytest "dm_test_creation_zeros_bfp8"  "$DM_TEST_DIR/test_creation.py::test_zeros_bfp8" -k 'not sharded'
-run_pytest "dm_test_creation_zeros_bfp4"  "$DM_TEST_DIR/test_creation.py::test_zeros_bfp4" -k 'not sharded'
+run_pytest "dm_test_creation_arange"      "$DM_TEST_DIR/test_creation.py::test_arange"
+run_pytest "dm_test_creation_full_with_opt"   "$DM_TEST_DIR/test_creation.py::test_full_with_opt_tensor"
+run_pytest "dm_test_creation_full_like"   "$DM_TEST_DIR/test_creation.py::test_full_like"
+run_pytest "dm_test_creation_full_like_bf8b" "$DM_TEST_DIR/test_creation.py::test_full_like_bf8b"
+run_pytest "dm_test_creation_empty_like"  "$DM_TEST_DIR/test_creation.py::test_empty_like"
+run_pytest "dm_test_creation_zeros_like"  "$DM_TEST_DIR/test_creation.py::test_zeros_like"
+run_pytest "dm_test_creation_ones_like"   "$DM_TEST_DIR/test_creation.py::test_ones_like"
+run_pytest "dm_test_creation_zeros_bfp8"  "$DM_TEST_DIR/test_creation.py::test_zeros_bfp8"
+run_pytest "dm_test_creation_zeros_bfp4"  "$DM_TEST_DIR/test_creation.py::test_zeros_bfp4"
 run_pytest "dm_test_creation_full_like_opt_rm" "$DM_TEST_DIR/test_creation.py::test_full_like_opt_tensor" -k 'ROW_MAJOR'
 
 run_pytest "elt_test_hardtanh"        "$ELT_TEST_DIR/test_activation.py::test_hardtanh"
@@ -282,7 +283,7 @@ run_pytest "dm_test_transpose_wh_uint32"    "$DM_TEST_DIR/test_permute.py::test_
 
 run_pytest "dm_test_untilize_same_volume"   "$DM_TEST_DIR/test_untilize.py::test_untilize_same_volume_different_shapes"
 
-run_pytest "reduce_test_mean"               "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean"                  -k 'not sharded'
+run_pytest "reduce_test_mean"               "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean"
 run_pytest "reduce_test_mean_2d"            "$REDUCE_TEST_DIR/test_reduction.py::test_mean_2d_tensor_dims"   -k 'not sharded'
 run_pytest "reduce_test_mean_3d"            "$REDUCE_TEST_DIR/test_reduction.py::test_mean_3d_tensor_dims"   -k 'not sharded'
 run_pytest "reduce_test_mean_4d"            "$REDUCE_TEST_DIR/test_reduction.py::test_mean_4d_tensor_dims"   -k 'not sharded'
