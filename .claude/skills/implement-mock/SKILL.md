@@ -45,6 +45,12 @@ implementation works for any kernel that calls it. Example:
   `cb_write_ptr_at` + `__emule_nfaces::rowmajor_to_nfaces[]` permute
 - If it's pipeline state (UNPACK/MATH/PACK config): no-op stub
 
+**For LLK compute shims** (functions like `<op>_tile` /
+`<op>_tile_init` under `include/jit_hw/api/compute/`), use
+`/compute-llk-bringup` directly — it specializes Strategy A with the
+shim-pattern catalog, `sfpu_split_includes.h` wiring, op→test-file
+mapping, polynomial-port recipe, and PCC triage flow for that scope.
+
 ### Strategy B — per-op `#ifdef __EMULE_JIT_MODE` patch in a consumer op header
 Use when the silicon API can't be mocked in a generic way (e.g.,
 takes a constexpr L1 firmware address) but the OP can route through
@@ -121,6 +127,13 @@ If any of the above slips, see "Recovery" below.
 - If you discover a new pattern (e.g. a fresh instance of the semantic
   rewrite, or a brand-new strategy), add it to
   `.claude/references/emule-mapping.md`.
+
+## Batch mode
+
+For sweeps (≥4 similar mocks at once), see
+`/parallel-mock-implementation` for the Workflow-tool dispatch pattern:
+one sub-agent per file, structured DONE/STUCK output, orchestrator
+handles centralized wiring afterward.
 
 ## Step 6 — Time-box
 
