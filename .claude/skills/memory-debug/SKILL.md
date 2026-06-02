@@ -484,18 +484,6 @@ Then pivot to next-priority B-item. Don't guess at fixes — guessed
   `populate_bank_mapping`, `build_kernel_defines`, bank topology
 - `tt_metal/impl/emulation/...::Core::l1_ptr` — L1 zero-init
 
-## Reference closure docs (read order for new debug)
-
-1. `docs/notes/round7-tensor-accessor-bringup.md` — DRAM bank fix
-   pattern + `IS_NOT_POW2_NUM_DRAM_BANKS`.
-2. `docs/notes/round8-sharded-harvest.md` — sharded failure taxonomy
-   B8.1–B8.5 (most marked CLOSED, headers point to closing round).
-3. `docs/notes/round10-b84-characterization.md` — `TT_EMULE_TRACE_CB`
-   / `TT_EMULE_TRACE_NOC` recipe + 4-layer trace methodology.
-4. `docs/notes/round11-closeout.md` — L1 bank topology fix, full
-   write-up of the populate-from-SoC pattern, multi-arch correctness
-   note.
-
 ## Methodology lessons from past rounds
 
 - **Misdiagnosis happens when you stop at the first plausible hop.**

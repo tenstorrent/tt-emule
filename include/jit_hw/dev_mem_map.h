@@ -26,7 +26,7 @@ constexpr uint32_t NUM_DM_CORES = 8;
 // Earlier emule choice (0xFFE00 = top of an assumed 1 MiB L1) silently
 // corrupted user buffers once L1 grew to the real WH worker_l1_size of ~1.43
 // MiB: user-allocator output buffers extended past 0xFFE00 and got the last
-// 512 bytes zeroed mid-shard. See round12-closeout.md for repro.
+// 512 bytes zeroed mid-shard.
 //
 // constexpr (not #define) so we don't accidentally shadow the upstream
 // dev_mem_map.h declarations if jit_hw is ever linked into a target that also
