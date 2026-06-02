@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# tt-emule TTNN pytest regression — single-device N150.
+# tt-emule TTNN pytest regression — Wormhole (single-device N150).
 #
 # Runs the subset of tt-metal/tests/ttnn/unit_tests/ pytest entries that pass
 # cleanly under emule. The list is curated: each entry is either a whole file
@@ -104,7 +104,7 @@ run_pytest() {
 }
 
 echo "========================================"
-echo " TTNN pytest (N150 single-device)"
+echo " TTNN pytest — Wormhole (N150 single-device)"
 echo "========================================"
 echo "  TT_METAL_DIR: $TT_METAL_DIR"
 echo "  BUILD_DIR:    $BUILD_DIR"
