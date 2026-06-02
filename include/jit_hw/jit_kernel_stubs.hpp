@@ -176,8 +176,11 @@ inline T get_common_arg_val(int arg_idx) {
 
 // Semaphore address helper — returns a uint32_t L1 address for the given
 // semaphore ID.  Defined here so both compute and dataflow kernels can use it.
-// EMULE_SEM_BASE should be passed as a JIT compiler define (e.g. -DEMULE_SEM_BASE=0xFFE00).
-// If not defined here, dataflow_api.h provides the default (0xFFE00).
+// EMULE_SEM_BASE is passed as a JIT compiler define by emulated_program_runner
+// (computed from the HAL's KERNEL_CONFIG base + sem_offset).  When not defined
+// (e.g. compute-only TU that doesn't pull in dataflow_api.h), get_semaphore is
+// elided — kernels that need semaphores include dataflow_api.h, which hard-
+// errors if EMULE_SEM_BASE is missing.
 #ifndef EMULE_SEM_ALIGN
 #define EMULE_SEM_ALIGN 16
 #endif

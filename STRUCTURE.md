@@ -194,7 +194,6 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 ## include/jit_hw/api/tensor/
 
 - `include/jit_hw/api/tensor/noc_traits.h` — `noc_traits_t<TensorAccessor>` specialization (nested `src_args_type`/`dst_args_type`); `NOC_ADDR_LOCAL_BITS` macro
-- `include/jit_hw/api/tensor/tensor_accessor.h` — `namespace tensor_accessor` (+`detail`): `struct TensorAccessor`, `TensorAccessorBindingToken`, `class AbstractTensorAccessorWrapper`; free fns `make_tensor_accessor_tuple`, `make_abstract_tensor_accessor_wrappers`
 
 ## include/jit_hw/cpp/ttnn/operations/data_movement/common/kernels/
 

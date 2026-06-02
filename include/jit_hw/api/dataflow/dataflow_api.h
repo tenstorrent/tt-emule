@@ -449,9 +449,15 @@ inline void noc_async_full_barrier(uint8_t noc = 0) {}
 // ---- Semaphore operations ----
 
 // Get L1 address of semaphore by id.
-// Uses EMULE_SEM_BASE + id * EMULE_SEM_ALIGN, matching the program runner.
+// Uses EMULE_SEM_BASE + id * EMULE_SEM_ALIGN.  The program runner always
+// passes both as JIT defines (computed from the HAL's KERNEL_CONFIG base +
+// sem_offset, see emulated_program_runner.cpp).  No safe default exists —
+// `0xFFE00` was the historical fallback but sits inside user-buffer space on
+// real WH-N150 L1 (1.43 MiB), the same hazard MEM_ZEROS_BASE was relocated
+// to fix.  Hard-error if a caller compiled dataflow_api.h without the
+// JIT-side define rather than silently allocating semaphores into user data.
 #ifndef EMULE_SEM_BASE
-#define EMULE_SEM_BASE 0xFFE00
+#error "EMULE_SEM_BASE must be defined by the JIT compiler (set in emulated_program_runner.cpp::build_kernel_defines)."
 #endif
 #ifndef EMULE_SEM_ALIGN
 #define EMULE_SEM_ALIGN 16
