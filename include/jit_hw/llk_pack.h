@@ -10,7 +10,24 @@
 // Tilize pack: PACK row-major DST → nfaces CB at pack_offset
 inline void __llk_pack_tiled(uint32_t tile_idx, uint32_t ocb) {
     uint8_t* buf = __emule_compute::cb_write_ptr_at(ocb, __llk_pack_offset);
-    if (__emule_compute::cb_is_32bit_format(ocb)) {
+    if (__emule_compute::cb_is_bfp8_b_format(ocb)) {
+        // Bfp8_b: 64 face-rows of 16 floats each, shared 8-bit exponent per
+        // face-row. Walk in nfaces order so each row16 corresponds to one
+        // exponent byte; DST is row-major fp32 so use the inverse LUT.
+        uint8_t* exp_base  = buf;
+        uint8_t* mant_base = buf + 64;
+        for (uint32_t fr = 0; fr < 64; ++fr) {
+            float row16[16];
+            for (uint32_t k = 0; k < 16; ++k) {
+                const uint32_t ni = fr * 16 + k;
+                const uint32_t rm = __emule_nfaces::nfaces_to_rowmajor[ni];
+                row16[k] = __emule_dst[tile_idx][rm];
+            }
+            uint8_t mant_row[16];
+            __emule_bfp8::encode_face_row(row16, exp_base[fr], mant_row);
+            std::memcpy(&mant_base[fr * 16], mant_row, 16);
+        }
+    } else if (__emule_compute::cb_is_32bit_format(ocb)) {
         uint32_t n = __emule_compute::cb_page_size(ocb) / sizeof(uint32_t);
         if (n > __EMULE_TILE_ELEMS) n = __EMULE_TILE_ELEMS;
         uint32_t* out = reinterpret_cast<uint32_t*>(buf);
