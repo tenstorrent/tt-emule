@@ -121,13 +121,10 @@ public:
     // here because including jit_hw headers from this host runtime header
     // would be the wrong include direction.
     //
-    // Note: this region sits BELOW tt-metal's l1_unreserved_base (i.e. below
-    // user-buffer space), not at the top of L1.  The earlier code assumed
-    // L1_SIZE == MEM_ZEROS_BASE + MEM_ZEROS_SIZE (true when L1 was 1 MiB),
-    // but emule now uses the real wormhole worker_l1_size (~1.43 MiB), so
-    // "top of L1" and "MEM_ZEROS region" diverged — corrupting user buffers
-    // placed at the top of the allocator's range.
-    static constexpr size_t MEM_ZEROS_BASE = 0xFFE00;
+    // Sits below tt-metal's l1_unreserved_base, mirroring upstream WH/BH/Quasar
+    // dev_mem_map.h where MEM_ZEROS_BASE = (MEM_MAILBOX_END + 31) & ~31 = 0x32A0.
+    // Must stay in sync with include/jit_hw/dev_mem_map.h::MEM_ZEROS_BASE.
+    static constexpr size_t MEM_ZEROS_BASE = 0x32A0;
     static constexpr size_t MEM_ZEROS_SIZE = 512;
 
     // Bump allocate `bytes` from L1; returns absolute host address.
