@@ -139,8 +139,10 @@ public:
     // Reset the L1 bump allocator (between program runs) and rezero the
     // MEM_ZEROS region so a kernel that touched it in the previous run
     // (e.g. via __emule_resolve_noc_addr -> l1_) doesn't leave stale data.
+    // l1_bump_ starts above the MEM_ZEROS region so allocations can never
+    // overlap (otherwise the memset below would clobber live data).
     void reset_l1_bump() {
-        l1_bump_ = 0;
+        l1_bump_ = MEM_ZEROS_BASE + MEM_ZEROS_SIZE;
         if (l1_ && (MEM_ZEROS_BASE + MEM_ZEROS_SIZE) <= l1_size_) {
             std::memset(l1_ + MEM_ZEROS_BASE, 0, MEM_ZEROS_SIZE);
         }
@@ -228,7 +230,8 @@ private:
     size_t    l1_size_ = L1_SIZE;
     uint8_t*  l1_      = nullptr;
     uint32_t  l1_base_ = 0;
-    size_t    l1_bump_ = 0;  // current L1 bump allocator offset
+    // Initial bump offset starts above MEM_ZEROS so allocations never overlap.
+    size_t    l1_bump_ = MEM_ZEROS_BASE + MEM_ZEROS_SIZE;
     std::array<std::shared_ptr<CircularBuffer>, MAX_CBS> cbs_;
     DstRegisterFile dst_;
     CBSyncState cb_sync_states_[MAX_CBS] = {};
