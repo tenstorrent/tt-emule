@@ -137,14 +137,21 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             return __emule_bridge_l1 + l1_addr;
         }
     }
-    if (__emule_l1_tensor_ranges != nullptr && l1_addr >= __emule_l1_unreserved_base) {
+    // Normalize to a buffer-relative offset before comparing against the live
+    // tensor / padding ranges (which are relative, from buffer.address()).
+    // Sharded, CB/DFB, l1_alloc and >2MB bank accesses reach here as ABSOLUTE
+    // bridge-based addresses; comparing a raw absolute value against a relative
+    // range can never match -> false OOB. Same conversion the pointer-return
+    // path below applies via __emule_addr_to_offset.
+    uint32_t l1_off = __emule_addr_to_offset(l1_addr);
+    if (__emule_l1_tensor_ranges != nullptr && l1_off >= __emule_l1_unreserved_base) {
         bool in_tensor = false;
         uint64_t matched_packed = 0;
         for (uint32_t i = 0; i < __emule_l1_tensor_ranges_count; ++i) {
             uint64_t packed = __emule_l1_tensor_ranges[i];
             uint32_t r_start = static_cast<uint32_t>(packed >> 32);
             uint32_t r_end = static_cast<uint32_t>(packed);
-            if (l1_addr >= r_start && l1_addr < r_end) {
+            if (l1_off >= r_start && l1_off < r_end) {
                 in_tensor = true;
                 matched_packed = packed;
                 break;
@@ -153,7 +160,7 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
         if (!in_tensor) {
             fprintf(stderr,
                     "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
-                    l1_addr);
+                    l1_off);
             abort();
         }
         if (__emule_l1_resolved_ranges != nullptr &&
@@ -177,10 +184,10 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             uint64_t packed = __emule_l1_padding_ranges[i];
             uint32_t logical_end = static_cast<uint32_t>(packed >> 32);
             uint32_t physical_end = static_cast<uint32_t>(packed);
-            if (l1_addr >= logical_end && l1_addr < physical_end) {
+            if (l1_off >= logical_end && l1_off < physical_end) {
                 fprintf(stderr,
                         "[ASAN ERROR] Tensor Padding Violation: Attempted to write to a padded memory region at address 0x%x (logical_end=0x%x, physical_end=0x%x)\n",
-                        l1_addr, logical_end, physical_end);
+                        l1_off, logical_end, physical_end);
                 abort();
             }
         }
