@@ -282,6 +282,12 @@ run_pytest "dm_test_nil_volume_permute"     "$DM_TEST_DIR/test_permute.py::test_
 run_pytest "dm_test_transpose_wh_uint32"    "$DM_TEST_DIR/test_permute.py::test_transpose_wh_tiled_uint32"
 
 run_pytest "dm_test_untilize_same_volume"   "$DM_TEST_DIR/test_untilize.py::test_untilize_same_volume_different_shapes"
+# Untilize sharded harvest from Round 11 NUM_L1_BANKS fix (+418 sharded variants).
+# Excludes test_untilize_multi_core_{,nd_}sharded_to_interleaved — those have
+# 8 residual ATOL≈3.2 failures on tensor_shape=[4,4,256,512] (B12.1 in
+# round11-closeout.md); the substring filter also excludes the matching
+# _uneven_input_shard_spec variant. Adds ~418 of 476 passing sharded variants.
+run_pytest "dm_test_untilize_sharded"       "$DM_TEST_DIR/test_untilize.py" -k 'sharded and not multi_core_sharded_to_interleaved and not multi_core_nd_sharded_to_interleaved'
 
 run_pytest "reduce_test_mean"               "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean"
 run_pytest "reduce_test_mean_2d"            "$REDUCE_TEST_DIR/test_reduction.py::test_mean_2d_tensor_dims"   -k 'not sharded'

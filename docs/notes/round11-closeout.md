@@ -90,30 +90,57 @@ This round only ran the WH-N150 regression. BH and Quasar will
 verify naturally via their nightly CI containers; no code branching
 needed.
 
-### The harvest: pad sharded variants promoted
+### The harvest: pad sharded variants + 426 untilize sharded promoted
 
-`scripts/run_ttnn_pytests.sh`: dropped the `-k 'not sharded'`
-filter on the 5 `dm_test_pad*` entries (lines 257-261). The 23
-previously-failing sharded variants in `test_pad_rm_sharded_stickwise`,
-`test_pad_nd_sharded_to_interleaved`, and
-`test_pad_legacy_sharded_to_interleaved` now pass.
+`scripts/run_ttnn_pytests.sh`:
 
-`not sub_core` filters retained — `sub_core_grids` is a separate
-pre-existing gap (Round 6).
+1. **Pad** — dropped the `-k 'not sharded'` filter on the 5
+   `dm_test_pad*` entries (lines 257-261). The 23 previously-failing
+   sharded variants in `test_pad_rm_sharded_stickwise`,
+   `test_pad_nd_sharded_to_interleaved`, and
+   `test_pad_legacy_sharded_to_interleaved` now pass. `not sub_core`
+   filters retained — `sub_core_grids` is a separate pre-existing
+   gap (Round 6).
 
-untilize sharded harvest deferred — 480+ sharded variants now pass,
-but 8 residuals remain (B12.1 below). Adding the family to the
-script requires a per-test-function `-k` selector to exclude the
-residuals; defer to Round 12.
+2. **Untilize** — added `dm_test_untilize_sharded` covering
+   ~426 sharded variants. Selector
+   `-k 'sharded and not multi_core_sharded_to_interleaved and not multi_core_nd_sharded_to_interleaved'`
+   excludes the two test functions with B12.1 residuals (the
+   substring filter also picks up the `_uneven_input_shard_spec`
+   variant, so 58 currently-passing sharded variants are
+   temporarily left out; they're re-included by Round 12 once
+   B12.1 lands).
+
+Total CI-side delta: **+449 sharded variants in
+`run_ttnn_pytests.sh`** (23 pad + 426 untilize).
 
 ## What did NOT close
 
 - **B12.1 (new)** — 8 residual `test_untilize_multi_core_*sharded_to_interleaved`
-  failures. Small ATOL (3.0625 / 3.28125 / 3.328125), not zero —
-  the writer side of `sharded → interleaved L1` has a different
-  arithmetic bug than the addrgen-disagreement that B8.4 closed.
-  Likely the writer's stride / page-boundary math for partial last
-  bank.
+  failures. Quick diagnostic pass captured the pattern; deferred
+  for a focused fix attempt:
+  - All 8 share `tensor_shape=[4, 4, 256, 512]` (=4096 rows × 512
+    cols, 4 shards × 1024 rows each).
+  - ATOL ≈ 3.0625 / 3.28125 / 3.328125 — mostly correct: 1020 of
+    2,097,152 elements wrong (~0.05%).
+  - The wrong elements span exactly **64 rows of 4096** — four
+    blocks of 16 contiguous rows, one block per shard, at the SAME
+    offset 592 within each shard (rows 592-607, 1616-1631,
+    2640-2655, 3664-3679).
+  - Row 592 = tile-row 18, sub-row 16: the **bottom half of
+    tile-row 18 within each shard** is corrupted.
+  - Smell test: writer's tile-row counter or face-row scatter has
+    an off-by-N at a specific tile-row index, only manifesting for
+    1024-row shards (the smaller [2,2,256,512] interleaved→sharded
+    case has 256-row shards = 8 tile-rows, doesn't reach tile-row
+    18).
+  - Tractable with the same `TT_EMULE_TRACE_CB` / `TT_EMULE_TRACE_NOC`
+    instrumentation recipe from Round 10. Start by re-dumping
+    writer's NOC write addresses for the canonical
+    `test_untilize_multi_core_sharded_to_interleaved
+    [num_shard_cores=4-...-HEIGHT_SHARDED-tensor_shape=[4, 4, 256, 512]
+    -BFLOAT16]` and inspect where the writer thinks tile-row 18
+    rows 16-31 should land.
 - **B10.1** — i2s BFP8 failures: pre-existing (12 of 24
   `test_interleaved_to_sharded_hash` failures use BFP8). The
   remaining 56 i2s failures (was 68) include these plus other
