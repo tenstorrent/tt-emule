@@ -23,6 +23,11 @@ struct CBSyncState {
     uint32_t  write_idx = 0;        // Current write index
     uint32_t  read_idx  = 0;        // Current read index
     std::atomic<uint32_t> occupied{0};  // Number of occupied pages (atomic for lock-free fast path)
+    // Cumulative pages popped this program launch. 0 means the CB never had a
+    // consumer (e.g. a globally-allocated/sharded output CB, or a producer-only
+    // single-kernel program that DMAs its result straight to DRAM) — leftover
+    // pages at exit are by design, not a leak. Consumed by the host Dirty-CB sweep.
+    std::atomic<uint32_t> total_popped{0};
     std::mutex              mu;
     std::condition_variable space_cv;
     std::condition_variable data_cv;
@@ -59,6 +64,7 @@ inline void cb_sync_pop(CBSyncState& cb, uint32_t n) {
     cb.read_idx = cb.page_mask ? (cb.read_idx + n) & cb.page_mask
                                : (cb.read_idx + n) % cb.num_pages;
     cb.occupied.fetch_sub(n, std::memory_order_release);
+    cb.total_popped.fetch_add(n, std::memory_order_relaxed);
     cb.space_cv.notify_one();
 }
 

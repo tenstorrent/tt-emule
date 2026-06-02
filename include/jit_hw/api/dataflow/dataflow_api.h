@@ -117,7 +117,14 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                 uint32_t read_dist  = (access_page + cb.num_pages - cb.read_idx)  % cb.num_pages;
                 uint32_t reserved = __emule_cb_reserved_pages[cb_id];
                 uint32_t waited   = __emule_cb_waited_pages[cb_id];
-                if (!(write_dist < reserved) && !(read_dist < waited)) {
+                // Only meaningful when the kernel holds an ACTIVE reservation/wait
+                // window. reserved==0 && waited==0 means raw get_write_ptr /
+                // get_read_ptr addressing (globally-allocated/sharded CBs, single-
+                // buffered scratch, output CBs written then DMA'd) — there is no
+                // window to be "outside" of, so it is not a boundary violation.
+                // (A genuine write past the CB's allocated region is still caught
+                // downstream by the OOB-tensor check.)
+                if ((reserved > 0 || waited > 0) && !(write_dist < reserved) && !(read_dist < waited)) {
                     fprintf(stderr,
                             "[ASAN ERROR] CB Boundary Violation: Attempted to access CB %u at offset 0x%x "
                             "(byte %u of %u, page %u of %u). "
