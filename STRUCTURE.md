@@ -92,6 +92,7 @@ non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/div_int32_sfpu.h` — `ckernel::` `div_int32_tile`, `div_int32_tile_init`
 - `include/jit_hw/api/compute/eltwise_binary.h` — `ckernel::` `add_tiles_init`, `sub_tiles_init`, `mul_tiles_init`
 - `include/jit_hw/api/compute/eltwise_binary_sfpu.h` — `ckernel::` `add/sub/mul/div/rsub/power_binary_tile` (+`_init`)
+- `include/jit_hw/api/compute/ema.h` — `ckernel::` `ema_tile`, `ema_init`, `ema_clear_previous_output`; TLS `__emule_ema_{alpha,beta,prev,has_prev}`
 - `include/jit_hw/api/compute/gcd.h` — `ckernel::` `gcd_tile`, `gcd_tile_init`
 - `include/jit_hw/api/compute/isclose.h` — `ckernel::` `isclose_binary_tile`, `isclose_binary_tile_init`
 - `include/jit_hw/api/compute/lcm.h` — `ckernel::` `lcm_tile`, `lcm_tile_init`
