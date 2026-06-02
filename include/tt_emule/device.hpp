@@ -119,11 +119,9 @@ public:
     // Address + size of the MEM_ZEROS region consumed by JIT kernels via
     // include/jit_hw/dev_mem_map.h::MEM_ZEROS_BASE.  Mirror those constants
     // here because including jit_hw headers from this host runtime header
-    // would be the wrong include direction.
-    //
-    // Sits below tt-metal's l1_unreserved_base, mirroring upstream WH/BH/Quasar
-    // dev_mem_map.h where MEM_ZEROS_BASE = (MEM_MAILBOX_END + 31) & ~31 = 0x32A0.
-    // Must stay in sync with include/jit_hw/dev_mem_map.h::MEM_ZEROS_BASE.
+    // would be the wrong include direction.  Sits in the firmware-reserved
+    // region below tt-metal's l1_unreserved_base, so it never overlaps user
+    // buffers.  Must stay in sync with include/jit_hw/dev_mem_map.h::MEM_ZEROS_BASE.
     static constexpr size_t MEM_ZEROS_BASE = 0x32A0;
     static constexpr size_t MEM_ZEROS_SIZE = 512;
 

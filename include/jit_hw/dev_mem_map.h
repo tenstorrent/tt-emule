@@ -18,15 +18,13 @@ constexpr uint32_t NUM_TRISC_CORES = 4;
 constexpr uint32_t NUM_DM_CORES = 8;
 
 // L1 zeros block. Reads from MEM_ZEROS_BASE return MEM_ZEROS_SIZE bytes of
-// zero. Mirrors upstream WH dev_mem_map.h: positioned immediately after the
-// mailbox region (MEM_MAILBOX_END=0x3280 → 32-byte-aligned = 0x32A0), well
-// below tt-metal's l1_unreserved_base. Core::reset_l1_bump() rezeros the
-// region between program runs.
+// zero. Placed in the firmware-reserved region below tt-metal's
+// l1_unreserved_base so it never overlaps user buffer allocations.
+// Core::reset_l1_bump() rezeros the region between program runs.
 //
-// Earlier emule choice (0xFFE00 = top of an assumed 1 MiB L1) silently
-// corrupted user buffers once L1 grew to the real WH worker_l1_size of ~1.43
-// MiB: user-allocator output buffers extended past 0xFFE00 and got the last
-// 512 bytes zeroed mid-shard.
+// Earlier emule choice (0xFFE00) silently corrupted user buffers once L1 grew
+// past 0xFFE00: output buffers extended into the zeros block and got their
+// last 512 bytes zeroed mid-shard between program runs.
 //
 // constexpr (not #define) so we don't accidentally shadow the upstream
 // dev_mem_map.h declarations if jit_hw is ever linked into a target that also
@@ -39,5 +37,5 @@ constexpr uint32_t NUM_DM_CORES = 8;
 constexpr int MEM_ZEROS_SIZE = 512;
 #endif
 #ifndef MEM_ZEROS_BASE
-constexpr uint32_t MEM_ZEROS_BASE = 0x32A0;  // (MEM_MAILBOX_END + 31) & ~31, matches WH/BH/Quasar
+constexpr uint32_t MEM_ZEROS_BASE = 0x32A0;
 #endif
