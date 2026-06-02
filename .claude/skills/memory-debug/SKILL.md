@@ -23,9 +23,13 @@ For missing API surface, use `/implement-mock`.
 - "Sharded → interleaved" (or vice versa) data movement is wrong.
 - "Output bytes are zero" where they shouldn't be.
 
+Also applies when:
+- Test crashes / segfault / abort during kernel execution (not at
+  compile/dispatch) — segfaults are usually one specific
+  bad-pointer-dereference reachable through the same trace pass plus
+  a gdb post-mortem (see "Crashes" section below).
+
 Don't invoke for:
-- "Test crashes / segfault / abort" — that's a missing API or wrong
-  address arithmetic upstream of the data path.
 - "Test fails to compile" — that's `/compute-llk-bringup`.
 
 ## The discriminator: zeros vs random-wrong
@@ -321,6 +325,134 @@ sizes (`[32]` vs `[NUM_L1_BANKS]` vs `[256]`).
 
 **Fix**: align all extern declarations to `[NUM_*_BANKS]` (the JIT
 define), matching upstream `dataflow_api_common.h`.
+
+## Crashes (segfault / abort during kernel execution)
+
+When the kernel runs but the process dies mid-execution (SIGSEGV,
+abort), the standard 5-step trace doesn't apply directly because
+nothing reaches `to_torch`. The data is in registers and the stack
+at the moment of the crash. Use gdb post-mortem to pinpoint the
+faulting instruction, then re-enter the trace methodology from
+the layer just above the fault.
+
+**Localize the fault**:
+
+```bash
+# Run the canonical repro under gdb, catching the fatal signal:
+gdb -batch \
+  -ex 'set pagination off' \
+  -ex 'handle SIGSEGV stop print' \
+  -ex 'run' \
+  -ex 'info registers' \
+  -ex 'x/30i $pc-60' \
+  --args /opt/.../python /tmp/your_repro.py
+```
+
+What you're looking for in the output:
+- The PC at the time of the crash. If it lives in a JIT-built `.so`
+  under `/tmp/tt_emule_jit_cache_*/`, the fault is in a JIT kernel,
+  not the emule runtime.
+- The instruction at the PC. A pattern like `mov (%rdx,%rax,4),%eax`
+  with a bogus `rdx` value points to an array-of-pointers load
+  through a truncated/uninitialized pointer.
+- Pointer-value sanity: emule maps L1 below 4 GB (MAP_32BIT) and
+  static globals live high (around `0x7fff…`). A register holding
+  `0xc0…` or another low 4-byte value is usually a 64-bit pointer
+  that got narrowed to 32-bit somewhere upstream.
+
+**Keep the JIT build sources for diff**:
+
+The runner cleans up the per-kernel build directory by default.
+Gate that cleanup behind an env var (it's typically a single
+`std::filesystem::remove_all(dir)` call in
+`emulated_program_runner.cpp`) so you can read the generated
+`wrapper.cpp` + `patched_kernel.cpp` of the crashing kernel.
+Identify the kernel by matching the `.so.tmp.*` path from the gdb
+output to its sibling build dir.
+
+**Cross-reference the upstream call**:
+
+Once you know the JIT kernel and the failing instruction, look at
+the original kernel `.cpp` and follow the call chain backwards.
+Pay particular attention to **silicon-side functions that take
+`uint32_t` for what's really a host pointer**: real L1 addresses
+fit in 32 bits, so silicon code routinely truncates pointers
+without losing information. emule's host pointers don't — those
+truncations produce SIGSEGV when dereferenced.
+
+The fix is usually emule-side: ensure the value the silicon-side
+code receives stays valid after a `uint64→uint32` narrowing.
+Options:
+
+- Back the relevant storage with a `MAP_32BIT` mmap so the host
+  pointer fits in 32 bits.
+- Keep the storage on the host heap but expose a separate
+  below-4 GB scratch buffer that the kernel-facing API returns.
+- Place the data inside a Core's L1 mmap (already `MAP_32BIT`) and
+  reference it via an L1 offset.
+
+## Dataflow-only debug (no compute kernel involved)
+
+Some ops are pure data movement — permute, sharded↔interleaved
+without dtype conversion, transpose. They have a reader and a
+writer kernel, no compute. The 5-step trace's compute hop
+(DST/PACK) doesn't exist; the pipeline is shorter:
+
+```
+input L1  →  reader  →  CB  →  writer (noc_async_write)  →  output L1
+```
+
+For these, instrument noc_async_write (and noc_async_read for the
+reader side). Print `(src_phys_core, src_local_l1_addr,
+dst_noc_addr, size)` per write, then in a Python post-pass
+decompose `dst_noc_addr`:
+
+```python
+# dst_noc_addr layout on WH:  [noc_xy:12 << 36] | [l1_offset:36]
+import re, collections
+nocs, phys, pairs = collections.Counter(), collections.Counter(), collections.defaultdict(set)
+for line in open('writes.log'):
+    m = re.match(r'\[W\] phys=\((\d+),(\d+)\) .* dst_noc=0x([0-9a-f]+) size=(\d+)', line)
+    if not m: continue
+    px, py = int(m.group(1)), int(m.group(2))
+    dst = int(m.group(3), 16)
+    noc_xy = (dst >> 36) & 0xFFFF
+    nx, ny = noc_xy & 0x3F, (noc_xy >> 6) & 0x3F
+    nocs[(nx, ny)] += 1; phys[(px, py)] += 1
+    pairs[(px, py)].add((nx, ny))
+```
+
+Then ask the diagnostic questions:
+
+- **How many distinct destination cores?** If 1, the writer's
+  bank-id math collapses to one bank. If `num_cores / 8` or
+  similar, it's likely walking only one axis of the shard grid.
+  If exactly `num_cores`, the destinations are at least spread
+  but might still be permuted.
+- **How many distinct source cores write?** If less than expected,
+  some cores never enter the kernel body — check `cb_wait_front`
+  / runtime arg propagation.
+- **Per-source: how many destinations does each source touch?**
+  Most sharded paths have each source writing to exactly one
+  shard. If the (src → dst) map is the identity (each source
+  writes to itself), HEIGHT-sharded layouts are matching
+  source-cores-to-destination-shards correctly. If it's a
+  transposition (src `(0, K)` → dst `(K, 0)`) you have an x↔y
+  orientation mismatch — the host's `packed_xy_coords` ordering
+  and the kernel's `bank_id` derivation disagree on row-major
+  vs column-major.
+
+The two ends of the kernel-host contract are:
+`tt_metal/impl/buffers/tensor_accessor_args.cpp` (host packs
+`bank_coords[i] = (coord.x << 8) | coord.y` in the order returned
+by `buffer_distribution_spec.cores()`) and
+`tt_metal/hw/inc/api/tensor/tensor_accessor.h` (kernel uses
+`packed_xy_coords[bank_id]` with `bank_id` derived from
+`flattened_shard_id` per `dspec.shard_grid_strides`). When these
+disagree on stride ordering, the symptom is the transposition
+above. The fix is in whichever side ordered wrong relative to the
+silicon contract — typically the upstream specifies row-major and
+emule's path needs to match.
 
 ## Defer rule
 
