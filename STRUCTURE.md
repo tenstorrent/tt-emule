@@ -121,6 +121,8 @@ non-source trees are intentionally absent.
 ## include/jit_hw/api/compute/eltwise_unary/
 
 - `include/jit_hw/api/compute/eltwise_unary/activations.h` — `ckernel::` `abs_tile`, `abs_tile_int32`, `hardsigmoid_tile`, `softsign_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/addcdiv.h` — `ckernel::` `addcdiv_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/addcmul.h` — `ckernel::` `addcmul_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/binop_with_scalar.h` — `ckernel::` `add/sub/mul/div/rsub_unary_tile`, `add_unary_tile_int32`, `sub_unary_tile_int32`, `binop_with_scalar_tile_init`
 - `include/jit_hw/api/compute/eltwise_unary/bitwise_and.h` — `ckernel::` `bitwise_and_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/bitwise_not.h` — `ckernel::` `bitwise_not_tile` (+`_init`)
@@ -146,6 +148,7 @@ non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/eltwise_unary/identity.h` — `ckernel::` `identity_tile`, `identity_tile_uint32` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/isinf_isnan.h` — `ckernel::` `isinf_tile`, `isnan_tile`, `isfinite_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/left_shift.h` — `ckernel::` `left_shift_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/lerp.h` — `ckernel::` `lerp_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/lgamma.h` — `ckernel::` `lgamma_stirling_tile`, `lgamma_stirling_float_tile` (+`_init`); anon-ns `lgamma_eval_z`
 - `include/jit_hw/api/compute/eltwise_unary/log1p.h` — `ckernel::` `log1p_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/logical_not.h` — `ckernel::` `logical_not_tile` (+`_init`)
@@ -164,9 +167,11 @@ non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/eltwise_unary/rsqrt.h` — `ckernel::` `rsqrt_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/rsub.h` — `ckernel::` `rsub_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/selu.h` — `ckernel::` `selu_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/snake_beta.h` — `ckernel::` `snake_beta_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/sfpu_split_includes.h` — conditional-include wiring; no own symbols
 - `include/jit_hw/api/compute/eltwise_unary/softplus.h` — `ckernel::` `softplus_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/sqrt.h` — `ckernel::` `sqrt_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/tanh_derivative.h` — `ckernel::` `tanh_derivative_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/threshold.h` — `ckernel::` `threshold_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/trigonometry.h` — `ckernel::` `sin/cos/tan/tanh/asin/acos/atan_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/typecast.h` — `ckernel::` `typecast_tile` (+`_init`)

@@ -247,6 +247,15 @@ run_pytest "elt_test_i1_clamp"    "$ELT_TEST_DIR/test_unary_i1.py::test_i1_clamp
 run_pytest "elt_test_i1_ood"      "$ELT_TEST_DIR/test_unary_i1.py::test_i1_ood"
 run_pytest "elt_test_i1_range"    "$ELT_TEST_DIR/test_unary_i1.py::test_i1_range"
 
+run_pytest "elt_test_tanh_bw"     "$ELT_TEST_DIR/test_tanh_bw_ulp.py::test_tanh_bw_ulp_summary"
+# ttt-ternary ops: multi-tile shapes only ("320"). Single-tile/low-rank cases hit the
+# emule integer div-by-zero SIGFPE in the ternary writer kernel — see issue #49.
+run_pytest "elt_test_addcdiv"     "$ELT_TEST_DIR/test_ternary_composite.py::test_ternary_addcdiv_ttnn" -k '320'
+run_pytest "elt_test_addcmul"     "$ELT_TEST_DIR/test_ternary_composite.py::test_ternary_addcmul_ttnn" -k '320'
+run_pytest "elt_test_lerp"        "$ELT_TEST_DIR/test_ternary_composite.py" -k 'lerp and 320'
+# snake_beta: fp32 workloads pass; bf16 deferred (tight-ULP non-finite), single-tile -> #49.
+run_pytest "elt_test_snake_beta"  "$ELT_TEST_DIR/test_snake_beta.py::test_snake_beta_real_workload" -k 'float32'
+
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
 
 run_pytest "dm_test_pad_tile"               "$DM_TEST_DIR/test_pad.py::test_pad_tile" -k 'not sharded and not sub_core'
