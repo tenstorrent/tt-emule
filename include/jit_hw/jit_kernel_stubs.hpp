@@ -30,7 +30,6 @@
 // pulling it into every TU corrupts the SFPU INT32 unary tile-data path.
 #include "internal/firmware_common.h"
 
-#include <vector>
 #include <cstdint>
 #include <cstring>
 
@@ -38,15 +37,10 @@
 // The main executable exports these with -rdynamic; the JIT .so resolves them
 // at dlopen() time.
 namespace tt_emule { class Core; class Device; }
-extern thread_local std::vector<uint32_t> __rt_args;
-extern thread_local std::vector<uint32_t> __common_rt_args;
-// Below-4GB scratch buffers mirroring the vectors above. Kernels reach into
-// rt-args storage via get_arg_addr/get_common_arg_addr; silicon-side callers
-// (e.g. shard_addr_gen_utils::get_shard_map) truncate the returned pointer to
-// uint32_t because real L1 addresses fit in 32 bits.  These scratch buffers
-// are mmap MAP_32BIT in the runtime so the truncation is lossless.
-extern thread_local uint32_t* __rt_args_scratch;
-extern thread_local uint32_t* __common_rt_args_scratch;
+// Per-thread L1 pointers set by the runner's kernel-launch lambda.
+// nullptr = no args for this RISC.
+extern thread_local uint32_t* __rt_args;
+extern thread_local uint32_t* __common_rt_args;
 extern thread_local tt_emule::Core*       __core;
 extern thread_local tt_emule::Device*     __device;
 
@@ -111,34 +105,17 @@ extern thread_local uint32_t __emule_my_thread_id;
 // NOC index — always 0 for emulation (real firmware sets this per core).
 constexpr uint8_t noc_index = 0;
 
-// get_arg_addr(idx) — mirrors tt-metal's rta_l1_base-based implementation.
-// Returns a pointer into the below-4GB rt-args scratch so silicon-side
-// callers that narrow the pointer to uint32_t (e.g. ShardedAddrGen's
-// get_shard_map) don't lose the upper bits.  Signature matches real
-// firmware: int param, uintptr_t return.
 static inline uintptr_t get_arg_addr(int arg_idx) {
-    return reinterpret_cast<uintptr_t>(&__rt_args_scratch[arg_idx]);
+    return reinterpret_cast<uintptr_t>(&__rt_args[arg_idx]);
 }
 
-// get_common_arg_addr(idx) — pointer to common runtime arg. Returns
-// `uintptr_t` to match upstream's forward declaration in
-// `tt_metal/hw/inc/internal/tensor/dspec.h:16` (only active when
-// KERNEL_BUILD is defined — emule sets this in the JIT compile defines).
-// Uses the below-4GB scratch for the same reason as get_arg_addr.
 static inline uintptr_t get_common_arg_addr(int arg_idx) {
-    return reinterpret_cast<uintptr_t>(&__common_rt_args_scratch[arg_idx]);
+    return reinterpret_cast<uintptr_t>(&__common_rt_args[arg_idx]);
 }
 
-// Per-core and common runtime argument value access.
-// Signatures match real firmware: int param, template return.
 template<typename T = uint32_t>
 inline T get_arg_val(int arg_idx) {
     static_assert(sizeof(T) <= sizeof(uint32_t));
-    if (arg_idx < 0 || static_cast<size_t>(arg_idx) >= __rt_args.size()) {
-        fprintf(stderr, "EMULE BUG: get_arg_val(%d) out of bounds (size=%zu)\n",
-                arg_idx, __rt_args.size());
-        std::abort();
-    }
     T val;
     std::memcpy(&val, &__rt_args[arg_idx], sizeof(T));
     return val;
@@ -147,11 +124,6 @@ inline T get_arg_val(int arg_idx) {
 template<typename T = uint32_t>
 inline T get_common_arg_val(int arg_idx) {
     static_assert(sizeof(T) <= sizeof(uint32_t));
-    if (arg_idx < 0 || static_cast<size_t>(arg_idx) >= __common_rt_args.size()) {
-        fprintf(stderr, "EMULE BUG: get_common_arg_val(%d) out of bounds (size=%zu)\n",
-                arg_idx, __common_rt_args.size());
-        std::abort();
-    }
     T val;
     std::memcpy(&val, &__common_rt_args[arg_idx], sizeof(T));
     return val;
