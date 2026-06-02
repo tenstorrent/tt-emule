@@ -16,9 +16,9 @@
 #include <cstddef>
 #include "tt_emule/device.hpp"
 #include "jit_hw/experimental/noc.h"
+#include "jit_hw/emule_l1_bridge.h"
 
 extern thread_local tt_emule::Core* __core;
-extern thread_local uint8_t* __emule_bridge_l1;
 
 namespace experimental {
 

@@ -19,6 +19,7 @@
 // real device API.
 
 #include "jit_hw/jit_kernel_stubs.hpp"
+#include "jit_hw/emule_l1_bridge.h"
 #include "jit_hw/api/cb_api.h"
 #include "jit_hw/internal/dataflow/dataflow_api_addrgen.h"
 // noc_parameters.h must be in scope before tensor_accessor.h so that the

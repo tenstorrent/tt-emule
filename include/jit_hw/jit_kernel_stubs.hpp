@@ -16,7 +16,7 @@
 #include "api/compile_time_args.h"
 #include "api/debug/dprint.h"
 #include "api/debug/device_print.h"
-#include "dev_mem_map.h"
+#include "emule_l1_bridge.h"
 #include "emule_cb_state.h"
 #include "emule_dfb_state.h"
 #include "tools/profiler/kernel_profiler.hpp"
