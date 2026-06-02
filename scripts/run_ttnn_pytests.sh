@@ -99,7 +99,11 @@ echo ""
 run_pytest "dm_test_non_zero_indices"  "$DM_TEST_DIR/test_non_zero_indices.py"
 run_pytest "dm_test_full"              "$DM_TEST_DIR/test_full.py"
 run_pytest "dm_test_repeat_interleave" "$DM_TEST_DIR/test_repeat_interleave.py"
-run_pytest "dm_test_concat_iterative"  "$DM_TEST_DIR/test_concat_iterative.py"
+# Deselect the 128-input dim=-1 case: its tilize step over-subscribes L1 after upstream
+# tt-metal #44307 added an unconditional staging CB (not an emule bug; over-budget on HW too).
+# See docs/notes/issue-concat-tilize-44307.md.
+run_pytest "dm_test_concat_iterative"  "$DM_TEST_DIR/test_concat_iterative.py" \
+    --deselect "tests/ttnn/unit_tests/operations/data_movement/test_concat_iterative.py::test_concat_lg_tensor_1[dim=-1-input_shapes=((1, 1, 1, 5000), (1, 1, 1, 33))-tensor_layout=Layout.TILE-num_inputs=128]"
 
 # Single-function entries (full pass within the function)
 run_pytest "dm_test_clone_shape"                "$DM_TEST_DIR/test_clone.py::test_clone_shape"
