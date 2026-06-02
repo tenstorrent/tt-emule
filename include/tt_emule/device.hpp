@@ -128,7 +128,9 @@ public:
         return addr;
     }
 
-    // Reset the bump allocator between program runs.
+    // Reset the bump allocator between program runs.  Only meaningful when
+    // l1_alloc has actually been called (DFB fallback path, Quasar-only); on
+    // WH/BH the bump never grows so this is a no-op.
     void reset_l1_bump() { l1_bump_ = 0; }
 
     // ---- CB sync state array (for JIT kernel threads) ----
