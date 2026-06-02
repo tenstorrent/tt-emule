@@ -52,7 +52,10 @@ constexpr uint32_t TILE_HW     = TILE_WIDTH * TILE_HEIGHT;
 constexpr uint32_t FACE_WIDTH  = 16;
 constexpr uint32_t FACE_HEIGHT = 16;
 constexpr uint32_t FACE_HW     = FACE_WIDTH * FACE_HEIGHT;
-constexpr uint32_t TILE_C_DIM  = TILE_WIDTH;
+// TILE_C_DIM lives in include/jit_hw/llk_types.h as a `#define` (because the
+// upstream llk_api headers expect it as a macro). Don't redefine it here as a
+// constexpr — the macro would expand inside the declaration and break the
+// parse on any kernel that includes both this header and llk_types.h.
 
 } // namespace ckernel
 
