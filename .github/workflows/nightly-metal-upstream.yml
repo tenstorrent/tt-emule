@@ -193,7 +193,7 @@ jobs:
           if-no-files-found: warn
 
   ttnn-pytest:
-    name: TTNN Pytests (shard ${{ matrix.shard }}/2)
+    name: TTNN Pytests (shard ${{ matrix.shard }}/4)
     needs: build
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 90
@@ -203,7 +203,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
     steps:
       - name: Checkout tt-emule (main)
         uses: actions/checkout@v4
@@ -237,12 +237,12 @@ jobs:
         shell: bash
         run: bash tt-metal/install_dependencies.sh --sfpi
 
-      - name: Run TTNN pytest (shard ${{ matrix.shard }}/2)
+      - name: Run TTNN pytest (shard ${{ matrix.shard }}/4)
         env:
           TT_METAL_DIR: ${{ github.workspace }}/tt-metal
           BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule
           SHARD_INDEX:  ${{ matrix.shard }}
-          SHARD_COUNT:  2
+          SHARD_COUNT:  4
         shell: bash
         run: bash tt-emule/.github/scripts/ci-ttnn-pytests.sh
 
