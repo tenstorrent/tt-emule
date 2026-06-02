@@ -40,6 +40,13 @@
 namespace tt_emule { class Core; class Device; }
 extern thread_local std::vector<uint32_t> __rt_args;
 extern thread_local std::vector<uint32_t> __common_rt_args;
+// Below-4GB scratch buffers mirroring the vectors above. Kernels reach into
+// rt-args storage via get_arg_addr/get_common_arg_addr; silicon-side callers
+// (e.g. shard_addr_gen_utils::get_shard_map) truncate the returned pointer to
+// uint32_t because real L1 addresses fit in 32 bits.  These scratch buffers
+// are mmap MAP_32BIT in the runtime so the truncation is lossless.
+extern thread_local uint32_t* __rt_args_scratch;
+extern thread_local uint32_t* __common_rt_args_scratch;
 extern thread_local tt_emule::Core*       __core;
 extern thread_local tt_emule::Device*     __device;
 
@@ -105,18 +112,21 @@ extern thread_local uint32_t __emule_my_thread_id;
 constexpr uint8_t noc_index = 0;
 
 // get_arg_addr(idx) — mirrors tt-metal's rta_l1_base-based implementation.
-// Returns a pointer to the idx-th runtime arg (held in __rt_args).
-// Signature matches real firmware: int param, uintptr_t return.
+// Returns a pointer into the below-4GB rt-args scratch so silicon-side
+// callers that narrow the pointer to uint32_t (e.g. ShardedAddrGen's
+// get_shard_map) don't lose the upper bits.  Signature matches real
+// firmware: int param, uintptr_t return.
 static inline uintptr_t get_arg_addr(int arg_idx) {
-    return reinterpret_cast<uintptr_t>(&__rt_args[arg_idx]);
+    return reinterpret_cast<uintptr_t>(&__rt_args_scratch[arg_idx]);
 }
 
 // get_common_arg_addr(idx) — pointer to common runtime arg. Returns
 // `uintptr_t` to match upstream's forward declaration in
 // `tt_metal/hw/inc/internal/tensor/dspec.h:16` (only active when
 // KERNEL_BUILD is defined — emule sets this in the JIT compile defines).
+// Uses the below-4GB scratch for the same reason as get_arg_addr.
 static inline uintptr_t get_common_arg_addr(int arg_idx) {
-    return reinterpret_cast<uintptr_t>(&__common_rt_args[arg_idx]);
+    return reinterpret_cast<uintptr_t>(&__common_rt_args_scratch[arg_idx]);
 }
 
 // Per-core and common runtime argument value access.
