@@ -79,6 +79,14 @@ template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim>
 inline void fast_tilize_init(uint32_t icb, uint32_t /*block_dst_tiles*/, uint32_t ocb) {
     tilize_init(icb, full_ct_dim, ocb);
 }
+// fast_tilize_init_skip_remap is the BH-only variant that skips the LLK math
+// tile-remap reconfig (used when the caller knows the operand is already in
+// the right remap state).  In emule there's no remap state to skip — same
+// path as fast_tilize_init.
+inline void fast_tilize_init_skip_remap(uint32_t icb, uint32_t /*full_dim*/, uint32_t ocb,
+                                        uint32_t /*call_line*/ = 0) {
+    tilize_init(icb, 0, ocb);
+}
 template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim>
 inline void fast_tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb,
                               uint32_t /*block_c_index*/ = 0) {
