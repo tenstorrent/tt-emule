@@ -141,7 +141,7 @@ Runs six test tiers against pre-built gtest binaries in `build_emule/`:
 | 4 | ttnn INT32 ops | Blackhole P100 |
 | 5/6 | ttnn bf16 matmul + emulation toggle | Wormhole N150 |
 
-Known failures are tracked in `.github/known-failures-wormhole.txt` and `.github/known-failures-blackhole.txt`; CI fails the PR if any test outside those files regresses, or if any listed entry starts passing.
+Wormhole and Blackhole must pass every test — CI fails the PR on any failure (no allowlist). Quasar's known failures are tracked in `.github/known-failures-quasar.txt`; CI fails the PR if a test outside that file regresses, or if a listed entry starts passing.
 
 ### D2M regression (tt-mlir)
 
