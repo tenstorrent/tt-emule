@@ -368,44 +368,63 @@ FORCE_INLINE void noc_async_write_tile(
 }
 
 // ---- NOC transfer alignment check (gated by TT_METAL_EMULE_ASAN) ----
-// Checks that src and dst lower bits match per the hardware requirement:
-//   L1<->L1: lower 4 bits must match (16-byte granularity)
-//   DRAM read WH: lower 5 bits must match (32-byte); BH: lower 6 bits must match (64-byte)
-//   DRAM write (WH/BH): lower 4 bits must match (16-byte)
+// ABSOLUTE per-side alignment: each endpoint must independently meet its own
+// memory type's NoC alignment (NOC_*_ALIGNMENT_BYTES). This is NOT a relative
+// "low bits of src and dst must match" rule — the two sides have DIFFERENT
+// requirements, which a single shared mask cannot express:
+//   L1 (read or write):  16-byte   (mask 0x0F)
+//   DRAM read:           WH 32-byte (0x1F) / BH 64-byte (0x3F)
+//   DRAM write:          16-byte   (0x0F, both arches)
+// e.g. a DRAM read from a 32-byte-aligned source into a 16-byte-aligned (but
+// not 32-aligned) L1 destination is LEGAL — each side meets its own alignment —
+// even though their low bits differ. The old relative model false-positived it.
 inline void __emule_check_noc_read_alignment(uint64_t src_noc_addr, uint32_t dst_local_l1_addr) {
     if (!__emule_asan_enabled()) return;
     uint32_t src_off = static_cast<uint32_t>(src_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
+    // L1 destination: 16-byte alignment.
+    if ((dst_local_l1_addr & 0xF) != 0) {
+        fprintf(stderr,
+                "[ASAN ERROR] NOC Transfer Alignment: L1 destination 0x%x must be 16-byte aligned\n",
+                dst_local_l1_addr);
+        std::abort();
+    }
+    // Source alignment depends on its memory type.
     if (__emule_noc_addr_is_dram(src_noc_addr)) {
 #ifdef ARCH_BLACKHOLE
-        constexpr uint32_t mask = 0x3F;  // NOC_DRAM_READ_ALIGNMENT_BYTES = 64
+        constexpr uint32_t src_mask = 0x3F;  // NOC_DRAM_READ_ALIGNMENT_BYTES = 64
 #else
-        constexpr uint32_t mask = 0x1F;  // NOC_DRAM_READ_ALIGNMENT_BYTES = 32
+        constexpr uint32_t src_mask = 0x1F;  // NOC_DRAM_READ_ALIGNMENT_BYTES = 32
 #endif
-        if ((src_off & mask) != (dst_local_l1_addr & mask)) {
+        if ((src_off & src_mask) != 0) {
             fprintf(stderr,
-                    "[ASAN ERROR] NOC Transfer Alignment: DRAM src(0x%x) and L1 dst(0x%x) lower bits must match (mask=0x%x)\n",
-                    src_off, dst_local_l1_addr, mask);
+                    "[ASAN ERROR] NOC Transfer Alignment: DRAM source 0x%x must be %u-byte aligned\n",
+                    src_off, src_mask + 1);
             std::abort();
         }
-    } else {
-        if ((src_off & 0xF) != (dst_local_l1_addr & 0xF)) {
-            fprintf(stderr,
-                    "[ASAN ERROR] NOC Transfer Alignment: L1 src(0x%x) and L1 dst(0x%x) lower 4 bits must match\n",
-                    src_off, dst_local_l1_addr);
-            std::abort();
-        }
+    } else if ((src_off & 0xF) != 0) {  // L1 source: 16-byte.
+        fprintf(stderr,
+                "[ASAN ERROR] NOC Transfer Alignment: L1 source 0x%x must be 16-byte aligned\n",
+                src_off);
+        std::abort();
     }
 }
 
 inline void __emule_check_noc_write_alignment(uint32_t src_local_l1_addr, uint64_t dst_noc_addr) {
     if (!__emule_asan_enabled()) return;
     uint32_t dst_off = static_cast<uint32_t>(dst_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
-    // Both L1 and DRAM writes use 0xF mask (16-byte) for both WH and BH
-    if ((src_local_l1_addr & 0xF) != (dst_off & 0xF)) {
+    // L1 source: 16-byte alignment.
+    if ((src_local_l1_addr & 0xF) != 0) {
+        fprintf(stderr,
+                "[ASAN ERROR] NOC Transfer Alignment: L1 source 0x%x must be 16-byte aligned\n",
+                src_local_l1_addr);
+        std::abort();
+    }
+    // Destination: DRAM write and L1 are both 16-byte aligned (WH and BH).
+    if ((dst_off & 0xF) != 0) {
         const char* dst_type = __emule_noc_addr_is_dram(dst_noc_addr) ? "DRAM" : "L1";
         fprintf(stderr,
-                "[ASAN ERROR] NOC Transfer Alignment: L1 src(0x%x) and %s dst(0x%x) lower 4 bits must match\n",
-                src_local_l1_addr, dst_type, dst_off);
+                "[ASAN ERROR] NOC Transfer Alignment: %s destination 0x%x must be 16-byte aligned\n",
+                dst_type, dst_off);
         std::abort();
     }
 }
