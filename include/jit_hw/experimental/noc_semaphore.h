@@ -19,9 +19,9 @@
 #include <sched.h>
 #include <unistd.h>
 #include "jit_hw/experimental/noc.h"
-#include "jit_hw/emule_l1_bridge.h"
 
 extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
+extern thread_local uint8_t* __emule_bridge_l1;
 
 namespace experimental {
 
