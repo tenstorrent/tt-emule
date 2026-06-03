@@ -15,6 +15,7 @@ This file is the in-`.claude/` orientation guide.
 | Step-by-step workflow for adding a new mock | `/implement-mock <api>` skill |
 | Add a compute-kernel LLK shim (`<op>_tile` in `include/jit_hw/api/compute/`) | `/compute-llk-bringup` skill |
 | Diagnose ATOL/PCC failures (wrong bytes, partial zeros, off-by-N) | `/memory-debug` skill |
+| A tt-metal pin bump turned the regression red (device-open crash, JIT-compile error, hang) | `/uplift` skill |
 | Parallelize a sweep of ≥4 similar mocks | `/parallel-mock-implementation` skill |
 | Map HW concept → existing emule strategy | `references/emule-mapping.md` |
 | Where in the pipeline to inject a change | `references/api-injection-points.md` |
@@ -41,6 +42,13 @@ This file is the in-`.claude/` orientation guide.
   sub-agent per file via the Workflow tool, orchestrator handles
   centralized wiring afterward. Invoked from `/implement-mock` and
   `/compute-llk-bringup` for sweeps.
+- **uplift** — methodology for tt-metal/tt-umd pin-bump regressions:
+  read-the-artifact triage, the two-stage build-and-run bisection
+  (metal-source vs umd bump), proving the mechanism from the upstream
+  PR diff, the two emule fix classes (shared-runtime behavioral
+  regression vs jit_hw API-surface drift), the cross-repo push chain,
+  and verification (oracle before/after + curated-suite membership
+  via `--collect-only`). Prove by build+run, never by `git log`.
 
 ## Agents (launched by skills, can be invoked directly via Agent tool)
 
