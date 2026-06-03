@@ -10,7 +10,7 @@
 #include "jit_hw/emule_cb_state.h"
 #include "jit_hw/api/compute/common_globals.h"
 #include "tt_emule/tile_counter.hpp"
-#include <chrono>
+#include "jit_hw/emule_wait.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -43,8 +43,7 @@ inline void dfb_reserve_back(uint32_t dfb_id, uint16_t n) {
             auto& slot = iface.tc_slots[i];
             auto& tc = __emule_tc_array->get(slot.neo_id, slot.counter_id);
             std::unique_lock<std::mutex> lk(tc.mu);
-            if (!tc.space_cv.wait_for(lk,
-                    std::chrono::seconds(__emule_dfb_timeout_sec()),
+            if (!__emule_cv_wait(tc.space_cv, lk, __emule_dfb_timeout_sec(),
                     [&]{ return tc.free_space() >= n; })) {
                 fprintf(stderr, "EMULE HANG: dfb_reserve_back(dfb=%u, n=%u) timed out "
                         "on TC(%u,%u) after %ds\n",
@@ -57,8 +56,7 @@ inline void dfb_reserve_back(uint32_t dfb_id, uint16_t n) {
         auto& slot = iface.tc_slots[iface.tc_idx];
         auto& tc = __emule_tc_array->get(slot.neo_id, slot.counter_id);
         std::unique_lock<std::mutex> lk(tc.mu);
-        if (!tc.space_cv.wait_for(lk,
-                std::chrono::seconds(__emule_dfb_timeout_sec()),
+        if (!__emule_cv_wait(tc.space_cv, lk, __emule_dfb_timeout_sec(),
                 [&]{ return tc.free_space() >= n; })) {
             fprintf(stderr, "EMULE HANG: dfb_reserve_back(dfb=%u, n=%u) timed out "
                     "on TC(%u,%u) after %ds\n",
@@ -107,8 +105,7 @@ inline void dfb_wait_front(uint32_t dfb_id, uint16_t n) {
     auto& slot = iface.tc_slots[iface.tc_idx];
     auto& tc = __emule_tc_array->get(slot.neo_id, slot.counter_id);
     std::unique_lock<std::mutex> lk(tc.mu);
-    if (!tc.data_cv.wait_for(lk,
-            std::chrono::seconds(__emule_dfb_timeout_sec()),
+    if (!__emule_cv_wait(tc.data_cv, lk, __emule_dfb_timeout_sec(),
             [&]{ return tc.occupancy() >= n; })) {
         fprintf(stderr, "EMULE HANG: dfb_wait_front(dfb=%u, n=%u) timed out "
                 "on TC(%u,%u) after %ds\n",

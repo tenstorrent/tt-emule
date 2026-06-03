@@ -12,11 +12,11 @@
 // the target core's L1 via __emule_resolve_noc_addr / __emule_multicast_write.
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <thread>
+#include <sched.h>
+#include <unistd.h>
 #include "jit_hw/experimental/noc.h"
 
 extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
@@ -64,9 +64,9 @@ public:
             if (spins < 64) {
                 // busy-spin
             } else if (spins < 1024) {
-                std::this_thread::yield();
+                sched_yield();
             } else {
-                std::this_thread::sleep_for(std::chrono::microseconds(1));
+                usleep(1);
             }
             if (++spins > 10'000'000ULL) {
                 fprintf(stderr,
@@ -86,9 +86,9 @@ public:
             if (spins < 64) {
                 // busy-spin
             } else if (spins < 1024) {
-                std::this_thread::yield();
+                sched_yield();
             } else {
-                std::this_thread::sleep_for(std::chrono::microseconds(1));
+                usleep(1);
             }
             if (++spins > 10'000'000ULL) {
                 fprintf(stderr,
