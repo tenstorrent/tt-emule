@@ -11,6 +11,7 @@
 // Remote operations (up with noc coords, set_multicast, inc_multicast) resolve
 // the target core's L1 via __emule_resolve_noc_addr / __emule_multicast_write.
 
+#include <algorithm>  // std::min/std::max in inc_multicast (was transitive via <thread>)
 #include <atomic>
 #include <cstdint>
 #include <cstdio>

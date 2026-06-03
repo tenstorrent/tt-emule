@@ -66,6 +66,13 @@ run_pytest() {
     if [ $(( (ENTRY_NUM - 1) % SHARD_COUNT + 1 )) -ne "$SHARD_INDEX" ]; then
         return
     fi
+    # Guard: with no target, pytest would collect/run the entire CWD suite — a
+    # very expensive CI failure mode. Treat a target-less entry as an authoring
+    # error and fail it loudly.
+    if [ "$#" -eq 0 ]; then
+        echo "--- $name ---"; echo "  FAIL (no test target supplied to run_pytest)"
+        FAIL=$((FAIL + 1)); return
+    fi
     echo "--- $name ---"
     if (
         export PYTHONPATH="$TT_METAL_DIR/ttnn:$TT_METAL_DIR/tools:$BUILD_DIR/lib:$TT_METAL_DIR:${PYTHONPATH:-}"
@@ -234,10 +241,10 @@ run_pytest "elt_test_celu_21f" "$ELT_TEST_DIR/test_celu_21f.py::test_celu_allclo
 
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
 
-run_pytest "dm_test_pad_knotsubc" "$DM_TEST_DIR/test_pad.py::test_pad_tile" "$DM_TEST_DIR/test_pad.py::test_pad_rm" "$DM_TEST_DIR/test_pad.py::test_pad_with_program_cache" -k 'not sub_core'
+run_pytest "dm_test_pad_not_sub_core" "$DM_TEST_DIR/test_pad.py::test_pad_tile" "$DM_TEST_DIR/test_pad.py::test_pad_rm" "$DM_TEST_DIR/test_pad.py::test_pad_with_program_cache" -k 'not sub_core'
 run_pytest "dm_test_pad" "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width" "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width_with_program_cache" "$DM_TEST_DIR/test_pad.py::test_pad_program_cache_hit_updates_pad_value_buffer" "$DM_TEST_DIR/test_pad.py::test_pad_padding_validation_front_pad_not_supported" "$DM_TEST_DIR/test_pad.py::test_pad_padding_validation_length"
 
-run_pytest "dm_test_permute_knotshar" "$DM_TEST_DIR/test_permute.py::test_permute_4d_fixed_w" "$DM_TEST_DIR/test_permute.py::test_permute_4d_cn" "$DM_TEST_DIR/test_permute.py::test_permute_4d_cnwh" "$DM_TEST_DIR/test_permute.py::test_permute_4d_wh" "$DM_TEST_DIR/test_permute.py::test_permute_5d" "$DM_TEST_DIR/test_permute.py::test_permute_5d_wyh" "$DM_TEST_DIR/test_permute.py::test_permute_5d_xh_pad" "$DM_TEST_DIR/test_permute.py::test_permute_8d_swapped" "$DM_TEST_DIR/test_permute.py::test_permutations_5d_fixed_w" "$DM_TEST_DIR/test_permute.py::test_permute_identity" -k 'not sharded'
+run_pytest "dm_test_permute_not_sharded" "$DM_TEST_DIR/test_permute.py::test_permute_4d_fixed_w" "$DM_TEST_DIR/test_permute.py::test_permute_4d_cn" "$DM_TEST_DIR/test_permute.py::test_permute_4d_cnwh" "$DM_TEST_DIR/test_permute.py::test_permute_4d_wh" "$DM_TEST_DIR/test_permute.py::test_permute_5d" "$DM_TEST_DIR/test_permute.py::test_permute_5d_wyh" "$DM_TEST_DIR/test_permute.py::test_permute_5d_xh_pad" "$DM_TEST_DIR/test_permute.py::test_permute_8d_swapped" "$DM_TEST_DIR/test_permute.py::test_permutations_5d_fixed_w" "$DM_TEST_DIR/test_permute.py::test_permute_identity" -k 'not sharded'
 run_pytest "dm_test_permute" "$DM_TEST_DIR/test_permute.py::test_permute_5d_tiled_basic" "$DM_TEST_DIR/test_permute.py::test_permute_5d_tiled_swap" "$DM_TEST_DIR/test_permute.py::test_permute_squeeze" "$DM_TEST_DIR/test_permute.py::test_permute_for_specific_case" "$DM_TEST_DIR/test_permute.py::test_permute_on_4D_tensor_with_smaller_tuple_size" "$DM_TEST_DIR/test_permute.py::test_nil_volume_permute" "$DM_TEST_DIR/test_permute.py::test_transpose_wh_tiled_uint32"
 
 run_pytest "dm_test_untilize_same_volume" "$DM_TEST_DIR/test_untilize.py::test_untilize_same_volume_different_shapes"
@@ -249,8 +256,8 @@ run_pytest "dm_test_untilize_same_volume" "$DM_TEST_DIR/test_untilize.py::test_u
 run_pytest "dm_test_untilize_sharded"       "$DM_TEST_DIR/test_untilize.py" -k 'sharded and not multi_core_sharded_to_interleaved and not multi_core_nd_sharded_to_interleaved'
 
 run_pytest "reduce_test_reduction_mean" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean_scaling" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean_scaling_factor"
-run_pytest "reduce_test_reduction_knotshar" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_2d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_3d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_4d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_sum_2d_tensor_dims" -k 'not sharded'
-run_pytest "reduce_test_reduction_min_knotshar" "$REDUCE_TEST_DIR/test_reduction_min.py::test_min" "$REDUCE_TEST_DIR/test_reduction_min.py::test_min_global" -k 'not sharded'
+run_pytest "reduce_test_reduction_not_sharded" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_2d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_3d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_4d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_sum_2d_tensor_dims" -k 'not sharded'
+run_pytest "reduce_test_reduction_min_not_sharded" "$REDUCE_TEST_DIR/test_reduction_min.py::test_min" "$REDUCE_TEST_DIR/test_reduction_min.py::test_min_global" -k 'not sharded'
 run_pytest "reduce_test_torch_compat" "$REDUCE_TEST_DIR/test_reduction.py::test_torch_compatibility"
 
 run_pytest "dm_test_tosa_gather" "$DM_TEST_DIR/test_tosa_gather.py" \
