@@ -73,12 +73,43 @@ unlike silicon in three ways:
 
 ## How emule preserves the invariant today
 
+### Host-side: the region stays zero
+
 emule's L1 mmap is `MAP_PRIVATE | MAP_ANONYMOUS`
 (`include/tt_emule/device.hpp::mmap_region` and
 `include/tt_emule/l1_pool.hpp`). Linux guarantees `MAP_ANONYMOUS` pages
 are zero-initialized at first access. That single `mmap` is emule's
 *"wzeromem at boot"* analog — performed once when the process maps L1,
 never again.
+
+### JIT-side: the constants reach kernels via shadowed `dev_mem_map.h`
+
+ttnn kernels (e.g. `kernel_lib/l1_helpers.hpp::zero_tile`,
+`generate_reduce_scaler.hpp`, `groupnorm_zero_fill.hpp`) reference
+`MEM_ZEROS_BASE` and `MEM_ZEROS_SIZE` as JIT-time constants. On silicon
+those come transitively via `api/dataflow/noc_semaphore.h:7` →
+`#include "dev_mem_map.h"`, where the JIT include path includes the
+per-arch firmware subdir (`internal/tt-1xx/<arch>/`).
+
+The emule JIT include path doesn't carry the arch-specific firmware
+subdirs, so the same `"dev_mem_map.h"` include resolves to an emule
+shim at `include/jit_hw/dev_mem_map.h` instead. The shim dispatches on
+the `ARCH_*` JIT defines the runner already emits per program
+(`build_kernel_defines` in `emulated_program_runner.cpp`):
+
+```cpp
+#if defined(ARCH_BLACKHOLE)
+constexpr uint32_t MEM_ZEROS_BASE = 0x32E0;
+#elif defined(ARCH_QUASAR)
+constexpr uint32_t MEM_ZEROS_BASE = 0xE180;
+#else  // ARCH_WORMHOLE (default)
+constexpr uint32_t MEM_ZEROS_BASE = 0x3280;
+#endif
+constexpr int MEM_ZEROS_SIZE = 512;
+```
+
+Each value mirrors upstream's `(MEM_MAILBOX_END + 31) & ~31` for that
+arch.
 
 The bump allocator (`Core::l1_alloc`, used by DFB fallback allocation)
 is the only path that could overwrite the firmware-reserved L1 range
