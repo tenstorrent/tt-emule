@@ -20,31 +20,43 @@ file.
 - Net: baseline counts are stale. **The sweep MUST start with a
   re-baseline**, not the existing file.
 
-## Phase 0 — re-baseline (single sequential run, ~4 hours)
+## Phase 0 — rerun BH failures only (faster than full re-baseline)
+
+**Do NOT re-baseline WH.** Trust the v1 baseline's WH-passing labels
+— a full WH sweep is ~2 hours and adds little: if a test was
+passing on WH in v1, we already know that, and any per-fix WH
+regression check happens at sub-agent verification time.
+
+Rerun **only the 78 entries marked FAIL in the v1
+`known-failures-blackhole-pytests.txt`** against current HEAD.
+Filter the BH script to just those entries (the easiest way: extract
+their entry names from the baseline file and run pytest directly
+on the corresponding test paths). Expect ~1-2 hours wall-clock
+depending on which entries survived the recent fixes.
 
 ```bash
-TT_EMULE_ARCH=blackhole bash scripts/run_ttnn_pytests_blackhole.sh \
-    2>&1 | tee /tmp/bh_sweep_v2.log
-TT_EMULE_ARCH=wormhole  bash scripts/run_ttnn_pytests_wormhole.sh  \
-    2>&1 | tee /tmp/wh_sweep_v2.log
+# Pull entry names from the baseline (lines starting with "=== ... === FAIL")
+awk -F' === ' '/=== .* === FAIL/{print $1}' known-failures-blackhole-pytests.txt | \
+    sed 's/^=== //' > /tmp/bh_v1_failing_entries.txt
+# Run those (and only those) against current HEAD; write results to v2 baseline.
+# See scripts/rerun_failing_entries.sh (to be added) — or invoke per-entry
+# with the BH script's run_pytest mechanism in a filtered loop.
 ```
 
-Then regenerate the failures file (using the parser already proven
-during the v1 baseline):
+Regenerate the BH baseline file using the same parser the v1 sweep
+used (the awk/python combo from `0dade57`'s commit message — promote
+it to `.github/scripts/parse-pytest-log.py` if not already there).
 
-```bash
-python3 .github/scripts/parse-pytest-log.py /tmp/bh_sweep_v2.log \
-    > known-failures-blackhole-pytests.txt
-```
-(parser is in this branch's history at `0dade57`'s commit message — promote
-it to a script if not already done.)
-
-Commit the new baseline as a single commit on `arminale/bh-parity`.
+Commit the v2 baseline as a single commit on `arminale/bh-parity`.
 The parallel sweep operates on **this** file, not the v1 baseline.
 
-**Stopping rule for Phase 0**: any entry where WH also FAILS gets
-flagged as pre-existing emule bug, NOT included in the parallel
-sweep. File a separate issue per such entry.
+**Stopping rule for Phase 0**: an entry that was WH-passing in v1
+and still BH-failing after rerun is a candidate. An entry whose v1
+WH-passing label looks suspect (e.g. its failure signature
+exactly matches a v1 regression we'd have seen on WH too — like
+the `MEM_ZEROS_SIZE` undeclared case Case 1 caught) gets a one-off
+WH spot-check from a sub-agent during its run; we don't pre-screen
+the whole list.
 
 ## Phase 1 — cluster by signature class
 
@@ -58,20 +70,20 @@ post-fix clusters are:
 | **N**: wrong output (PCC / ATOL) | pytest assertion at the comparison line, no compile error | 10-20 | /memory-debug discriminator |
 | **C**: SIGABRT signal 6 | `:-1: running the test CRASHED with signal 6` after kernel JIT-compiled cleanly | unknown (was 519 subtests pre-fix; re-baseline tells truth) | /memory-debug §Crashes, gdb |
 | **T**: hang / timeout | `pytest killed by 900s wall-clock` | <5 | inspect runner state; CB/sem sync most likely |
-| **R**: pre-existing emule bug (fails on WH too) | matches anything else **and** WH also fails | filed as issues, NOT in sweep | n/a |
+| **R**: pre-existing emule bug (fails on WH too) | discovered ad-hoc when a sub-agent's Step A.5 spot-check fails on WH | filed as issues, NOT in sweep | n/a |
 
 **Clustering script** (deterministic, run after Phase 0):
 
 ```bash
 python3 .github/scripts/cluster-failures.py \
     known-failures-blackhole-pytests.txt \
-    --wh-baseline /tmp/wh_sweep_v2.log \
     --out clusters/
 ```
 
-Produces one file per cluster + a `pre-existing.txt` for class R.
-The L1 cluster should be the **largest** — that's the dominant
-failure mode and where parallel agents pay off the most.
+Produces one file per cluster (R is empty initially; populated by
+sub-agents during Phase 2 as they discover false-positive WH-passing
+labels). The L1 cluster should be the **largest** — that's the
+dominant failure mode and where parallel agents pay off the most.
 
 ## Phase 2 — parallel attack (the bulk of the work)
 
@@ -90,13 +102,16 @@ Each sub-agent gets:
 3. **`docs/bh-bring-up-methodology.md`** as the workflow reference
 
 Each sub-agent runs:
-1. Step A (rerun on BH against HEAD). PASS → report "resolved",
+1. Step A (rerun on BH against HEAD; already done by Phase 0 — agent
+   sees the post-Phase-0 result). If now PASS, report "resolved",
    stop.
-2. Step A.5 (rerun on WH). FAIL on WH → report "pre-existing emule
-   bug", stop. Don't fix.
+2. Step A.5 (one-off WH spot-check, only the failing entry — NOT a
+   full WH sweep). FAIL on WH → report "pre-existing emule bug",
+   stop, don't fix.
 3. Step B-G per its cluster's methodology branch.
 4. **Stops at**: a single-file minimal diff. Tests pass on BH AND
-   no regression on WH AND no regression on the WH sentinel
+   the one-off WH rerun of the same entry still passes AND no
+   regression on the WH sentinel
    (`test_untilize_single_core_interleaved_to_sharded`). Reports
    the diff + verification output.
 
@@ -195,5 +210,6 @@ that point:
    shows many entries fail on WH too, the curated WH list itself
    is stale and needs maintenance. That's a finding, not a sweep
    failure — the methodology surfaces it directly.
-4. **Re-baseline cost (~4 hours)**: hard to compress. Phase 0 is
-   the largest sequential bottleneck. Accept it.
+4. **Phase 0 cost (~1-2 hours)**: filtered to BH-failing entries
+   only (no WH re-baseline). Largest sequential bottleneck but
+   bounded by the v1 failure count, not the full curated list.
