@@ -182,7 +182,7 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/tensix_types.h` — (empty include-shim, no symbols)
 - `include/jit_hw/api/dataflow/dataflow_buffer.h` — `class DataflowBuffer` (get_write_ptr/get_read_ptr methods), `struct DFBAccessor`; `noc_traits_t<DataflowBuffer>` specialization
 - `include/jit_hw/api/dataflow/endpoints.h` — `struct UnicastEndpoint`, `MulticastEndpoint`, `AllocatorBank`; `enum class AllocatorBankType`; `noc_traits_t` specializations for each (`get_noc_unicast_addr`/`get_noc_multicast_addr` are endpoint methods)
-- `include/jit_hw/api/dataflow/noc.h` — `class Noc` (async_read/async_write/barriers/inline_dw_write methods); `enum class AddressType`/`BarrierMode`/`McastMode`/`ResponseMode`/`TxnIdMode`/`VcSelection`; `struct DataflowBufferArgs`; primary `noc_traits_t` template
+- `include/jit_hw/api/dataflow/noc.h` — `class Noc` (async_read/async_write/barriers/inline_dw_write methods); `enum class NocOptions`/`Noc::AddressType`; `struct NocOptVals`/`DataflowBufferArgs`; `operator|`/`has_flag` (NocOptions); primary `noc_traits_t` template
 - `include/jit_hw/api/dataflow/noc_semaphore.h` — `class Semaphore`; `enum class ProgrammableCoreType`
 
 ## include/jit_hw/api/debug/
