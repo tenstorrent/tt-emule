@@ -12,11 +12,15 @@
 # Optional env:
 #   GTEST_XML_DIR  default $RUNNER_TEMP/ttnn-junit-xml (per-entry junit XML)
 #   REGRESSION_LOG default $RUNNER_TEMP/ttnn-pytests.log
+#   SHARD_INDEX    1-based shard index (default 1; round-robin in run_ttnn_pytests.sh)
+#   SHARD_COUNT    total number of shards (default 1)
 
 set -euo pipefail
 
 : "${TT_METAL_DIR:?TT_METAL_DIR must be set}"
 : "${BUILD_DIR:?BUILD_DIR must be set}"
+export SHARD_INDEX="${SHARD_INDEX:-1}"
+export SHARD_COUNT="${SHARD_COUNT:-1}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TT_EMULE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -41,6 +45,7 @@ echo "  TT_METAL_DIR:   $TT_METAL_DIR"
 echo "  BUILD_DIR:      $BUILD_DIR"
 echo "  GTEST_XML_DIR:  $GTEST_XML_DIR"
 echo "  REGRESSION_LOG: $REGRESSION_LOG"
+echo "  SHARD:          $SHARD_INDEX of $SHARD_COUNT"
 echo ""
 
 set +e

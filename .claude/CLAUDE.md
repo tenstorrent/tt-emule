@@ -13,6 +13,9 @@ This file is the in-`.claude/` orientation guide.
 |---|---|
 | What does silicon API X do, so I can mock it? | `/arch-lookup "X"` skill |
 | Step-by-step workflow for adding a new mock | `/implement-mock <api>` skill |
+| Add a compute-kernel LLK shim (`<op>_tile` in `include/jit_hw/api/compute/`) | `/compute-llk-bringup` skill |
+| Diagnose ATOL/PCC failures (wrong bytes, partial zeros, off-by-N) | `/memory-debug` skill |
+| Parallelize a sweep of ≥4 similar mocks | `/parallel-mock-implementation` skill |
 | Map HW concept → existing emule strategy | `references/emule-mapping.md` |
 | Where in the pipeline to inject a change | `references/api-injection-points.md` |
 | Verify a mock is complete | `references/stub-checklist.md` |
@@ -25,6 +28,19 @@ This file is the in-`.claude/` orientation guide.
   from `tt-metal/tt_metal/tt-llk/.claude/skills/arch-lookup`.
 - **implement-mock** — end-to-end workflow: arch-lookup → pick
   strategy (A/B/C) → implement → verify → document.
+- **memory-debug** — diagnostic playbook for data-corruption / ATOL
+  failures. The discriminator (exact-zero vs random-wrong), the
+  5-step trace pass (compute→CB→writer→L1), and five recurring
+  root-cause classes (bank topology, per-shard math, face-3 loss,
+  DAZ/FTZ, extern array mismatch). Distilled from rounds 7-12.
+- **compute-llk-bringup** — specialization of `implement-mock` for
+  compute LLK shims (Strategy A applied to ops under
+  `include/jit_hw/api/compute/`). Has the shim-pattern catalog,
+  `sfpu_split_includes.h` wiring, polynomial-port recipe, PCC triage.
+- **parallel-mock-implementation** — batching primitive: spawn one
+  sub-agent per file via the Workflow tool, orchestrator handles
+  centralized wiring afterward. Invoked from `/implement-mock` and
+  `/compute-llk-bringup` for sweeps.
 
 ## Agents (launched by skills, can be invoked directly via Agent tool)
 

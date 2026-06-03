@@ -9,11 +9,10 @@
 // tt_metal/hw/inc/api/dataflow/noc.h but implemented with direct memcpy and
 // host-pointer resolution instead of hardware NOC transactions.
 //
-// Relationship to jit_hw/experimental/noc.h:
-//   The real tt-metal commit a67eb83be3c ("Moving new device apis out of
-//   experimental namespace") is a pure namespace promotion — the only diff is
-//   removal of 'namespace experimental {}'. This file extends that promotion
-//   with the wider template/enum surface that the new class Noc exposes.
+// Option surface mirrors tt-metal #45509 ("Replace diff noc txn template args
+// with one NocOptions enum"): the per-method nested enums (TxnIdMode,
+// VcSelection, BarrierMode, McastMode, ResponseMode) were collapsed into the
+// single file-scope NocOptions flag enum + NocOptVals runtime struct.
 
 #include <cstdint>
 #include <cstring>
@@ -37,18 +36,38 @@ struct noc_traits_t {
     static_assert(sizeof(T) == 0, "NoC transactions are not supported for this type");
 };
 
+// ---- NocOptions (file scope; mirrors api/dataflow/noc.h #45509) ----
+// Bit-flag combination chosen at a template call site, e.g.
+//   noc.async_write<NocOptions::TXN_ID | NocOptions::CUSTOM_VC>(...)
+enum class NocOptions : uint32_t {
+    DEFAULT        = 0,
+    TXN_ID         = 1u << 0,
+    POSTED         = 1u << 1,
+    CUSTOM_VC      = 1u << 2,
+    MCAST_INCL_SRC = 1u << 3,
+    INLINE_L1      = 1u << 4,
+    INLINE_REG     = 1u << 5,
+};
+
+constexpr NocOptions operator|(NocOptions a, NocOptions b) noexcept {
+    return static_cast<NocOptions>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+
+constexpr bool has_flag(NocOptions opts, NocOptions flag) noexcept {
+    return (static_cast<uint32_t>(opts) & static_cast<uint32_t>(flag)) != 0;
+}
+
+// Runtime values for the optional flags (vc when CUSTOM_VC, trid when TXN_ID).
+struct NocOptVals {
+    uint32_t vc   = NOC_UNICAST_WRITE_VC;
+    uint32_t trid = 0;
+};
+
 // ---- class Noc ----
 
 class Noc {
 public:
-    // ----- Enums (full set matching api/dataflow/noc.h) -----
-
     enum class AddressType { NOC, LOCAL_L1 };
-    enum class TxnIdMode  { ENABLED, DISABLED };
-    enum class ResponseMode { NON_POSTED, POSTED };
-    enum class BarrierMode  { TXN_ID, FULL };
-    enum class McastMode    { INCLUDE_SRC, EXCLUDE_SRC };
-    enum class VcSelection  { DEFAULT, CUSTOM };
 
     static constexpr uint32_t INVALID_TXN_ID = 0xFFFFFFFF;
 
@@ -100,11 +119,11 @@ public:
 
     // ----- async_read -----
     // In emulation: resolve both addresses via traits, then memcpy.
-    // Template params (txn_id_mode, max_page_size, enable_noc_tracing) are
-    // accepted for API compatibility but have no effect.
+    // Template params (opts, max_page_size, enable_noc_tracing) and noc_opts are
+    // accepted for API compatibility but have no effect (no real VC / trid).
 
     template <
-        TxnIdMode txn_id_mode = TxnIdMode::DISABLED,
+        NocOptions opts = NocOptions::DEFAULT,
         uint32_t  max_page_size = NOC_MAX_BURST_SIZE + 1,
         bool      enable_noc_tracing = true,
         typename Src, typename Dst>
@@ -114,8 +133,7 @@ public:
         uint32_t size_bytes,
         const src_args_t<Src>& src_args,
         const dst_args_t<Dst>& dst_args,
-        uint32_t vc  = NOC_UNICAST_WRITE_VC,
-        uint32_t trid = INVALID_TXN_ID) const {
+        const NocOptVals& /*noc_opts*/ = {}) const {
         uint8_t* src_ptr = to_host_ptr<AddressType::NOC>(
             noc_traits_t<Src>::template src_addr<AddressType::NOC>(src, *this, src_args));
         uint8_t* dst_ptr = to_host_ptr<AddressType::LOCAL_L1>(
@@ -129,19 +147,19 @@ public:
     // Mirrors upstream contract: cache size for subsequent async_read_with_state.
 
     template <
-        VcSelection vc_selection = VcSelection::DEFAULT,
+        NocOptions opts = NocOptions::DEFAULT,
         uint32_t    max_page_size = NOC_MAX_BURST_SIZE + 1,
         typename Src>
     void set_async_read_state(
         const Src& /*src*/,
         uint32_t size_bytes,
         const src_args_t<Src>& /*src_args*/,
-        uint8_t /*vc*/ = 0) const {
+        const NocOptVals& /*noc_opts*/ = {}) const {
         cached_size_ = size_bytes;
     }
 
     template <
-        VcSelection vc_selection = VcSelection::DEFAULT,
+        NocOptions opts = NocOptions::DEFAULT,
         uint32_t    max_page_size = NOC_MAX_BURST_SIZE + 1,
         typename Src, typename Dst>
     void async_read_with_state(
@@ -150,7 +168,7 @@ public:
         uint32_t size_bytes,
         const src_args_t<Src>& src_args,
         const dst_args_t<Dst>& dst_args,
-        uint8_t /*vc*/ = 0) const {
+        const NocOptVals& /*noc_opts*/ = {}) const {
         // When max_page_size fits in one packet, size comes from cached state.
         constexpr bool fits_in_one_packet = max_page_size <= NOC_MAX_BURST_SIZE;
         const uint32_t bytes = fits_in_one_packet ? cached_size_ : size_bytes;
@@ -166,8 +184,7 @@ public:
     // ----- async_write -----
 
     template <
-        TxnIdMode    txn_id_mode   = TxnIdMode::DISABLED,
-        ResponseMode response_mode = ResponseMode::NON_POSTED,
+        NocOptions opts = NocOptions::DEFAULT,
         uint32_t     max_page_size = NOC_MAX_BURST_SIZE + 1,
         bool         enable_noc_tracing = true,
         typename Src, typename Dst>
@@ -177,8 +194,7 @@ public:
         uint32_t size_bytes,
         const src_args_t<Src>& src_args,
         const dst_args_t<Dst>& dst_args,
-        uint32_t vc   = NOC_UNICAST_WRITE_VC,
-        uint32_t trid = INVALID_TXN_ID) const {
+        const NocOptVals& /*noc_opts*/ = {}) const {
         uint8_t* src_ptr = to_host_ptr<AddressType::LOCAL_L1>(
             noc_traits_t<Src>::template src_addr<AddressType::LOCAL_L1>(src, *this, src_args));
         uint8_t* dst_ptr = to_host_ptr<AddressType::NOC>(
@@ -191,21 +207,21 @@ public:
     // ----- set_async_write_state + async_write_with_state -----
 
     template <
-        ResponseMode response_mode = ResponseMode::NON_POSTED,
+        NocOptions opts = NocOptions::DEFAULT,
         uint32_t     max_page_size = NOC_MAX_BURST_SIZE + 1,
         typename Dst>
     void set_async_write_state(
         const Dst& dst,
         uint32_t size_bytes,
         const dst_args_t<Dst>& dst_args,
-        uint8_t /*vc*/ = NOC_UNICAST_WRITE_VC) const {
+        const NocOptVals& /*noc_opts*/ = {}) const {
         cached_size_      = size_bytes;
         cached_write_dst_ = reinterpret_cast<uintptr_t>(to_host_ptr<AddressType::NOC>(
             noc_traits_t<Dst>::template dst_addr<AddressType::NOC>(dst, *this, dst_args)));
     }
 
     template <
-        ResponseMode response_mode = ResponseMode::NON_POSTED,
+        NocOptions opts = NocOptions::DEFAULT,
         uint32_t     max_page_size = NOC_MAX_BURST_SIZE + 1,
         typename Src, typename Dst>
     void async_write_with_state(
@@ -214,7 +230,7 @@ public:
         uint32_t size_bytes,
         const src_args_t<Src>& src_args,
         const dst_args_t<Dst>& dst_args,
-        uint8_t /*vc*/ = NOC_UNICAST_WRITE_VC) const {
+        const NocOptVals& /*noc_opts*/ = {}) const {
         constexpr bool fits_in_one_packet = max_page_size <= NOC_MAX_BURST_SIZE;
         const uint32_t bytes = fits_in_one_packet ? cached_size_ : size_bytes;
         uint8_t* src_ptr = to_host_ptr<AddressType::LOCAL_L1>(
@@ -233,13 +249,11 @@ public:
 
     // ----- async_write_multicast -----
     // Delegates to __emule_multicast_write which iterates the rectangle.
-    // McastMode::INCLUDE_SRC is handled by the multicast write loop visiting
+    // NocOptions::MCAST_INCL_SRC is handled by the multicast write loop visiting
     // all cores including the sender's (same host memory, no special case needed).
 
     template <
-        McastMode    mcast_mode    = McastMode::EXCLUDE_SRC,
-        TxnIdMode    txn_id_mode   = TxnIdMode::DISABLED,
-        ResponseMode response_mode = ResponseMode::NON_POSTED,
+        NocOptions   opts = NocOptions::DEFAULT,
         uint32_t     max_page_size = NOC_MAX_BURST_SIZE + 1,
         bool         enable_noc_tracing = true,
         typename Src, typename Dst>
@@ -250,8 +264,7 @@ public:
         uint32_t num_dsts,
         const src_args_t<Src>& src_args,
         const dst_args_mcast_t<Dst>& dst_args,
-        bool linked = false,
-        uint32_t trid = INVALID_TXN_ID) const {
+        bool linked = false) const {
         uintptr_t s = noc_traits_t<Src>::template src_addr<AddressType::LOCAL_L1>(src, *this, src_args);
         auto mcast_noc_addr = noc_traits_t<Dst>::template dst_addr_mcast<AddressType::NOC>(dst, *this, dst_args);
         if (s) {
@@ -265,18 +278,14 @@ public:
     // value with byte-enable masking via __emule_dw_write_be.
 
     template <
-        TxnIdMode    txn_id_mode   = TxnIdMode::DISABLED,
-        InlineWriteDst dst_type    = InlineWriteDst::DEFAULT,
-        ResponseMode response_mode = ResponseMode::NON_POSTED,
+        NocOptions opts = NocOptions::DEFAULT,
         typename Dst>
     void inline_dw_write(
         const Dst& dst,
         uint32_t val,
         const dst_args_t<Dst>& dst_args,
         uint8_t  be  = 0xF,
-        uint32_t vc  = NOC_UNICAST_WRITE_VC,
-        uint32_t trid = INVALID_TXN_ID) const {
-        static_assert(txn_id_mode == TxnIdMode::DISABLED);
+        const NocOptVals& /*noc_opts*/ = {}) const {
         uint8_t* ptr = to_host_ptr<AddressType::NOC>(
             noc_traits_t<Dst>::template dst_addr<AddressType::NOC>(dst, *this, dst_args));
         if (ptr) {
@@ -287,35 +296,32 @@ public:
     // ----- Barriers -----
     // All are no-ops in emulation; template params accepted for API compatibility.
 
-    template <BarrierMode barrier_type = BarrierMode::FULL>
-    void async_read_barrier(uint32_t trid = INVALID_TXN_ID) const {
-        if constexpr (barrier_type == BarrierMode::TXN_ID) {
-            noc_async_read_barrier_with_trid(trid, noc_id_);
+    template <NocOptions opts = NocOptions::DEFAULT>
+    void async_read_barrier(const NocOptVals& noc_opts = {}) const {
+        if constexpr (has_flag(opts, NocOptions::TXN_ID)) {
+            noc_async_read_barrier_with_trid(noc_opts.trid, noc_id_);
         } else {
             noc_async_read_barrier(noc_id_);
         }
     }
 
-    template <BarrierMode barrier_type = BarrierMode::FULL>
-    void async_write_barrier(uint32_t trid = INVALID_TXN_ID) const {
-        if constexpr (barrier_type == BarrierMode::TXN_ID) {
-            noc_async_write_barrier_with_trid(trid, noc_id_);
+    template <NocOptions opts = NocOptions::DEFAULT>
+    void async_write_barrier(const NocOptVals& noc_opts = {}) const {
+        if constexpr (has_flag(opts, NocOptions::TXN_ID)) {
+            noc_async_write_barrier_with_trid(noc_opts.trid, noc_id_);
         } else {
             noc_async_write_barrier(noc_id_);
         }
     }
 
-    template <ResponseMode response_mode = ResponseMode::NON_POSTED,
-              BarrierMode  barrier_type  = BarrierMode::FULL>
-    void async_writes_flushed(uint32_t trid = INVALID_TXN_ID) const {
-        if constexpr (response_mode == ResponseMode::POSTED) {
+    template <NocOptions opts = NocOptions::DEFAULT>
+    void async_writes_flushed(const NocOptVals& noc_opts = {}) const {
+        if constexpr (has_flag(opts, NocOptions::POSTED)) {
             noc_async_posted_writes_flushed(noc_id_);
+        } else if constexpr (has_flag(opts, NocOptions::TXN_ID)) {
+            noc_async_write_flushed_with_trid(noc_opts.trid, noc_id_);
         } else {
-            if constexpr (barrier_type == BarrierMode::TXN_ID) {
-                noc_async_write_flushed_with_trid(trid, noc_id_);
-            } else {
-                noc_async_writes_flushed(noc_id_);
-            }
+            noc_async_writes_flushed(noc_id_);
         }
     }
 
@@ -326,16 +332,16 @@ public:
     // Declared here; defined out-of-line in api/dataflow/dataflow_buffer.h
     // which includes this header.
 
-    template <TxnIdMode txn_id_mode, typename Src>
-    std::enable_if_t<txn_id_mode == TxnIdMode::ENABLED>
+    template <NocOptions opts, typename Src>
+    std::enable_if_t<has_flag(opts, NocOptions::TXN_ID)>
     async_read(
         const Src& src,
         DataflowBuffer& dst,
         const src_args_t<Src>& src_args,
         const DataflowBufferArgs& dst_args = {}) const;
 
-    template <TxnIdMode txn_id_mode, typename Dst>
-    std::enable_if_t<txn_id_mode == TxnIdMode::ENABLED>
+    template <NocOptions opts, typename Dst>
+    std::enable_if_t<has_flag(opts, NocOptions::TXN_ID)>
     async_write(
         DataflowBuffer& src,
         const Dst& dst,
