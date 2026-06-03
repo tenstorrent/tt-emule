@@ -243,6 +243,14 @@ The key env vars that gate emulation at runtime:
 
 Cluster YAMLs are in `tt_metal/third_party/umd/tests/cluster_descriptor_examples/`.
 
+Optional debug/perf knobs (all default off / auto):
+
+| Variable | Value | Effect |
+|---|---|---|
+| `TT_EMULE_WAIT_TIMEOUT` | `1` | Re-enable the per-op CB/DFB/semaphore hang watchdog. Off by default: the JIT kernel wait path uses `cv.wait` and drops `<chrono>`, which on libstdc++ pulls the heavy C++20 `<format>`/iostream graph (~1 s of cold JIT compile per kernel). Set this when debugging a deadlock to restore the bounded `wait_for` + offending-CB/DFB abort message. The flag is part of the JIT cache key, so toggling it recompiles automatically. |
+| `TT_EMULE_JIT_CACHE_DIR` | path | Override the JIT `.so` cache dir (default `/tmp/tt_emule_jit_cache_<uid>`). |
+| `TT_EMULE_KEEP_JIT_SRC` | `1` | Keep generated inline-kernel sources for inspection instead of deleting them. |
+
 ---
 
 ## Known limitations

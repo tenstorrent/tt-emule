@@ -10,9 +10,12 @@
 // pulls the C++20 <format>/iostream machinery (~1s of frontend parse per JIT
 // kernel). Silicon kernels never include <chrono>, so this is zero divergence.
 //
-// Define EMULE_WAIT_TIMEOUT to restore the bounded wait_for + per-op hang
-// diagnostic: this returns false on timeout and the caller's fprintf+abort runs.
-// Use it when debugging a deadlock; off by default for fast JIT compile.
+// Set TT_EMULE_WAIT_TIMEOUT=1 in the environment (honored by the emule program
+// runner's build_kernel_defines, which then defines EMULE_WAIT_TIMEOUT for the
+// JIT compile) to restore the bounded wait_for + per-op hang diagnostic: this
+// returns false on timeout and the caller's fprintf+abort runs. Off by default
+// for fast JIT compile. Toggling it invalidates the JIT cache automatically
+// (the define is part of the cache key).
 
 #include <condition_variable>
 #include <mutex>
