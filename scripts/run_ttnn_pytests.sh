@@ -99,7 +99,11 @@ echo ""
 run_pytest "dm_test_non_zero_indices"  "$DM_TEST_DIR/test_non_zero_indices.py"
 run_pytest "dm_test_full"              "$DM_TEST_DIR/test_full.py"
 run_pytest "dm_test_repeat_interleave" "$DM_TEST_DIR/test_repeat_interleave.py"
-run_pytest "dm_test_concat_iterative"  "$DM_TEST_DIR/test_concat_iterative.py"
+# Deselect the 128-input dim=-1 case: its tilize step over-subscribes L1 after upstream
+# tt-metal #44307 added an unconditional staging CB (not an emule bug; over-budget on HW too).
+# See docs/notes/issue-concat-tilize-44307.md.
+run_pytest "dm_test_concat_iterative"  "$DM_TEST_DIR/test_concat_iterative.py" \
+    --deselect "tests/ttnn/unit_tests/operations/data_movement/test_concat_iterative.py::test_concat_lg_tensor_1[dim=-1-input_shapes=((1, 1, 1, 5000), (1, 1, 1, 33))-tensor_layout=Layout.TILE-num_inputs=128]"
 
 # Single-function entries (full pass within the function)
 run_pytest "dm_test_clone_shape"                "$DM_TEST_DIR/test_clone.py::test_clone_shape"
@@ -123,7 +127,8 @@ run_pytest "dm_test_embedding_tiled_input"   "$DM_TEST_DIR/test_embedding.py" -k
 run_pytest "dm_test_embedding_tiled"         "$DM_TEST_DIR/test_embedding.py" -k 'test_tiled and not test_embedding_tiled'
 run_pytest "dm_test_moe_embedding"           "$DM_TEST_DIR/test_embedding.py" -k 'test_moe_embedding'
 run_pytest "dm_test_embedding_base_case"     "$DM_TEST_DIR/test_embedding.py" -k 'test_base_case'
-run_pytest "dm_test_full_like"               "$DM_TEST_DIR/test_full_like.py" -k 'not sharded'
+run_pytest "dm_test_full_like"               "$DM_TEST_DIR/test_full_like.py"
+run_pytest "dm_test_sharded_to_interleaved_oob" "$DM_TEST_DIR/test_sharded_to_interleaved_oob.py"
 
 # tests/ttnn/unit_tests/base_functionality/ — whole-file all-pass entries.
 run_pytest "bf_test_as_tensor"                              "$BF_TEST_DIR/test_as_tensor.py"
@@ -186,7 +191,15 @@ run_pytest "bf_test_to_memory_config"      "$BF_TEST_DIR/test_to_memory_config.p
 run_pytest "bf_test_copy"                  "$BF_TEST_DIR/test_copy.py" \
     -k '((test_copy_rm_interleaved_to_legacy_2D_sharded_large_row or test_copy_uint16) and not test_copy_uint16_to_memory_config) or (test_copy and not test_copy_)'
 
-run_pytest "dm_test_indexed_fill_sharded"   "$DM_TEST_DIR/test_indexed_fill.py::test_indexed_fill_sharded" -k 'B8-b3-D64 or B6-b4-D128'
+# test_pad_subcoregrids: round 7 win — 57/58 pass with the IS_NOT_POW2 fix +
+# InterleavedPow2AddrGenFast shim.
+run_pytest "dm_test_pad_subcoregrids" "$DM_TEST_DIR/test_pad_subcoregrids.py" -k 'not test_pad_subcoregrids_rejects_sharded'
+
+# indexed_fill_sharded is de-scoped: deterministically hangs on the companion build (cold JIT
+# cache) in the emule parallel JIT compile — std::system forks clang from a ~130-thread process
+# and the child wedges before exec (fork-in-multithreaded-process deadlock). Not a kernel/sharding
+# bug: the exact kernel compiles standalone in ~8s. Tracking: tenstorrent/tt-emule#55.
+# run_pytest "dm_test_indexed_fill_sharded"   "$DM_TEST_DIR/test_indexed_fill.py::test_indexed_fill_sharded" -k 'B8-b3-D64 or B6-b4-D128'
 
 run_pytest "reduce_test_sum" "$REDUCE_TEST_DIR/test_sum.py" -k 'test_sum and not test_sum_global and not test_sum_4d and not test_sum_nd_shard and not test_sum_subcores'
 
@@ -198,15 +211,15 @@ run_pytest "dm_test_dropout" "$DM_TEST_DIR/test_dropout.py"
 
 run_pytest "dm_test_reallocate" "$DM_TEST_DIR/test_reallocate.py" -k 'DRAM or sharded'
 
-run_pytest "dm_test_creation_arange"      "$DM_TEST_DIR/test_creation.py::test_arange" -k 'not sharded'
-run_pytest "dm_test_creation_full_with_opt"   "$DM_TEST_DIR/test_creation.py::test_full_with_opt_tensor" -k 'not sharded'
-run_pytest "dm_test_creation_full_like"   "$DM_TEST_DIR/test_creation.py::test_full_like" -k 'not sharded'
-run_pytest "dm_test_creation_full_like_bf8b" "$DM_TEST_DIR/test_creation.py::test_full_like_bf8b" -k 'not sharded'
-run_pytest "dm_test_creation_empty_like"  "$DM_TEST_DIR/test_creation.py::test_empty_like" -k 'not sharded'
-run_pytest "dm_test_creation_zeros_like"  "$DM_TEST_DIR/test_creation.py::test_zeros_like" -k 'not sharded'
-run_pytest "dm_test_creation_ones_like"   "$DM_TEST_DIR/test_creation.py::test_ones_like" -k 'not sharded'
-run_pytest "dm_test_creation_zeros_bfp8"  "$DM_TEST_DIR/test_creation.py::test_zeros_bfp8" -k 'not sharded'
-run_pytest "dm_test_creation_zeros_bfp4"  "$DM_TEST_DIR/test_creation.py::test_zeros_bfp4" -k 'not sharded'
+run_pytest "dm_test_creation_arange"      "$DM_TEST_DIR/test_creation.py::test_arange"
+run_pytest "dm_test_creation_full_with_opt"   "$DM_TEST_DIR/test_creation.py::test_full_with_opt_tensor"
+run_pytest "dm_test_creation_full_like"   "$DM_TEST_DIR/test_creation.py::test_full_like"
+run_pytest "dm_test_creation_full_like_bf8b" "$DM_TEST_DIR/test_creation.py::test_full_like_bf8b"
+run_pytest "dm_test_creation_empty_like"  "$DM_TEST_DIR/test_creation.py::test_empty_like"
+run_pytest "dm_test_creation_zeros_like"  "$DM_TEST_DIR/test_creation.py::test_zeros_like"
+run_pytest "dm_test_creation_ones_like"   "$DM_TEST_DIR/test_creation.py::test_ones_like"
+run_pytest "dm_test_creation_zeros_bfp8"  "$DM_TEST_DIR/test_creation.py::test_zeros_bfp8"
+run_pytest "dm_test_creation_zeros_bfp4"  "$DM_TEST_DIR/test_creation.py::test_zeros_bfp4"
 run_pytest "dm_test_creation_full_like_opt_rm" "$DM_TEST_DIR/test_creation.py::test_full_like_opt_tensor" -k 'ROW_MAJOR'
 
 run_pytest "elt_test_hardtanh"        "$ELT_TEST_DIR/test_activation.py::test_hardtanh"
@@ -249,11 +262,11 @@ run_pytest "elt_test_i1_range"    "$ELT_TEST_DIR/test_unary_i1.py::test_i1_range
 
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
 
-run_pytest "dm_test_pad_tile"               "$DM_TEST_DIR/test_pad.py::test_pad_tile" -k 'not sharded and not sub_core'
-run_pytest "dm_test_pad_rm"                 "$DM_TEST_DIR/test_pad.py::test_pad_rm" -k 'not sharded and not sub_core'
-run_pytest "dm_test_pad_rm_small_to_large"  "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width" -k 'not sharded'
-run_pytest "dm_test_pad_rm_small_to_large_pc" "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width_with_program_cache" -k 'not sharded'
-run_pytest "dm_test_pad_with_program_cache" "$DM_TEST_DIR/test_pad.py::test_pad_with_program_cache" -k 'not sharded and not sub_core'
+run_pytest "dm_test_pad_tile"               "$DM_TEST_DIR/test_pad.py::test_pad_tile" -k 'not sub_core'
+run_pytest "dm_test_pad_rm"                 "$DM_TEST_DIR/test_pad.py::test_pad_rm" -k 'not sub_core'
+run_pytest "dm_test_pad_rm_small_to_large"  "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width"
+run_pytest "dm_test_pad_rm_small_to_large_pc" "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width_with_program_cache"
+run_pytest "dm_test_pad_with_program_cache" "$DM_TEST_DIR/test_pad.py::test_pad_with_program_cache" -k 'not sub_core'
 run_pytest "dm_test_pad_pc_hit_updates"     "$DM_TEST_DIR/test_pad.py::test_pad_program_cache_hit_updates_pad_value_buffer"
 run_pytest "dm_test_pad_validation_front"   "$DM_TEST_DIR/test_pad.py::test_pad_padding_validation_front_pad_not_supported"
 run_pytest "dm_test_pad_validation_length"  "$DM_TEST_DIR/test_pad.py::test_pad_padding_validation_length"
@@ -277,8 +290,14 @@ run_pytest "dm_test_nil_volume_permute"     "$DM_TEST_DIR/test_permute.py::test_
 run_pytest "dm_test_transpose_wh_uint32"    "$DM_TEST_DIR/test_permute.py::test_transpose_wh_tiled_uint32"
 
 run_pytest "dm_test_untilize_same_volume"   "$DM_TEST_DIR/test_untilize.py::test_untilize_same_volume_different_shapes"
+# Untilize sharded harvest from the NUM_L1_BANKS fix (+418 sharded variants).
+# Excludes test_untilize_multi_core_{,nd_}sharded_to_interleaved — those have
+# 8 residual ATOL≈3.2 failures on tensor_shape=[4,4,256,512]; the substring
+# filter also excludes the matching _uneven_input_shard_spec variant.
+# Adds ~418 of 476 passing sharded variants.
+run_pytest "dm_test_untilize_sharded"       "$DM_TEST_DIR/test_untilize.py" -k 'sharded and not multi_core_sharded_to_interleaved and not multi_core_nd_sharded_to_interleaved'
 
-run_pytest "reduce_test_mean"               "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean"                  -k 'not sharded'
+run_pytest "reduce_test_mean"               "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean"
 run_pytest "reduce_test_mean_2d"            "$REDUCE_TEST_DIR/test_reduction.py::test_mean_2d_tensor_dims"   -k 'not sharded'
 run_pytest "reduce_test_mean_3d"            "$REDUCE_TEST_DIR/test_reduction.py::test_mean_3d_tensor_dims"   -k 'not sharded'
 run_pytest "reduce_test_mean_4d"            "$REDUCE_TEST_DIR/test_reduction.py::test_mean_4d_tensor_dims"   -k 'not sharded'

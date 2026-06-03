@@ -21,7 +21,10 @@
 #include "jit_hw/jit_kernel_stubs.hpp"
 #include "jit_hw/api/cb_api.h"
 #include "jit_hw/internal/dataflow/dataflow_api_addrgen.h"
-#include "jit_hw/api/tensor/tensor_accessor.h"
+// noc_parameters.h must be in scope before tensor_accessor.h so that the
+// NOC_UNICAST_ADDR_X/Y macros (used at upstream tensor_accessor.h:235) resolve.
+#include "noc/noc_parameters.h"
+#include "api/tensor/tensor_accessor.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -195,6 +198,15 @@ template <typename T>
 inline constexpr bool has_log_base_2_of_page_size_v<
     T, std::void_t<decltype(std::declval<T>().log_base_2_of_page_size)>> = true;
 
+// TensorAccessor exposes the page size via get_aligned_page_size() rather than
+// a `page_size` member or `log_base_2_of_page_size` field.  Matches upstream
+// dataflow_api.h's 3-way dispatch (get_aligned_page_size → page_size → log2).
+template <typename, typename = void>
+inline constexpr bool has_get_aligned_page_size_v = false;
+template <typename T>
+inline constexpr bool has_get_aligned_page_size_v<
+    T, std::void_t<decltype(std::declval<T>().get_aligned_page_size())>> = true;
+
 // ---- NOC page operations (using addrgen.get_noc_addr) ----
 
 template<typename AddrGen>
@@ -203,7 +215,9 @@ FORCE_INLINE void noc_async_read_page(
         uint32_t dst_local_l1_addr,
         uint32_t offset = 0, uint8_t noc = 0) {
     uint32_t page_size;
-    if constexpr (has_page_size_v<AddrGen>) {
+    if constexpr (has_get_aligned_page_size_v<AddrGen>) {
+        page_size = addrgen.get_aligned_page_size();
+    } else if constexpr (has_page_size_v<AddrGen>) {
         page_size = addrgen.page_size;
     } else {
         page_size = (1u << addrgen.log_base_2_of_page_size);
@@ -227,7 +241,9 @@ FORCE_INLINE void noc_async_write_page(
         uint32_t src_local_l1_addr,
         uint32_t size = 0, uint32_t offset = 0, uint8_t noc = 0) {
     uint32_t page_size;
-    if constexpr (has_page_size_v<AddrGen>) {
+    if constexpr (has_get_aligned_page_size_v<AddrGen>) {
+        page_size = addrgen.get_aligned_page_size();
+    } else if constexpr (has_page_size_v<AddrGen>) {
         page_size = addrgen.page_size;
     } else {
         page_size = (1u << addrgen.log_base_2_of_page_size);
@@ -321,6 +337,51 @@ inline void noc_async_write_one_packet(uint32_t src_local_l1_addr, uint64_t dst_
                                        uint32_t size, uint8_t noc = 0) {
     noc_async_write(src_local_l1_addr, dst_noc_addr, size, noc);
 }
+
+// Stateful one-packet read: silicon programs the NOC with size + base in
+// `set_state`, then reuses that state for `with_state` calls (e.g.
+// `reader_unary_transpose_hc_sharded_rm.cpp`). Emule is synchronous, so we
+// just memoize the size and use it in the read.
+inline thread_local uint32_t __emule_one_packet_state_size = 0;
+template <bool use_vc = false>
+inline void noc_async_read_one_packet_set_state(uint64_t /*src_noc_addr*/,
+                                                uint32_t size,
+                                                uint32_t /*vc*/ = 0,
+                                                uint8_t /*noc*/ = 0) {
+    __emule_one_packet_state_size = size;
+}
+template <bool inc_num_issued = true, bool use_vc = false>
+inline void noc_async_read_one_packet_with_state(uint64_t src_noc_addr,
+                                                 uint32_t dst_local_l1_addr,
+                                                 uint32_t /*vc*/ = 0,
+                                                 uint8_t noc = 0) {
+    noc_async_read(src_noc_addr, dst_local_l1_addr,
+                   __emule_one_packet_state_size, noc);
+}
+
+// Write-side counterpart used by sharded writer kernels (e.g.
+// `writer_unary_transpose_wh_sharded_rm.cpp`). Silicon stores the dst
+// NOC address + packet size in the NOC cmd-buf state; `with_state`
+// then issues writes that reuse that state. Emule fans the state out
+// to a thread_local and uses noc_async_write for the actual transfer.
+inline thread_local uint64_t __emule_write_one_packet_state_dst = 0;
+inline thread_local uint32_t __emule_write_one_packet_state_size = 0;
+template <bool posted = false>
+inline void noc_async_write_one_packet_set_state(uint64_t dst_noc_addr,
+                                                 uint32_t size,
+                                                 uint8_t /*noc*/ = 0,
+                                                 uint8_t /*vc*/ = 0) {
+    __emule_write_one_packet_state_dst = dst_noc_addr;
+    __emule_write_one_packet_state_size = size;
+}
+template <bool posted = false>
+inline void noc_async_write_one_packet_with_state(uint32_t src_local_l1_addr,
+                                                  uint32_t /*dst_local_l1_addr*/,
+                                                  uint8_t noc = 0) {
+    noc_async_write(src_local_l1_addr,
+                    __emule_write_one_packet_state_dst,
+                    __emule_write_one_packet_state_size, noc);
+}
 template <uint32_t max_page_size>
 inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr, uint32_t size,
                            uint8_t noc = 0, uint32_t vc = 0) {
@@ -364,18 +425,39 @@ inline void noc_async_read_barrier(uint8_t noc = 0) {}
 inline void noc_async_write_barrier(uint8_t noc = 0) {}
 inline void noc_async_writes_flushed(uint8_t noc = 0) {}
 inline void noc_async_posted_writes_flushed(uint8_t noc = 0) {}
+// TRID family: silicon overlaps multiple async NOC reads/writes on the same
+// NOC by tagging each with a transaction id, then polling per-tag completion.
+// Emule executes every NOC op inline before returning, so:
+//   - set_trid stores nothing (no in-flight transactions to label)
+//   - barriers/flushed/sent return immediately (everything completed at issue)
+//   - *_with_transaction_id_flushed/sent probes always report "true"
+// noc_async_read_one_packet_with_state_with_trid is intentionally omitted —
+// its only call sites are experimental kernels (ccl/deepseek/prefetcher) not
+// in the routine bring-up regression scope, and adding it would also require
+// noc_async_read_one_packet_set_state / _with_state which are a separate gap.
 inline void noc_async_read_barrier_with_trid(uint32_t trid, uint8_t noc = 0) {}
 inline void noc_async_write_barrier_with_trid(uint32_t trid, uint8_t noc = 0) {}
 inline void noc_async_write_flushed_with_trid(uint32_t trid, uint8_t noc = 0) {}
+inline void noc_async_read_set_trid(uint32_t trid = 0, uint8_t noc = 0) {}
+inline void noc_async_write_set_trid(uint32_t trid = 0, uint8_t noc = 0) {}
+inline bool ncrisc_noc_read_with_transaction_id_flushed(uint32_t noc, uint32_t trid) { return true; }
+inline bool ncrisc_noc_nonposted_write_with_transaction_id_sent(uint32_t noc, uint32_t trid) { return true; }
+inline bool ncrisc_noc_nonposted_write_with_transaction_id_flushed(uint32_t noc, uint32_t trid) { return true; }
 inline void noc_async_atomic_barrier(uint8_t noc = 0) {}
 inline void noc_async_full_barrier(uint8_t noc = 0) {}
 
 // ---- Semaphore operations ----
 
 // Get L1 address of semaphore by id.
-// Uses EMULE_SEM_BASE + id * EMULE_SEM_ALIGN, matching the program runner.
+// Uses EMULE_SEM_BASE + id * EMULE_SEM_ALIGN.  The program runner always
+// passes both as JIT defines (computed from the HAL's KERNEL_CONFIG base +
+// sem_offset, see emulated_program_runner.cpp).  No safe default exists —
+// `0xFFE00` was the historical fallback but sits inside user-buffer space on
+// real WH-N150 L1 (1.43 MiB), the same hazard MEM_ZEROS_BASE was relocated
+// to fix.  Hard-error if a caller compiled dataflow_api.h without the
+// JIT-side define rather than silently allocating semaphores into user data.
 #ifndef EMULE_SEM_BASE
-#define EMULE_SEM_BASE 0xFFE00
+#error "EMULE_SEM_BASE must be defined by the JIT compiler (set in emulated_program_runner.cpp::build_kernel_defines)."
 #endif
 #ifndef EMULE_SEM_ALIGN
 #define EMULE_SEM_ALIGN 16

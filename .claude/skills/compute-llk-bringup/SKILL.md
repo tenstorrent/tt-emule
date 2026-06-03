@@ -246,6 +246,47 @@ If none of those: defer with a one-paragraph note in the test entry's
 comment in `scripts/run_ttnn_pytests.sh` and move on. PCC-fix work
 deserves its own focused round.
 
+## Pass-through to upstream — delete the shim entirely
+
+When the emule shim is a *simplification* (not silicon-specific), prefer
+to delete the shim and let JIT include resolution fall through to
+upstream's real header. Emule already provides the silicon-specific
+primitives (NOC encoding, bank tables, etc.); upstream's templated C++
+adapts on top of them.
+
+The pattern:
+
+1. Delete `include/jit_hw/api/.../<thing>.h`.
+2. Change one-line `#include "jit_hw/..."` references to
+   `#include "api/..."` so JIT resolves through `tt_metal/hw/inc/`
+   instead.
+3. Define `KERNEL_BUILD=1` in the JIT defines so upstream's
+   `#if defined(KERNEL_BUILD)` branches pick the in-kernel codepath
+   (forward decls of `get_common_arg_addr`, the
+   `InterleavedAddrGen`-inheriting interleaved DRAM specialization, etc.).
+4. Make `get_compile_time_arg_val<N>` bounds-safe (return 0 for
+   `N >= size`) so upstream's `TensorAccessorArgs<CTA_OFFSET>` constexpr
+   parsing doesn't choke when the host emits fewer slots than the
+   template scans.
+5. Add `noc_traits_t<>` specializations for the iterator-yielded types
+   upstream produces (e.g. `tensor_accessor::Page`, `ShardView<Accessor>`)
+   — extract NOC address → route through `__emule_resolve_noc_addr` for
+   the host-pointer lookup.
+
+**Watch out for non-power-of-2 bank counts.** WH-N150 has 12 DRAM banks.
+Upstream's `interleaved_addr_gen::get_bank_offset_index<DRAM>` uses
+bit-shift when the count is a power of two (gated on
+`LOG_BASE_2_OF_NUM_DRAM_BANKS`) and a fast-divide otherwise (gated on
+`IS_NOT_POW2_NUM_DRAM_BANKS`). Emule must emit one of these defines —
+see `build_kernel_defines` in
+`tt_metal/impl/emulation/emulated_program_runner.cpp`.
+
+**Watch out for upstream kernels that include `sharding_addrgen.hpp`**
+(common via untilize/repeat_interleave/...). With `KERNEL_BUILD`
+defined, an overload references `InterleavedPow2AddrGenFast<DRAM>` — add
+it to `include/jit_hw/internal/dataflow/dataflow_api_addrgen.h` as a
+pow2 variant of `InterleavedAddrGenFast`.
+
 ## Separate kernel chain not shimmed
 
 Some ttnn ops dispatch to alternate kernel implementations (moreh, fused,

@@ -13,7 +13,10 @@
 // __emule_resolve_noc_addr() to get a host-accessible pointer.
 
 #include "jit_hw/experimental/noc.h"
-#include "jit_hw/api/tensor/tensor_accessor.h"
+// tensor_accessor.h references NOC_UNICAST_ADDR_X/Y; experimental/noc.h
+// doesn't pull noc_parameters.h transitively, so include it explicitly.
+#include "noc/noc_parameters.h"
+#include "api/tensor/tensor_accessor.h"
 
 extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
 

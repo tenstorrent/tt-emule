@@ -30,7 +30,6 @@
 // pulling it into every TU corrupts the SFPU INT32 unary tile-data path.
 #include "internal/firmware_common.h"
 
-#include <vector>
 #include <cstdint>
 #include <cstring>
 
@@ -38,8 +37,10 @@
 // The main executable exports these with -rdynamic; the JIT .so resolves them
 // at dlopen() time.
 namespace tt_emule { class Core; class Device; }
-extern thread_local std::vector<uint32_t> __rt_args;
-extern thread_local std::vector<uint32_t> __common_rt_args;
+// Per-thread L1 pointers set by the runner's kernel-launch lambda.
+// nullptr = no args for this RISC.
+extern thread_local uint32_t* __rt_args;
+extern thread_local uint32_t* __common_rt_args;
 extern thread_local tt_emule::Core*       __core;
 extern thread_local tt_emule::Device*     __device;
 
@@ -68,11 +69,13 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
 #endif
 
 // Bank mapping arrays — populated by emulated_program_runner, resolved at dlopen.
-// Match firmware declarations from dataflow_api_common.h / firmware_common.h.
-extern uint16_t dram_bank_to_noc_xy[2][32];
-extern int32_t bank_to_dram_offset[32];
-extern uint16_t l1_bank_to_noc_xy[2][32];
-extern int32_t bank_to_l1_offset[32];
+// Match firmware declarations from dataflow_api_common.h / firmware_common.h —
+// sized by the same NUM_*_BANKS JIT defines so multi-extern type-mismatch
+// errors don't fire when this header and dataflow_api_addrgen.h coexist.
+extern uint16_t dram_bank_to_noc_xy[2][NUM_DRAM_BANKS];
+extern int32_t bank_to_dram_offset[NUM_DRAM_BANKS];
+extern uint16_t l1_bank_to_noc_xy[2][NUM_L1_BANKS];
+extern int32_t bank_to_l1_offset[NUM_L1_BANKS];
 
 // Per-core NOC coordinates (set per kernel thread by program runner).
 extern thread_local uint8_t my_x[2];
@@ -102,28 +105,17 @@ extern thread_local uint32_t __emule_my_thread_id;
 // NOC index — always 0 for emulation (real firmware sets this per core).
 constexpr uint8_t noc_index = 0;
 
-// get_arg_addr(idx) — mirrors tt-metal's rta_l1_base-based implementation.
-// Returns a pointer to the idx-th runtime arg (held in __rt_args).
-// Signature matches real firmware: int param, uintptr_t return.
 static inline uintptr_t get_arg_addr(int arg_idx) {
     return reinterpret_cast<uintptr_t>(&__rt_args[arg_idx]);
 }
 
-// get_common_arg_addr(idx) — pointer to common runtime arg.
 static inline uintptr_t get_common_arg_addr(int arg_idx) {
     return reinterpret_cast<uintptr_t>(&__common_rt_args[arg_idx]);
 }
 
-// Per-core and common runtime argument value access.
-// Signatures match real firmware: int param, template return.
 template<typename T = uint32_t>
 inline T get_arg_val(int arg_idx) {
     static_assert(sizeof(T) <= sizeof(uint32_t));
-    if (arg_idx < 0 || static_cast<size_t>(arg_idx) >= __rt_args.size()) {
-        fprintf(stderr, "EMULE BUG: get_arg_val(%d) out of bounds (size=%zu)\n",
-                arg_idx, __rt_args.size());
-        std::abort();
-    }
     T val;
     std::memcpy(&val, &__rt_args[arg_idx], sizeof(T));
     return val;
@@ -132,11 +124,6 @@ inline T get_arg_val(int arg_idx) {
 template<typename T = uint32_t>
 inline T get_common_arg_val(int arg_idx) {
     static_assert(sizeof(T) <= sizeof(uint32_t));
-    if (arg_idx < 0 || static_cast<size_t>(arg_idx) >= __common_rt_args.size()) {
-        fprintf(stderr, "EMULE BUG: get_common_arg_val(%d) out of bounds (size=%zu)\n",
-                arg_idx, __common_rt_args.size());
-        std::abort();
-    }
     T val;
     std::memcpy(&val, &__common_rt_args[arg_idx], sizeof(T));
     return val;
@@ -161,8 +148,11 @@ inline T get_common_arg_val(int arg_idx) {
 
 // Semaphore address helper — returns a uint32_t L1 address for the given
 // semaphore ID.  Defined here so both compute and dataflow kernels can use it.
-// EMULE_SEM_BASE should be passed as a JIT compiler define (e.g. -DEMULE_SEM_BASE=0xFFE00).
-// If not defined here, dataflow_api.h provides the default (0xFFE00).
+// EMULE_SEM_BASE is passed as a JIT compiler define by emulated_program_runner
+// (computed from the HAL's KERNEL_CONFIG base + sem_offset).  When not defined
+// (e.g. compute-only TU that doesn't pull in dataflow_api.h), get_semaphore is
+// elided — kernels that need semaphores include dataflow_api.h, which hard-
+// errors if EMULE_SEM_BASE is missing.
 #ifndef EMULE_SEM_ALIGN
 #define EMULE_SEM_ALIGN 16
 #endif
