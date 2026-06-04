@@ -20,19 +20,15 @@ concurrency:
   group: pr-d2m-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # tt-mlir's CI image: ubuntu-22-04 + pre-built /opt/ttmlir-toolchain
-  # (LLVM, StableHLO, Shardy, flatbuffers). Mirrored via harbor for shared runners.
-  TT_MLIR_CI_IMAGE: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
-
 jobs:
   build:
     name: Build tt-mlir+tt-metal against PR's tt-emule
     runs-on: tt-ubuntu-2204-large-stable
     timeout-minutes: 240
     container:
-      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
-      options: --user root
+      # ubuntu-24-04: ships clang-20 + gcc-13 + /opt/ttmlir-toolchain
+      # pre-baked, so no runtime apt-install (and no --user root) needed.
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     outputs:
       mlir-pin:  ${{ steps.pin.outputs.mlir }}
       metal-pin: ${{ steps.pin.outputs.metal }}
@@ -93,35 +89,10 @@ jobs:
           git submodule update --init --depth=1 tt_metal/third_party/umd
           git submodule update --init --depth=1 tt_metal/third_party/tracy
 
-      - name: Install clang-20 + gcc-13 libstdc++
-        # tt-mlir's CI container ships clang-17 + gcc-12's libstdc++. clang-20
-        # on libstdc++-12 trips -Werror,-Wdeprecated-declarations on
-        # get_temporary_buffer (in template instantiations in mlir's
-        # Scheduler.cpp). gcc-13's libstdc++ stops declaring that template in
-        # C++20 mode, fixing the warning at the source. We also keep libstdc++-13
-        # available as a runtime dep.
-        shell: bash
-        run: |
-          set -e
-          apt-get update -qq
-          apt-get install -y -qq wget gnupg lsb-release software-properties-common
-          if ! command -v clang-20 >/dev/null 2>&1; then
-            wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
-            chmod +x /tmp/llvm.sh
-            /tmp/llvm.sh 20 all
-          fi
-          if [ ! -d /usr/lib/gcc/x86_64-linux-gnu/13 ]; then
-            add-apt-repository -y ppa:ubuntu-toolchain-r/test
-            apt-get update -qq
-            apt-get install -y -qq gcc-13 g++-13 libstdc++-13-dev
-          fi
-          clang-20 --version
-          ls /usr/lib/gcc/x86_64-linux-gnu/ | head
-
       - name: Restore ccache
         uses: actions/cache@v4
         with:
-          path: /root/.ccache
+          path: ~/.ccache
           key: d2m-mlir-${{ steps.pin.outputs.mlir }}-metal-${{ steps.pin.outputs.metal }}-clang20-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             d2m-mlir-${{ steps.pin.outputs.mlir }}-metal-${{ steps.pin.outputs.metal }}-clang20-${{ runner.os }}-
@@ -158,11 +129,15 @@ jobs:
   test:
     name: Run D2M regression (${{ matrix.arch }})
     needs: build
+    # TEMPORARILY DISABLED — see #54. D2M builds against tt-mlir's cascade
+    # tt-metal, which lacks this PR's companion runtime (rt-args scratch, real
+    # bank count); every kernel fails at dlopen. Re-enable (remove this `if:`)
+    # once the companion lands in tt-mlir's TT_METAL_VERSION cascade.
+    if: ${{ false }}
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 120
     container:
-      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-22-04:latest
-      options: --user root
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     strategy:
       fail-fast: false
       matrix:
@@ -220,25 +195,6 @@ jobs:
           chmod +x tt-metal/build/test/tt_metal/unit_tests_* 2>/dev/null || true
           chmod +x tt-metal/build/test/ttnn/unit_tests_* 2>/dev/null || true
 
-      - name: Install gcc-13 libstdc++ runtime
-        # The build job links libTTMLIRRuntime.so against libstdc++ from
-        # gcc-13 (GLIBCXX_3.4.32). The container ships libstdc++-12 by
-        # default; ttrt fails to import with:
-        #   ImportError: libstdc++.so.6: version 'GLIBCXX_3.4.32' not found
-        # Install gcc-13 from ppa:ubuntu-toolchain-r/test to upgrade
-        # libstdc++6 to a version that provides the required symbols.
-        shell: bash
-        run: |
-          set -e
-          apt-get update -qq
-          apt-get install -y -qq software-properties-common
-          if [ ! -d /usr/lib/gcc/x86_64-linux-gnu/13 ]; then
-            add-apt-repository -y ppa:ubuntu-toolchain-r/test
-            apt-get update -qq
-            apt-get install -y -qq libstdc++6 gcc-13 g++-13 libstdc++-13-dev
-          fi
-          strings /lib/x86_64-linux-gnu/libstdc++.so.6 | grep -E '^GLIBCXX_3\.4\.(3[0-9])' | sort -u | tail
-
       - name: Install ttrt wheel
         # The build job pip-installs ttrt into its venv, but venv state doesn't
         # carry across job containers. Reinstall on the test runner from the
@@ -273,6 +229,21 @@ jobs:
           # ttrt --help can exit non-zero on the test runner when an optional
           # subcommand import fails — skip the sanity check and let the actual
           # `ttrt query` in the prepare step be the test of usability.
+
+      - name: Install pytest-timeout
+        # run_d2m_regression.sh enforces a per-test timeout via pytest-timeout.
+        # The toolchain image does not ship it, so install the tt-metal-pinned
+        # version (matches tt-metal/tt_metal/python_env/requirements-dev.txt).
+        shell: bash
+        run: |
+          set -xeo pipefail
+          set +u
+          cd tt-mlir
+          # shellcheck disable=SC1091
+          source env/activate
+          set -u
+          python -m pip install 'pytest-timeout==2.4.0'
+          python -c 'import pytest_timeout; print("pytest_timeout OK")'
 
       - name: Generate ttrt system_desc.ttsys
         env:

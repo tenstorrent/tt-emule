@@ -21,7 +21,10 @@
 #include "jit_hw/jit_kernel_stubs.hpp"
 #include "jit_hw/api/cb_api.h"
 #include "jit_hw/internal/dataflow/dataflow_api_addrgen.h"
-#include "jit_hw/api/tensor/tensor_accessor.h"
+// noc_parameters.h must be in scope before tensor_accessor.h so that the
+// NOC_UNICAST_ADDR_X/Y macros (used at upstream tensor_accessor.h:235) resolve.
+#include "noc/noc_parameters.h"
+#include "api/tensor/tensor_accessor.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -117,7 +120,14 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                 uint32_t read_dist  = (access_page + cb.num_pages - cb.read_idx)  % cb.num_pages;
                 uint32_t reserved = __emule_cb_reserved_pages[cb_id];
                 uint32_t waited   = __emule_cb_waited_pages[cb_id];
-                if (!(write_dist < reserved) && !(read_dist < waited)) {
+                // Only meaningful when the kernel holds an ACTIVE reservation/wait
+                // window. reserved==0 && waited==0 means raw get_write_ptr /
+                // get_read_ptr addressing (globally-allocated/sharded CBs, single-
+                // buffered scratch, output CBs written then DMA'd) — there is no
+                // window to be "outside" of, so it is not a boundary violation.
+                // (A genuine write past the CB's allocated region is still caught
+                // downstream by the OOB-tensor check.)
+                if ((reserved > 0 || waited > 0) && !(write_dist < reserved) && !(read_dist < waited)) {
                     fprintf(stderr,
                             "[ASAN ERROR] CB Boundary Violation: Attempted to access CB %u at offset 0x%x "
                             "(byte %u of %u, page %u of %u). "
@@ -137,14 +147,21 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             return __emule_bridge_l1 + l1_addr;
         }
     }
-    if (__emule_l1_tensor_ranges != nullptr && l1_addr >= __emule_l1_unreserved_base) {
+    // Normalize to a buffer-relative offset before comparing against the live
+    // tensor / padding ranges (which are relative, from buffer.address()).
+    // Sharded, CB/DFB, l1_alloc and >2MB bank accesses reach here as ABSOLUTE
+    // bridge-based addresses; comparing a raw absolute value against a relative
+    // range can never match -> false OOB. Same conversion the pointer-return
+    // path below applies via __emule_addr_to_offset.
+    uint32_t l1_off = __emule_addr_to_offset(l1_addr);
+    if (__emule_l1_tensor_ranges != nullptr && l1_off >= __emule_l1_unreserved_base) {
         bool in_tensor = false;
         uint64_t matched_packed = 0;
         for (uint32_t i = 0; i < __emule_l1_tensor_ranges_count; ++i) {
             uint64_t packed = __emule_l1_tensor_ranges[i];
             uint32_t r_start = static_cast<uint32_t>(packed >> 32);
             uint32_t r_end = static_cast<uint32_t>(packed);
-            if (l1_addr >= r_start && l1_addr < r_end) {
+            if (l1_off >= r_start && l1_off < r_end) {
                 in_tensor = true;
                 matched_packed = packed;
                 break;
@@ -153,7 +170,7 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
         if (!in_tensor) {
             fprintf(stderr,
                     "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
-                    l1_addr);
+                    l1_off);
             abort();
         }
         if (__emule_l1_resolved_ranges != nullptr &&
@@ -177,10 +194,10 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             uint64_t packed = __emule_l1_padding_ranges[i];
             uint32_t logical_end = static_cast<uint32_t>(packed >> 32);
             uint32_t physical_end = static_cast<uint32_t>(packed);
-            if (l1_addr >= logical_end && l1_addr < physical_end) {
+            if (l1_off >= logical_end && l1_off < physical_end) {
                 fprintf(stderr,
                         "[ASAN ERROR] Tensor Padding Violation: Attempted to write to a padded memory region at address 0x%x (logical_end=0x%x, physical_end=0x%x)\n",
-                        l1_addr, logical_end, physical_end);
+                        l1_off, logical_end, physical_end);
                 abort();
             }
         }
@@ -261,6 +278,17 @@ inline constexpr bool has_get_noc_addr_v<
     T, std::void_t<decltype(std::declval<T>().get_noc_addr(
            std::declval<uint32_t>(), std::declval<uint32_t>(), std::declval<uint8_t>()))>> = true;
 
+// Free-function get_noc_addr(page_id, accessor) — forwards to the accessor's
+// method form. Required by upstream kernel-lib helpers (e.g.
+// `embedding/device/kernels/dataflow/embeddings_common.hpp::get_token_noc_addr`)
+// that pass a TensorAccessor directly into a free `get_noc_addr` call.
+template <typename AddrGen,
+          typename = std::enable_if_t<has_get_noc_addr_v<AddrGen>>>
+inline uint64_t get_noc_addr(uint32_t page_id, const AddrGen& accessor,
+                             uint32_t offset = 0, uint8_t noc = 0) {
+    return accessor.get_noc_addr(page_id, offset, noc);
+}
+
 template <typename, typename = void>
 inline constexpr bool has_page_size_v = false;
 template <typename T>
@@ -272,6 +300,15 @@ template <typename T>
 inline constexpr bool has_log_base_2_of_page_size_v<
     T, std::void_t<decltype(std::declval<T>().log_base_2_of_page_size)>> = true;
 
+// TensorAccessor exposes the page size via get_aligned_page_size() rather than
+// a `page_size` member or `log_base_2_of_page_size` field.  Matches upstream
+// dataflow_api.h's 3-way dispatch (get_aligned_page_size → page_size → log2).
+template <typename, typename = void>
+inline constexpr bool has_get_aligned_page_size_v = false;
+template <typename T>
+inline constexpr bool has_get_aligned_page_size_v<
+    T, std::void_t<decltype(std::declval<T>().get_aligned_page_size())>> = true;
+
 // ---- NOC page operations (using addrgen.get_noc_addr) ----
 
 template<typename AddrGen>
@@ -280,7 +317,9 @@ FORCE_INLINE void noc_async_read_page(
         uint32_t dst_local_l1_addr,
         uint32_t offset = 0, uint8_t noc = 0) {
     uint32_t page_size;
-    if constexpr (has_page_size_v<AddrGen>) {
+    if constexpr (has_get_aligned_page_size_v<AddrGen>) {
+        page_size = addrgen.get_aligned_page_size();
+    } else if constexpr (has_page_size_v<AddrGen>) {
         page_size = addrgen.page_size;
     } else {
         page_size = (1u << addrgen.log_base_2_of_page_size);
@@ -305,7 +344,9 @@ FORCE_INLINE void noc_async_write_page(
         uint32_t src_local_l1_addr,
         uint32_t size = 0, uint32_t offset = 0, uint8_t noc = 0) {
     uint32_t page_size;
-    if constexpr (has_page_size_v<AddrGen>) {
+    if constexpr (has_get_aligned_page_size_v<AddrGen>) {
+        page_size = addrgen.get_aligned_page_size();
+    } else if constexpr (has_page_size_v<AddrGen>) {
         page_size = addrgen.page_size;
     } else {
         page_size = (1u << addrgen.log_base_2_of_page_size);
@@ -343,45 +384,63 @@ FORCE_INLINE void noc_async_write_tile(
 }
 
 // ---- NOC transfer alignment check (gated by TT_METAL_EMULE_ASAN) ----
-// Checks that src and dst lower bits match per the hardware requirement:
-//   L1<->L1: lower 4 bits must match (16-byte granularity)
-//   DRAM read WH: lower 5 bits must match (32-byte granularity)
-//   DRAM read BH: lower 6 bits must match (64-byte granularity)
-//   DRAM write (WH/BH): lower 4 bits must match (16-byte granularity)
+// ABSOLUTE per-side alignment: each endpoint must independently meet its own
+// memory type's NoC alignment (NOC_*_ALIGNMENT_BYTES). This is NOT a relative
+// "low bits of src and dst must match" rule — the two sides have DIFFERENT
+// requirements, which a single shared mask cannot express:
+//   L1 (read or write):  16-byte   (mask 0x0F)
+//   DRAM read:           WH 32-byte (0x1F) / BH 64-byte (0x3F)
+//   DRAM write:          16-byte   (0x0F, both arches)
+// e.g. a DRAM read from a 32-byte-aligned source into a 16-byte-aligned (but
+// not 32-aligned) L1 destination is LEGAL — each side meets its own alignment —
+// even though their low bits differ. The old relative model false-positived it.
 inline void __emule_check_noc_read_alignment(uint64_t src_noc_addr, uint32_t dst_local_l1_addr) {
     if (!__emule_asan_enabled()) return;
     uint32_t src_off = static_cast<uint32_t>(src_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
+    // L1 destination: 16-byte alignment.
+    if ((dst_local_l1_addr & 0xF) != 0) {
+        fprintf(stderr,
+                "[ASAN ERROR] NOC Transfer Alignment: L1 destination 0x%x must be 16-byte aligned\n",
+                dst_local_l1_addr);
+        std::abort();
+    }
+    // Source alignment depends on its memory type.
     if (__emule_noc_addr_is_dram(src_noc_addr)) {
 #ifdef ARCH_BLACKHOLE
-        constexpr uint32_t mask = 0x3F;  // 64-byte alignment
+        constexpr uint32_t src_mask = 0x3F;  // NOC_DRAM_READ_ALIGNMENT_BYTES = 64
 #else
-        constexpr uint32_t mask = 0x1F;  // 32-byte alignment
+        constexpr uint32_t src_mask = 0x1F;  // NOC_DRAM_READ_ALIGNMENT_BYTES = 32
 #endif
-        if ((src_off & mask) != (dst_local_l1_addr & mask)) {
+        if ((src_off & src_mask) != 0) {
             fprintf(stderr,
-                    "[ASAN ERROR] NOC Transfer Alignment: DRAM src(0x%x) and L1 dst(0x%x) lower bits must match (mask=0x%x)\n",
-                    src_off, dst_local_l1_addr, mask);
+                    "[ASAN ERROR] NOC Transfer Alignment: DRAM source 0x%x must be %u-byte aligned\n",
+                    src_off, src_mask + 1);
             std::abort();
         }
-    } else {
-        if ((src_off & 0xF) != (dst_local_l1_addr & 0xF)) {
-            fprintf(stderr,
-                    "[ASAN ERROR] NOC Transfer Alignment: L1 src(0x%x) and L1 dst(0x%x) lower 4 bits must match\n",
-                    src_off, dst_local_l1_addr);
-            std::abort();
-        }
+    } else if ((src_off & 0xF) != 0) {  // L1 source: 16-byte.
+        fprintf(stderr,
+                "[ASAN ERROR] NOC Transfer Alignment: L1 source 0x%x must be 16-byte aligned\n",
+                src_off);
+        std::abort();
     }
 }
 
 inline void __emule_check_noc_write_alignment(uint32_t src_local_l1_addr, uint64_t dst_noc_addr) {
     if (!__emule_asan_enabled()) return;
     uint32_t dst_off = static_cast<uint32_t>(dst_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
-    // Both L1 and DRAM writes use 0xF mask (16-byte) for both WH and BH
-    if ((src_local_l1_addr & 0xF) != (dst_off & 0xF)) {
+    // L1 source: 16-byte alignment.
+    if ((src_local_l1_addr & 0xF) != 0) {
+        fprintf(stderr,
+                "[ASAN ERROR] NOC Transfer Alignment: L1 source 0x%x must be 16-byte aligned\n",
+                src_local_l1_addr);
+        std::abort();
+    }
+    // Destination: DRAM write and L1 are both 16-byte aligned (WH and BH).
+    if ((dst_off & 0xF) != 0) {
         const char* dst_type = __emule_noc_addr_is_dram(dst_noc_addr) ? "DRAM" : "L1";
         fprintf(stderr,
-                "[ASAN ERROR] NOC Transfer Alignment: L1 src(0x%x) and %s dst(0x%x) lower 4 bits must match\n",
-                src_local_l1_addr, dst_type, dst_off);
+                "[ASAN ERROR] NOC Transfer Alignment: %s destination 0x%x must be 16-byte aligned\n",
+                dst_type, dst_off);
         std::abort();
     }
 }
@@ -431,6 +490,77 @@ inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
     }
 }
 
+// ---- Single-packet + templated aliases ----
+// On real hardware these are fast-path variants for transfers ≤ NOC_MAX_BURST_SIZE
+// that elide the multi-packet command-buffer split. In emule, all NOC ops are
+// synchronous memcpy regardless of size, so these alias to the non-templated form.
+// Required by `ttnn/cpp/ttnn/operations/data_movement/common/kernels/common.hpp`
+// (used by tt::data_movement::common::enhanced_noc_async_{read,write} +
+// tt_memmove<>, which select the variant via `max_transfer_size` template arg).
+inline void noc_async_read_one_packet(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
+                                      uint32_t size, uint8_t noc = 0) {
+    noc_async_read(src_noc_addr, dst_local_l1_addr, size, noc);
+}
+inline void noc_async_write_one_packet(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
+                                       uint32_t size, uint8_t noc = 0) {
+    noc_async_write(src_local_l1_addr, dst_noc_addr, size, noc);
+}
+
+// Stateful one-packet read: silicon programs the NOC with size + base in
+// `set_state`, then reuses that state for `with_state` calls (e.g.
+// `reader_unary_transpose_hc_sharded_rm.cpp`). Emule is synchronous, so we
+// just memoize the size and use it in the read.
+inline thread_local uint32_t __emule_one_packet_state_size = 0;
+template <bool use_vc = false>
+inline void noc_async_read_one_packet_set_state(uint64_t /*src_noc_addr*/,
+                                                uint32_t size,
+                                                uint32_t /*vc*/ = 0,
+                                                uint8_t /*noc*/ = 0) {
+    __emule_one_packet_state_size = size;
+}
+template <bool inc_num_issued = true, bool use_vc = false>
+inline void noc_async_read_one_packet_with_state(uint64_t src_noc_addr,
+                                                 uint32_t dst_local_l1_addr,
+                                                 uint32_t /*vc*/ = 0,
+                                                 uint8_t noc = 0) {
+    noc_async_read(src_noc_addr, dst_local_l1_addr,
+                   __emule_one_packet_state_size, noc);
+}
+
+// Write-side counterpart used by sharded writer kernels (e.g.
+// `writer_unary_transpose_wh_sharded_rm.cpp`). Silicon stores the dst
+// NOC address + packet size in the NOC cmd-buf state; `with_state`
+// then issues writes that reuse that state. Emule fans the state out
+// to a thread_local and uses noc_async_write for the actual transfer.
+inline thread_local uint64_t __emule_write_one_packet_state_dst = 0;
+inline thread_local uint32_t __emule_write_one_packet_state_size = 0;
+template <bool posted = false>
+inline void noc_async_write_one_packet_set_state(uint64_t dst_noc_addr,
+                                                 uint32_t size,
+                                                 uint8_t /*noc*/ = 0,
+                                                 uint8_t /*vc*/ = 0) {
+    __emule_write_one_packet_state_dst = dst_noc_addr;
+    __emule_write_one_packet_state_size = size;
+}
+template <bool posted = false>
+inline void noc_async_write_one_packet_with_state(uint32_t src_local_l1_addr,
+                                                  uint32_t /*dst_local_l1_addr*/,
+                                                  uint8_t noc = 0) {
+    noc_async_write(src_local_l1_addr,
+                    __emule_write_one_packet_state_dst,
+                    __emule_write_one_packet_state_size, noc);
+}
+template <uint32_t max_page_size>
+inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr, uint32_t size,
+                           uint8_t noc = 0, uint32_t vc = 0) {
+    noc_async_read(src_noc_addr, dst_local_l1_addr, size, noc, vc);
+}
+template <uint32_t max_page_size>
+inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr, uint32_t size,
+                            uint8_t noc = 0, uint32_t vc = 0) {
+    noc_async_write(src_local_l1_addr, dst_noc_addr, size, noc, vc);
+}
+
 // ---- Multicast write ----
 
 inline void noc_async_write_multicast(
@@ -467,18 +597,39 @@ inline void noc_async_read_barrier(uint8_t noc = 0) { __emule_pending_noc_reads 
 inline void noc_async_write_barrier(uint8_t noc = 0) {}
 inline void noc_async_writes_flushed(uint8_t noc = 0) {}
 inline void noc_async_posted_writes_flushed(uint8_t noc = 0) {}
+// TRID family: silicon overlaps multiple async NOC reads/writes on the same
+// NOC by tagging each with a transaction id, then polling per-tag completion.
+// Emule executes every NOC op inline before returning, so:
+//   - set_trid stores nothing (no in-flight transactions to label)
+//   - barriers/flushed/sent return immediately (everything completed at issue)
+//   - *_with_transaction_id_flushed/sent probes always report "true"
+// noc_async_read_one_packet_with_state_with_trid is intentionally omitted —
+// its only call sites are experimental kernels (ccl/deepseek/prefetcher) not
+// in the routine bring-up regression scope, and adding it would also require
+// noc_async_read_one_packet_set_state / _with_state which are a separate gap.
 inline void noc_async_read_barrier_with_trid(uint32_t trid, uint8_t noc = 0) {}
 inline void noc_async_write_barrier_with_trid(uint32_t trid, uint8_t noc = 0) {}
 inline void noc_async_write_flushed_with_trid(uint32_t trid, uint8_t noc = 0) {}
+inline void noc_async_read_set_trid(uint32_t trid = 0, uint8_t noc = 0) {}
+inline void noc_async_write_set_trid(uint32_t trid = 0, uint8_t noc = 0) {}
+inline bool ncrisc_noc_read_with_transaction_id_flushed(uint32_t noc, uint32_t trid) { return true; }
+inline bool ncrisc_noc_nonposted_write_with_transaction_id_sent(uint32_t noc, uint32_t trid) { return true; }
+inline bool ncrisc_noc_nonposted_write_with_transaction_id_flushed(uint32_t noc, uint32_t trid) { return true; }
 inline void noc_async_atomic_barrier(uint8_t noc = 0) {}
 inline void noc_async_full_barrier(uint8_t noc = 0) {}
 
 // ---- Semaphore operations ----
 
 // Get L1 address of semaphore by id.
-// Uses EMULE_SEM_BASE + id * EMULE_SEM_ALIGN, matching the program runner.
+// Uses EMULE_SEM_BASE + id * EMULE_SEM_ALIGN.  The program runner always
+// passes both as JIT defines (computed from the HAL's KERNEL_CONFIG base +
+// sem_offset, see emulated_program_runner.cpp).  No safe default exists —
+// `0xFFE00` was the historical fallback but sits inside user-buffer space on
+// real WH-N150 L1 (1.43 MiB), the same hazard MEM_ZEROS_BASE was relocated
+// to fix.  Hard-error if a caller compiled dataflow_api.h without the
+// JIT-side define rather than silently allocating semaphores into user data.
 #ifndef EMULE_SEM_BASE
-#define EMULE_SEM_BASE 0xFFE00
+#error "EMULE_SEM_BASE must be defined by the JIT compiler (set in emulated_program_runner.cpp::build_kernel_defines)."
 #endif
 #ifndef EMULE_SEM_ALIGN
 #define EMULE_SEM_ALIGN 16

@@ -9,6 +9,8 @@
 #include "tile_counter.hpp"
 #include "dst_register_file.hpp"
 #include <array>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -89,13 +91,19 @@ public:
 
     DstRegisterFile& dst() { return dst_; }
 
-    // Device-side / kernel-side alignment chokepoint: every NOC resolution
-    // (__emule_resolve_noc_addr → core->l1_ptr) and every kernel-issued L1
-    // access lands here. WORKER cores require 4-byte alignment (RISC-V scalar
-    // safety); DRAM cores require 32-byte alignment on Wormhole (NOC DMA
-    // granularity). Host→device writes/reads are validated separately at the
-    // tt-metal host API layer.
-    uint8_t* l1_ptr(uint32_t offset) {
+    // Accepts uint64_t so DRAM banks (≤ 4 GB on BH, ≤ 2 GB on WH views) can be
+    // addressed without uint32 truncation. Loud bounds check converts what was
+    // previously silent UB into a clear failure during testing.
+    uint8_t* l1_ptr(uint64_t offset) {
+        if (offset >= l1_size_) {
+            std::fprintf(stderr,
+                "[EMULE] Core::l1_ptr OOB: role=%s coord=(%zu,%zu) offset=0x%llx size=0x%zx\n",
+                role_ == CoreRole::DRAM ? "DRAM" : "WORKER",
+                coord_.x, coord_.y,
+                static_cast<unsigned long long>(offset),
+                l1_size_);
+            std::abort();
+        }
         return l1_ + offset;
     }
 
@@ -108,17 +116,18 @@ public:
     // 32-bit absolute address of the L1 base (valid if mmap succeeded below 4 GB).
     uint32_t l1_base_addr() const { return l1_base_; }
 
-    // Top of L1 reserved for the MEM_ZEROS region consumed by JIT kernels via
-    // include/jit_hw/dev_mem_map.h::MEM_ZEROS_BASE.  Mirror that 512 here
-    // because including jit_hw headers from this host runtime header would be
-    // the wrong include direction.
-    static constexpr size_t L1_RESERVED_TOP = 512;
+    // Address + size of the MEM_ZEROS region consumed by JIT kernels via
+    // include/jit_hw/dev_mem_map.h::MEM_ZEROS_BASE.  Mirror those constants
+    // here because including jit_hw headers from this host runtime header
+    // would be the wrong include direction.  Sits in the firmware-reserved
+    // region below tt-metal's l1_unreserved_base, so it never overlaps user
+    // buffers.  Must stay in sync with include/jit_hw/dev_mem_map.h::MEM_ZEROS_BASE.
+    static constexpr size_t MEM_ZEROS_BASE = 0x32A0;
+    static constexpr size_t MEM_ZEROS_SIZE = 512;
 
     // Bump allocate `bytes` from L1; returns absolute host address.
-    // Refuses allocations that would cross into the reserved zeros region at
-    // the top of L1.
     uint32_t l1_alloc(size_t bytes) {
-        if (l1_bump_ + bytes > l1_size_ - L1_RESERVED_TOP)
+        if (l1_bump_ + bytes > l1_size_)
             throw std::runtime_error("L1 OOM");
         uint32_t addr = l1_base_ + static_cast<uint32_t>(l1_bump_);
         l1_bump_ += bytes;
@@ -126,12 +135,14 @@ public:
     }
 
     // Reset the L1 bump allocator (between program runs) and rezero the
-    // reserved zeros region so a kernel that touched it in the previous run
+    // MEM_ZEROS region so a kernel that touched it in the previous run
     // (e.g. via __emule_resolve_noc_addr -> l1_) doesn't leave stale data.
+    // l1_bump_ starts above the MEM_ZEROS region so allocations can never
+    // overlap (otherwise the memset below would clobber live data).
     void reset_l1_bump() {
-        l1_bump_ = 0;
-        if (l1_ && l1_size_ >= L1_RESERVED_TOP) {
-            std::memset(l1_ + (l1_size_ - L1_RESERVED_TOP), 0, L1_RESERVED_TOP);
+        l1_bump_ = MEM_ZEROS_BASE + MEM_ZEROS_SIZE;
+        if (l1_ && (MEM_ZEROS_BASE + MEM_ZEROS_SIZE) <= l1_size_) {
+            std::memset(l1_ + MEM_ZEROS_BASE, 0, MEM_ZEROS_SIZE);
         }
     }
 
@@ -149,6 +160,7 @@ public:
         s.write_idx = 0;
         s.read_idx  = 0;
         s.occupied  = 0;
+        s.total_popped = 0;
     }
 
     void reset_cb_sync() {
@@ -160,6 +172,7 @@ public:
             s.write_idx = 0;
             s.read_idx  = 0;
             s.occupied  = 0;
+            s.total_popped = 0;
         }
     }
 
@@ -217,7 +230,8 @@ private:
     size_t    l1_size_ = L1_SIZE;
     uint8_t*  l1_      = nullptr;
     uint32_t  l1_base_ = 0;
-    size_t    l1_bump_ = 0;  // current L1 bump allocator offset
+    // Initial bump offset starts above MEM_ZEROS so allocations never overlap.
+    size_t    l1_bump_ = MEM_ZEROS_BASE + MEM_ZEROS_SIZE;
     std::array<std::shared_ptr<CircularBuffer>, MAX_CBS> cbs_;
     DstRegisterFile dst_;
     CBSyncState cb_sync_states_[MAX_CBS] = {};

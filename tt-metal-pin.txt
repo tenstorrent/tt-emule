@@ -8,4 +8,4 @@
 # (the same one tt-mlir-pin.txt cascades to via TT_METAL_VERSION). Drifting
 # apart pins the two CI pipelines on different umd revisions and exposes
 # version-specific umd bugs in one pipeline but not the other.
-665bc4e6cf285733a9ede187501b19615b34c597
+17647beb8e49ad0f3b3b40858f908874bf20fc65

@@ -4,37 +4,22 @@
 
 #pragma once
 // Stub debug print for JIT-compiled kernels.
-// On the real device, DPRINT streams to a ring buffer read by the host.
-// In the emulator, we discard all output (sink object).
 //
-// NOTE: hw/inc/api/debug/dprint.h has a different DPRINT definition ((void)0 &&).
-// Both guard with #ifndef DPRINT, so whichever is included first wins.
-// This JIT version should always be included first by JIT-compiled kernels.
+// On the real device, DPRINT serializes its arguments to a ring buffer that
+// the host print server drains. In the emulator we discard everything.
+//
+// Upstream removed the legacy stream-style API (`DPRINT << ... << ENDL();`)
+// in tt-metal #44930 in favor of fmt-style `DPRINT(format, args...)`. Mirror
+// upstream's per-thread variants (UNPACK/MATH/PACK/DATA0/DATA1) so kernels
+// that target a specific RISC compile under emule too.
 
-#include <cstdio>
-
-namespace tt_emule_jit {
-struct DPrintSink {
-    template<typename T>
-    const DPrintSink& operator<<(const T&) const { return *this; }
-};
-inline DPrintSink make_dprint() { return DPrintSink{}; }
-} // namespace tt_emule_jit
-
-#define DPRINT tt_emule_jit::make_dprint()
-#define ENDL() '\n'
-
-// Stream manipulators referenced by upstream kernel debug prints.  All discarded
-// by the sink, but they need to be valid expressions for the DPRINT chain to
-// parse.  Match upstream tt_metal/hw/inc/api/debug/dprint.h shape.
-struct HEX {};
-struct DEC {};
-struct OCT {};
-struct BIN {};
-struct FIXED {};
-struct DEFAULTFLOAT {};
-struct SETW { int v; constexpr SETW(int v_) : v(v_) {} };
-struct SETPRECISION { int v; constexpr SETPRECISION(int v_) : v(v_) {} };
-
-// Support for DEVICE_PRINT.
 #include "device_print.h"
+
+#define DPRINT(format, ...)        DEVICE_PRINT(format, ##__VA_ARGS__)
+#define DPRINT_UNPACK(format, ...) DEVICE_PRINT_UNPACK(format, ##__VA_ARGS__)
+#define DPRINT_MATH(format, ...)   DEVICE_PRINT_MATH(format, ##__VA_ARGS__)
+#define DPRINT_PACK(format, ...)   DEVICE_PRINT_PACK(format, ##__VA_ARGS__)
+#define DPRINT_DATA0(format, ...)  DEVICE_PRINT_DATA0(format, ##__VA_ARGS__)
+#define DPRINT_DATA1(format, ...)  DEVICE_PRINT_DATA1(format, ##__VA_ARGS__)
+
+#define ENDL() '\n'

@@ -30,7 +30,6 @@
 // pulling it into every TU corrupts the SFPU INT32 unary tile-data path.
 #include "internal/firmware_common.h"
 
-#include <vector>
 #include <cstdint>
 #include <cstring>
 
@@ -38,8 +37,10 @@
 // The main executable exports these with -rdynamic; the JIT .so resolves them
 // at dlopen() time.
 namespace tt_emule { class Core; class Device; }
-extern thread_local std::vector<uint32_t> __rt_args;
-extern thread_local std::vector<uint32_t> __common_rt_args;
+// Per-thread L1 pointers set by the runner's kernel-launch lambda.
+// nullptr = no args for this RISC.
+extern thread_local uint32_t* __rt_args;
+extern thread_local uint32_t* __common_rt_args;
 extern thread_local tt_emule::Core*       __core;
 extern thread_local tt_emule::Device*     __device;
 
@@ -95,7 +96,14 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                 uint32_t read_dist  = (access_page + cb.num_pages - cb.read_idx)  % cb.num_pages;
                 uint32_t reserved = __emule_cb_reserved_pages[cb_id];
                 uint32_t waited   = __emule_cb_waited_pages[cb_id];
-                if (!(write_dist < reserved) && !(read_dist < waited)) {
+                // Only meaningful when the kernel holds an ACTIVE reservation/wait
+                // window. reserved==0 && waited==0 means raw get_write_ptr /
+                // get_read_ptr addressing (globally-allocated/sharded CBs, single-
+                // buffered scratch, output CBs written then DMA'd) — there is no
+                // window to be "outside" of, so it is not a boundary violation.
+                // (A genuine write past the CB's allocated region is still caught
+                // downstream by the OOB-tensor check.)
+                if ((reserved > 0 || waited > 0) && !(write_dist < reserved) && !(read_dist < waited)) {
                     fprintf(stderr,
                             "[ASAN ERROR] CB Boundary Violation: Attempted to access CB %u at offset 0x%x "
                             "(byte %u of %u, page %u of %u). "
@@ -115,14 +123,22 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             return __emule_bridge_l1 + l1_addr;
         }
     }
-    if (__emule_l1_tensor_ranges != nullptr && l1_addr >= __emule_l1_unreserved_base) {
+    // Normalize to a buffer-relative offset before comparing against the live
+    // tensor / padding ranges (which are relative, from buffer.address()).
+    // Sharded, CB/DFB, l1_alloc and >2MB bank accesses reach here as ABSOLUTE
+    // bridge-based addresses; a raw absolute value can never fall in a relative
+    // range -> false OOB. Mirrors the pointer-return path's absolute->relative
+    // conversion (dataflow_api.h uses __emule_addr_to_offset).
+    uint32_t l1_off_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
+    uint32_t l1_off = (l1_addr >= l1_off_base) ? (l1_addr - l1_off_base) : l1_addr;
+    if (__emule_l1_tensor_ranges != nullptr && l1_off >= __emule_l1_unreserved_base) {
         bool in_tensor = false;
         uint64_t matched_packed = 0;
         for (uint32_t i = 0; i < __emule_l1_tensor_ranges_count; ++i) {
             uint64_t packed = __emule_l1_tensor_ranges[i];
             uint32_t r_start = static_cast<uint32_t>(packed >> 32);
             uint32_t r_end = static_cast<uint32_t>(packed);
-            if (l1_addr >= r_start && l1_addr < r_end) {
+            if (l1_off >= r_start && l1_off < r_end) {
                 in_tensor = true;
                 matched_packed = packed;
                 break;
@@ -131,7 +147,7 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
         if (!in_tensor) {
             fprintf(stderr,
                     "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
-                    l1_addr);
+                    l1_off);
             abort();
         }
         if (__emule_l1_resolved_ranges != nullptr &&
@@ -155,10 +171,10 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             uint64_t packed = __emule_l1_padding_ranges[i];
             uint32_t logical_end = static_cast<uint32_t>(packed >> 32);
             uint32_t physical_end = static_cast<uint32_t>(packed);
-            if (l1_addr >= logical_end && l1_addr < physical_end) {
+            if (l1_off >= logical_end && l1_off < physical_end) {
                 fprintf(stderr,
                         "[ASAN ERROR] Tensor Padding Violation: Attempted to write to a padded memory region at address 0x%x (logical_end=0x%x, physical_end=0x%x)\n",
-                        l1_addr, logical_end, physical_end);
+                        l1_off, logical_end, physical_end);
                 abort();
             }
         }
@@ -172,11 +188,13 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
 #endif
 
 // Bank mapping arrays — populated by emulated_program_runner, resolved at dlopen.
-// Match firmware declarations from dataflow_api_common.h / firmware_common.h.
-extern uint16_t dram_bank_to_noc_xy[2][32];
-extern int32_t bank_to_dram_offset[32];
-extern uint16_t l1_bank_to_noc_xy[2][32];
-extern int32_t bank_to_l1_offset[32];
+// Match firmware declarations from dataflow_api_common.h / firmware_common.h —
+// sized by the same NUM_*_BANKS JIT defines so multi-extern type-mismatch
+// errors don't fire when this header and dataflow_api_addrgen.h coexist.
+extern uint16_t dram_bank_to_noc_xy[2][NUM_DRAM_BANKS];
+extern int32_t bank_to_dram_offset[NUM_DRAM_BANKS];
+extern uint16_t l1_bank_to_noc_xy[2][NUM_L1_BANKS];
+extern int32_t bank_to_l1_offset[NUM_L1_BANKS];
 
 // Per-core NOC coordinates (set per kernel thread by program runner).
 extern thread_local uint8_t my_x[2];
@@ -206,28 +224,17 @@ extern thread_local uint32_t __emule_my_thread_id;
 // NOC index — always 0 for emulation (real firmware sets this per core).
 constexpr uint8_t noc_index = 0;
 
-// get_arg_addr(idx) — mirrors tt-metal's rta_l1_base-based implementation.
-// Returns a pointer to the idx-th runtime arg (held in __rt_args).
-// Signature matches real firmware: int param, uintptr_t return.
 static inline uintptr_t get_arg_addr(int arg_idx) {
     return reinterpret_cast<uintptr_t>(&__rt_args[arg_idx]);
 }
 
-// get_common_arg_addr(idx) — pointer to common runtime arg.
 static inline uintptr_t get_common_arg_addr(int arg_idx) {
     return reinterpret_cast<uintptr_t>(&__common_rt_args[arg_idx]);
 }
 
-// Per-core and common runtime argument value access.
-// Signatures match real firmware: int param, template return.
 template<typename T = uint32_t>
 inline T get_arg_val(int arg_idx) {
     static_assert(sizeof(T) <= sizeof(uint32_t));
-    if (arg_idx < 0 || static_cast<size_t>(arg_idx) >= __rt_args.size()) {
-        fprintf(stderr, "EMULE BUG: get_arg_val(%d) out of bounds (size=%zu)\n",
-                arg_idx, __rt_args.size());
-        std::abort();
-    }
     T val;
     std::memcpy(&val, &__rt_args[arg_idx], sizeof(T));
     return val;
@@ -236,11 +243,6 @@ inline T get_arg_val(int arg_idx) {
 template<typename T = uint32_t>
 inline T get_common_arg_val(int arg_idx) {
     static_assert(sizeof(T) <= sizeof(uint32_t));
-    if (arg_idx < 0 || static_cast<size_t>(arg_idx) >= __common_rt_args.size()) {
-        fprintf(stderr, "EMULE BUG: get_common_arg_val(%d) out of bounds (size=%zu)\n",
-                arg_idx, __common_rt_args.size());
-        std::abort();
-    }
     T val;
     std::memcpy(&val, &__common_rt_args[arg_idx], sizeof(T));
     return val;
@@ -265,8 +267,11 @@ inline T get_common_arg_val(int arg_idx) {
 
 // Semaphore address helper — returns a uint32_t L1 address for the given
 // semaphore ID.  Defined here so both compute and dataflow kernels can use it.
-// EMULE_SEM_BASE should be passed as a JIT compiler define (e.g. -DEMULE_SEM_BASE=0xFFE00).
-// If not defined here, dataflow_api.h provides the default (0xFFE00).
+// EMULE_SEM_BASE is passed as a JIT compiler define by emulated_program_runner
+// (computed from the HAL's KERNEL_CONFIG base + sem_offset).  When not defined
+// (e.g. compute-only TU that doesn't pull in dataflow_api.h), get_semaphore is
+// elided — kernels that need semaphores include dataflow_api.h, which hard-
+// errors if EMULE_SEM_BASE is missing.
 #ifndef EMULE_SEM_ALIGN
 #define EMULE_SEM_ALIGN 16
 #endif

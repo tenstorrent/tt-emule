@@ -1,6 +1,19 @@
 #pragma once
-// tt-emule shim for tt-mlir-emitted `#include "api/compute/eltwise_unary/log1p.h"`.
-// log1p_tile / log1p_tile_init are SFPU ops; the emulator's eltwise_unary path
-// handles them through the common SFPU framework. Empty shim suffices when
-// only the include is required for name lookup.
-#include "eltwise_unary.h"
+// Emulator stub for log1p SFPU tile op.
+
+#include <cmath>
+#include <cstdint>
+
+namespace ckernel {
+
+template <bool fast_and_approx = false>
+ALWI void log1p_tile_init() {}
+
+template <bool fast_and_approx = false>
+ALWI void log1p_tile(uint32_t idst) {
+    __emule_dst_check(idst, "log1p_tile");
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
+        __emule_dst[idst][i] = std::log1p(__emule_dst[idst][i]);
+}
+
+} // namespace ckernel

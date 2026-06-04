@@ -174,8 +174,8 @@ struct noc_traits_t<DataflowBuffer> {
 // unconditionally here: on WH the `if constexpr (implicit_sync)` branch that
 // calls them is pruned at compile time, so they are never instantiated.
 
-template <Noc::TxnIdMode txn_id_mode, typename Src>
-inline std::enable_if_t<txn_id_mode == Noc::TxnIdMode::ENABLED>
+template <NocOptions opts, typename Src>
+inline std::enable_if_t<has_flag(opts, NocOptions::TXN_ID)>
 Noc::async_read(const Src& src,
                 DataflowBuffer& dst,
                 const typename noc_traits_t<Src>::src_args_type& src_args,
@@ -190,8 +190,8 @@ Noc::async_read(const Src& src,
     dst.push_back(1);
 }
 
-template <Noc::TxnIdMode txn_id_mode, typename Dst>
-inline std::enable_if_t<txn_id_mode == Noc::TxnIdMode::ENABLED>
+template <NocOptions opts, typename Dst>
+inline std::enable_if_t<has_flag(opts, NocOptions::TXN_ID)>
 Noc::async_write(DataflowBuffer& src,
                  const Dst& dst,
                  const DataflowBufferArgs& src_args,

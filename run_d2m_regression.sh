@@ -21,7 +21,11 @@ case "$TT_EMULE_ARCH" in
     *) echo "ERROR: TT_EMULE_ARCH must be wormhole|blackhole, got '$TT_EMULE_ARCH'" >&2; exit 1 ;;
 esac
 LOG_DIR="/tmp/tt_emule_d2m_logs_$$"
-TIMEOUT="${TIMEOUT:-1800}"
+# PYTEST_TIMEOUT bounds an individual test case via the pytest-timeout plugin.
+# FILE_TIMEOUT is the bash-level per-file ceiling that catches hangs in native
+# code that the plugin's thread can't interrupt.
+PYTEST_TIMEOUT="${PYTEST_TIMEOUT:-300}"
+FILE_TIMEOUT="${FILE_TIMEOUT:-3600}"
 D2M_XML_DIR="${D2M_XML_DIR:-}"
 
 SERIAL=0
@@ -65,6 +69,16 @@ if [ -f "$TT_MLIR_DIR/env/activate" ]; then
     source "$TT_MLIR_DIR/env/activate"
 fi
 
+# Per-test timeouts rely on the pytest-timeout plugin. tt-metal's
+# requirements-dev.txt pins pytest-timeout==2.4.0 and tt-mlir's env pulls it
+# in transitively; fail loudly if it's missing rather than silently dropping
+# the per-test timeout.
+if ! python -c 'import pytest_timeout' >/dev/null 2>&1; then
+    echo "ERROR: pytest-timeout plugin not importable in the current Python env." >&2
+    echo "       Install it (see tt-metal/tt_metal/python_env/requirements-dev.txt) and rerun." >&2
+    exit 1
+fi
+
 # Set PYTHONPATH for ttnn (from tt-metal build) and ttmlir_runtime (from tt-mlir build).
 # $TT_METAL_DIR/tools is required because ttnn's __init__.py imports the tracy python
 # module from tt-metal-main/tools/tracy/.
@@ -92,7 +106,7 @@ mkdir -p "$LOG_DIR"
 
 echo ""
 echo "Running ${#TEST_FILES[@]} test files (mode: $([ $SERIAL -eq 1 ] && echo serial || echo parallel))"
-echo "Timeout per file: ${TIMEOUT}s"
+echo "Timeout per test: ${PYTEST_TIMEOUT}s  /  per file: ${FILE_TIMEOUT}s"
 echo "Logs: $LOG_DIR"
 echo ""
 
@@ -120,7 +134,7 @@ for tf in "${TEST_FILES[@]}"; do
     if [ $SERIAL -eq 1 ]; then
         echo "--- $tf ---"
         START=$(date +%s)
-        timeout "$TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider --forked "${JUNIT_ARG[@]}" "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1
+        timeout "$FILE_TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider --forked --timeout="$PYTEST_TIMEOUT" "${JUNIT_ARG[@]}" "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1
         RC=$?
         END=$(date +%s)
         ELAPSED=$((END - START))
@@ -139,7 +153,7 @@ for tf in "${TEST_FILES[@]}"; do
         # Clear JIT cache between test files
         rm -rf /tmp/tt_emule_jit_*
     else
-        timeout "$TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider --forked "${JUNIT_ARG[@]}" "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1 &
+        timeout "$FILE_TIMEOUT" pytest "$test_path" -v --tb=short -p no:cacheprovider --forked --timeout="$PYTEST_TIMEOUT" "${JUNIT_ARG[@]}" "${PYTEST_EXTRA_ARGS[@]}" > "$log_file" 2>&1 &
         PIDS[$tf]=$!
     fi
 done
@@ -156,7 +170,7 @@ if [ $SERIAL -eq 0 ]; then
         else
             RC=$?
             if [ "$RC" -eq 124 ]; then
-                echo "  HUNG: $tf (timeout after ${TIMEOUT}s, log: $log_file)"
+                echo "  HUNG: $tf (file-wide timeout after ${FILE_TIMEOUT}s, log: $log_file)"
                 HUNG=$((HUNG + 1))
             else
                 summary=$(grep -E "^=+" "$log_file" | tail -1)

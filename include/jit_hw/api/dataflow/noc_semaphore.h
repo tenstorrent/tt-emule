@@ -9,7 +9,7 @@
 // with the 'namespace experimental {}' wrapper removed and the API surface
 // extended to match the promoted api/dataflow/noc_semaphore.h:
 //   - template param is now ProgrammableCoreType (stubbed enum below)
-//   - set_multicast gains a Noc::McastMode template param
+//   - set_multicast gains a NocOptions template param (MCAST_INCL_SRC)
 //   - inc_multicast argument order matches real API (value, num_dests)
 //   - up(const Noc&, ...) delegates to noc_semaphore_inc (already in dataflow_api.h)
 //
@@ -130,11 +130,11 @@ public:
     }
 
     // ---- Multicast operations ----
-    // McastMode::INCLUDE_SRC: sender is included in the rectangle — both modes
+    // NocOptions::MCAST_INCL_SRC: sender is included in the rectangle — both modes
     // funnel through __emule_multicast_write which visits all cores in the
     // rectangle (including the local core if its coordinates fall inside).
 
-    template <Noc::McastMode mcast_mode = Noc::McastMode::EXCLUDE_SRC>
+    template <NocOptions opts = NocOptions::DEFAULT>
     void set_multicast(
         const Noc& noc,
         uint32_t noc_x_start, uint32_t noc_y_start,

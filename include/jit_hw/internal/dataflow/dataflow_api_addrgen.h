@@ -12,10 +12,15 @@
 
 // Bank mapping arrays — populated by emulated_program_runner.cpp, resolved at dlopen.
 // Declared with C++ linkage (matching firmware declarations in dataflow_api_common.h).
-extern uint16_t dram_bank_to_noc_xy[2][32];
-extern int32_t bank_to_dram_offset[32];
-extern uint16_t l1_bank_to_noc_xy[2][32];
-extern int32_t bank_to_l1_offset[32];
+// Sized via JIT defines (NUM_DRAM_BANKS / NUM_L1_BANKS) so we match upstream's
+// `dataflow_api_common.h` extern declarations exactly — multiple-extern type-
+// mismatch errors fire otherwise.  Runtime backing storage in
+// `tt_metal/impl/emulation/emulated_program_runner.cpp` is sized by
+// MAX_NUM_BANKS (256, oversized).
+extern uint16_t dram_bank_to_noc_xy[2][NUM_DRAM_BANKS];
+extern int32_t bank_to_dram_offset[NUM_DRAM_BANKS];
+extern uint16_t l1_bank_to_noc_xy[2][NUM_L1_BANKS];
+extern int32_t bank_to_l1_offset[NUM_L1_BANKS];
 
 // Core coordinates (set per kernel thread by program runner).
 extern thread_local uint8_t my_x[2];
@@ -170,6 +175,29 @@ template <bool DRAM>
 struct InterleavedPow2AddrGen {
     static constexpr bool is_dram = DRAM;
     const uint32_t bank_base_address;
+    const uint32_t log_base_2_of_page_size;
+
+    inline uint64_t get_noc_addr(const uint32_t id, const uint32_t offset = 0, uint8_t noc = 0) const {
+        uint32_t bank_offset_index = interleaved_addr_gen::get_bank_offset_index<DRAM>(id);
+        uint32_t bank_index = interleaved_addr_gen::get_bank_index<DRAM>(id, bank_offset_index);
+        uint32_t page_size = 1u << log_base_2_of_page_size;
+        uint32_t aligned = align_power_of_2(page_size, interleaved_addr_gen::get_allocator_alignment<DRAM>());
+        uint32_t addr = (bank_offset_index * aligned) + bank_base_address + offset +
+                        interleaved_addr_gen::get_bank_offset<DRAM>(bank_index);
+        uint32_t noc_xy = interleaved_addr_gen::get_noc_xy<DRAM>(bank_index, noc);
+        return get_noc_addr_helper(noc_xy, addr);
+    }
+};
+
+// InterleavedPow2AddrGenFast — pow2-page variant of InterleavedAddrGenFast.
+// Used by sharded-CCL kernels (e.g. ttnn/cpp/ttnn/operations/ccl/kernel_common/
+// sharding_addrgen.hpp line 345) when KERNEL_BUILD is defined and the
+// `get_contiguous_noc_addr(id, InterleavedPow2AddrGenFast<>)` overload is
+// reachable from the include chain.
+template <bool DRAM>
+struct InterleavedPow2AddrGenFast {
+    static constexpr bool is_dram = DRAM;
+    uint32_t bank_base_address;
     const uint32_t log_base_2_of_page_size;
 
     inline uint64_t get_noc_addr(const uint32_t id, const uint32_t offset = 0, uint8_t noc = 0) const {

@@ -110,19 +110,25 @@ struct noc_traits_t<AllocatorBank<L1>> {
 };
 
 // --- noc_traits_t<AllocatorBank<DRAM>> ---
+// DRAM resolves per-bank: (bank_id, addr) → NOC address via
+// get_noc_addr_from_bank_id<DRAM>, then __emule_resolve_noc_addr to a host
+// pointer. The legacy `__emule_dram_ptr(args.addr)` was bank-unaware (single
+// mmap view, silently routed all banks to bank 0) and is being deprecated.
 template <>
 struct noc_traits_t<AllocatorBank<DRAM>> {
     using src_args_type = ReadSpec;
     using dst_args_type = WriteSpec;
 
     template <Noc::AddressType AT>
-    static uintptr_t src_addr(const AllocatorBank<DRAM>&, const Noc&, const ReadSpec& args) {
-        return reinterpret_cast<uintptr_t>(__emule_dram_ptr(args.addr));
+    static uintptr_t src_addr(const AllocatorBank<DRAM>&, const Noc& noc, const ReadSpec& args) {
+        uint64_t noc_addr = get_noc_addr_from_bank_id<true>(args.bank_id, args.addr, noc.get_noc_id());
+        return reinterpret_cast<uintptr_t>(__emule_resolve_noc_addr(noc_addr));
     }
 
     template <Noc::AddressType AT>
-    static uintptr_t dst_addr(const AllocatorBank<DRAM>&, const Noc&, const WriteSpec& args) {
-        return reinterpret_cast<uintptr_t>(__emule_dram_ptr(args.addr));
+    static uintptr_t dst_addr(const AllocatorBank<DRAM>&, const Noc& noc, const WriteSpec& args) {
+        uint64_t noc_addr = get_noc_addr_from_bank_id<true>(args.bank_id, args.addr, noc.get_noc_id());
+        return reinterpret_cast<uintptr_t>(__emule_resolve_noc_addr(noc_addr));
     }
 };
 

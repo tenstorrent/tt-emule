@@ -79,7 +79,7 @@ The pool is sized at 2x the Tensix core count from the SOC descriptor to provide
 
 Quasar Neos have larger L1 and a different DRAM model than WH/BH:
 
-- **L1**: 4 MB shared across all 12 cores in a Neo (8 DM + 4 compute). Emulated as a bump allocator on the host heap (`Core::l1_alloc()`). The JIT path reads the L1 size from the SOC YAML via `SWEmulatedChip`.
+- **L1**: 4 MB shared across all 12 cores in a Neo (8 DM + 4 compute). Emulated as a bump allocator on the host heap (`Core::l1_alloc()`). The JIT path reads the L1 size from the SOC YAML via `SWEmuleChip`.
 - **Firmware L1 address translation**: Device kernels reference L1 via firmware-range offsets (e.g., `0x1000`). `__emule_local_l1_to_ptr()` distinguishes these from host pointers and translates via `__emule_bridge_l1`. NOC operations and JIT-patched `reinterpret_cast<T*>(get_arg_val(N))` patterns use this translation.
 - **DRAM**: `NUM_DRAM_BANKS` is set to the real architecture channel count (Quasar=2, WH=6, BH=8) at `emulated_program_runner.cpp:700`. All bank NOC coordinates are registered in `__emule_core_map` (lines 1012-1031), enabling multi-bank interleaving via `InterleavedAddrGen`.
 - **Bridge DFBs**: When a compute kernel bridges two DFBs with the same `(entry_size, num_entries)`, the runner allocates L1 once and reuses the base address for both, modeling the hardware register file passthrough.
@@ -200,10 +200,12 @@ tt-emule/
 │   │   └── experimental/     CoreLocalMem, Noc, AllocatorBank, Lock stubs
 │   └── ttkernel/        Forwarding headers for tt-metal kernel include paths
 ├── src/                 host_api.cpp, kernel_runner.cpp, jit_kernel.cpp
-├── tests/               eltwise_add, matmul, tilize, compat, dfb_passthrough,
-│                        dfb_multi_consumer tests
+├── tests/               standalone gtests: tilize/, dram/ (DRAM model),
+│                        integration/ (emulation toggle)
 └── docs/                DFB_EMULATION.md, QUASAR_EMULATION.md, changelog.md, etc.
 ```
+
+The tree above is a high-level overview. For an authoritative, complete file-level index — every file under `src/` and `include/` with the top-level symbols it contains — see [STRUCTURE.md](STRUCTURE.md). It is kept in sync with the source as files and symbols change.
 
 ### JIT Kernel API Coverage
 
@@ -211,7 +213,7 @@ The `jit_hw/` directory provides stub implementations covering:
 
 | Category | Key APIs |
 |----------|----------|
-| Compute | `matmul_tiles`, `matmul_block`, `add/sub/mul_tiles`, `pack_tile`, `copy_tile`, `reduce_tile` (row/col/scalar × sum/max), `bcast`, `tilize/untilize`, `pack_untilize` (with `experimental::pack_untilize_block`), `transpose_wh`, `quantization`, eltwise_unary SFPU ops (`abs_tile`, `exp_tile`, `negative_tile`, `typecast_tile`, etc.), binary bitwise/shift/comp/fmod/max_min, `gcd/lcm`, `xlogy`, `copy_dest_values` |
+| Compute | `matmul_tiles`, `matmul_block`, `add/sub/mul_tiles`, `pack_tile`, `copy_tile`, `reduce_tile` (row/col/scalar × sum/max), `bcast`, `tilize/untilize`, `pack_untilize` (with `experimental::pack_untilize_block`), `transpose_wh`, `quantization`, `cumsum_tile`/`cumprod_tile` (stateful), `welford_init`/`reinit`/`clear` (statistics), `mask_tile`/`mask_posinf_tile`, `logsigmoid_tile`, `reshuffle_rows_tile`, eltwise_unary SFPU ops (`abs_tile`, `exp_tile`, `negative_tile`, `typecast_tile`, and ~40 more — see [STRUCTURE.md](STRUCTURE.md) §`include/jit_hw/api/compute/eltwise_unary/` for the full list incl. bitwise_and/or/xor, cbrt, digamma, dropout, elu, erfinv, fmod, hardmish, hardtanh, i0/i1, identity, isinf_isnan, left_shift/right_shift, lgamma, mish, polygamma, prelu, remainder, rsub, softplus, threshold, xielu), binary bitwise/shift/comp/fmod/max_min, `gcd/lcm`, `xlogy`, `copy_dest_values` |
 | Compute nfaces | `__emule_nfaces::rowmajor_to_nfaces` constexpr LUT — UNPACK/PACK engine layout conversion between nfaces (L1) and row-major (DST) |
 | Dataflow | `noc_async_read/write`, `noc_async_write_multicast`, `noc_inline_dw_write` (unicast/multicast/stateful), semaphore ops, `InterleavedAddrGen<DRAM/L1>`, banking arrays |
 | CB sync | `cb_reserve_back`, `cb_push_back`, `cb_wait_front`, `cb_pop_front` (uint32_t and int32_t overloads), DFB↔CB bridge |
@@ -239,7 +241,7 @@ Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
 
 ### Test Results
 
-The emulated C++ regression runs as three parallel CI matrix jobs (`wormhole`, `blackhole`, `quasar`), driven by the per-arch scripts under `scripts/`. The D2M golden-test regression runs through `run_d2m_regression.sh`.
+The emulated C++ regression runs as three parallel CI matrix jobs (`wormhole`, `blackhole`, `quasar`), driven by the per-arch `scripts/run_regression_<arch>.sh` (invoked in CI via `.github/scripts/ci-regression.sh`). A separate `ttnn-pytest` CI job runs stock tt-metal ttnn pytests against the emulated build (`scripts/run_ttnn_pytests.sh`, invoked via `.github/scripts/ci-ttnn-pytests.sh`). The D2M golden-test regression runs through `run_d2m_regression.sh`. The three arch jobs and the `ttnn-pytest` job live in `.github/workflows/pr-metal-regression.yml`; the D2M regression is in `pr-d2m-regression.yml`.
 
 Authoritative state lives outside this report so it stays in sync:
 
@@ -258,24 +260,25 @@ The integration follows three key principles:
 
 1. **Zero fake headers.** Tests link the real `Metalium::Metal` library and use real tt-metal headers, fixtures, and buffer utilities. Emulation is injected at the UMD (User-Mode Driver) boundary, not via mock headers.
 
-2. **Memory isolation in `tt_emule::Core`.** All device memory — worker L1, DRAM banks — is owned by `tt_emule::Core` objects inside `SWEmulatedChip`. There is no intermediate copy-in/copy-out stage. The program runner uses Core's mmap'd memory directly, and it persists across program runs.
+2. **Memory isolation in `tt_emule::Core`.** All device memory — worker L1, DRAM banks — is owned by `tt_emule::Core` objects inside `SWEmuleChip`. There is no intermediate copy-in/copy-out stage. The program runner uses Core's mmap'd memory directly, and it persists across program runs.
 
 3. **Minimal API surface in `jit_hw/`.** Stub headers only implement what is needed for the target kernel to compile and execute correctly. Where possible, real tt-metal headers are included rather than duplicated.
 
 ### Integration Layers
 
-#### Layer 1: UMD Device Injection — SWEmulatedChip
+#### Layer 1: UMD Device Injection — SWEmuleChip
 
 ```
 tt_metal/third_party/umd/device/
-├── api/umd/device/chip/sw_emulated_chip.hpp
-└── chip/sw_emulated_chip.cpp
+├── api/umd/device/chip/sw_emule_chip.hpp
+└── chip/sw_emule_chip.cpp
 ```
 
-`SWEmulatedChip` extends `MockChip` with memory-backed I/O:
+`SWEmuleChip` extends `Chip` with memory-backed I/O (all non-memory operations — barriers, resets, power management, host channels — are no-ops):
 
 ```cpp
-class SWEmulatedChip : public MockChip {
+class SWEmuleChip : public Chip {
+    std::mutex core_mutex_;
     std::unique_ptr<tt_emule::L1Pool> worker_pool_;          // 2MB-aligned slots
     size_t next_slot_ = 0;
     std::unordered_map<tt_xy_pair, size_t> core_to_slot_;    // core -> pool slot
@@ -283,7 +286,6 @@ class SWEmulatedChip : public MockChip {
     std::unordered_map<tt_xy_pair, uint32_t> dram_core_to_channel_;
     uint32_t l1_size_;
     uint64_t dram_bank_size_;
-    std::mutex core_mutex_;
 };
 ```
 
@@ -292,14 +294,12 @@ class SWEmulatedChip : public MockChip {
 - **Forward declaration only.** The header forward-declares `tt_emule::Core` and `tt_emule::L1Pool`, avoiding UMD include path contamination.
 - **Uniform I/O.** All `read_from_device` / `write_to_device` overrides delegate to `get_core(xy)->l1_ptr(offset)` + `memcpy` — uniform for both worker and DRAM cores.
 
-Chip instantiation in `cluster.cpp`:
+Chip instantiation in `cluster.cpp` (guarded by `#ifdef TT_UMD_BUILD_EMULE`):
 
 ```cpp
-#ifdef TT_METAL_EMULATION
-if (chip_type == ChipType::EMULATED) {
-    return std::make_unique<SWEmulatedChip>(soc_desc);
+if (chip_type == ChipType::SWEMULE) {
+    return std::make_unique<SWEmuleChip>(soc_desc);
 }
-#endif
 ```
 
 #### Layer 2: Runtime Activation
@@ -307,12 +307,12 @@ if (chip_type == ChipType::EMULATED) {
 Activation is controlled by environment variables:
 
 ```
-TT_METAL_EMULATED_MODE=1              -> TargetDevice::Emulated + force slow dispatch
-TT_METAL_MOCK_CLUSTER_DESC_PATH=...   -> SOC descriptor for core/DRAM topology
+TT_METAL_EMULE_MODE=1                 -> TargetDevice::Emule + force slow dispatch
+TT_METAL_MOCK_CLUSTER_DESC_PATH=...   -> SOC descriptor for core/DRAM topology (required)
 TT_METAL_SLOW_DISPATCH_MODE=1         -> Required (no HWCommandQueue in emulation)
 ```
 
-Both the build flag and the env var are required. The `TT_METAL_EMULATION=ON` CMake flag compiles in the emulated code paths (`SWEmulatedChip`, `execute_program_emulated`, JIT runner) behind `#ifdef TT_METAL_EMULATION`. Without it, these code paths do not exist in the binary. The env var then selects the emulated path at runtime. A single binary built with this flag supports both silicon and emulated execution — the env var toggles which path is taken.
+Both the build flag and the env var are required. The `TT_METAL_USE_EMULE=ON` CMake flag compiles in the emulated code paths (`SWEmuleChip`, `execute_program_emulated`, JIT runner) behind `#ifdef TT_METAL_USE_EMULE` (the UMD chip behind `#ifdef TT_UMD_BUILD_EMULE`, which `TT_METAL_USE_EMULE` propagates). Without it, these code paths do not exist in the binary. The env var then selects the emulated path at runtime — `TT_METAL_EMULE_MODE=1` requires `TT_METAL_MOCK_CLUSTER_DESC_PATH` to be set or the runtime throws. A single binary built with this flag supports both silicon and emulated execution — the env var toggles which path is taken.
 
 #### Layer 3: JIT Kernel Execution
 
@@ -321,14 +321,13 @@ The emulated program runner is the core integration component:
 ```
 tt_metal/impl/emulation/
 ├── emulated_program_runner.hpp
-├── emulated_program_runner.cpp
-└── emulated_run_stats.hpp
+└── emulated_program_runner.cpp
 ```
 
 **JIT Compilation Pipeline:**
 
 1. Kernel source `.cpp` -> temp directory with `wrapper.cpp` (kernel `#define`s + `#include "jit_kernel_stubs.hpp"` + Metal 2.0 namespace blocks + `#include kernel.cpp`)
-2. `g++ -std=c++17 -fPIC -shared -O3` with tt-emule and kernel-directory include paths
+2. The build's configured C++ compiler and standard (`TT_EMULE_CXX_COMPILER` / `TT_EMULE_CXX_STANDARD`, set by CMake to `${CMAKE_CXX_COMPILER}` / `${CMAKE_CXX_STANDARD}` — clang-20 / C++20 in the standard build) invoked as `<compiler> -std=c++<std> -fPIC -shared` with tt-emule and kernel-directory include paths
 3. Compile-time args as `-DKERNEL_COMPILE_TIME_ARGS=v0,v1,...`; named args via `-DKERNEL_COMPILE_TIME_ARG_MAP`
 4. Metal 2.0 named-binding namespaces (`args::`/`dfb::`/`sem::`/`ta::`) emitted inline into `wrapper.cpp` by `emit_metal2_namespaces()`. Replaces the `kernel_args_generated.h` + `kernel_bindings_generated.h` that upstream's `tt_metal/jit_build/genfiles.cpp` would produce — kept text-equivalent to `write_kernel_{args,bindings}_generated_header` so kernels using `args::NAME`, `dfb::NAME`, `sem::NAME`, `ta::NAME` resolve identically to the silicon JIT build. Contained entirely in `emulated_program_runner.cpp` (no public-API leak into `genfiles.hpp`).
 5. Quasar-specific patches applied via regex before compilation:
@@ -423,8 +422,8 @@ This avoids the ABI hazard of JIT kernels inlining any `Device` or `Core` method
 In `tt_metal.cpp`, `LaunchProgram()` checks the target device type:
 
 ```cpp
-#ifdef TT_METAL_EMULATION
-if (MetalContext::instance().get_cluster().get_target_device_type() == tt::TargetDevice::Emulated) {
+#ifdef TT_METAL_USE_EMULE
+if (MetalContext::instance().get_cluster().get_target_device_type() == tt::TargetDevice::Emule) {
     emule::execute_program_emulated(device, program);
 } else
 #endif
@@ -457,7 +456,7 @@ Definition (in `tt_cluster.hpp`):
 ```cpp
 bool is_mock_or_emulated() const {
     return this->target_type_ == tt::TargetDevice::Mock ||
-           this->target_type_ == tt::TargetDevice::Emulated;
+           this->target_type_ == tt::TargetDevice::Emule;
 }
 ```
 
@@ -466,9 +465,9 @@ bool is_mock_or_emulated() const {
 ```
 User Code (ttnn::matmul, ttnn::add, etc.)
     +-- tt-metal API (CreateBuffer, CreateProgram, LaunchProgram)
-            +-- [TT_METAL_EMULATION guard] execute_program_emulated()
-                    |-- JIT compile: kernel .cpp -> .so via g++ + dlopen
-                    |-- Per-core: SWEmulatedChip::get_core() -> tt_emule::Core*
+            +-- [TT_METAL_USE_EMULE guard] execute_program_emulated()
+                    |-- JIT compile: kernel .cpp -> .so via configured C++ compiler + dlopen
+                    |-- Per-core: SWEmuleChip::get_core() -> tt_emule::Core*
                     |-- Init CB sync states from ProgramImpl
                     |-- Compute sem base from HAL kernel config + ProgramConfig
                     |-- Populate banking arrays from metal_SocDescriptor
@@ -481,7 +480,7 @@ User Code (ttnn::matmul, ttnn::add, etc.)
                             |-- dm_kernel_main() x P   --- DFB push/pop, NOC read/write
                             +-- compute_main() x Q     --- UNPACK/MATH/PACK, CB↔DFB bridge
 
-tt::umd::SWEmulatedChip (extends MockChip)
+tt::umd::SWEmuleChip (extends Chip)
     +-- L1Pool: single MAP_32BIT mmap, 2MB-aligned slots for all worker cores
     +-- Per-{x,y} lazy-created tt_emule::Core (pool slot or individual mmap)
     +-- write_to_device / read_from_device -> memcpy to/from Core::l1_ptr()
@@ -502,22 +501,23 @@ tt_emule::Core
 
 ### CMake Configuration
 
-Two independent flags control the build:
+A single flag controls the build:
 
 | Flag | Scope | Effect |
 |------|-------|--------|
-| `TT_METAL_EMULATION` | tt_metal library + UMD | Compiles `emulated_program_runner.cpp`, enables `SWEmulatedChip`, defines JIT include paths, adds `-rdynamic` |
-| `TT_METAL_USE_TT_EMULE` | Top-level build | Adds `tt_emule/` test subdirectory |
+| `TT_METAL_USE_EMULE` | tt_metal library + UMD | Compiles `emulated_program_runner.cpp`, defines `TT_METAL_USE_EMULE=1` in `tt_metal`/`impl`/`llrt`, propagates `TT_UMD_BUILD_EMULE=ON` to the UMD subbuild (enabling `SWEmuleChip`), defines JIT include paths, adds `-rdynamic` |
 
 ```bash
-cmake -B build_emule \
-  -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 \
-  -DTT_METAL_USE_TT_EMULE=ON \
-  -DTT_METAL_EMULATION=ON \
+cmake -S . -B build_emule -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DTT_METAL_USE_EMULE=ON \
   -DTT_EMULE_PATH=/path/to/tt-emule \
-  -DWITH_PYTHON_BINDINGS=OFF -DENABLE_TRACY=OFF -DTT_INSTALL=OFF \
-  -DTT_METAL_BUILD_TESTS=OFF -DTTNN_BUILD_TESTS=OFF
+  -DWITH_PYTHON_BINDINGS=ON -DENABLE_TRACY=OFF \
+  -DTT_METAL_BUILD_TESTS=ON -DTTNN_BUILD_TESTS=ON
 ```
+
+See [BUILD_GUIDE.md](BUILD_GUIDE.md) for the full build/test setup, including the post-build symlinks and tt-mlir D2M wiring.
 
 ### Test Infrastructure
 
@@ -531,11 +531,11 @@ tt-metal modifications for emulation support:
 
 | Category | Files |
 |----------|-------|
-| New: program runner | `emulated_program_runner.{hpp,cpp}`, `emulated_run_stats.hpp` |
-| New: UMD chip | `sw_emulated_chip.{hpp,cpp}` |
+| New: program runner | `emulated_program_runner.{hpp,cpp}` |
+| New: UMD chip | `sw_emule_chip.{hpp,cpp}` |
 | New: test infrastructure | `tt_emule/CMakeLists.txt`, `tt_emule/ttnn_tests/CMakeLists.txt` |
 | New: Quasar test files | `test_dfb_emulation.cpp`, `test_dataflow_buffer.cpp`, `test_quasar_compute_kernels.cpp`, `test_quasar_semaphores.cpp`, `test_dm_loopback.cpp`, `test_single_dm_l1_write.cpp`, `test_riscv_atomics.cpp`, `test_globals_tls.cpp`, `test_matmul_X_tile.cpp`, data_movement tests |
-| Modified: dispatch | `tt_metal.cpp` (`#ifdef TT_METAL_EMULATION` branch) |
+| Modified: dispatch | `tt_metal.cpp` (`#ifdef TT_METAL_USE_EMULE` branch) |
 | Modified: guards | `is_mock_or_emulated()` call sites in `impl/`, `llrt/`, `umd/` |
 | Modified: enum additions | `rtoptions.cpp`, `tt_cluster.hpp`, UMD types |
 | Modified: CMake | top-level `CMakeLists.txt` + UMD build glue |
@@ -556,7 +556,7 @@ tt-metal modifications for emulation support:
 
 **Semaphore layout matches hardware.** The HAL-based semaphore base (`kernel_config_base + prog_config.sem_offset`) uses the same values `finalize_sems()` produces for real firmware. Any change to semaphore placement in tt-metal is automatically reflected in emulation.
 
-**Runtime toggle from a single binary.** A binary built with `TT_METAL_EMULATION=ON` supports both silicon and emulated execution — the `TT_METAL_EMULATED_MODE` environment variable selects which path is taken at runtime. The build flag is a prerequisite: without it, the emulated code paths (`SWEmulatedChip`, `execute_program_emulated`) are not compiled in (`#ifdef TT_METAL_EMULATION`).
+**Runtime toggle from a single binary.** A binary built with `TT_METAL_USE_EMULE=ON` supports both silicon and emulated execution — the `TT_METAL_EMULE_MODE` environment variable selects which path is taken at runtime. The build flag is a prerequisite: without it, the emulated code paths (`SWEmuleChip`, `execute_program_emulated`) are not compiled in (`#ifdef TT_METAL_USE_EMULE`).
 
 **Interleaved DRAM banking is production-accurate.** Bank mapping arrays (`dram_bank_to_noc_xy`, `bank_to_dram_offset`, etc.) are populated from the real `metal_SocDescriptor` at program execution time. `InterleavedAddrGen<DRAM>` computes proper banked NOC addresses matching the real firmware's banking logic.
 
@@ -602,7 +602,7 @@ Tests that pass in emulation may fail on silicon due to timing, precision, or re
 
 **Rebase risk is bounded.** The tt-metal integration is concentrated in:
 - `tt_metal/impl/emulation/` — the program runner
-- `SWEmulatedChip` in UMD (with L1Pool)
+- `SWEmuleChip` in UMD (with L1Pool)
 - `is_mock_or_emulated()` one-liner guards in `impl/`, `llrt/`, `umd/`
 - One dispatch branch in `tt_metal.cpp`
 

@@ -9,19 +9,5 @@
 # Quasar-specific failures (DFB topology limits, config-validation) live in
 # known-failures-quasar.txt — they are not exercised by the wormhole job.
 
-MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/0
-MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/1
-MinMaxTensorFirstDimTests/MinMaxTensorFirstDimFixture.MinMaxTensorCorrectly/0
-MinMaxTensorFirstDimTests/MinMaxTensorFirstDimFixture.MinMaxTensorCorrectly/1
-MinMaxTensorFirstDimTests/MinMaxTensorFirstDimFixture.MinMaxTensorCorrectly/2
-MinMaxTensorFirstDimTests/MinMaxTensorFirstDimFixture.MinMaxTensorCorrectly/3
-MinMaxTensorLastDimTests/MinMaxTensorLastDimFixture.MinMaxTensorCorrectly/0
-MinMaxTensorLastDimTests/MinMaxTensorLastDimFixture.MinMaxTensorCorrectly/1
-MinMaxTensorLastDimTests/MinMaxTensorLastDimFixture.MinMaxTensorCorrectly/2
-MinMaxTensorLastDimTests/MinMaxTensorLastDimFixture.MinMaxTensorCorrectly/3
-SumTensorBothDimsTests/SumTensorBothDimsFixture.SumTensorCorrectly/0
-SumTensorBothDimsTests/SumTensorBothDimsFixture.SumTensorCorrectly/1
-SumTensorFirstDimTests/SumTensorFirstDimFixture.SumTensorCorrectly/0
-SumTensorFirstDimTests/SumTensorFirstDimFixture.SumTensorCorrectly/1
-SumTensorLastDimTests/SumTensorLastDimFixture.SumTensorCorrectly/0
-SumTensorLastDimTests/SumTensorLastDimFixture.SumTensorCorrectly/1
+# (none — the MinMaxTensor*/SumTensor* reduction tests now pass after the
+#  compute LLK bring-up; removed so classify-results.py stays green.)
