@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# tt-emule TTNN pytest regression — single-device N150.
+# tt-emule TTNN pytest regression — Wormhole (single-device N150).
 #
 # Runs the subset of tt-metal/tests/ttnn/unit_tests/ pytest entries that pass
 # cleanly under emule. The list is curated: each entry is either a whole file
@@ -104,7 +104,7 @@ run_pytest() {
 }
 
 echo "========================================"
-echo " TTNN pytest (N150 single-device)"
+echo " TTNN pytest — Wormhole (N150 single-device)"
 echo "========================================"
 echo "  TT_METAL_DIR: $TT_METAL_DIR"
 echo "  BUILD_DIR:    $BUILD_DIR"
@@ -121,7 +121,6 @@ run_pytest "dm_test_full"              "$DM_TEST_DIR/test_full.py"
 run_pytest "dm_test_repeat_interleave" "$DM_TEST_DIR/test_repeat_interleave.py"
 # Deselect the 128-input dim=-1 case: its tilize step over-subscribes L1 after upstream
 # tt-metal #44307 added an unconditional staging CB (not an emule bug; over-budget on HW too).
-# See docs/notes/issue-concat-tilize-44307.md.
 run_pytest "dm_test_concat_iterative"  "$DM_TEST_DIR/test_concat_iterative.py" \
     --deselect "tests/ttnn/unit_tests/operations/data_movement/test_concat_iterative.py::test_concat_lg_tensor_1[dim=-1-input_shapes=((1, 1, 1, 5000), (1, 1, 1, 33))-tensor_layout=Layout.TILE-num_inputs=128]"
 
