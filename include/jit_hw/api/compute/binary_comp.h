@@ -52,7 +52,10 @@ ALWI void le_int32_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
 // ---- Upstream-named int comparisons → 1/0 (binary_comp.h). DataFormat selects
 // signed (Int32) vs unsigned (UInt32/UInt16) compare on the DST int bits.
 // data_format == UInt16 ? (uint16_t)a < (uint16_t)b : etc.
-// Init forms are templated on DataFormat to match the host's emitted call
+// Only lt/gt/le/ge are provided: the binary_ng host emits `*_int_tile` only for the ordered
+// comparisons (binary_ng_utils.cpp). Integer eq/ne don't route here — equality is bit-exact
+// so they take the format-agnostic path (verified by test_relational's edge_case with
+// INT_MAX). Init forms are templated on DataFormat to match the host's emitted call
 // (binary_ng_utils.cpp: `lt_int_tile_init<DataFormat::Int32>();`).
 template <DataFormat data_format> ALWI void lt_int_tile_init() {}
 template <DataFormat data_format> ALWI void gt_int_tile_init() {}

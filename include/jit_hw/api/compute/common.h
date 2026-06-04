@@ -222,7 +222,9 @@ inline bool cb_is_bfp8_b_format(uint32_t cb_id) {
 // CANNOT tell 16-bit int (UInt16) from bf16 — both are 2048B. The real format resolves
 // that one ambiguity; everything else stays on the reliable page_size dispatch.
 inline uint8_t cb_data_format(uint32_t cb_id) { return ::unpack_src_format[cb_id]; }
-inline bool cb_is_uint16_format(uint32_t cb_id) { return cb_data_format(cb_id) == 9; }  // tt::DataFormat::UInt16
+inline bool cb_is_uint16_format(uint32_t cb_id) {
+    return cb_data_format(cb_id) == static_cast<uint8_t>(DataFormat::UInt16);
+}
 
 // pack_dst_to_buf: PACK row-major DST → nfaces CB with L1 accumulation support.
 // When __emule_l1_acc_enabled, adds DST to existing CB contents instead of overwriting.

@@ -57,29 +57,41 @@ A `SIGFPE` handler installed around kernel execution, in the emule runtime:
 
 `tt-metal` companion → `tt_metal/impl/emulation/emulated_program_runner.cpp`
 
-- **`emule_sigfpe_handler`** — on `SIGFPE` with `si_code == FPE_INTDIV`,
-  reads the saved CPU register image (`ucontext_t`), writes RISC-V's defined
-  result into the saved `RAX` (quotient = all-ones) and `RDX` (remainder =
-  dividend), advances the saved `RIP` past the faulting instruction, and
-  returns — so the faulting thread resumes as if the divide had produced the
-  RISC-V value. Anything other than an integer divide-by-zero falls back to
-  the default disposition (`SIG_DFL` + re-raise).
-- **`emule_decode_divlen`** — a minimal length-decoder for the only x86 forms
-  clang emits for C integer `/` and `%`: `F6 /6,/7` (8-bit) and `F7 /6,/7`
-  (32/64-bit), with optional legacy + REX prefixes and ModRM/SIB/disp for a
-  memory operand. It is *not* a general disassembler — just enough to measure
-  one instruction so `RIP` can step over it. `REX.W` selects 64-bit operand
-  size (remainder/dividend masking).
+- **`emule_sigfpe_handler`** — on `SIGFPE` from an integer divide, reads the
+  saved CPU register image (`ucontext_t`), writes RISC-V's defined result into
+  the saved registers, advances the saved `RIP` past the faulting instruction,
+  and returns — so the faulting thread resumes as if the divide had produced the
+  RISC-V value. Both fault modes are handled:
+    - `FPE_INTDIV` (divide by zero): quotient (`(R|E)AX`) = all-ones, remainder
+      (`(R|E)DX`) = dividend.
+    - `FPE_INTOVF` (`INT_MIN / -1`): quotient = dividend (`INT_MIN`), remainder = 0.
+  Anything else falls back to the default disposition (`SIG_DFL` + re-raise).
+- **`emule_decode_divlen`** — a minimal length-decoder that recognizes **only the
+  32-bit and 64-bit `F7 /6,/7` forms** — the only integer-divide widths a
+  RISC-V-derived kernel compiled to x86 emits (RV32/RV64 have no 8/16-bit divide,
+  and C integer promotion never yields one). The 8-bit (`F6`) and 16-bit
+  (`0x66`-prefixed) forms are deliberately declined (so they fall through to abort
+  rather than risk a wrong partial-register write-back). It handles optional legacy
+  + REX prefixes and ModRM/SIB/disp; `REX.W` selects 64-bit width. It is *not* a
+  general disassembler — just enough to size one instruction so `RIP` can step over it.
 - **`EmuleSigfpeGuard`** — RAII installer (`sigaction` on construct, restore
   previous disposition on destruct), scoped to the body of `launch_cores()`
   so emule only intercepts `SIGFPE` while kernel code is running and never
-  permanently alters the host process's signal disposition.
+  permanently alters the host process's signal disposition. Installed with
+  `SA_SIGINFO` only (no `SA_NODEFER`; the handler never re-faults).
 
 `SIGFPE` from `#DE` is **synchronous and thread-directed**, so one
 process-wide handler correctly services whichever worker thread faults; no
 per-thread setup is needed. The whole thing is guarded by
 `#if defined(__x86_64__) && defined(__linux__)` (it depends on the host
 register / `ucontext` layout).
+
+**Caveats.** (1) The handler is process-global for the lifetime of
+`launch_cores`, so a non-kernel host thread that divides by zero in that window
+is also "recovered" — acceptable because only kernel threads run div-heavy code
+then. (2) A *genuine* kernel divide bug becomes silent-wrong-output rather than a
+crash — but that is exactly what silicon would do (RISC-V does not trap), so it is
+the faithful behavior, not a regression.
 
 ## Result-value fidelity
 
