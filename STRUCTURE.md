@@ -72,7 +72,7 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/bcast.h` — `namespace __emule_bcast` `enum class Dim`; `add_tiles`/`sub_tiles`/`mul_tiles` bcast forms, `unary_bcast_init`
 - `include/jit_hw/api/compute/bfp8.h` — `namespace __emule_bfp8`: `face_row`, `col_in_row` (BFP8 codec helpers)
 - `include/jit_hw/api/compute/binary_bitwise_sfpu.h` — `ckernel::` `bitwise_and/or/xor_binary_tile` (+`_init`), `binary_bitwise_tile_init`
-- `include/jit_hw/api/compute/binary_comp.h` — `ckernel::` `lt/le/gt/ge_int32_tile` (+`_init`)
+- `include/jit_hw/api/compute/binary_comp.h` — `ckernel::` `lt/le/gt/ge_int32_tile` (+`_init`); `lt/le/gt/ge_int_tile<DataFormat>` (+`_init`, Int32/UInt32/UInt16)
 - `include/jit_hw/api/compute/binary_fmod.h` — `ckernel::` `fmod_binary_tile`, `fmod_int32_tile` (+`_init`)
 - `include/jit_hw/api/compute/binary_max_min.h` — `ckernel::` `binary_max/min_tile`, `_int32_`, `_uint32_` variants (+`_init`)
 - `include/jit_hw/api/compute/binary_remainder.h` — `ckernel::` `remainder_binary_tile`, `remainder_int32_tile` (+`_init`)
@@ -88,7 +88,7 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/div_int32_floor.h` — `ckernel::` `div_int32_floor_tile`, `div_int32_trunc_tile` (+`_init`)
 - `include/jit_hw/api/compute/div_int32_sfpu.h` — `ckernel::` `div_int32_tile`, `div_int32_tile_init`
 - `include/jit_hw/api/compute/eltwise_binary.h` — `ckernel::` `add_tiles_init`, `sub_tiles_init`, `mul_tiles_init`
-- `include/jit_hw/api/compute/eltwise_binary_sfpu.h` — `ckernel::` `add/sub/mul/div/rsub/power_binary_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_binary_sfpu.h` — `ckernel::` `add/sub/mul/div/rsub/power_binary_tile` (+`_init`); `eq/ne/lt/gt/le/ge_binary_tile` (+`_init`, float compares → 1.0/0.0)
 - `include/jit_hw/api/compute/gcd.h` — `ckernel::` `gcd_tile`, `gcd_tile_init`
 - `include/jit_hw/api/compute/isclose.h` — `ckernel::` `isclose_binary_tile`, `isclose_binary_tile_init`
 - `include/jit_hw/api/compute/lcm.h` — `ckernel::` `lcm_tile`, `lcm_tile_init`
