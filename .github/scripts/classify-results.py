@@ -12,8 +12,11 @@ to $GITHUB_STEP_SUMMARY (or stdout if unset).
 Exits 0 iff there are no new failures, no newly-passing entries, and no
 stale allowlist entries. Exits 1 otherwise.
 
+With no --allowlist, the allowlist is empty: every failure is a new failure
+(zero-tolerance, all tests must pass). Used by arches with no known failures.
+
 Usage:
-    classify-results.py --xml-dir <dir> --allowlist <file> [--build-dir <dir>]
+    classify-results.py --xml-dir <dir> [--allowlist <file>] [--build-dir <dir>]
 """
 
 import argparse
@@ -206,14 +209,18 @@ def write_summary(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--xml-dir", required=True, type=Path)
-    parser.add_argument("--allowlist", required=True, type=Path)
+    parser.add_argument("--allowlist", default=None, type=Path)
     parser.add_argument("--build-dir", default=None)
     args = parser.parse_args()
 
     passed, failed = parse_xml(args.xml_dir)
     universe = passed | set(failed.keys())
 
-    allowlist_patterns, flaky_patterns = read_allowlist(args.allowlist)
+    # No --allowlist => empty allowlist => zero-tolerance (all tests must pass).
+    if args.allowlist is None:
+        allowlist_patterns, flaky_patterns = [], set()
+    else:
+        allowlist_patterns, flaky_patterns = read_allowlist(args.allowlist)
     matches, stale = expand_allowlist(allowlist_patterns, universe)
 
     # Flatten matched fqnames across all patterns; track which came via flaky entries.

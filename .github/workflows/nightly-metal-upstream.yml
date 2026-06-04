@@ -175,9 +175,15 @@ jobs:
           BUILD_DIR: ${{ github.workspace }}/tt-metal/build_emule
         shell: bash
         run: |
+          # wormhole/blackhole: no allowlist => every test must pass.
+          # quasar: allow the documented known failures.
+          allowlist=()
+          if [ "${{ matrix.arch }}" = "quasar" ]; then
+            allowlist=(--allowlist tt-emule/.github/known-failures-quasar.txt)
+          fi
           python3 tt-emule/.github/scripts/classify-results.py \
             --xml-dir "${RUNNER_TEMP}/gtest-xml" \
-            --allowlist tt-emule/.github/known-failures-${{ matrix.arch }}.txt \
+            "${allowlist[@]}" \
             --build-dir "$BUILD_DIR"
 
       - name: Upload regression artifacts

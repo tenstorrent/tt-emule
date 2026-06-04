@@ -8,11 +8,11 @@
 // ckernel namespace and used by TRISC/compute-side code.
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <thread>
+#include <sched.h>
+#include <unistd.h>
 
 // get_semaphore() is defined in jit_kernel_stubs.hpp (included by all JIT
 // kernels).  It returns a uint32_t L1 address (truncated host pointer) for
@@ -40,9 +40,9 @@ public:
             if (spins < 64) {
                 // busy-spin
             } else if (spins < 1024) {
-                std::this_thread::yield();
+                sched_yield();
             } else {
-                std::this_thread::sleep_for(std::chrono::microseconds(1));
+                usleep(1);
             }
             if (++spins > 10'000'000ULL) {
                 fprintf(stderr,
@@ -62,9 +62,9 @@ public:
             if (spins < 64) {
                 // busy-spin
             } else if (spins < 1024) {
-                std::this_thread::yield();
+                sched_yield();
             } else {
-                std::this_thread::sleep_for(std::chrono::microseconds(1));
+                usleep(1);
             }
             if (++spins > 10'000'000ULL) {
                 fprintf(stderr,

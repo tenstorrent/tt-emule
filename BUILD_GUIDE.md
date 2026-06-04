@@ -196,13 +196,13 @@ Expected baseline:
 
 | Job | Passed | Failed |
 |-----|-------:|-------:|
-| wormhole | ~30 | 16 |
+| wormhole | ~30 | 0 |
 | blackhole | ~19 | 0 |
 | quasar | ~105 | 9 |
 
-The **Failed** column is the size of `.github/known-failures-{arch}.txt` (wormhole 16, blackhole 0, quasar 9 as of this writing) — that file is the authoritative count. The **Passed** column is approximate and shifts as the suite and JIT coverage grow; confirm against your own run rather than treating it as exact.
+Wormhole and Blackhole are **zero-tolerance** — they have no allowlist, so any failure is a regression. Quasar's **Failed** column is the size of `.github/known-failures-quasar.txt` (9 as of this writing) — that file is the authoritative count. The **Passed** column is approximate and shifts as the suite and JIT coverage grow; confirm against your own run rather than treating it as exact.
 
-A "passed regression" means failures match `.github/known-failures-{arch}.txt`; CI's `.github/scripts/classify-results.py` does the per-test cross-check. The per-arch scripts exit non-zero on any failure (including known), so the exit code alone does not distinguish a new regression — compare the PASS/FAIL summary against the allowlist.
+CI's `.github/scripts/classify-results.py` does the per-test cross-check: for wormhole/blackhole it runs with no allowlist (every test must pass); for quasar a "passed regression" means failures match `.github/known-failures-quasar.txt`. The per-arch scripts exit non-zero on any failure (including known), so the exit code alone does not distinguish a new regression — compare the PASS/FAIL summary against the allowlist.
 
 ---
 
