@@ -45,33 +45,61 @@ inline void __llk_pack_tiled(uint32_t tile_idx, uint32_t ocb) {
     }
 }
 
-// Untilize pack: scatter DST tile into row-major output CB
+// Untilize pack: scatter DST tile into row-major output CB.  Format-aware
+// dispatch mirrors `pack_dst_to_buf` in common.h — necessary because
+// elem_size = page_size/1024 cannot distinguish bf16 from uint16 (both
+// 2 bytes/elem) nor handle Bfp8_b (1088 bytes/tile → elem_size=1) or
+// narrow-row tiles (page_size < 1024 → elem_size=0).
 inline void __llk_pack_untilize(uint32_t tile_idx, uint32_t ocb) {
-    uint32_t ps = __emule_compute::cb_page_size(ocb);
-    uint32_t elem_size = ps / 1024;
-    uint32_t block_c = __llk_pack_block_c;
-    uint32_t tile_row = __llk_pack_offset / block_c;
-    uint32_t tile_col = __llk_pack_offset % block_c;
+    constexpr uint32_t TILE_DIM = 32;
+    const uint32_t block_c = __llk_pack_block_c;
+    const uint32_t tile_row = __llk_pack_offset / block_c;
+    const uint32_t tile_col = __llk_pack_offset % block_c;
+    uint8_t* const base = __emule_compute::cb_write_ptr_at(ocb, 0);
 
-    uint8_t* base = __emule_compute::cb_write_ptr_at(ocb, 0);
-    uint32_t row_stride = block_c * 32 * elem_size;
-    uint32_t tile_row_offset = tile_row * 32 * row_stride;
-    uint32_t tile_col_offset = tile_col * 32 * elem_size;
-
-    if (elem_size == 2) {  // bfloat16
-        for (uint32_t r = 0; r < 32; r++) {
+    if (__emule_compute::cb_is_uint16_format(ocb)) {
+        // uint16 output: write the low 16 bits of the DST int32 bit pattern.
+        // Symmetric with `pack_dst_to_buf`'s uint16 branch (post-typecast or
+        // uint16 layout move).
+        const uint32_t row_stride = block_c * TILE_DIM * sizeof(uint16_t);
+        const uint32_t tile_row_offset = tile_row * TILE_DIM * row_stride;
+        const uint32_t tile_col_offset = tile_col * TILE_DIM * sizeof(uint16_t);
+        for (uint32_t r = 0; r < TILE_DIM; r++) {
             uint16_t* dst = reinterpret_cast<uint16_t*>(
                 base + tile_row_offset + r * row_stride + tile_col_offset);
-            for (uint32_t c = 0; c < 32; c++)
-                dst[c] = __emule_bf16::from_f32(__emule_dst[tile_idx][r * 32 + c]);
+            for (uint32_t c = 0; c < TILE_DIM; c++) {
+                uint32_t bits;
+                std::memcpy(&bits, &__emule_dst[tile_idx][r * TILE_DIM + c], sizeof(uint32_t));
+                dst[c] = static_cast<uint16_t>(bits);
+            }
         }
-    } else {  // float32 / int32: use memcpy to preserve exact bit patterns
-        for (uint32_t r = 0; r < 32; r++) {
+        return;
+    }
+    if (__emule_compute::cb_is_32bit_format(ocb)) {
+        // 32-bit (fp32 / int32 / uint32): preserve bit patterns via memcpy.
+        const uint32_t row_stride = block_c * TILE_DIM * sizeof(uint32_t);
+        const uint32_t tile_row_offset = tile_row * TILE_DIM * row_stride;
+        const uint32_t tile_col_offset = tile_col * TILE_DIM * sizeof(uint32_t);
+        for (uint32_t r = 0; r < TILE_DIM; r++) {
             uint32_t* dst = reinterpret_cast<uint32_t*>(
                 base + tile_row_offset + r * row_stride + tile_col_offset);
-            for (uint32_t c = 0; c < 32; c++)
-                std::memcpy(&dst[c], &__emule_dst[tile_idx][r * 32 + c], sizeof(uint32_t));
+            for (uint32_t c = 0; c < TILE_DIM; c++)
+                std::memcpy(&dst[c], &__emule_dst[tile_idx][r * TILE_DIM + c], sizeof(uint32_t));
         }
+        return;
+    }
+    // bfloat16: default 2-byte output.  Note: Bfp8_b output is not supported
+    // for untilize-pack (silicon-side `untilize_helpers.inl:155` asserts
+    // !is_block_float_format(pack_dst_format)) — no caller produces Bfp8_b
+    // via this path.
+    const uint32_t row_stride = block_c * TILE_DIM * sizeof(uint16_t);
+    const uint32_t tile_row_offset = tile_row * TILE_DIM * row_stride;
+    const uint32_t tile_col_offset = tile_col * TILE_DIM * sizeof(uint16_t);
+    for (uint32_t r = 0; r < TILE_DIM; r++) {
+        uint16_t* dst = reinterpret_cast<uint16_t*>(
+            base + tile_row_offset + r * row_stride + tile_col_offset);
+        for (uint32_t c = 0; c < TILE_DIM; c++)
+            dst[c] = __emule_bf16::from_f32(__emule_dst[tile_idx][r * TILE_DIM + c]);
     }
 }
 
