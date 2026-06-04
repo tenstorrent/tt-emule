@@ -132,6 +132,8 @@ struct CBSyncState {
 
 Four inline operations (`cb_sync_reserve`, `cb_sync_push`, `cb_sync_wait`, `cb_sync_pop`) implement the producer-consumer protocol. Both standalone and JIT kernel paths use the same `CBSyncState` struct. The CB API also provides a lock-free fast path for SPSC scenarios.
 
+**JIT wait path is `<chrono>`-free by default.** The JIT kernel-facing CB/DFB/semaphore waits (`jit_hw/emule_wait.h`, `cb_api.h`, `dfb_api.h`, `noc_semaphore.h`) block on `cv.wait(pred)` and spin with `sched_yield()`/`usleep(1)` — deliberately avoiding `<chrono>` and `<thread>`, which on libstdc++ transitively pull the C++20 `<format>`/iostream machinery and cost ~1 s of frontend parse per kernel (roughly half the cold JIT compile). Silicon kernels include neither, so this is zero divergence. Setting `TT_EMULE_WAIT_TIMEOUT=1` makes the emule program runner define `EMULE_WAIT_TIMEOUT` for the JIT compile, restoring the bounded `cv.wait_for` + per-op hang diagnostic (which CB/DFB deadlocked, and an abort) for debugging. The define is part of the JIT cache key, so toggling it recompiles cleanly.
+
 #### Quasar: Tile Counter Synchronization
 
 On Quasar, a single Neo has 24 logical processors sharing one L1, so SPSC circular buffers are insufficient. DFBs (Dataflow Buffers) provide MPMC synchronization via **tile counters** — one per consumer, each with an independent `posted`/`acked` counter pair.

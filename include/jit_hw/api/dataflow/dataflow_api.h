@@ -25,12 +25,12 @@
 // NOC_UNICAST_ADDR_X/Y macros (used at upstream tensor_accessor.h:235) resolve.
 #include "noc/noc_parameters.h"
 #include "api/tensor/tensor_accessor.h"
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
-#include <thread>
+#include <sched.h>
+#include <unistd.h>
 
 // ---- NOC virtual channel constants (values are unused in emulation) ----
 #ifndef NOC_UNICAST_WRITE_VC
@@ -669,9 +669,9 @@ inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t v
         if (spins < 64) {
             // Busy-spin for fast wakeup
         } else if (spins < 1024) {
-            std::this_thread::yield();
+            sched_yield();
         } else {
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
+            usleep(1);
         }
         if (++spins > 10'000'000ULL) {
             fprintf(stderr, "EMULE HANG: noc_semaphore_wait(%p, %u) stuck at %u after %llu spins "
@@ -697,9 +697,9 @@ inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32
         if (spins < 64) {
             // Busy-spin for fast wakeup
         } else if (spins < 1024) {
-            std::this_thread::yield();
+            sched_yield();
         } else {
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
+            usleep(1);
         }
         if (++spins > 10'000'000ULL) {
             fprintf(stderr, "EMULE HANG: noc_semaphore_wait_min(%p, %u) stuck at %u after %llu spins "

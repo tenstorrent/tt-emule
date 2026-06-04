@@ -9,7 +9,7 @@
 #include "jit_hw/emule_cb_state.h"
 #include "jit_hw/emule_dfb_state.h"
 #include "jit_hw/api/compute/common_globals.h"
-#include <chrono>
+#include "jit_hw/emule_wait.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -85,7 +85,7 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
         return;
     }
     std::unique_lock<std::mutex> lk(cb.mu);
-    if (!cb.space_cv.wait_for(lk, std::chrono::seconds(__emule_cb_timeout_sec()),
+    if (!__emule_cv_wait(cb.space_cv, lk, __emule_cb_timeout_sec(),
             [&]{ return (cb.num_pages - cb.occupied.load(std::memory_order_relaxed)) >= n; })) {
         fprintf(stderr, "EMULE HANG: cb_reserve_back(cb_id=%u, n=%u) timed out after %ds "
                 "(occupied=%u, num_pages=%u, page_size=%u) "
@@ -160,7 +160,7 @@ inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
         return;
     }
     std::unique_lock<std::mutex> lk(cb.mu);
-    if (!cb.data_cv.wait_for(lk, std::chrono::seconds(__emule_cb_timeout_sec()),
+    if (!__emule_cv_wait(cb.data_cv, lk, __emule_cb_timeout_sec(),
             [&]{ return cb.occupied.load(std::memory_order_relaxed) >= n; })) {
         fprintf(stderr, "EMULE HANG: cb_wait_front(cb_id=%u, n=%u) timed out after %ds "
                 "(occupied=%u, num_pages=%u, page_size=%u) "

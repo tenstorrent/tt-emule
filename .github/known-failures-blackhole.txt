@@ -1,8 +1,0 @@
-# tt-emule known regression failures — blackhole matrix job.
-#
-# Format: one gtest filter expression per line. Wildcards permitted.
-# Comments start with '#'; blank lines are ignored.
-#
-# Regenerated from local run against pinned tt-metal SHA with TT_EMULE_ARCH=blackhole.
-# Stale or newly-passing entries cause CI to fail — keep this file in sync.
-
