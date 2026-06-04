@@ -10,6 +10,8 @@
 #include <cstring>
 #include <cmath>
 
+#include "jit_hw/api/compute/common.h"
+
 namespace ckernel {
 
 template <uint32_t IN_DTYPE, uint32_t OUT_DTYPE>

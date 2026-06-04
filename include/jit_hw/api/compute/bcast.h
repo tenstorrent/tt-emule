@@ -98,14 +98,32 @@ inline void mul_tiles_bcast(uint32_t icb0, uint32_t icb1, uint32_t itile0, uint3
     any_tiles_bcast<op_type, bcast_type>(icb0, icb1, itile0, itile1, idst);
 }
 
-// `unary_bcast<BroadcastType>` — broadcasts a single tile across DST positions.
-// On emule we don't track per-thread DST layout; treat as copy_tile.
+// `unary_bcast<BroadcastType>` — loads one tile and broadcasts it across DST.
+// SCALAR replicates element (0,0); ROW replicates row 0 down all rows; COL
+// replicates column 0 across all columns. Used by the binary_ng *_scalar/row/
+// col_bcast compute kernels when the host picks the LLK-broadcast path
+// (BCAST_LLK=1, so the reader does NOT pre-fill the tile). Broadcast on the raw
+// DST bits so it is format-agnostic (fp32 and int32 share the path). Layout:
+// element (r,c) at r*32 + c (see __emule_bcast above).
 template <BroadcastType BCAST_T>
 inline void unary_bcast_init(uint32_t /*icb0*/, uint32_t /*icb1*/) {}
 
 template <BroadcastType BCAST_T>
 inline void unary_bcast(uint32_t icb, uint32_t in_tile_index, uint32_t idst) {
-    copy_tile(icb, in_tile_index, idst);
+    copy_tile(icb, in_tile_index, idst);  // load tile into DST honoring format
+    if constexpr (BCAST_T == BroadcastType::SCALAR) {
+        const int32_t v = __emule_dst_load_i32(idst, 0);
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; ++i) __emule_dst_store_i32(idst, i, v);
+    } else if constexpr (BCAST_T == BroadcastType::ROW) {
+        for (uint32_t r = 1; r < 32; ++r)
+            for (uint32_t c = 0; c < 32; ++c)
+                __emule_dst_store_i32(idst, r * 32 + c, __emule_dst_load_i32(idst, c));
+    } else if constexpr (BCAST_T == BroadcastType::COL) {
+        for (uint32_t r = 0; r < 32; ++r)
+            for (uint32_t c = 1; c < 32; ++c)
+                __emule_dst_store_i32(idst, r * 32 + c, __emule_dst_load_i32(idst, r * 32));
+    }
+    // NONE: plain copy already done.
 }
 
 // ---- Non-templated row/col/scalar variants ----

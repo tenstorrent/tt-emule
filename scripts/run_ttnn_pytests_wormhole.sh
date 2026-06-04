@@ -230,6 +230,15 @@ run_pytest "elt_test_math" "$ELT_TEST_DIR/test_math.py::test_cbrt" "$ELT_TEST_DI
 run_pytest "elt_test_elu" "$ELT_TEST_DIR/test_elu.py::test_elu_allclose" "$ELT_TEST_DIR/test_elu.py::test_elu_arange_masking"
 run_pytest "elt_test_unary_i1" "$ELT_TEST_DIR/test_unary_i1.py::test_i1_zero" "$ELT_TEST_DIR/test_unary_i1.py::test_i1_clamp_boundary" "$ELT_TEST_DIR/test_unary_i1.py::test_i1_ood" "$ELT_TEST_DIR/test_unary_i1.py::test_i1_range"
 
+# Eltwise comparison ops (#75): float (binary_comp_fp32), int/uint-output (binary_comp_init),
+# bf16 + int32 relational, unary compare-to-scalar, typecast-output, and sharded col-bcast.
+run_pytest "elt_test_binary_comp_init"  "$ELT_TEST_DIR/test_binary_comp_init.py"
+run_pytest "elt_test_binary_comp_fp32"  "$ELT_TEST_DIR/test_binary_comp_fp32.py"
+run_pytest "elt_test_relational"        "$ELT_TEST_DIR/test_relational.py" -k 'not isclose'
+run_pytest "elt_test_unary_comp"        "$ELT_TEST_DIR/test_unary.py::test_unary_comp_ops"
+run_pytest "elt_test_binary_ng_typecast_cmp" "$ELT_TEST_DIR/test_binary_ng_typecast.py" -k 'test_binary_ng_typecast_lt or (test_binary_w_typecast and (ge or gt or le or lt or eq or ne))'
+run_pytest "elt_test_binary_sharded_col_major_cmp" "$ELT_TEST_DIR/test_binary_bcast.py::test_binary_sharded_col_major" -k 'eq or ne or gt or ge or lt or le'
+
 run_pytest "fused_test_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_large_fill_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_accuracy" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_stable_neg_values" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_4096x4096_fp32" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_large_kernel_block_size" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_3D" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout_large"
 run_pytest "reduce_test_cumprod" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_backward" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_failing_cases"
 run_pytest "reduce_test_cumsum_failing" "$REDUCE_TEST_DIR/test_cumsum.py::test_cumsum_failing_cases"

@@ -216,6 +216,14 @@ inline bool cb_is_bfp8_b_format(uint32_t cb_id) {
     return ps > 0 && ps < 2048;
 }
 
+// Real per-CB data format (tt::DataFormat enum value) from the compile-time
+// unpack_src_format[] array (cb_api.h, fed by EMULE_CB_DATA_FORMATS). 255 == Invalid.
+// page_size cleanly separates 32-bit (4096B) / Bfp8_b (1088B) / 16-bit (2048B), but it
+// CANNOT tell 16-bit int (UInt16) from bf16 — both are 2048B. The real format resolves
+// that one ambiguity; everything else stays on the reliable page_size dispatch.
+inline uint8_t cb_data_format(uint32_t cb_id) { return ::unpack_src_format[cb_id]; }
+inline bool cb_is_uint16_format(uint32_t cb_id) { return cb_data_format(cb_id) == 9; }  // tt::DataFormat::UInt16
+
 // pack_dst_to_buf: PACK row-major DST → nfaces CB with L1 accumulation support.
 // When __emule_l1_acc_enabled, adds DST to existing CB contents instead of overwriting.
 inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
@@ -262,6 +270,18 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
                 uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
                 std::memcpy(&out[ni], &__emule_dst[dst_slot][i], sizeof(uint32_t));
             }
+        }
+    } else if (cb_is_uint16_format(ocb)) {
+        // 16-bit integer output: write the low 16 bits of the DST int32 bit pattern.
+        // (DST holds int values bit-punned into its fp32 storage — e.g. comparison
+        // results after typecast<*,UInt16>; no bf16 float conversion.)
+        uint16_t* out = reinterpret_cast<uint16_t*>(buf);
+        uint32_t n = cb_tile_elems(ocb);
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
+            uint32_t bits;
+            std::memcpy(&bits, &__emule_dst[dst_slot][i], sizeof(uint32_t));
+            out[ni] = static_cast<uint16_t>(bits);
         }
     } else {
         uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
@@ -427,6 +447,16 @@ inline void __emule_unpack_cb_tile_to(uint32_t icb, uint32_t itile, float* out) 
             uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
             std::memcpy(&out[i], &ubuf[ni], sizeof(uint32_t));
         }
+    } else if (__emule_compute::cb_is_uint16_format(icb)) {
+        // 16-bit integer input: widen each uint16 to int32 and store the bit pattern
+        // into the fp32 DST slot (bit-preserving, like the 32-bit branch) so int
+        // comparison shims read the value via __emule_dst_load_i32.
+        const uint16_t* ubuf = reinterpret_cast<const uint16_t*>(buf);
+        uint32_t n = __emule_compute::cb_tile_elems(icb);
+        for (uint32_t i = 0; i < n; i++) {
+            int32_t v = static_cast<int32_t>(ubuf[__emule_nfaces::rowmajor_to_nfaces[i]]);
+            std::memcpy(&out[i], &v, sizeof(uint32_t));
+        }
     } else {
         // bfloat16: UNPACK nfaces→row-major + bf16→f32 conversion
         uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
@@ -483,6 +513,12 @@ ALWI void pack_reconfig_data_format(uint32_t, uint32_t) {}
 // ---- Pack configuration (no-ops) ----
 ALWI void llk_pack_relu_config(ReluType) {}
 ALWI void pack_set_relu_threshold(float) {}
+
+// llk_pack_hw_configure: BH (#ifdef ARCH_BLACKHOLE) binary_ng SFPU bcast kernels call
+// the templated form to configure the pack HW engine (the WH path skips it). emule packs
+// in software, so it's a no-op — matches all the other llk pack/unpack HW-config stubs.
+template <bool is_fp32_dest_acc_en>
+ALWI void llk_pack_hw_configure(uint32_t /*pack_output*/) {}
 
 // binary_dest_reuse stubs.
 // D2M emits these as `binary_dest_reuse_tiles{,_init}<BinaryType, ReuseType>(...)`
