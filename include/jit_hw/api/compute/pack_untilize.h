@@ -71,12 +71,48 @@ template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim,
 inline void pack_untilize_dest_init(uint32_t ocb = 0, uint32_t face_r_dim = 16,
                                      uint32_t num_faces = 4, uint32_t call_line = 0) {}
 
+// pack_untilize_dest: scatter (block_rt_dim × block_ct_dim) DST tiles to
+// cb_out in row-major order.  Each row of each tile becomes one cb_out page,
+// with `block_ct_dim` tiles laid out side-by-side on each row.
+//
+// Direct scatter (does NOT delegate to __llk_pack_untilize) because cb_out's
+// page_size here is "one row of the tile row" (e.g. 32 bf16 = 64 bytes), not
+// the full tile size.  Used by BlockedGeneric permute (transpose_xw) which
+// produces partial-X tiles where only the first `block_ct_dim` columns hold
+// valid data.
 template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim,
           bool diagonal = false, bool narrow_row = false,
           uint32_t row_num_datums = 32, uint32_t tile_dst_ct_offset = 0, bool dense = false>
 inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
                                 uint32_t block_c_index = 0, uint32_t face_r_dim = 16,
-                                uint32_t num_faces = 4, uint32_t tile_dst_rt_offset = 0) {}
+                                uint32_t num_faces = 4, uint32_t tile_dst_rt_offset = 0) {
+    constexpr uint32_t TILE_DIM = 32;
+    uint32_t ps = __emule_compute::cb_page_size(ocb);
+    bool is_32bit = __emule_compute::cb_is_32bit_format(ocb);
+    uint32_t elem_size = is_32bit ? 4 : 2;
+    uint8_t* base = __emule_compute::cb_write_ptr_at(ocb, 0);
+
+    for (uint32_t rt = 0; rt < block_rt_dim; ++rt) {
+        for (uint32_t ct = 0; ct < block_ct_dim; ++ct) {
+            uint32_t dst_idx = tile_dst_ct_offset + rt * block_ct_dim + ct;
+            // Each of 32 rows of this tile → one cb_out page (cb page-size).
+            for (uint32_t r = 0; r < TILE_DIM; ++r) {
+                uint32_t cb_page_idx = rt * TILE_DIM + r;
+                uint8_t* row_base = base + cb_page_idx * ps +
+                                    (block_c_index * block_ct_dim + ct) * TILE_DIM * elem_size;
+                if (is_32bit) {
+                    uint32_t* dst = reinterpret_cast<uint32_t*>(row_base);
+                    for (uint32_t c = 0; c < TILE_DIM; ++c)
+                        std::memcpy(&dst[c], &__emule_dst[dst_idx][r * TILE_DIM + c], sizeof(uint32_t));
+                } else {
+                    uint16_t* dst = reinterpret_cast<uint16_t*>(row_base);
+                    for (uint32_t c = 0; c < TILE_DIM; ++c)
+                        dst[c] = __emule_bf16::from_f32(__emule_dst[dst_idx][r * TILE_DIM + c]);
+                }
+            }
+        }
+    }
+}
 
 }  // namespace ckernel
 
