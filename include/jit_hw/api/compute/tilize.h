@@ -29,45 +29,46 @@ inline void tilize_uninit(uint32_t = 0, uint32_t = 0) {
     __llk_unpack_is_tilize = false;
 }
 
-// tilize_block: read `ntiles` row-major tiles from `icb` and write them as
-// nfaces tiles to `ocb`.
-//
-// Direct rowmajor→nfaces conversion. Don't reuse `copy_tile + pack_tile`:
-// copy_tile's unpack ALWAYS applies the nfaces→rowmajor permutation (assumes
-// nfaces input); pack_tile then applies the inverse rowmajor→nfaces. With
-// row-major source data, the unpack permutation produces a scrambled DST,
-// so the round-trip is NOT identity.
+// tilize_block: read `ntiles` tiles from `icb` (laid out as a single
+// horizontal strip of TILE_HEIGHT rows × ntiles*TILE_WIDTH cols, stride
+// ntiles*TILE_WIDTH*elem_size bytes per row) and write each tile to `ocb`
+// in nfaces (face-row-major) format.  Matches silicon's llk_unpack_tilize:
+// the input CB stores the block's H*W input as a horizontal strip, NOT as
+// `ntiles` sequential 2048-byte tile blocks.  For ntiles=1 the strip is one
+// tile wide, so the layout collapses to the same single-tile layout used
+// elsewhere — backward compatible.
 inline void tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb) {
+    constexpr uint32_t TILE_DIM = 32;
     const bool icb_is_32bit = __emule_compute::cb_is_32bit_format(icb);
     const bool ocb_is_32bit = __emule_compute::cb_is_32bit_format(ocb);
+    const uint32_t in_elem_size  = icb_is_32bit ? 4 : 2;
+    const uint32_t row_stride    = ntiles * TILE_DIM * in_elem_size;
+    uint8_t* const in_base = __emule_compute::cb_read_ptr_at(icb, 0);
+
     for (uint32_t t = 0; t < ntiles; ++t) {
-        uint8_t* in = __emule_compute::cb_read_ptr_at(icb, t);
-        uint8_t* out = __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++);
-        if (icb_is_32bit && ocb_is_32bit) {
-            const uint32_t* in_u = reinterpret_cast<const uint32_t*>(in);
-            uint32_t* out_u = reinterpret_cast<uint32_t*>(out);
-            for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-                std::memcpy(&out_u[__emule_nfaces::rowmajor_to_nfaces[i]], &in_u[i], sizeof(uint32_t));
-            }
-        } else if (!icb_is_32bit && !ocb_is_32bit) {
-            const uint16_t* in_bf = reinterpret_cast<const uint16_t*>(in);
-            uint16_t* out_bf = reinterpret_cast<uint16_t*>(out);
-            for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-                out_bf[__emule_nfaces::rowmajor_to_nfaces[i]] = in_bf[i];
-            }
-        } else if (!icb_is_32bit && ocb_is_32bit) {
-            // bf16 in → fp32 out
-            const uint16_t* in_bf = reinterpret_cast<const uint16_t*>(in);
-            float* out_f = reinterpret_cast<float*>(out);
-            for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-                out_f[__emule_nfaces::rowmajor_to_nfaces[i]] = __emule_bf16::to_f32(in_bf[i]);
-            }
-        } else {
-            // fp32 in → bf16 out
-            const float* in_f = reinterpret_cast<const float*>(in);
-            uint16_t* out_bf = reinterpret_cast<uint16_t*>(out);
-            for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-                out_bf[__emule_nfaces::rowmajor_to_nfaces[i]] = __emule_bf16::from_f32(in_f[i]);
+        uint8_t* const out = __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++);
+        for (uint32_t r = 0; r < TILE_DIM; ++r) {
+            const uint8_t* row_in =
+                in_base + r * row_stride + t * TILE_DIM * in_elem_size;
+            for (uint32_t c = 0; c < TILE_DIM; ++c) {
+                const uint32_t out_pos = __emule_nfaces::rowmajor_to_nfaces[r * TILE_DIM + c];
+                if (icb_is_32bit && ocb_is_32bit) {
+                    uint32_t v;
+                    std::memcpy(&v, row_in + c * 4, 4);
+                    std::memcpy(reinterpret_cast<uint32_t*>(out) + out_pos, &v, 4);
+                } else if (!icb_is_32bit && !ocb_is_32bit) {
+                    uint16_t v;
+                    std::memcpy(&v, row_in + c * 2, 2);
+                    reinterpret_cast<uint16_t*>(out)[out_pos] = v;
+                } else if (!icb_is_32bit && ocb_is_32bit) {
+                    uint16_t v;
+                    std::memcpy(&v, row_in + c * 2, 2);
+                    reinterpret_cast<float*>(out)[out_pos] = __emule_bf16::to_f32(v);
+                } else {
+                    float v;
+                    std::memcpy(&v, row_in + c * 4, 4);
+                    reinterpret_cast<uint16_t*>(out)[out_pos] = __emule_bf16::from_f32(v);
+                }
             }
         }
     }

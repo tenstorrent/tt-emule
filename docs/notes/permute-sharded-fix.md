@@ -1,72 +1,98 @@
 # test_permute_sharded fix — running notes
 
-Tracks the investigation of tt-emule#50 on branch `arminale/permute-fix`.
+Closes tt-emule#50 on branch `arminale/permute-fix`.
 
-## Status
+## Status — 8/8 PASS
 
-| Variant (input_sharding, perm) | x_dim | Result |
-|---|---|---|
-| None,                  [0, 2, 3, 1] | 1 | **PASS** |
-| None,                  [0, 3, 2, 1] | 1 | **PASS** |
-| None,                  [1, 2, 3, 0] | 0 | **PASS** |
-| None,                  [1, 3, 2, 0] | 0 | **PASS** |
-| ShardStrategy.HEIGHT,  [1, 2, 3, 0] | 0 | **PASS** |
-| ShardStrategy.HEIGHT,  [1, 3, 2, 0] | 0 | **PASS** |
-| ShardStrategy.HEIGHT,  [0, 2, 3, 1] | 1 | FAIL (ATOL 6.03, 3.11% non-zero) |
-| ShardStrategy.HEIGHT,  [0, 3, 2, 1] | 1 | FAIL (ATOL 6.03, 3.11% non-zero) |
+```
+PASSED  perm=[0, 2, 3, 1]  input=None
+PASSED  perm=[0, 3, 2, 1]  input=None
+PASSED  perm=[1, 2, 3, 0]  input=None
+PASSED  perm=[1, 3, 2, 0]  input=None
+PASSED  perm=[0, 2, 3, 1]  input=HEIGHT
+PASSED  perm=[0, 3, 2, 1]  input=HEIGHT
+PASSED  perm=[1, 2, 3, 0]  input=HEIGHT
+PASSED  perm=[1, 3, 2, 0]  input=HEIGHT
+```
 
-**6/8 PASS** (was 0/8 before this branch). The 2 remaining failures
-share `input_sharding=HEIGHT` AND `x_dim=1` (perm.back()=1). The
-DRAM-interleaved-input case works for both x_dim values, so the bug
-is specific to the sharded-input × x_dim=1 cross.
+## Three independent bugs
 
-## Fix #1 — `pack_untilize_dest` was a no-op stub
+### 1. `pack_untilize_dest` was an empty stub
 
-`include/jit_hw/api/compute/pack_untilize.h` — `pack_untilize_dest` had an
-empty body `{}`. The BlockedGeneric permute kernel uses
-`tilize → transpose_wh_tile → pack_untilize_dest` to drive its
-transpose; the last step is what scatters the DST register back to the
-output CB. With it as a no-op, `cb_out` stayed zero, the writer kernel
-read zeros, and the output buffer landed at every core as all-zero
-data — hence the `output_uniform_zero=True` symptom and the
-`ATOL 0.99609375` failure (`|randn| ≈ 1.0`).
+`include/jit_hw/api/compute/pack_untilize.h`. With no scatter, `cb_out`
+stayed zero, the writer kernel read zeros, the output buffer ended up
+all-zero — `ATOL 0.99609375` from `|randn| ≈ 1.0`.
 
-Implementation: direct scatter of `(block_rt_dim × block_ct_dim)`
-DST tiles to `cb_out` row-major. Does NOT delegate to
-`__llk_pack_untilize` because that helper assumes the CB page size is a
-full tile (`ps == 32*32*element_size`); BlockedGeneric uses a smaller
-page size (one row = 32 bf16 = 64 bytes).
+Fixed by emulating the silicon LLK as a single row-major scatter
+across (block_rt_dim × block_ct_dim) DST tiles. The cb page_size is
+sync granularity only — the L1 layout is always contiguous row-major.
+`narrow_row` is the only template that changes the per-row column
+count (`row_num_datums` instead of `TILE_DIM`).
 
-## Diagnosis trail
+This unblocked all the BlockedGeneric paths (`input_sharding=None` or
+`perm=[1,…]`).
 
-The trail that found this — for the playbook:
+### 2. `tilize_block` was reading sequential tile blocks, not horizontal strips
 
-1. **Symptom**: 8/8 fail, `Max ATOL Delta: 0.99609375`, output uniformly zero.
-2. **R-probe** (host registration of `__emule_core_map`, runner side):
-   logical-to-phys mapping is correct, 64 worker cores registered. So
-   chip model is fine.
-3. **Resolve-probe** (`__emule_resolve_noc_addr`): noc_addr decode for
-   the 64 workers' writes shows `dst = (src.y, src.x)` — looked like
-   an x/y transpose at first.
-4. **PACK-probe** (`tensor_accessor_args.cpp` host pack site): bank
-   coords packed in ROW_MAJOR order, format `(virt.x << 8) | virt.y` —
-   correct.
-5. **Factory experiment** — flipped `corerange_to_cores(..., true)` so
-   the work split matched `BufferDistributionSpec::cores()` ROW_MAJOR
-   order. Still failed. So work assignment wasn't the issue.
-6. **WBYTES-probe** (first 4 bytes of `dst` after the `memcpy` inside
-   `noc_async_write`): all writes were `0x00000000`. So the writer
-   kernel's **CB source** was zero. The earlier "transpose" symptom
-   was an illusion — every kernel wrote ZEROS to a single dst, so the
-   apparent (Sy, Sx) pattern was just "each kernel writes its own
-   shard of zeros."
-7. **RBYTES-probe** (inside `noc_async_read`): reader kernels read
-   real non-zero DRAM data. So input → compute pipeline was the gap.
-8. Compute pipeline = `tilize → transpose_wh_tile → pack_untilize_dest`.
-   `transpose_wh_tile` does the real transpose (in
-   `transpose_wh.h`). `pack_untilize_dest` was the empty stub.
+`include/jit_hw/api/compute/tilize.h`. The sharded transpose's reader
+writes the H×W input into `cb_in` as a horizontal strip of stride
+`Wt * TILE_WIDTH * elem_size` per row, but the old `tilize_block`
+treated each tile `t` as living at `cb_read_ptr_at(icb, t)` (=
+`t * page_size`, sequential 2048-byte blocks). That meant tiles
+2..6 were read from unwritten reserved memory and came back zero —
+hence transpose_wh of an 8×224 block left 5 of 7 tiles empty.
 
-## Probes (now cleaned up — kept here for reuse)
+Fixed by reading the input as a horizontal strip: row stride =
+`ntiles * TILE_DIM * elem_size`, tile `t`'s cells are at column
+offset `t * TILE_DIM * elem_size`. For `ntiles=1` this collapses
+to the old layout, so single-tile callers are unaffected.
+
+This unblocked transpose_wh with partial output H (e.g. H=8 < 32).
+
+### 3. `pack_untilize_dest` Mode B was tile-major, not row-major
+
+After fixes 1 and 2 the failing case was the longest chain
+(`perm=[0,3,2,1]` on `input_sharding=HEIGHT`, which expands to
+`transpose_wh ∘ transpose_hc ∘ transpose_wh`). Step 1 is a square
+224×224 `transpose_wh` that uses `pack_untilize_dest<7, 7>` with
+`ps == 2048` (one tile per page).
+
+The original impl had three branches; for `ps >= TILE_ELEMS * elem_size`
+it wrote tile-major (each cb page = one full 32×32 tile in row-major
+within the page, tiles stacked). But the consumer (downstream sharded
+buffer) reads sticks of `W * elem_size` contiguous bytes — it needs
+row-major across the WHOLE output region, not tile-major. With
+tile-major layout, row 0's cols 32..63 landed at byte offset 2048
+instead of 64, so step 1's output was scrambled and the chain
+propagated garbage into the final transpose.
+
+Fixed by unifying all modes into a single row-major scatter. The
+page_size is purely a sync-granularity signal — the L1 byte layout
+is row-major regardless. Now Mode A and Mode B collapse into one
+expression; only `narrow_row` (which changes the row width to
+`row_num_datums`) remains a branch.
+
+## Diagnosis trail (preserved for the playbook)
+
+1. `pack_untilize_dest` empty-stub → 6/8 fixed.
+2. Per-call DST[0][0..7] probe in `pack_untilize_dest`: data
+   correct for `narrow_row` path, ruling out the scatter.
+3. Per-call DST[0][0..7] probe in `transpose_wh_tile` (pre-transpose,
+   post-`copy_tile`): tiles 2..6 of a 7-tile-wide block came back
+   all-zero. CB_in was getting only 2 tiles of valid data.
+4. Read the reader: it strides the 8 input rows at
+   `l1_write_offset_bytes = Wt * elem_size * TILE_WIDTH = 448`
+   bytes per row. So `cb_in` is row-major 8×224, NOT tile-major.
+5. `tilize_block` was reading tile-by-tile at 2048-byte offsets —
+   wrong. Rewrote it to read horizontal-strip with the correct row
+   stride. 7/8 fixed.
+6. Remaining failure was `perm=[0,3,2,1]`. Traced: step 1
+   (square 224×224 `transpose_wh`) takes the LARGE-PAGE branch
+   (ps=2048). Realized this branch wrote tile-major, but the
+   consumer expects row-major. Unified all three modes into one
+   row-major scatter. 8/8.
+
+## Probes (env-gated) — useful, kept around in adjacent commits
 
 - `__emule_resolve_noc_addr` print on `TT_EMULE_TRACE_RESOLVE`
 - core-map registration print on `TT_EMULE_TRACE_REG`
@@ -77,60 +103,30 @@ The trail that found this — for the playbook:
 - factory iteration print on `TT_EMULE_TRACE_FACTORY` (tt-metal
   `permute_rm_program_factory.cpp`)
 
-## Open — the 2 remaining failures
+## Rabbit holes (DO NOT REDO blindly)
 
-Both: `input_sharding=ShardStrategy.HEIGHT` + `perm=[0, ...]` (batch
-preserved → x_dim = perm.back() = 1, the C dim). The other 6
-(`input_sharding=None` for any perm, or `input_sharding=HEIGHT` +
-`perm=[1, ...]` = x_dim 0) pass.
+- Probing `TensorAccessor::get_noc_addr`,
+  `TensorAccessorArgs::TensorAccessorArgs`, or `append_sharded_args`
+  via fprintf — the symbols exist in `libtt_metal.so` but the probes
+  never fire. Suspected Unity-build inlining / different code path.
+  Spent ~1h. Skip this path; instrument the consumer side instead.
+- Flipping `corerange_to_cores(..., row_wise=true)` in the
+  BlockedGeneric factory: didn't change anything. Work-assignment
+  order was already consistent with TensorAccessor.
+- Workaround via `ttnn::permute` falling through to `prim_permute`
+  on emule (via `TT_METAL_USE_EMULE` define): user rejected — emule
+  must faithfully run the same ops as silicon.
 
-Symptom: output **3.11% non-zero** (199878/6422528 cells), max ATOL
-6.03. Sampled outputs:
+## Sentinels (verified after fix)
 
-```
-out[0, 0,  0, 0] = -1.2344   ref=-1.2344  ✓ correct
-out[0, 0,  0, 1] = -0.0315   ref=-1.2578  ✗ non-zero but wrong
-out[0, 0,  0, 2] = 1.0156    ref=0.7422   ✗
-out[0, 0, 64, *] = 0.0       ref nonzero  ✗ entire w=64 slab empty
-out[0,56,  0, 0] = 1.3359    ref=1.3359   ✓
-out[0,56,  0, 1] = 0.9414    ref=0.3828   ✗
-```
+- `test_permute_sharded` — 8/8 PASS (was 0/8)
+- `dm_test_permute_not_sharded` — 293/293 PASS
+- `dm_test_permute` — 16/16 PASS
+- `dm_test_untilize_sharded` — 426/430 PASS (4 pre-existing skips)
 
-3.11% ≈ 1/32, consistent with "only every 32nd w-position written";
-within a written page only c=0 is correct.
+## Re-enable the masked variants
 
-Working hypothesis: another compute LLK shim is a stub (likely in the
-SHARDED-input variant of the transpose pipeline — for x_dim=1, the
-tilize/transpose path differs from x_dim=0). The block-to-output-page
-math in the BlockedGeneric writer is identical between the two
-x_dim values; the divergence is in how compute processes a partial
-X-block of 8 rows (rather than 16 rows for x_dim=0).
-
-Things that aren't the bug:
-- chip-model routing (REG probe confirmed all 64 cores registered correctly)
-- noc_addr decode (RESOLVE probe verified)
-- writer's noc_async_write path
-- host tensor_accessor packing (PACK probe verified for the passing case)
-
-Investigation rabbit holes (DO NOT REDO blindly):
-- Tried to probe upstream `append_sharded_args` and TensorAccessorArgs
-  constructor with fprintf — never fires despite the symbols being in
-  `libtt_metal.so`. Cause unknown; possibly Cmake Unity build, ccache,
-  or a different code path bypasses these functions. Spent ~1h on this
-  and gave up.
-- Flipping `corerange_to_cores(..., row_wise=true)` in the BlockedGeneric
-  factory did NOT fix anything — work-assignment order is consistent
-  with TensorAccessor.
-
-Suggested next probe: instead of host-side, add a kernel-side fprintf
-inside the compute kernel (`transpose_xw_rm_single_tile_size.cpp`) to
-see whether the compute path differs for x_dim=1 vs x_dim=0. The
-compute kernel uses `compute_kernel_lib::tilize<>` from
-`ttnn/cpp/ttnn/kernel_lib/tilize_helpers.hpp`; that helper has multiple
-modes (InitAndUninit, etc.) — one mode may be a stub for x_dim != 0.
-
-## Sentinels (don't regress)
-
-- `dm_test_permute_not_sharded` (currently `-k 'not sharded'` filtered)
-- `dm_test_permute`
-- Whatever else exercises `pack_untilize_dest`
+Once this PR lands, drop the `-k 'not sharded'` filter from
+`dm_test_permute_not_sharded` in
+`scripts/run_ttnn_pytests_{wormhole,blackhole}.sh` and add a
+`dm_test_permute_sharded` entry covering the 8 perms from #50.
