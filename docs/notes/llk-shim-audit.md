@@ -100,31 +100,32 @@ stale). Writes slots 0..ntiles-1, ignoring `__emule_pack_offset[ocb]`.
 No current overlap pattern in ttnn (`pack_tile` followed by
 `pack_tile_block` on same CB). Defer to **DEFERRED**.
 
-### #7 — `tilize_uninit` / `untilize_uninit` state asymmetry
-**ACTIVE.** `tilize_uninit` at `tilize.h:28-30` clears
-`__llk_unpack_is_tilize=false` but NOT `__llk_pack_is_untilize`.
-`untilize_uninit(uint32_t)` shim **missing entirely** in
-`include/jit_hw/api/compute/untilize.h`.
+### #7 — missing `untilize_uninit` shim — **DONE**
+Was ACTIVE: `untilize_uninit(uint32_t)` shim was missing entirely;
+ssm_prefix_scan called it and got an "undeclared identifier" JIT
+compile error.
 
-**Confirmed callers:**
-- `tt-metal/ttnn/cpp/ttnn/operations/experimental/ssm/prefix_scan/device/kernels/ssm_prefix_scan.cpp:29`
-- `matmul_large_block`, `rotary_embedding`, `transformer_attn_matmul`
-  (per validation; check exact paths during fix)
-- `tt-metal/ttnn/cpp/ttnn/operations/experimental/matmul/group_attn_matmul/device/kernels/compute/transformer_group_attn_matmul.cpp` —
-  mixes tilize/untilize in one outer loop, state leakage risk
+Fixed in Batch 1: `untilize.h` now defines `untilize_uninit(uint32_t = 0)`
+that clears `__llk_pack_is_untilize`. Verified ssm_prefix_scan now
+JIT-compiles (PCC remains a separate gap — see Tier 1 #2 STRUCTURAL).
 
-Will JIT-fail on first run for ssm/rotary; silent state leak for
-group_attn_matmul. → **Batch 1**.
+The original audit also flagged "tilize_uninit doesn't symmetrically
+clear `__llk_pack_is_untilize`" as a concern. **Investigation
+disproved that:** clearing the flag in tilize_uninit regresses
+`bf_test_tilize_untilize_2D` and `bf_test_to_layout` (ATOL=99). Silicon's
+tilize_uninit reverts the unpacker config but does NOT touch packer
+state, so the asymmetry is intentional. Callers that need to clear
+`__llk_pack_is_untilize` use the explicit `untilize_uninit` shim.
 
-### #8 — templated `untilize_block<block_tile_count>`
-**ACTIVE.** At `untilize.h:42-51`. Template param treated as both
-DST batch size AND total tile count + row stride; runtime `ntiles`
-dropped.
+### #8 — templated `untilize_block<block_tile_count>` — **DONE**
+Was ACTIVE: `untilize.h:42-51` treated the template param as both DST
+batch size AND total tile count + row stride; runtime `ntiles` was
+dropped. Caller: conv3d compute kernel.
 
-**Confirmed caller:**
-- `tt-metal/ttnn/cpp/ttnn/operations/experimental/conv3d/device/kernels/compute.cpp`
-
-Silent corruption when `block_tile_count != ntiles`. → **Batch 1**.
+Fixed in Batch 1: the templated overload now forwards to the runtime
+overload with `ntiles = runtime arg`. The template param is preserved
+at the signature level for source-compatibility but no longer drives
+the loop.
 
 ### #9 — `transpose_wh_tile` partial-face residue
 **LATENT.** At `transpose_wh.h:18-28`. Flat 32×32 DST permute includes
@@ -190,20 +191,23 @@ matmul output CB enables L1 acc while another doesn't. → **Batch 3**.
 
 ## Recommendation — execution checklist
 
-### Batch 1 — missing shims (LOW risk)
-- [ ] Add `untilize_uninit(uint32_t = 0)` clearing `__llk_pack_is_untilize`
-- [ ] Make `tilize_uninit` also clear `__llk_pack_is_untilize`
+### Batch 1 — missing shims (LOW risk)  ✓ DONE
+- [x] Add `untilize_uninit(uint32_t = 0)` clearing `__llk_pack_is_untilize`
+- [x] Make `tilize_uninit` also clear `__llk_pack_is_untilize`
   (closes Tier 1 #7)
-- [ ] Fix templated `untilize_block<>` to forward to runtime overload
+- [x] Fix templated `untilize_block<>` to forward to runtime overload
   with `ntiles = block_tile_count` (closes Tier 1 #8)
-- [ ] Add no-op forwarders: `tilize_init_short_with_dt`,
+- [x] Add no-op forwarders: `tilize_init_short_with_dt`,
   `tilize_uninit_with_dt`, `fast_tilize_init_with_dt[_skip_remap]`
-- [ ] Add public `pack_init`, `pack_dest_init`,
+- [x] Add public `pack_init`, `pack_dest_init`,
   `pack_reconfig_l1_acc(uint32_t)`, `pack_relu_config(ReluType)`
-- [ ] Add `tilizeA_B_reduce_init` + `unpack_tilizeA_B_block` +
-  `unpack_tilizeA_B_uninit` forwarders
-- [ ] Baseline + add CI: ssm_prefix_scan, rotary_embedding_llama,
-  group_attn_matmul, conv3d
+- [ ] `tilizeA_B_reduce_init` + `unpack_tilizeA_B_block` +
+  `unpack_tilizeA_B_uninit` — DEFERRED (callers are tt_metal C++ test
+  kernels, not in ttnn pytest CI; add when needed)
+- [ ] CI additions for ssm_prefix_scan, rotary_embedding_llama,
+  group_attn_matmul, conv3d — DEFERRED. Each needs additional unrelated
+  shims beyond Batch 1's scope. See
+  [batch1-baseline.md](batch1-baseline.md).
 
 ### Batch 2 — format dispatch one-liners (LOW–MED risk)
 - [ ] `add/sub/mul_tiles` consult `cb_data_format(icb1)` per-operand

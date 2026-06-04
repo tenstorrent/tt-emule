@@ -516,6 +516,17 @@ ALWI void pack_reconfig_data_format(uint32_t, uint32_t) {}
 ALWI void llk_pack_relu_config(ReluType) {}
 ALWI void pack_set_relu_threshold(float) {}
 
+// Public-API forwarders for handwritten compute kernels that use silicon's
+// public pack_* names (rather than the llk_-prefixed forms).  Forward
+// declaration of `llk_pack_reconfig_l1_acc` (defined later in this file)
+// lets the alias compile regardless of order.
+ALWI void llk_pack_reconfig_l1_acc(uint32_t enable);
+ALWI void pack_init(uint32_t = 0, uint32_t = 0) {}
+ALWI void pack_dest_init(uint32_t = 0) {}
+ALWI void pack_reconfig_l1_acc(uint32_t enable) { llk_pack_reconfig_l1_acc(enable); }
+ALWI void pack_relu_config(ReluType t) { llk_pack_relu_config(t); }
+ALWI void pack_relu_config(uint32_t /*config*/) {}  // silicon BH/WH integer-config overload
+
 // llk_pack_hw_configure: BH (#ifdef ARCH_BLACKHOLE) binary_ng SFPU bcast kernels call
 // the templated form to configure the pack HW engine (the WH path skips it). emule packs
 // in software, so it's a no-op — matches all the other llk pack/unpack HW-config stubs.

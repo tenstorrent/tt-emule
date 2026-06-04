@@ -27,6 +27,22 @@ inline void tilize_init_short(uint32_t, uint32_t) {
 }
 inline void tilize_uninit(uint32_t = 0, uint32_t = 0) {
     __llk_unpack_is_tilize = false;
+    // Note: we do NOT clear __llk_pack_is_untilize here.  Silicon's
+    // tilize_uninit reverts the unpacker config but does not touch the
+    // packer state.  Clearing the pack flag here regresses kernels that
+    // call tilize → tilize_uninit in the middle of a pack-untilize block.
+    // Use the explicit `untilize_uninit` shim for the packer-side flag.
+}
+// _with_dt overloads mirror silicon's data-type-reconfig variants.  Emule
+// reads CB format per-call, so the format change is implicit and the
+// forwarders are no-op-equivalent.
+inline void tilize_init_short_with_dt(uint32_t /*old_icb*/, uint32_t new_icb,
+                                      uint32_t num_tiles, uint32_t /*ocb*/ = 0) {
+    tilize_init_short(new_icb, num_tiles);
+}
+inline void tilize_uninit_with_dt(uint32_t /*old_icb*/ = 0, uint32_t /*new_icb*/ = 0,
+                                  uint32_t /*ocb*/ = 0) {
+    tilize_uninit();
 }
 
 // tilize_block: read `ntiles` tiles from `icb` (laid out as a single
@@ -87,6 +103,21 @@ inline void fast_tilize_init(uint32_t icb, uint32_t /*block_dst_tiles*/, uint32_
 inline void fast_tilize_init_skip_remap(uint32_t icb, uint32_t full_dim, uint32_t ocb,
                                         uint32_t /*call_line*/ = 0) {
     tilize_init(icb, full_dim, ocb);
+}
+// _with_dt fast-tilize forwarders mirror silicon's data-type-reconfig API
+// (used by pool / conv2d-reuse / group_attn_matmul / upsample-bilinear).
+// Emule reads CB format per-call so the format change is implicit.
+template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim>
+inline void fast_tilize_init_with_dt(uint32_t /*old_icb*/, uint32_t new_icb,
+                                     uint32_t /*block_dst_tiles*/, uint32_t ocb) {
+    tilize_init(new_icb, full_ct_dim, ocb);
+}
+template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim>
+inline void fast_tilize_init_with_dt_skip_remap(uint32_t /*old_icb*/, uint32_t new_icb,
+                                                uint32_t /*block_dst_tiles*/,
+                                                uint32_t ocb,
+                                                uint32_t /*call_line*/ = 0) {
+    tilize_init(new_icb, full_ct_dim, ocb);
 }
 template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim>
 inline void fast_tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb,
