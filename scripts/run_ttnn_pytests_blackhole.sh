@@ -301,12 +301,12 @@ run_pytest "matmul_test_custom_grids"   "$MATMUL_TEST_DIR/test_custom_grids.py"
 # (same class as #94). Unwired pending the bfp8_b sharded matmul fix.
 # test_matmul_deepseek: 26 of 27 tests fail on DRAM-sharded matmul (bf16 + bfp8)
 # — tracked in #96. Unwired pending DRAM-sharded matmul reduce fix.
-# test_matmul.py: curated 122-test subset. Excludes tiny_tile* (TinyTile gap),
-# transpose_b (tracked in #91), and many mesh/DRAM-sharded variants (#94/#96).
-# Expansion tracked in #97. Includes the Phase A unblock target
-# (test_matmul_activation_with_sharded_input → silu fused-activation).
+# test_matmul.py: curated 140-test subset. Excludes tiny_tile* (TinyTile gap)
+# and many mesh/DRAM-sharded variants. Includes the Phase A unblock target
+# (test_matmul_activation_with_sharded_input → silu fused-activation) and the
+# transpose tests (mm_init transpose=1 → IN1 in-place transpose in matmul_tiles).
 run_pytest "matmul_test_basic" "$MATMUL_TEST_DIR/test_matmul.py" \
-    -k '(test_matmul_with_matched_width_height or test_matmul_does_dot_product or test_matmul_same_shape or test_tutorial_matmul or test_small_matmul_pcc or test_matmul_with_core_grid or test_matmul_activation_with_sharded_input or test_matmul_by_passing_in_1D_systolic_array_program_config or test_pytorch_2_0_failed_cases or test_linear_with_optional_output_tensor or test_wide_matmul_with_argument_for_core_grid_set_to_device_grid or test_tall_matmul_with_argument_for_core_grid_set_to_device_grid or test_optional_output_argument or test_falcon_query_key_value_matmul or test_alternating_dst_sync_mode_matmul or test_sharded_matmul_with_multiple_out_block_values or test_padded_2d_matmul or test_matmul_padding or test_matmul_height_sharded_input_with_padding or test_matmul_block_sharded_input_with_padding) and not tiny_tile and not tiny_tiles'
+    -k '(test_matmul_with_matched_width_height or test_matmul_does_dot_product or test_matmul_same_shape or test_tutorial_matmul or test_small_matmul_pcc or test_matmul_with_core_grid or test_matmul_activation_with_sharded_input or test_matmul_by_passing_in_1D_systolic_array_program_config or test_pytorch_2_0_failed_cases or test_linear_with_optional_output_tensor or test_wide_matmul_with_argument_for_core_grid_set_to_device_grid or test_tall_matmul_with_argument_for_core_grid_set_to_device_grid or test_optional_output_argument or test_falcon_query_key_value_matmul or test_alternating_dst_sync_mode_matmul or test_sharded_matmul_with_multiple_out_block_values or test_padded_2d_matmul or test_matmul_padding or test_matmul_height_sharded_input_with_padding or test_matmul_block_sharded_input_with_padding or test_matmul_with_transpose_a_or_b or test_matmul_transpose_a_with_core_grid) and not tiny_tile and not tiny_tiles'
 
 echo ""
 echo "========================================"

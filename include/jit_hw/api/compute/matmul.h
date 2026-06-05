@@ -9,6 +9,7 @@
 
 #include "jit_hw/api/compute/common.h"
 #include "jit_hw/api/compute/nfaces.h"
+#include "jit_hw/internal/llk_state.h"
 #include "jit_hw/llk/llk_reduce_primitives.h"
 
 #if defined(__AVX2__) && defined(__FMA__)
@@ -19,12 +20,20 @@
 namespace ckernel {
 
 // ---- Init stubs (hardware pipeline configuration) ----
+// `transpose=1` is honored: stored in `__llk_matmul_transpose` and applied
+// to the IN1 tile in matmul_tiles below — see internal/llk_state.h.
 ALWI void mm_init(uint32_t in0_cb = 0, uint32_t in1_cb = 1, uint32_t out_cb = 16,
-                  uint32_t transpose = 0) {}
+                  uint32_t transpose = 0) {
+    __llk_matmul_transpose = (transpose != 0);
+}
 ALWI void mm_init_short(uint32_t in0_cb = 0, uint32_t in1_cb = 1,
-                        uint32_t transpose = 0) {}
+                        uint32_t transpose = 0) {
+    __llk_matmul_transpose = (transpose != 0);
+}
 ALWI void mm_init_short_with_dt(uint32_t in0_cb, uint32_t in1_cb,
-                                uint32_t old_in1_cb = 0, uint32_t transpose = 0) {}
+                                uint32_t old_in1_cb = 0, uint32_t transpose = 0) {
+    __llk_matmul_transpose = (transpose != 0);
+}
 
 // ---- matmul_tiles: tile GEMM accumulate into DST ----
 // Reads tile A from CB[in0_cb] at tile offset in0_tile and tile B from
@@ -63,6 +72,16 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
             b_rm[i] = __emule_bf16::to_f32(b_ptr[ni]);
         }
     }
+    // Apply IN1 transpose if mm_init(... transpose=1) was set — silicon does
+    // this in the unpacker (THCON_SEC0_REG2_Haloize_mode_RMW); emule transposes
+    // the decoded row-major view in-place before the FMA loop.
+    if (__llk_matmul_transpose) {
+        for (uint32_t r = 0; r < DIM; r++) {
+            for (uint32_t c = r + 1; c < DIM; c++) {
+                std::swap(b_rm[r * DIM + c], b_rm[c * DIM + r]);
+            }
+        }
+    }
     // MATH: row-major matmul accumulating into DST.
 #ifdef EMULE_MATMUL_USE_AVX2
     for (uint32_t r = 0; r < DIM; r++) {
@@ -92,22 +111,31 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
 ALWI void mm_block_init(uint32_t in0_cb = 0, uint32_t in1_cb = 1,
                         uint32_t out_cb = 16, uint32_t transpose = 0,
                         uint32_t ct_dim = 1, uint32_t rt_dim = 1,
-                        uint32_t kt_dim = 1) {}
+                        uint32_t kt_dim = 1) {
+    __llk_matmul_transpose = (transpose != 0);
+}
 ALWI void mm_block_init_short(uint32_t in0_cb = 0, uint32_t in1_cb = 1,
                               uint32_t transpose = 0, uint32_t ct_dim = 1,
-                              uint32_t rt_dim = 1, uint32_t kt_dim = 1) {}
+                              uint32_t rt_dim = 1, uint32_t kt_dim = 1) {
+    __llk_matmul_transpose = (transpose != 0);
+}
 ALWI void mm_block_init_short_with_dt(uint32_t in0_cb = 0, uint32_t in1_cb = 1,
                                       uint32_t old_in1_cb = 0, uint32_t transpose = 0,
                                       uint32_t ct_dim = 1, uint32_t rt_dim = 1,
-                                      uint32_t kt_dim = 1) {}
+                                      uint32_t kt_dim = 1) {
+    __llk_matmul_transpose = (transpose != 0);
+}
 // matmul_block: compute rt_dim × ct_dim block of output tiles.
 // For each output tile (r, c): DST[idst + r*ct_dim + c] += A[in0_tile + r*kt_dim] * B[in1_tile + c]
+// The runtime `transpose` arg here overrides any value previously set by
+// mm_block_init for this block call.
 ALWI void matmul_block(uint32_t in0_cb, uint32_t in1_cb,
                        uint32_t in0_tile, uint32_t in1_tile, uint32_t idst,
                        uint32_t transpose = 0, uint32_t ct_dim = 1,
                        uint32_t rt_dim = 1, uint32_t kt_dim = 1) {
     if (rt_dim * ct_dim > 0)
         __emule_dst_check(idst + rt_dim * ct_dim - 1, "matmul_block");
+    __llk_matmul_transpose = (transpose != 0);
     uint32_t dst = idst;
     for (uint32_t r = 0; r < rt_dim; r++) {
         for (uint32_t c = 0; c < ct_dim; c++) {
