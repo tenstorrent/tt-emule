@@ -1,10 +1,11 @@
 #pragma once
 // Emule-specific LLK state symbols:
 //   - thread_local pack/unpack trackers used by tilize/untilize stubs
-//   - inline format arrays (unpack_src_format / unpack_dst_format)
 //   - CbInterface stub + get_local_cb_interface
 //   - operand/output query helpers
-// Kept free of common.h to avoid a cycle through llk_defs.h.
+//   - re-exports the per-CB format arrays via jit_hw/api/cb_api.h (see below)
+// Must not include common.h (would cycle through llk_defs.h); cb_api.h is safe — it does
+// not include this header.
 #include <cstdint>
 
 // Operand CB interface stub
@@ -62,15 +63,13 @@ inline bool get_output_narrow_tile(uint32_t) { return false; }
 inline uint32_t get_output_face_r_dim(uint32_t) { return 16; }
 inline uint32_t get_output_num_faces(uint32_t) { return 4; }
 
-// Format arrays (stub). Real device populates these via JIT codegen with the
-// per-CB DataFormat enum. emule's DST is always fp32 internally; treat every CB
-// as fp32 (== 0) at compile time. Made constexpr so kernel-lib helpers like
-// `constexpr auto format = unpack_src_format[icb]` (in tilize_helpers.inl
-// `is_fp32_input_format()`) can resolve as constant expressions.
-inline constexpr uint32_t unpack_src_format[32] = {};
-inline constexpr uint32_t unpack_dst_format[32] = {};
-inline constexpr uint32_t pack_dst_format[32]   = {};
-inline constexpr uint32_t pack_src_format[32]   = {};
+// All four per-CB format arrays (unpack_src_format / pack_dst_format / unpack_dst_format /
+// pack_src_format) live in jit_hw/api/cb_api.h — single source of truth, populated from the
+// EMULE_CB_DATA_FORMATS JIT define (mirroring the device's chlkc_descriptors.h). Pulled in
+// here so kernel-lib helpers like `constexpr auto format = unpack_src_format[icb]`
+// (tilize_helpers.inl is_fp32_input_format) resolve them as constant expressions. cb_api.h
+// does not include this header, so there is no include cycle.
+#include "jit_hw/api/cb_api.h"
 
 // ---- Tilize/Untilize state ----
 // Unpack state: tracks source CB and tile position for datacopy calls

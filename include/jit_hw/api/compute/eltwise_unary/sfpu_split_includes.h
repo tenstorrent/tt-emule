@@ -206,3 +206,11 @@
 #if SFPU_OP_POLYGAMMA_INCLUDE
 #include "api/compute/eltwise_unary/polygamma.h"
 #endif
+
+#if SFPU_OP_BINARY_DIV_INCLUDE
+#include "api/compute/eltwise_binary_sfpu.h"
+#endif
+
+#if SFPU_OP_BINARY_GT_INT_INCLUDE
+#include "api/compute/binary_comp.h"
+#endif

@@ -230,6 +230,15 @@ run_pytest "elt_test_math" "$ELT_TEST_DIR/test_math.py::test_cbrt" "$ELT_TEST_DI
 run_pytest "elt_test_elu" "$ELT_TEST_DIR/test_elu.py::test_elu_allclose" "$ELT_TEST_DIR/test_elu.py::test_elu_arange_masking"
 run_pytest "elt_test_unary_i1" "$ELT_TEST_DIR/test_unary_i1.py::test_i1_zero" "$ELT_TEST_DIR/test_unary_i1.py::test_i1_clamp_boundary" "$ELT_TEST_DIR/test_unary_i1.py::test_i1_ood" "$ELT_TEST_DIR/test_unary_i1.py::test_i1_range"
 
+# Eltwise comparison ops (#75): float (binary_comp_fp32), int/uint-output (binary_comp_init),
+# bf16 + int32 relational, unary compare-to-scalar, typecast-output, and sharded col-bcast.
+run_pytest "elt_test_binary_comp_init"  "$ELT_TEST_DIR/test_binary_comp_init.py"
+run_pytest "elt_test_binary_comp_fp32"  "$ELT_TEST_DIR/test_binary_comp_fp32.py"
+run_pytest "elt_test_relational"        "$ELT_TEST_DIR/test_relational.py" -k 'not isclose'
+run_pytest "elt_test_unary_comp"        "$ELT_TEST_DIR/test_unary.py::test_unary_comp_ops"
+run_pytest "elt_test_binary_ng_typecast_cmp" "$ELT_TEST_DIR/test_binary_ng_typecast.py" -k 'test_binary_ng_typecast_lt or (test_binary_w_typecast and (ge or gt or le or lt or eq or ne))'
+run_pytest "elt_test_binary_sharded_col_major_cmp" "$ELT_TEST_DIR/test_binary_bcast.py::test_binary_sharded_col_major" -k 'eq or ne or gt or ge or lt or le'
+
 run_pytest "fused_test_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_large_fill_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_accuracy" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_stable_neg_values" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_4096x4096_fp32" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_large_kernel_block_size" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_3D" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout_large"
 run_pytest "reduce_test_cumprod" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_backward" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_failing_cases"
 run_pytest "reduce_test_cumsum_failing" "$REDUCE_TEST_DIR/test_cumsum.py::test_cumsum_failing_cases"
@@ -245,6 +254,7 @@ run_pytest "dm_test_pad" "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_w
 
 run_pytest "dm_test_permute_not_sharded" "$DM_TEST_DIR/test_permute.py::test_permute_4d_fixed_w" "$DM_TEST_DIR/test_permute.py::test_permute_4d_cn" "$DM_TEST_DIR/test_permute.py::test_permute_4d_cnwh" "$DM_TEST_DIR/test_permute.py::test_permute_4d_wh" "$DM_TEST_DIR/test_permute.py::test_permute_5d" "$DM_TEST_DIR/test_permute.py::test_permute_5d_wyh" "$DM_TEST_DIR/test_permute.py::test_permute_5d_xh_pad" "$DM_TEST_DIR/test_permute.py::test_permute_8d_swapped" "$DM_TEST_DIR/test_permute.py::test_permutations_5d_fixed_w" "$DM_TEST_DIR/test_permute.py::test_permute_identity" -k 'not sharded'
 run_pytest "dm_test_permute" "$DM_TEST_DIR/test_permute.py::test_permute_5d_tiled_basic" "$DM_TEST_DIR/test_permute.py::test_permute_5d_tiled_swap" "$DM_TEST_DIR/test_permute.py::test_permute_squeeze" "$DM_TEST_DIR/test_permute.py::test_permute_for_specific_case" "$DM_TEST_DIR/test_permute.py::test_permute_on_4D_tensor_with_smaller_tuple_size" "$DM_TEST_DIR/test_permute.py::test_nil_volume_permute" "$DM_TEST_DIR/test_permute.py::test_transpose_wh_tiled_uint32"
+run_pytest "dm_test_permute_sharded" "$DM_TEST_DIR/test_permute.py::test_permute_sharded"
 
 run_pytest "dm_test_untilize_same_volume" "$DM_TEST_DIR/test_untilize.py::test_untilize_same_volume_different_shapes"
 # Untilize sharded harvest from the NUM_L1_BANKS fix (+418 sharded variants).
@@ -271,6 +281,13 @@ run_pytest "matmul_test_linear" "$MATMUL_TEST_DIR/test_linear.py" -k 'test_linea
 
 run_pytest "matmul_test_addmm" "$MATMUL_TEST_DIR/test_addmm.py" \
     -k 'test_alpha_zero_should_throw_error or test_input_tensor_with_invalid_shape or test_unsupported_dtype_should_throw_error'
+
+# Sentinel for the pack-fused ReLU clamp (STACC_RELU model). bf16+relu_{str,param}
+# is the subset that exercises `llk_pack_relu_config` + `pack_dst_to_buf`'s ReLU
+# path. relu6_* and bf8b-relu_* fail on pre-existing unrelated gaps
+# (missing `*_tile_pack` SFPU shims; bf8b matmul+relu numerics) — tracked separately.
+run_pytest "matmul_test_fused_activations_relu" "$TT_METAL_DIR/tests/ttnn/nightly/unit_tests/operations/matmul/test_matmul_activations.py::test_matmul_with_fused_activations" \
+    -k 'bf16 and (relu_str or relu_param)'
 
 echo ""
 echo "========================================"

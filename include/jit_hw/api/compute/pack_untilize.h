@@ -71,12 +71,85 @@ template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim,
 inline void pack_untilize_dest_init(uint32_t ocb = 0, uint32_t face_r_dim = 16,
                                      uint32_t num_faces = 4, uint32_t call_line = 0) {}
 
+// pack_untilize_dest: emule of silicon's pack_untilize_dest LLK.
+//
+// Silicon's hardware packer reads (block_rt_dim × block_ct_dim) DST tiles
+// and writes them to cb_out untilized in ROW-MAJOR layout: the output
+// region is (block_rt_dim * TILE_DIM) rows × (full_ct_dim * row_cols) cols
+// laid out contiguously, where row_cols = TILE_DIM normally or
+// row_num_datums when narrow_row is set.  This call writes the
+// `block_ct_dim`-wide column-block at column-block index `block_c_index`
+// of the full row.
+//
+// The cb's page_size is sync granularity only — it does NOT change the
+// physical L1 layout.  Consumers (writers, downstream CBs) expect
+// contiguous row-major sticks so that one logical output row sits at
+// offset row * full_row_bytes regardless of page_size.
 template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim,
           bool diagonal = false, bool narrow_row = false,
           uint32_t row_num_datums = 32, uint32_t tile_dst_ct_offset = 0, bool dense = false>
 inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
-                                uint32_t block_c_index = 0, uint32_t face_r_dim = 16,
-                                uint32_t num_faces = 4, uint32_t tile_dst_rt_offset = 0) {}
+                                uint32_t block_c_index = 0, uint32_t /*face_r_dim*/ = 16,
+                                uint32_t /*num_faces*/ = 4, uint32_t /*tile_dst_rt_offset*/ = 0) {
+    static_assert(!diagonal, "pack_untilize_dest: diagonal packer mode not modelled");
+    static_assert(!dense,    "pack_untilize_dest: dense packer mode not modelled");
+
+    constexpr uint32_t TILE_DIM = 32;
+    constexpr uint32_t row_cols = narrow_row ? row_num_datums : TILE_DIM;
+
+    // Format dispatch matches `pack_dst_to_buf` / `__llk_pack_untilize`:
+    // silicon's packer engine is reconfigured per OCB format via
+    // `llk_pack_reconfig_data_format_disaggregated` at `pack_untilize_dest_init`
+    // time, so uint16 / 32-bit / bf16 output all natively work.  emule
+    // mirrors via format predicates.
+    const bool     is_uint16      = __emule_compute::cb_is_uint16_format(ocb);
+    const bool     is_32bit       = __emule_compute::cb_is_32bit_format(ocb);
+    const uint32_t elem_size      = is_32bit ? 4 : 2;  // uint16 shares the 2-byte stride
+    const uint32_t full_row_bytes = full_ct_dim * row_cols * elem_size;
+    uint8_t* const base           = __emule_compute::cb_write_ptr_at(ocb, 0);
+
+    auto target = [&](uint32_t rt, uint32_t ct, uint32_t r, uint32_t c) -> uint8_t* {
+        const uint32_t out_row = rt * TILE_DIM + r;
+        const uint32_t out_col = (block_c_index * block_ct_dim + ct) * row_cols + c;
+        return base + out_row * full_row_bytes + out_col * elem_size;
+    };
+
+    for (uint32_t rt = 0; rt < block_rt_dim; ++rt) {
+        for (uint32_t ct = 0; ct < block_ct_dim; ++ct) {
+            const uint32_t dst_idx = tile_dst_ct_offset + rt * block_ct_dim + ct;
+            for (uint32_t r = 0; r < TILE_DIM; ++r) {
+                for (uint32_t c = 0; c < row_cols; ++c) {
+                    const float src = __emule_dst[dst_idx][r * TILE_DIM + c];
+                    uint8_t* dst_ptr = target(rt, ct, r, c);
+                    if (is_uint16) {
+                        // uint16 output: write low 16 bits of DST int32 bit pattern.
+                        // ReLU skipped on integer output (not a coherent silicon config).
+                        uint32_t bits;
+                        std::memcpy(&bits, &src, sizeof(uint32_t));
+                        uint16_t u16 = static_cast<uint16_t>(bits);
+                        std::memcpy(dst_ptr, &u16, sizeof(uint16_t));
+                    } else if (is_32bit) {
+                        // 32-bit (fp32 / int32 / uint32).  STACC_RELU on 32-bit
+                        // is reachable on silicon when DST_ACCUM_MODE is set;
+                        // apply the clamp through the float view, then memcpy
+                        // out the bits (NO_RELU fast path preserves INT32 bit
+                        // patterns via memcpy of the unmodified src).
+                        if (__emule_pack_relu_mode == ReluType::NO_RELU) {
+                            std::memcpy(dst_ptr, &src, sizeof(uint32_t));
+                        } else {
+                            float clamped = __emule_apply_pack_relu(src);
+                            std::memcpy(dst_ptr, &clamped, sizeof(uint32_t));
+                        }
+                    } else {
+                        // bf16 output.  Apply ReLU before format conversion.
+                        uint16_t bf = __emule_bf16::from_f32(__emule_apply_pack_relu(src));
+                        std::memcpy(dst_ptr, &bf, sizeof(uint16_t));
+                    }
+                }
+            }
+        }
+    }
+}
 
 }  // namespace ckernel
 

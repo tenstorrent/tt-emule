@@ -31,6 +31,32 @@ constexpr uint16_t unpack_tile_size[32] = { EMULE_TILE_SIZES };
 constexpr uint16_t unpack_tile_size[32] = {};
 #endif
 
+// Per-CB data format arrays (tt::DataFormat enum values) — emule's single source of
+// truth, the analog of the device's compile-time unpack_src_format[]/pack_dst_format[]
+// (generated into chlkc_descriptors.h by genfiles.cpp::compute_data_formats). The two
+// L1-side arrays are populated from EMULE_CB_DATA_FORMATS (a 32-value list the JIT
+// compiler builds from each CB's CircularBufferImpl::data_format(idx)); for a given CB id
+// both equal the L1 tile's format. DataFormat::Invalid (0xFF) marks unconfigured slots
+// (mirrors the host's std::optional<DataFormat> empty state) — format-dispatch consumers
+// fall back to the page_size heuristic for those. The two DST-side arrays are all-zero
+// (Float32) stubs: emule's DST register file is always fp32, so they are immaterial to
+// the emulated pack/unpack math.
+#ifdef EMULE_CB_DATA_FORMATS
+constexpr uint8_t unpack_src_format[32] = { EMULE_CB_DATA_FORMATS };
+constexpr uint8_t pack_dst_format[32]   = { EMULE_CB_DATA_FORMATS };
+#else
+constexpr uint8_t unpack_src_format[32] = {
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+};
+constexpr uint8_t pack_dst_format[32] = {
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+};
+#endif
+constexpr uint8_t unpack_dst_format[32] = {};  // DST-side (fp32) stub
+constexpr uint8_t pack_src_format[32]   = {};  // DST-side (fp32) stub
+
 // Standard 32×32 tiles: 2 faces in each dimension
 constexpr uint8_t unpack_tile_r_dim[32] = {
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
@@ -192,10 +218,13 @@ constexpr inline uint32_t get_tile_num_faces(uint32_t cb_id) {
            static_cast<uint32_t>(unpack_num_faces_c_dim[cb_id]);
 }
 
-// get_dataformat — infer DataFormat from tile size.
-// bf16 = 2048 bytes (Float16_b), 32-bit = 4096 bytes (Float32), else Float16_b.
+// get_dataformat — return the CB's real data format, faithful to the device's
+// dataflow_api.h: `get_dataformat(operand) = unpack_src_format[operand]`. Falls back to
+// the page_size heuristic (bf16 ≤ 2048B, else Float32) when the format is unset (Invalid).
 constexpr inline DataFormat get_dataformat(uint32_t cb_id) {
-    uint32_t sz = unpack_tile_size[cb_id];
-    if (sz > 2048) return DataFormat::Float32;
-    return DataFormat::Float16_b;
+    const uint8_t fmt = unpack_src_format[cb_id];
+    if (fmt != static_cast<uint8_t>(DataFormat::Invalid)) {
+        return static_cast<DataFormat>(fmt);
+    }
+    return unpack_tile_size[cb_id] > 2048 ? DataFormat::Float32 : DataFormat::Float16_b;
 }
