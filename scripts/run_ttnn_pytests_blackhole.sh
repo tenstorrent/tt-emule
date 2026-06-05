@@ -282,6 +282,13 @@ run_pytest "matmul_test_linear" "$MATMUL_TEST_DIR/test_linear.py" -k 'test_linea
 run_pytest "matmul_test_addmm" "$MATMUL_TEST_DIR/test_addmm.py" \
     -k 'test_alpha_zero_should_throw_error or test_input_tensor_with_invalid_shape or test_unsupported_dtype_should_throw_error'
 
+# Sentinel for the pack-fused ReLU clamp (STACC_RELU model). bf16+relu_{str,param}
+# is the subset that exercises `llk_pack_relu_config` + `pack_dst_to_buf`'s ReLU
+# path. relu6_* and bf8b-relu_* fail on pre-existing unrelated gaps
+# (missing `*_tile_pack` SFPU shims; bf8b matmul+relu numerics) — tracked separately.
+run_pytest "matmul_test_fused_activations_relu" "$TT_METAL_DIR/tests/ttnn/nightly/unit_tests/operations/matmul/test_matmul_activations.py::test_matmul_with_fused_activations" \
+    -k 'bf16 and (relu_str or relu_param)'
+
 echo ""
 echo "========================================"
 echo " Results: $PASS passed, $FAIL failed"
