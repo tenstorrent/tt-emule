@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
+#include "jit_hw/api/compute/common.h"
 // Emulator stubs for rounding SFPU tile ops.
 // trunc, ceil, floor operate element-wise on DST float32 storage; frac = x - trunc(x).
 

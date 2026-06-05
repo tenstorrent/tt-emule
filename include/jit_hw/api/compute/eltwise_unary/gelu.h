@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
+#include "jit_hw/api/compute/common.h"
 // Emulator stub for GELU SFPU tile op.
 // Implements the exact GELU formula: 0.5 * x * (1 + erf(x / sqrt(2))).
 

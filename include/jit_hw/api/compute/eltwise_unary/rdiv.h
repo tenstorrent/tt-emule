@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
+#include "jit_hw/api/compute/common.h"
 // Emulator stub for reciprocal-divide SFPU tile op: result = value / x,
 // then trunc/floor per the RoundingMode template arg.
 

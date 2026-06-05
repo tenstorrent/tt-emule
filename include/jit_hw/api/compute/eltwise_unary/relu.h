@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
+#include "jit_hw/api/compute/common.h"
 // Emulator stubs for ReLU SFPU tile ops.
 
 #include <algorithm>

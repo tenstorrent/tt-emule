@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
+#include "jit_hw/api/compute/common.h"
 // Emulator stubs for trigonometric SFPU tile ops.
 // All ops operate on DST (float32 storage) element-wise via std:: math.
 
