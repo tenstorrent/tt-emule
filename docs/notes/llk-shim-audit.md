@@ -67,11 +67,24 @@ one tile, can't handle horizontal-strip layouts. No current ttnn test
 triggers (no sharded op produces horizontal-strip input to these).
 Defer to **STRUCTURAL** section.
 
-### #2 — `__llk_pack_untilize` elem_size = page_size / 1024
-**LATENT.** At `llk_pack.h:50-51`. For Bfp8_b (ps=1088) → 1; for
-narrow-row (ps=512) → **0 → all rows alias same byte**. No current
-ttnn caller exposes Bfp8_b or narrow-row output via
-`experimental::pack_untilize_block`. Defer to **STRUCTURAL**.
+### #2 — `__llk_pack_untilize` elem_size = page_size / 1024 — **DONE (format dispatch)**
+Was ACTIVE for uint16 outputs (PR #84 regression on
+`bf_test_to_layout`, `bf_test_tilize_untilize_2D`, ATOL=99): the
+elem_size heuristic couldn't distinguish uint16 from bf16 (both
+2 bytes/elem), and the function then routed uint16 DST through
+`bf16::from_f32` → denormal-to-zero corruption.
+
+Fixed: `__llk_pack_untilize` now mirrors `pack_dst_to_buf`'s
+format-aware dispatch via `cb_is_uint16_format`,
+`cb_is_32bit_format`, fallback bf16.  uint16 path extracts the low
+16 bits of the DST int32 bit pattern.
+
+**Still LATENT (deferred):** Bfp8_b output for untilize-pack (ps=1088
+would have hit elem_size=1).  Silicon's `untilize_helpers.inl`
+asserts `!is_block_float_format(pack_dst_format)` so no real caller
+produces Bfp8_b output via this path.  Narrow-row (ps=512 → elem_size=0)
+also unreachable via current callers since `pack_untilize_dest`'s
+narrow-row branch handles that case directly.
 
 ### #3 — mixed-format binary ops
 **LATENT** (no existing ttnn test exercises mixed formats). At
@@ -193,8 +206,11 @@ matmul output CB enables L1 acc while another doesn't. → **Batch 3**.
 
 ### Batch 1 — missing shims (LOW risk)  ✓ DONE
 - [x] Add `untilize_uninit(uint32_t = 0)` clearing `__llk_pack_is_untilize`
-- [x] Make `tilize_uninit` also clear `__llk_pack_is_untilize`
   (closes Tier 1 #7)
+- [~] `tilize_uninit` symmetric clear of `__llk_pack_is_untilize` —
+  REJECTED. Investigation found this regresses
+  `bf_test_tilize_untilize_2D` and `bf_test_to_layout` (ATOL=99); silicon's
+  tilize_uninit only reverts unpacker state.
 - [x] Fix templated `untilize_block<>` to forward to runtime overload
   with `ntiles = block_tile_count` (closes Tier 1 #8)
 - [x] Add no-op forwarders: `tilize_init_short_with_dt`,
@@ -209,16 +225,24 @@ matmul output CB enables L1 acc while another doesn't. → **Batch 3**.
   shims beyond Batch 1's scope. See
   [batch1-baseline.md](batch1-baseline.md).
 
-### Batch 2 — format dispatch one-liners (LOW–MED risk)
+### Batch 2 — format dispatch (LOW–MED risk)  ✓ DONE (PR #84 layout fixes)
+- [x] Make `__llk_pack_untilize` format-aware via `cb_is_uint16_format`
+  / `cb_is_32bit_format` / bf16 fallback. Closes Tier 1 #2 for current
+  callers (uint16); resolves PR #84 layout regressions on WH
+- [x] Bump `__EMULE_DST_TILES` to 32 (BH FULL_DEST capacity). WH paths
+  never index > 16 so unchanged there
+- [x] Make `fast_untilize_block` bypass `pack_untilize_block` (the
+  per-DST-slot loop). Forward to `untilize_block` (load-one-pack-one,
+  1 DST slot). Resolves PR #84 layout regressions on BH for wide
+  tensors (W=131072 case)
 - [ ] `add/sub/mul_tiles` consult `cb_data_format(icb1)` per-operand
-  (closes Tier 1 #3)
+  (closes Tier 1 #3) — deferred, no current ttnn caller
 - [ ] Add Bfp4_b decoder (new `bfp4.h`) + branch in
   `__emule_unpack_cb_tile_to` / `pack_dst_to_buf` (closes Tier 4
-  Bfp4_b)
+  Bfp4_b) — deferred, moe_compute / moe_gpt would exercise this
 - [ ] Tighten `cb_is_bfp8_b_format` to consult `cb_data_format()`
-  when set
-- [ ] Author `tests/jit_hw/test_mixed_format_binary.cpp`
-- [ ] Baseline + add CI: moe_compute, moe_gpt_e2e
+  when set — deferred
+- [ ] Author `tests/jit_hw/test_mixed_format_binary.cpp` — deferred
 
 ### Batch 3 — PACK state corrections (LOW–MED risk)
 - [ ] Per-CB `__emule_l1_acc_enabled[32]` array in `common_globals.h`
