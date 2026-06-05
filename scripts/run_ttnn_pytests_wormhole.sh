@@ -288,7 +288,7 @@ run_pytest "elt_test_binary_fp32" "$ELT_TEST_DIR/test_binary_fp32.py" -k 'not te
 run_pytest "elt_test_binary_int32" "$ELT_TEST_DIR/test_binary_int32.py" -k 'not div and not shift and not test_binary_implicit_broadcast'
 run_pytest "elt_test_binaryng_ND" "$ELT_TEST_DIR/test_binaryng_ND.py" -k 'not rsub'
 run_pytest "elt_test_binaryng_fp32" "$ELT_TEST_DIR/test_binaryng_fp32.py" -k 'not test_bitwise_left_shift and not test_div_fp32'
-run_pytest "elt_test_composite" "$ELT_TEST_DIR/test_composite.py" -k 'not test_unary_composite_mish and not test_unary_composite_multigammaln and not test_unary_glu'
+run_pytest "elt_test_composite" "$ELT_TEST_DIR/test_composite.py"
 run_pytest "elt_test_elt_binary" "$ELT_TEST_DIR/test_elt_binary.py"
 run_pytest "elt_test_exp2" "$ELT_TEST_DIR/test_exp2.py" -k 'not test_exp2_special_values'
 run_pytest "elt_test_remainder" "$ELT_TEST_DIR/test_remainder.py" -k 'not test_broken_remainder and not test_remainder_scalar'
