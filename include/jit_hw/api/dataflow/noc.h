@@ -269,7 +269,8 @@ public:
         auto mcast_noc_addr = noc_traits_t<Dst>::template dst_addr_mcast<AddressType::NOC>(dst, *this, dst_args);
         if (s) {
             __emule_multicast_write(static_cast<uint64_t>(mcast_noc_addr),
-                                    reinterpret_cast<const uint8_t*>(s), size_bytes);
+                                    reinterpret_cast<const uint8_t*>(s), size_bytes,
+                                    /*include_self=*/true);
         }
     }
 

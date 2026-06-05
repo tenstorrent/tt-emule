@@ -21,6 +21,13 @@ extern thread_local uint8_t my_y[2];
 extern thread_local uint32_t __emule_logical_x;
 extern thread_local uint32_t __emule_logical_y;
 
+// ---- cb_addr_shift ----
+// Silicon convention: addresses stored in 16-byte units (matches fifo_rd_ptr
+// encoding in LocalCBInterface). the cb_reconfig kernel reads
+// cb_config[] entries and right-shifts by this constant to get the encoded
+// pointer form.
+inline constexpr uint32_t cb_addr_shift = 4;
+
 // ---- Constexpr tile metadata arrays (populated by JIT defines) ----
 // EMULE_TILE_SIZES is defined by the JIT compiler as a comma-separated list of
 // 32 page sizes (one per CB index), matching the real device's unpack_tile_size[].
