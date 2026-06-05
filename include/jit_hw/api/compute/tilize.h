@@ -68,8 +68,20 @@ inline void tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb) {
     const bool icb_is_32bit = __emule_compute::cb_is_32bit_format(icb);
     const bool ocb_is_32bit = __emule_compute::cb_is_32bit_format(ocb);
     const uint32_t in_elem_size  = icb_is_32bit ? 4 : 2;
+    // Input row stride: silicon's tilize unpacker reads with a TILE_DIM (32) row
+    // stride per tile regardless of output tile geometry. Callers pad input to
+    // 32 rows even when the useful data is thinner.
     const uint32_t row_stride    = ntiles * TILE_DIM * in_elem_size;
     uint8_t* const in_base = __emule_compute::cb_read_ptr_at(icb, 0);
+
+    // Output tile row count: thin tiles (rows ∈ {1,2,4,8,16}) are used by
+    // retilize / create_q_heads / similar ops. Derive from the OCB page size.
+    const uint32_t out_elem_size = ocb_is_32bit ? 4 : 2;
+    const uint32_t out_rows =
+        __emule_compute::cb_is_bfp8_b_format(ocb)
+            ? TILE_DIM
+            : __emule_nfaces::tile_rows_from_pagesize(
+                  __emule_compute::cb_page_size(ocb), out_elem_size);
 
     // BFP8_b output: encode row-major bf16/fp32 input into 64 face-rows of
     // (shared exponent + 16 mantissas). Layout: 64 exp bytes, then 64*16
@@ -105,11 +117,11 @@ inline void tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb) {
 
     for (uint32_t t = 0; t < ntiles; ++t) {
         uint8_t* const out = __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++);
-        for (uint32_t r = 0; r < TILE_DIM; ++r) {
+        for (uint32_t r = 0; r < out_rows; ++r) {
             const uint8_t* row_in =
                 in_base + r * row_stride + t * TILE_DIM * in_elem_size;
             for (uint32_t c = 0; c < TILE_DIM; ++c) {
-                const uint32_t out_pos = __emule_nfaces::rowmajor_to_nfaces[r * TILE_DIM + c];
+                const uint32_t out_pos = __emule_nfaces::tile_rm_to_nfaces(r * TILE_DIM + c, out_rows);
                 if (icb_is_32bit && ocb_is_32bit) {
                     uint32_t v;
                     std::memcpy(&v, row_in + c * 4, 4);
