@@ -388,91 +388,38 @@ ALWI void binary_tiles_init(uint32_t, uint32_t, bool = false) {}
 // reader instead of re-implementing every format.
 inline void __emule_unpack_cb_tile_to(uint32_t icb, uint32_t itile, float* out);
 
-// add_tiles: UNPACK + MATH — DST[idst] = CB[icb0][itile0] + CB[icb1][itile1]
+// add/sub/mul_tiles: UNPACK both operands via the central format-aware reader,
+// then apply the binop. Per-operand format dispatch handles mixed cases (e.g.
+// bf16 + Bfp4_b for MoE bias-add). Reading either operand by icb0's format
+// alone misroutes block-float operands into the bf16 fallback.
 ALWI void add_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
     __emule_dst_check(idst, "add_tiles");
     __emule_dst_mark_dirty(idst);
-    if (__emule_compute::cb_is_32bit_format(icb0)) {
-        const float* buf0 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
-        const float* buf1 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
-        uint32_t n = __emule_compute::cb_page_size(icb0) / sizeof(float);
-        for (uint32_t i = 0; i < n; i++) {
-            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
-            __emule_dst[idst][i] = buf0[ni] + buf1[ni];
-        }
-    } else if (__emule_compute::cb_is_bfp8_b_format(icb0) || __emule_compute::cb_is_bfp4_b_format(icb0)) {
-        float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
-        __emule_unpack_cb_tile_to(icb0, itile0, a);
-        __emule_unpack_cb_tile_to(icb1, itile1, b);
-        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] + b[i];
-    } else {
-        uint16_t* buf0 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
-        uint16_t* buf1 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
-        uint32_t n = __emule_compute::cb_tile_elems(icb0);
-        for (uint32_t i = 0; i < n; i++) {
-            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
-            __emule_dst[idst][i] = __emule_bf16::to_f32(buf0[ni]) + __emule_bf16::to_f32(buf1[ni]);
-        }
-    }
+    float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
+    __emule_unpack_cb_tile_to(icb0, itile0, a);
+    __emule_unpack_cb_tile_to(icb1, itile1, b);
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] + b[i];
 }
 
-// sub_tiles: UNPACK + MATH — DST[idst] = CB[icb0][itile0] - CB[icb1][itile1]
 ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
     __emule_dst_check(idst, "sub_tiles");
     __emule_dst_mark_dirty(idst);
-    if (__emule_compute::cb_is_32bit_format(icb0)) {
-        const float* buf0 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
-        const float* buf1 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
-        uint32_t n = __emule_compute::cb_page_size(icb0) / sizeof(float);
-        for (uint32_t i = 0; i < n; i++) {
-            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
-            __emule_dst[idst][i] = buf0[ni] - buf1[ni];
-        }
-    } else if (__emule_compute::cb_is_bfp8_b_format(icb0) || __emule_compute::cb_is_bfp4_b_format(icb0)) {
-        float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
-        __emule_unpack_cb_tile_to(icb0, itile0, a);
-        __emule_unpack_cb_tile_to(icb1, itile1, b);
-        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] - b[i];
-    } else {
-        uint16_t* buf0 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
-        uint16_t* buf1 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
-        uint32_t n = __emule_compute::cb_tile_elems(icb0);
-        for (uint32_t i = 0; i < n; i++) {
-            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
-            __emule_dst[idst][i] = __emule_bf16::to_f32(buf0[ni]) - __emule_bf16::to_f32(buf1[ni]);
-        }
-    }
+    float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
+    __emule_unpack_cb_tile_to(icb0, itile0, a);
+    __emule_unpack_cb_tile_to(icb1, itile1, b);
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] - b[i];
 }
 
-// mul_tiles: UNPACK + MATH — DST[idst] = CB[icb0][itile0] * CB[icb1][itile1]
 ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
     __emule_dst_check(idst, "mul_tiles");
     __emule_dst_mark_dirty(idst);
-    if (__emule_compute::cb_is_32bit_format(icb0)) {
-        const float* buf0 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
-        const float* buf1 = reinterpret_cast<const float*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
-        uint32_t n = __emule_compute::cb_page_size(icb0) / sizeof(float);
-        for (uint32_t i = 0; i < n; i++) {
-            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
-            __emule_dst[idst][i] = buf0[ni] * buf1[ni];
-        }
-    } else if (__emule_compute::cb_is_bfp8_b_format(icb0) || __emule_compute::cb_is_bfp4_b_format(icb0)) {
-        float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
-        __emule_unpack_cb_tile_to(icb0, itile0, a);
-        __emule_unpack_cb_tile_to(icb1, itile1, b);
-        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] * b[i];
-    } else {
-        uint16_t* buf0 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb0, itile0));
-        uint16_t* buf1 = reinterpret_cast<uint16_t*>(__emule_compute::cb_read_ptr_at(icb1, itile1));
-        uint32_t n = __emule_compute::cb_tile_elems(icb0);
-        for (uint32_t i = 0; i < n; i++) {
-            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
-            __emule_dst[idst][i] = __emule_bf16::to_f32(buf0[ni]) * __emule_bf16::to_f32(buf1[ni]);
-        }
-    }
+    float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
+    __emule_unpack_cb_tile_to(icb0, itile0, a);
+    __emule_unpack_cb_tile_to(icb1, itile1, b);
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] * b[i];
 }
 
 // pack_tile: write DST[idst] → CB[ocb] write slot.

@@ -7,9 +7,7 @@
 // matmul_tiles performs a 32x32 tile GEMM (bfloat16 inputs, float32 DST accumulate).
 // Uses AVX2/FMA intrinsics when available for ~4-8x speedup over scalar.
 
-#include "jit_hw/api/compute/bfp8.h"
 #include "jit_hw/api/compute/common.h"
-#include "jit_hw/api/compute/nfaces.h"
 #include "jit_hw/internal/llk_state.h"
 #include "jit_hw/llk/llk_reduce_primitives.h"
 
@@ -21,18 +19,23 @@
 namespace ckernel {
 
 // ---- Init stubs (hardware pipeline configuration) ----
+// Signatures match silicon's tt_metal/hw/inc/api/compute/matmul.h: required
+// CB ids and (for _with_dt) the old-srcA cb; transpose has a default of 0.
 // `transpose=1` is honored: stored in `__llk_matmul_transpose` and applied
 // to the IN1 tile in matmul_tiles below — see internal/llk_state.h.
-ALWI void mm_init(uint32_t in0_cb = 0, uint32_t in1_cb = 1, uint32_t out_cb = 16,
+ALWI void mm_init(uint32_t in0_cb_id, uint32_t in1_cb_id, uint32_t out_cb_id,
                   uint32_t transpose = 0) {
+    (void)in0_cb_id; (void)in1_cb_id; (void)out_cb_id;
     __llk_matmul_transpose = (transpose != 0);
 }
-ALWI void mm_init_short(uint32_t in0_cb = 0, uint32_t in1_cb = 1,
+ALWI void mm_init_short(uint32_t in0_cb_id, uint32_t in1_cb_id,
                         uint32_t transpose = 0) {
+    (void)in0_cb_id; (void)in1_cb_id;
     __llk_matmul_transpose = (transpose != 0);
 }
-ALWI void mm_init_short_with_dt(uint32_t in0_cb, uint32_t in1_cb,
-                                uint32_t old_in1_cb = 0, uint32_t transpose = 0) {
+ALWI void mm_init_short_with_dt(uint32_t in0_cb_id, uint32_t in1_cb_id,
+                                uint32_t c_in_old_srca, uint32_t transpose = 0) {
+    (void)in0_cb_id; (void)in1_cb_id; (void)c_in_old_srca;
     __llk_matmul_transpose = (transpose != 0);
 }
 
@@ -93,40 +96,49 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
 }
 
 // ---- Block matmul stubs (not used by bmm.cpp simple path) ----
-ALWI void mm_block_init(uint32_t in0_cb = 0, uint32_t in1_cb = 1,
-                        uint32_t out_cb = 16, uint32_t transpose = 0,
+// Signatures match silicon's mm_block_init / mm_block_init_short[_with_dt] /
+// matmul_block: ct/rt/kt_dim have defaults of 1, transpose has default 0,
+// CB ids are required.
+ALWI void mm_block_init(uint32_t in0_cb_id, uint32_t in1_cb_id,
+                        uint32_t out_cb_id, uint32_t transpose = 0,
                         uint32_t ct_dim = 1, uint32_t rt_dim = 1,
                         uint32_t kt_dim = 1) {
+    (void)in0_cb_id; (void)in1_cb_id; (void)out_cb_id;
+    (void)ct_dim; (void)rt_dim; (void)kt_dim;
     __llk_matmul_transpose = (transpose != 0);
 }
-ALWI void mm_block_init_short(uint32_t in0_cb = 0, uint32_t in1_cb = 1,
+ALWI void mm_block_init_short(uint32_t in0_cb_id, uint32_t in1_cb_id,
                               uint32_t transpose = 0, uint32_t ct_dim = 1,
                               uint32_t rt_dim = 1, uint32_t kt_dim = 1) {
+    (void)in0_cb_id; (void)in1_cb_id;
+    (void)ct_dim; (void)rt_dim; (void)kt_dim;
     __llk_matmul_transpose = (transpose != 0);
 }
-ALWI void mm_block_init_short_with_dt(uint32_t in0_cb = 0, uint32_t in1_cb = 1,
-                                      uint32_t old_in1_cb = 0, uint32_t transpose = 0,
+ALWI void mm_block_init_short_with_dt(uint32_t in0_cb_id, uint32_t in1_cb_id,
+                                      uint32_t old_in1_cb_id, uint32_t transpose = 0,
                                       uint32_t ct_dim = 1, uint32_t rt_dim = 1,
                                       uint32_t kt_dim = 1) {
+    (void)in0_cb_id; (void)in1_cb_id; (void)old_in1_cb_id;
+    (void)ct_dim; (void)rt_dim; (void)kt_dim;
     __llk_matmul_transpose = (transpose != 0);
 }
 // matmul_block: compute rt_dim × ct_dim block of output tiles.
 // For each output tile (r, c): DST[idst + r*ct_dim + c] += A[in0_tile + r*kt_dim] * B[in1_tile + c]
 // The runtime `transpose` arg here overrides any value previously set by
-// mm_block_init for this block call.
-ALWI void matmul_block(uint32_t in0_cb, uint32_t in1_cb,
-                       uint32_t in0_tile, uint32_t in1_tile, uint32_t idst,
-                       uint32_t transpose = 0, uint32_t ct_dim = 1,
-                       uint32_t rt_dim = 1, uint32_t kt_dim = 1) {
+// mm_block_init for this block call. All args required, matching silicon.
+ALWI void matmul_block(uint32_t in0_cb_id, uint32_t in1_cb_id,
+                       uint32_t in0_tile_index, uint32_t in1_tile_index, uint32_t idst,
+                       uint32_t transpose, uint32_t ct_dim,
+                       uint32_t rt_dim, uint32_t kt_dim) {
     if (rt_dim * ct_dim > 0)
         __emule_dst_check(idst + rt_dim * ct_dim - 1, "matmul_block");
     __llk_matmul_transpose = (transpose != 0);
     uint32_t dst = idst;
     for (uint32_t r = 0; r < rt_dim; r++) {
         for (uint32_t c = 0; c < ct_dim; c++) {
-            matmul_tiles(in0_cb, in1_cb,
-                         in0_tile + r * kt_dim,
-                         in1_tile + c,
+            matmul_tiles(in0_cb_id, in1_cb_id,
+                         in0_tile_index + r * kt_dim,
+                         in1_tile_index + c,
                          dst);
             dst++;
         }

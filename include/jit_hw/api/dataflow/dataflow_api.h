@@ -421,9 +421,20 @@ inline void noc_async_write_multicast(
 
 inline void noc_async_write_multicast_loopback_src(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
-    uint32_t size, uint32_t /*num_dests*/, bool /*linked*/ = false, uint8_t /*noc*/ = 0) {
+    uint32_t size, uint32_t num_dests, bool /*linked*/ = false, uint8_t /*noc*/ = 0) {
     // Silicon: NOC_CMD_BRCST_SRC_INCLUDE set → sender receives the packet.
     // Cannot delegate to the non-loopback variant (which passes false).
+    if (__emule_debug_multicast()) {
+        uint32_t x_end   = (dst_mcast_noc_addr >> NOC_ADDR_LOCAL_BITS) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t y_end   = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t x_start = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + 2 * NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t y_start = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + 3 * NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t off     = static_cast<uint32_t>(dst_mcast_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
+        fprintf(stderr, "EMULE DBG: noc_async_write_multicast_loopback_src (%u,%u)->(%u,%u) offset=0x%x size=%u num_dests=%u "
+                "[from logical (%u,%u)]\n",
+                x_start, y_start, x_end, y_end, off, size, num_dests,
+                __emule_logical_x, __emule_logical_y);
+    }
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     __emule_multicast_write(dst_mcast_noc_addr, src, size, /*include_self=*/true);
 }
@@ -595,8 +606,21 @@ inline void noc_semaphore_set_multicast(
 
 inline void noc_semaphore_set_multicast_loopback_src(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
-    uint32_t /*num_dests*/, bool /*linked*/ = false, uint8_t /*noc*/ = 0) {
+    uint32_t num_dests, bool /*linked*/ = false, uint8_t /*noc*/ = 0) {
     // Silicon NOC_CMD_BRCST_SRC_INCLUDE: sender sees its own semaphore update.
+    if (__emule_debug_multicast()) {
+        uint32_t x_end   = (dst_mcast_noc_addr >> NOC_ADDR_LOCAL_BITS) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t y_end   = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t x_start = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + 2 * NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t y_start = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + 3 * NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+        uint32_t off     = static_cast<uint32_t>(dst_mcast_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
+        uint32_t sem_val;
+        std::memcpy(&sem_val, __emule_local_l1_to_ptr(src_local_l1_addr), sizeof(uint32_t));
+        fprintf(stderr, "EMULE DBG: noc_semaphore_set_multicast_loopback_src (%u,%u)->(%u,%u) offset=0x%x val=%u num_dests=%u "
+                "[from logical (%u,%u)]\n",
+                x_start, y_start, x_end, y_end, off, sem_val, num_dests,
+                __emule_logical_x, __emule_logical_y);
+    }
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t), /*include_self=*/true);
 }
