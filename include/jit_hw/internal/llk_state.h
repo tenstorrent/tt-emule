@@ -8,50 +8,7 @@
 // not include this header.
 #include <cstdint>
 
-// Operand CB interface stub
-struct CbInterface {
-    uint32_t fifo_page_size = 0;
-    uint32_t fifo_rd_ptr = 0;
-    uint32_t fifo_wr_ptr = 0;
-    uint32_t fifo_size = 0;
-    uint32_t fifo_limit = 0;
-    uint32_t fifo_num_pages = 0;
-};
-
-// Global operand interface stubs.
-// `__emule_cbs[cb_id]` provides real CB state when available (declared in
-// emule_cb_state.h, populated per-core by the program runner). When the
-// compute kernel uses `fifo_rd_ptr << 4` as a raw L1 address (e.g. the
-// `experimental::write_row_mask_tile` helper that fires under TRISC_UNPACK),
-// we need to return a real pointer rather than a dummy zero. Returning by
-// reference into thread_local storage keeps callers that take a reference
-// happy.
-//
-// Guarded: dataflow_api.h provides a CB-backed version with a different
-// struct type (`CBInterface`, capital B); if both headers are included the
-// dataflow version takes precedence for non-tilize call sites.
-#ifndef __EMULE_GET_LOCAL_CB_INTERFACE_DEFINED
-#define __EMULE_GET_LOCAL_CB_INTERFACE_DEFINED
-#include "jit_hw/emule_cb_state.h"
-inline CbInterface& get_local_cb_interface(uint32_t cb_id) {
-    thread_local CbInterface ci{};
-    if (__emule_cbs != nullptr) {
-        auto& cb = __emule_cbs[cb_id];
-        uint32_t r = cb.page_mask ? (cb.read_idx & cb.page_mask)
-                                  : (cb.num_pages ? (cb.read_idx % cb.num_pages) : 0);
-        uint32_t w = cb.page_mask ? (cb.write_idx & cb.page_mask)
-                                  : (cb.num_pages ? (cb.write_idx % cb.num_pages) : 0);
-        // Encode addresses as 16-byte indices so callers' `<< 4` reconstitutes the byte addr.
-        uintptr_t rp = cb.base ? reinterpret_cast<uintptr_t>(cb.base + r * cb.page_size) >> 4 : 0;
-        uintptr_t wp = cb.base ? reinterpret_cast<uintptr_t>(cb.base + w * cb.page_size) >> 4 : 0;
-        ci.fifo_page_size = cb.page_size;
-        ci.fifo_rd_ptr    = static_cast<uint32_t>(rp);
-        ci.fifo_wr_ptr    = static_cast<uint32_t>(wp);
-        ci.fifo_num_pages = cb.num_pages;
-    }
-    return ci;
-}
-#endif
+#include "internal/cb_interface.h"
 
 inline uint32_t get_operand_id(uint32_t operand) { return operand; }
 inline uint32_t get_output_id(uint32_t output) { return output; }

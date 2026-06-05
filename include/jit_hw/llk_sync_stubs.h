@@ -28,24 +28,13 @@ inline void llk_push_tiles(std::int32_t operand, std::int32_t num_tiles) {
 inline void llk_math_wait_for_dest_available() {}
 inline void llk_packer_wait_for_math_done() {}
 
-// ---- TRISC sync primitives ----
-// Referenced by the verbatim-inlined body of `experimental::unpack_stall_on_pack`
-// (D2M emits the contents of `experimental_reg_api.h` into the kernel). On real
-// silicon these gate PACK/UNPACK threads on TRISC semaphores; on emule
+// ---- TRISC sync primitives (no-ops; semaphore + p_stall live in ckernel::) ----
+// On real silicon these gate PACK/UNPACK threads on TRISC semaphores; on emule
 // (single-threaded compute) they are no-ops.
-namespace semaphore {
-    constexpr int PACK_DONE = 0;
-    constexpr int UNPACK_SYNC = 1;
-    constexpr int FPU_SFPU = 2;
-    constexpr int MATH_DONE = 3;
-}
-namespace p_stall {
-    constexpr int STALL_SYNC = 0;
-    constexpr int WAIT_SFPU = 1;
-    constexpr int MATH = 2;
-    constexpr int PACK = 3;
-    constexpr int UNPACK = 4;
-}
+// `semaphore` and `p_stall` namespaces are owned by `ckernel.h` and
+// `api/compute/matmul_fused_act_emule.h` (canonical mainline definitions).
+// Do NOT redefine them in the global namespace — `using namespace ckernel;`
+// at the end of common.h would otherwise trigger ambiguous-lookup errors.
 template <int Stall = 0>
 inline void t6_semaphore_post(int /*sem*/ = 0) {}
 template <int Stall = 0>
