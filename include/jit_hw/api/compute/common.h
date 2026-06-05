@@ -99,12 +99,16 @@ enum class p_dim_stride_target {
 #include "jit_hw/api/bfloat16.h"
 
 // ---- Thread-local DST register file ----
-// Physical size: 16 tile slots × 1024 elements × 4 bytes = 64 KB (same on WH/BH/Quasar).
-// Active slots depend on DST_ACCUM_MODE: bf16 mode → 16 slots, fp32 mode → 8 slots.
-// Stores float32 for bfloat16 ops or raw int32 bit patterns for INT32 ops.
+// Physical size: 32 tile slots × 1024 elements × 4 bytes = 128 KB.
+// Active slots depend on DST_ACCUM_MODE and arch.  In bf16 half-dest mode WH
+// allows 16 slots; BH in FULL_DEST mode allows 32 (kernel-lib's BH fast
+// untilize path uses block_width_tiles up to ~32 — see
+// `ttnn/cpp/ttnn/kernel_lib/untilize_helpers.inl` `can_use_fast_untilize`).
+// fp32 mode is half that.  Stores float32 for bfloat16 ops or raw int32 bit
+// patterns for INT32 ops.
 
-static constexpr uint32_t __EMULE_DST_TILES = 16;     // bf16 half-dest
-static constexpr uint32_t __EMULE_DST_TILES_FP32 = 8; // f32 half-dest (2x element size)
+static constexpr uint32_t __EMULE_DST_TILES = 32;      // bf16 full-dest (BH); WH paths never index > 16
+static constexpr uint32_t __EMULE_DST_TILES_FP32 = 16; // f32 full-dest (BH); WH never > 8
 static constexpr uint32_t __EMULE_TILE_ELEMS = 1024;
 static constexpr uint32_t __EMULE_DST_BYTES = __EMULE_TILE_ELEMS * sizeof(float);
 static thread_local float __emule_dst[__EMULE_DST_TILES][__EMULE_TILE_ELEMS];

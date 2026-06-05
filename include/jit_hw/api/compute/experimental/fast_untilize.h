@@ -51,11 +51,17 @@ template <std::uint32_t full_ct_dim>
 inline void fast_untilize_block(uint32_t icb, uint32_t ocb,
                                 uint32_t /*input_tile_index*/ = 0,
                                 uint32_t /*output_tile_index*/ = 0) {
-    // Delegate to the regular packer with block_rt_dim=1 (a single tile-row
-    // block of width full_ct_dim), matching upstream's non-BH branch:
-    //   #else  // !ARCH_BLACKHOLE
-    //       pack_untilize_block<full_ct_dim, full_ct_dim>(icb, 1, ocb, 0);
-    pack_untilize_block<full_ct_dim, full_ct_dim>(icb, 1, ocb, 0);
+    // BH fast-untilize on silicon is HW-accelerated and chunks the block
+    // via `fast_untilize_next_unit_dim(full_ct_dim)` so DEST is never
+    // expected to hold all `full_ct_dim` tiles at once.  Delegating to
+    // `pack_untilize_block<full_ct_dim, full_ct_dim>(icb, 1, ocb, 0)`
+    // would force emule to copy_tile every tile into a separate DST slot
+    // — fine for small full_ct_dim, broken at full_ct_dim > 32 (e.g.
+    // wide-tensor untilize with W=131072 → full_ct_dim=4096).  Forward
+    // to `untilize_block` instead: load-one-pack-one loop, uses only
+    // DST slot 0, identical output layout (both set `__llk_pack_block_c
+    // = ntiles` and call `__llk_pack_untilize` per tile).
+    untilize_block(icb, full_ct_dim, ocb);
 }
 
 template <std::uint32_t full_ct_dim>
