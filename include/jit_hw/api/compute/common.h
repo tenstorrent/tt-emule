@@ -99,16 +99,21 @@ enum class p_dim_stride_target {
 #include "jit_hw/api/bfloat16.h"
 
 // ---- Thread-local DST register file ----
-// Physical size: 32 tile slots × 1024 elements × 4 bytes = 128 KB.
-// Active slots depend on DST_ACCUM_MODE and arch.  In bf16 half-dest mode WH
-// allows 16 slots; BH in FULL_DEST mode allows 32 (kernel-lib's BH fast
-// untilize path uses block_width_tiles up to ~32 — see
-// `ttnn/cpp/ttnn/kernel_lib/untilize_helpers.inl` `can_use_fast_untilize`).
-// fp32 mode is half that.  Stores float32 for bfloat16 ops or raw int32 bit
-// patterns for INT32 ops.
+// Physical Dst on both WH-B0 and BH is 64 KB (two banks of 32 KB; one bank
+// is 1024 rows × 16 cols × 2 bytes = 32 KB).  Kernel-visible tile-slot
+// capacity is identical on both arches:
+//
+//   SyncFull + bf16: 16 tiles   SyncFull + fp32: 8 tiles
+//   SyncHalf + bf16: 8 tiles    SyncHalf + fp32: 4 tiles
+//
+// Production kernels run in SyncHalf (double-buffered: math writes one bank
+// while pack reads the other).  emule allows SyncFull capacity (16 / 8) as
+// the kernel-visible ceiling — strictly stricter than SyncHalf, generous
+// enough that no in-tree LLK errors on a legitimate slot index.  Stores
+// float32 for bfloat16 ops or raw int32 bit patterns for INT32 ops.
 
-static constexpr uint32_t __EMULE_DST_TILES = 32;      // bf16 full-dest (BH); WH paths never index > 16
-static constexpr uint32_t __EMULE_DST_TILES_FP32 = 16; // f32 full-dest (BH); WH never > 8
+static constexpr uint32_t __EMULE_DST_TILES = 16;     // bf16 SyncFull ceiling (arch-independent)
+static constexpr uint32_t __EMULE_DST_TILES_FP32 = 8; // f32 SyncFull ceiling (arch-independent)
 static constexpr uint32_t __EMULE_TILE_ELEMS = 1024;
 static constexpr uint32_t __EMULE_DST_BYTES = __EMULE_TILE_ELEMS * sizeof(float);
 static thread_local float __emule_dst[__EMULE_DST_TILES][__EMULE_TILE_ELEMS];
