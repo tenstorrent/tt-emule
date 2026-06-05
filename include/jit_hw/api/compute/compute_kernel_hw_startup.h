@@ -18,6 +18,7 @@ inline void compute_kernel_hw_startup(uint32_t, uint32_t) {
     __llk_pack_offset = 0;
     __llk_pack_is_untilize = false;
     __llk_unpack_is_tilize = false;
+    __llk_matmul_transpose = false;
     // Reset PACK engine auto-advance offsets and L1 acc flag to prevent
     // stale state from prior kernel invocations in the same thread.
     std::memset(__emule_pack_offset, 0, sizeof(__emule_pack_offset));

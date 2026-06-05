@@ -10,6 +10,7 @@
 #include "jit_hw/api/compute/common.h"
 #include "jit_hw/internal/llk_state.h"
 #include "jit_hw/llk/llk_reduce_primitives.h"
+#include <utility>  // std::swap for the IN1 transpose path
 
 #if defined(__AVX2__) && defined(__FMA__)
 #include <immintrin.h>
