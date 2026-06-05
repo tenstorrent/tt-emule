@@ -70,6 +70,66 @@ extern thread_local uint32_t __emule_cb_reserved_pages[32];
 extern thread_local uint32_t __emule_cb_waited_pages[32];
 extern thread_local bool __emule_cb_boundary_strict;
 
+// Tensor-padding membership test. Tensor padding is 2-D, not a single trailing
+// band (see emule_live_ranges.hpp): a tensor with a logical extent smaller than
+// its padded extent has pad bytes at the right edge of every data row AND in the
+// trailing rows — an "L" shape. `desc` points at this buffer's 4 packed descriptor
+// words (w0=start|physical_end, w1=layout|elem_size, w2=logical_rows|logical_cols,
+// w3=padded_cols|reserved). Returns true if within-slot offset `l1_off` lands in
+// the padding region. Closed-form modulo math, O(1) — no per-row range list.
+// KEEP IN SYNC with the identical copy in dataflow_api.h.
+#ifndef __EMULE_OFFSET_IN_PADDING_DEFINED
+#define __EMULE_OFFSET_IN_PADDING_DEFINED
+inline bool __emule_offset_in_padding(const uint64_t* desc, uint32_t l1_off) {
+    uint32_t start = static_cast<uint32_t>(desc[0] >> 32);
+    uint32_t physical_end = static_cast<uint32_t>(desc[0]);
+    if (l1_off < start || l1_off >= physical_end) {
+        return false;  // not inside the buffer this descriptor covers
+    }
+    uint32_t layout = static_cast<uint32_t>(desc[1] >> 32);
+    uint32_t elem_size = static_cast<uint32_t>(desc[1]);
+    uint32_t logical_rows = static_cast<uint32_t>(desc[2] >> 32);
+    uint32_t logical_cols = static_cast<uint32_t>(desc[2]);
+    uint32_t padded_cols = static_cast<uint32_t>(desc[3] >> 32);
+    uint32_t padded_page_rows = static_cast<uint32_t>(desc[3]);  // per-page row period; 0 = no paging
+    if (elem_size == 0 || padded_cols == 0) {
+        return false;  // malformed descriptor — never fire
+    }
+    uint32_t elem = (l1_off - start) / elem_size;  // element index in storage order
+    uint32_t row, col;
+    if (layout == 0) {
+        // Row-major: padded_cols-wide physical rows.
+        row = elem / padded_cols;
+        col = elem % padded_cols;
+    } else {
+        // Tiled: 32x32 tiles in row-major tile order; each tile is 4 16x16 nfaces
+        // (face 0 = top-left, 1 = top-right, 2 = bottom-left, 3 = bottom-right),
+        // row-major within a face. This inverts nfaces.h's rowmajor_to_nfaces.
+        const uint32_t TILE = 32, FACE = 16, FACE_HW = 256, TILE_HW = 1024;
+        uint32_t tiles_per_row = padded_cols / TILE;
+        if (tiles_per_row == 0) {
+            return false;
+        }
+        uint32_t tile_idx = elem / TILE_HW;
+        uint32_t in_tile = elem % TILE_HW;  // == nfaces offset within this tile
+        uint32_t tile_r = tile_idx / tiles_per_row;
+        uint32_t tile_c = tile_idx % tiles_per_row;
+        uint32_t face = in_tile / FACE_HW;  // 0..3
+        uint32_t in_face = in_tile % FACE_HW;
+        uint32_t fr = in_face / FACE;
+        uint32_t fc = in_face % FACE;
+        row = tile_r * TILE + (face / 2) * FACE + fr;
+        col = tile_c * TILE + (face % 2) * FACE + fc;
+    }
+    // N-D / batched: the buffer stacks G pages of height padded_page_rows, each with
+    // the same per-page logical height (logical_rows). Reset the row test per page so
+    // page p's data rows (global rows p*padded_page_rows .. +logical_rows) aren't
+    // mistaken for padding. Columns don't stack, so col needs no period.
+    uint32_t row_in_page = (padded_page_rows != 0) ? (row % padded_page_rows) : row;
+    return (row_in_page >= logical_rows) || (col >= logical_cols);
+}
+#endif
+
 // L1 access chokepoint — all kernel sanitizers run here. See ASAN.md.
 #ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED
 #define __EMULE_LOCAL_L1_TO_PTR_DEFINED
@@ -174,14 +234,14 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
         }
     }
     if (__emule_l1_padding_ranges != nullptr) {
+        // 4 packed words per descriptor (see emule_live_ranges.cpp); count is the
+        // number of descriptors.
         for (uint32_t i = 0; i < __emule_l1_padding_ranges_count; ++i) {
-            uint64_t packed = __emule_l1_padding_ranges[i];
-            uint32_t logical_end = static_cast<uint32_t>(packed >> 32);
-            uint32_t physical_end = static_cast<uint32_t>(packed);
-            if (l1_off >= logical_end && l1_off < physical_end) {
+            const uint64_t* desc = __emule_l1_padding_ranges + i * 4;
+            if (__emule_offset_in_padding(desc, l1_off)) {
                 fprintf(stderr,
-                        "[ASAN ERROR] Tensor Padding Violation: Attempted to write to a padded memory region at address 0x%x (logical_end=0x%x, physical_end=0x%x)\n",
-                        l1_off, logical_end, physical_end);
+                        "[ASAN ERROR] Tensor Padding Violation: Attempted to write to a padded memory region at address 0x%x (buffer base 0x%x)\n",
+                        l1_off, static_cast<uint32_t>(desc[0] >> 32));
                 abort();
             }
         }
