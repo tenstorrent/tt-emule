@@ -282,7 +282,7 @@ run_pytest "elt_test_unary_uint16" "$ELT_TEST_DIR/test_unary_uint16.py"
 run_pytest "elt_test_unary_uint32" "$ELT_TEST_DIR/test_unary_uint32.py"
 # partial files: failing param subsets excluded (see deferrals note)
 run_pytest "elt_test_add" "$ELT_TEST_DIR/test_add.py" -k 'not test_add_and_apply_activations and not test_in_place_add_and_apply_activations'
-run_pytest "elt_test_binary_bcast_tcast" "$ELT_TEST_DIR/test_binary_bcast_tcast.py" -k 'not BFLOAT8_B and not BFLOAT4_B'
+run_pytest "elt_test_binary_bcast_tcast" "$ELT_TEST_DIR/test_binary_bcast_tcast.py"
 run_pytest "elt_test_binary_composite" "$ELT_TEST_DIR/test_binary_composite.py" -k 'not test_binary_div_scalar_ttnn and not test_binary_div_ttnn and not test_binary_left_shift and not test_remainder_ttnn'
 run_pytest "elt_test_binary_fp32" "$ELT_TEST_DIR/test_binary_fp32.py" -k 'not test_bias_gelu_fp32 and not test_binary_div_edge_case_ttnn and not test_div_fp32 and not test_logaddexp_fp32'
 run_pytest "elt_test_binary_int32" "$ELT_TEST_DIR/test_binary_int32.py" -k 'not div and not shift and not test_binary_implicit_broadcast'
@@ -293,8 +293,8 @@ run_pytest "elt_test_elt_binary" "$ELT_TEST_DIR/test_elt_binary.py" -k 'not test
 run_pytest "elt_test_exp2" "$ELT_TEST_DIR/test_exp2.py" -k 'not test_exp2_special_values'
 run_pytest "elt_test_remainder" "$ELT_TEST_DIR/test_remainder.py" -k 'not test_broken_remainder and not test_remainder_scalar'
 run_pytest "elt_test_sub" "$ELT_TEST_DIR/test_sub.py" -k 'not test_rsub'
-run_pytest "elt_test_ternary" "$ELT_TEST_DIR/test_ternary.py" -k 'not test_addcmul_with_bcast_bf8b'
-run_pytest "elt_test_typecast_int" "$ELT_TEST_DIR/test_typecast_int.py" -k 'not test_typecast_bfloat_subcore_grid_large_tensor'
+run_pytest "elt_test_ternary" "$ELT_TEST_DIR/test_ternary.py"
+run_pytest "elt_test_typecast_int" "$ELT_TEST_DIR/test_typecast_int.py"
 run_pytest "elt_test_unary_fp32" "$ELT_TEST_DIR/test_unary_fp32.py" -k 'not test_tanh'
 run_pytest "elt_test_unary_maximum" "$ELT_TEST_DIR/test_unary_maximum.py" -k 'not test_unary_max_fill_val_bf16'
 run_pytest "elt_test_where" "$ELT_TEST_DIR/test_where.py" -k 'not test_div_edgcase and not test_where_TSS_float_types and not test_where_subcore_grid and not test_where_tst and not test_where_tts'
