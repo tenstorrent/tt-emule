@@ -24,4 +24,11 @@ ALWI void selu_tile(uint32_t idst, uint32_t param_scale = 0, uint32_t param_alph
     }
 }
 
+// Pack-thread variant: upstream dispatches the same SFPU LLK via PACK() for
+// matmul fused-activation overlap (#79). emule has no thread split — forward.
+ALWI void selu_tile_init_pack() { selu_tile_init(); }
+ALWI void selu_tile_pack(uint32_t idst, uint32_t param_scale = 0, uint32_t param_alpha = 0) {
+    selu_tile(idst, param_scale, param_alpha);
+}
+
 } // namespace ckernel

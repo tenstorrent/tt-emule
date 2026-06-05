@@ -32,4 +32,11 @@ ALWI void hardtanh_tile(uint32_t idst, uint32_t param0, uint32_t param1) {
     }
 }
 
+// Pack-thread variant: upstream dispatches the same SFPU LLK via PACK() for
+// matmul fused-activation overlap (#79). emule has no thread split — forward.
+ALWI void hardtanh_tile_init_pack() { hardtanh_tile_init(); }
+ALWI void hardtanh_tile_pack(uint32_t idst, uint32_t param0, uint32_t param1) {
+    hardtanh_tile(idst, param0, param1);
+}
+
 }  // namespace ckernel

@@ -129,6 +129,11 @@ ALWI void silu_tile(uint32_t idst) {
         __emule_dst[idst][i] = x / (1.0f + std::exp(-x));
     }
 }
+// Upstream routes the same SFPU LLK on the PACK thread to overlap activation
+// with the pack pipeline (matmul fused-activation, #79). emule has no
+// MATH/PACK thread split — forward to the existing tile body.
+ALWI void silu_tile_init_pack() { silu_tile_init(); }
+ALWI void silu_tile_pack(uint32_t idst) { silu_tile(idst); }
 
 // --- sfpu_reduce — SFPU-based reduction helper; emule reduces via other paths.
 // No-op stubs let JIT compile; actual reduction tests use llk_defs.h reduce helpers.
