@@ -115,11 +115,9 @@ ALWI void lgamma_adjusted_tile(uint32_t idst0, uint32_t idst1, uint32_t idst2, u
 
 }  // namespace ckernel
 
-// The lgamma kernels (lgamma_kernel.cpp / lgamma_fast_kernel.cpp) declare their
-// own `constexpr float M_PI`. emule's headers transitively include <cmath>, whose
-// M_PI macro collides with that declaration ("expected unqualified-id"). Undef it
-// here — both kernels include this header before their M_PI definition, and no
-// emule code uses the M_PI macro.
+// The lgamma kernels declare their own `constexpr float M_PI`, which collides
+// with the M_PI macro from <cmath>. Undef it here (this header is included
+// before their definition); no emule code uses the macro.
 #ifdef M_PI
 #undef M_PI
 #endif
