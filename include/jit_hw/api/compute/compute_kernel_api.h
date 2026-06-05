@@ -10,6 +10,7 @@
 // per-op header). On real silicon those ops are pulled in through
 // transitive includes; in tt-emule we declare them here directly.
 #include "api/compute/common.h"
+#include "api/compute/vector_mode.h"
 #include "api/compute/matmul.h"
 #include "api/compute/eltwise_binary.h"
 #include "api/compute/tile_move_copy.h"
@@ -82,7 +83,9 @@ ALWI void power_tile(uint32_t idst, uint32_t exponent_packed = 0) {
 }
 
 // --- sigmoid (1 / (1 + e^-x)) ---
+template <uint32_t sigmoid_mode = 0>
 ALWI void sigmoid_tile_init() {}
+template <VectorMode vector_mode = VectorMode::RC, uint32_t sigmoid_mode = 0>
 ALWI void sigmoid_tile(uint32_t idst) {
     __emule_dst_check(idst, "sigmoid_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
