@@ -97,8 +97,14 @@ inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
     constexpr uint32_t TILE_DIM = 32;
     constexpr uint32_t row_cols = narrow_row ? row_num_datums : TILE_DIM;
 
+    // Format dispatch matches `pack_dst_to_buf` / `__llk_pack_untilize`:
+    // silicon's packer engine is reconfigured per OCB format via
+    // `llk_pack_reconfig_data_format_disaggregated` at `pack_untilize_dest_init`
+    // time, so uint16 / 32-bit / bf16 output all natively work.  emule
+    // mirrors via format predicates.
+    const bool     is_uint16      = __emule_compute::cb_is_uint16_format(ocb);
     const bool     is_32bit       = __emule_compute::cb_is_32bit_format(ocb);
-    const uint32_t elem_size      = is_32bit ? 4 : 2;
+    const uint32_t elem_size      = is_32bit ? 4 : 2;  // uint16 shares the 2-byte stride
     const uint32_t full_row_bytes = full_ct_dim * row_cols * elem_size;
     uint8_t* const base           = __emule_compute::cb_write_ptr_at(ocb, 0);
 
@@ -115,10 +121,28 @@ inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
                 for (uint32_t c = 0; c < row_cols; ++c) {
                     const float src = __emule_dst[dst_idx][r * TILE_DIM + c];
                     uint8_t* dst_ptr = target(rt, ct, r, c);
-                    if (is_32bit) {
-                        std::memcpy(dst_ptr, &src, sizeof(uint32_t));
+                    if (is_uint16) {
+                        // uint16 output: write low 16 bits of DST int32 bit pattern.
+                        // ReLU skipped on integer output (not a coherent silicon config).
+                        uint32_t bits;
+                        std::memcpy(&bits, &src, sizeof(uint32_t));
+                        uint16_t u16 = static_cast<uint16_t>(bits);
+                        std::memcpy(dst_ptr, &u16, sizeof(uint16_t));
+                    } else if (is_32bit) {
+                        // 32-bit (fp32 / int32 / uint32).  STACC_RELU on 32-bit
+                        // is reachable on silicon when DST_ACCUM_MODE is set;
+                        // apply the clamp through the float view, then memcpy
+                        // out the bits (NO_RELU fast path preserves INT32 bit
+                        // patterns via memcpy of the unmodified src).
+                        if (__emule_pack_relu_mode == ReluType::NO_RELU) {
+                            std::memcpy(dst_ptr, &src, sizeof(uint32_t));
+                        } else {
+                            float clamped = __emule_apply_pack_relu(src);
+                            std::memcpy(dst_ptr, &clamped, sizeof(uint32_t));
+                        }
                     } else {
-                        uint16_t bf = __emule_bf16::from_f32(src);
+                        // bf16 output.  Apply ReLU before format conversion.
+                        uint16_t bf = __emule_bf16::from_f32(__emule_apply_pack_relu(src));
                         std::memcpy(dst_ptr, &bf, sizeof(uint16_t));
                     }
                 }

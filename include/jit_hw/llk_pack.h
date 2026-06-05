@@ -30,6 +30,19 @@ inline void __llk_pack_tiled(uint32_t tile_idx, uint32_t ocb) {
             __emule_bfp8::encode_face_row(row16, exp_base[fr], mant_row);
             std::memcpy(&mant_base[fr * 16], mant_row, 16);
         }
+    } else if (__emule_compute::cb_is_uint16_format(ocb)) {
+        // uint16 output: write the low 16 bits of the DST int32 bit pattern.
+        // Mirrors `pack_dst_to_buf` / `__llk_pack_untilize`; on silicon the
+        // packer is reconfigured per OCB format so uint16 output is native.
+        // ReLU skipped on integer output (not a coherent silicon config).
+        uint16_t* out = reinterpret_cast<uint16_t*>(buf);
+        uint32_t n = __emule_compute::cb_tile_elems(ocb);
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
+            uint32_t bits;
+            std::memcpy(&bits, &__emule_dst[tile_idx][i], sizeof(uint32_t));
+            out[ni] = static_cast<uint16_t>(bits);
+        }
     } else if (__emule_compute::cb_is_32bit_format(ocb)) {
         uint32_t n = __emule_compute::cb_page_size(ocb) / sizeof(uint32_t);
         if (n > __EMULE_TILE_ELEMS) n = __EMULE_TILE_ELEMS;
