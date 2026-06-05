@@ -71,6 +71,38 @@ inline void tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb) {
     const uint32_t row_stride    = ntiles * TILE_DIM * in_elem_size;
     uint8_t* const in_base = __emule_compute::cb_read_ptr_at(icb, 0);
 
+    // BFP8_b output: encode row-major bf16/fp32 input into 64 face-rows of
+    // (shared exponent + 16 mantissas). Layout: 64 exp bytes, then 64*16
+    // mantissa bytes (= 1088 bytes/tile). Mirrors the encoder used by
+    // __llk_pack_tiled for the BFP8_b OCB path.
+    if (__emule_compute::cb_is_bfp8_b_format(ocb)) {
+        for (uint32_t t = 0; t < ntiles; ++t) {
+            uint8_t* const out = __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++);
+            uint8_t* const exp_base  = out;
+            uint8_t* const mant_base = out + 64;
+            for (uint32_t fr = 0; fr < 64; ++fr) {
+                float row16[16];
+                for (uint32_t k = 0; k < 16; ++k) {
+                    const uint32_t rm = __emule_nfaces::nfaces_to_rowmajor[fr * 16 + k];
+                    const uint32_t rr = rm / TILE_DIM;
+                    const uint32_t cc = rm % TILE_DIM;
+                    const uint8_t* p = in_base + rr * row_stride + (t * TILE_DIM + cc) * in_elem_size;
+                    if (icb_is_32bit) {
+                        float v;
+                        std::memcpy(&v, p, sizeof(float));
+                        row16[k] = v;
+                    } else {
+                        uint16_t bf;
+                        std::memcpy(&bf, p, sizeof(uint16_t));
+                        row16[k] = __emule_bf16::to_f32(bf);
+                    }
+                }
+                __emule_bfp8::encode_face_row(row16, exp_base[fr], &mant_base[fr * 16]);
+            }
+        }
+        return;
+    }
+
     for (uint32_t t = 0; t < ntiles; ++t) {
         uint8_t* const out = __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++);
         for (uint32_t r = 0; r < TILE_DIM; ++r) {
