@@ -289,6 +289,25 @@ run_pytest "matmul_test_addmm" "$MATMUL_TEST_DIR/test_addmm.py" \
 run_pytest "matmul_test_fused_activations_relu" "$TT_METAL_DIR/tests/ttnn/nightly/unit_tests/operations/matmul/test_matmul_activations.py::test_matmul_with_fused_activations" \
     -k 'bf16 and (relu_str or relu_param)'
 
+# Issue #63: bring up the `ttnn matmul group` (tests/ttnn/unit_tests/operations/matmul/) on emule.
+run_pytest "matmul_test_batch_mismatch" "$MATMUL_TEST_DIR/test_matmul_batch_mismatch.py"
+# test_ring_matmul (WH-only) JIT-fails on missing remote-CB / gathered fused-bias-
+# activation kernel surface — tracked in #93. Unwired on WH pending that gap.
+# test_experimental.test_ttnn_matmul_dram_sharded outputs NaN on DRAM-sharded mcast
+# + bfp8_b + packer_l1_acc — tracked in #94. test_sharded_partial_op passes.
+run_pytest "matmul_test_experimental"   "$MATMUL_TEST_DIR/test_experimental.py" -k 'test_sharded_partial_op'
+run_pytest "matmul_test_custom_grids"   "$MATMUL_TEST_DIR/test_custom_grids.py"
+# test_sparse_matmul: every test is bfp8_b-only and outputs NaN — tracked in #95
+# (same class as #94). Unwired pending the bfp8_b sharded matmul fix.
+# test_matmul_deepseek: 26 of 27 tests fail on DRAM-sharded matmul (bf16 + bfp8)
+# — tracked in #96. Unwired pending DRAM-sharded matmul reduce fix.
+# test_matmul.py: curated 122-test subset. Excludes tiny_tile* (TinyTile gap),
+# transpose_b (tracked in #91), and many mesh/DRAM-sharded variants (#94/#96).
+# Expansion tracked in #97. Includes the Phase A unblock target
+# (test_matmul_activation_with_sharded_input → silu fused-activation).
+run_pytest "matmul_test_basic" "$MATMUL_TEST_DIR/test_matmul.py" \
+    -k '(test_matmul_with_matched_width_height or test_matmul_does_dot_product or test_matmul_same_shape or test_tutorial_matmul or test_small_matmul_pcc or test_matmul_with_core_grid or test_matmul_activation_with_sharded_input or test_matmul_by_passing_in_1D_systolic_array_program_config or test_pytorch_2_0_failed_cases or test_linear_with_optional_output_tensor or test_wide_matmul_with_argument_for_core_grid_set_to_device_grid or test_tall_matmul_with_argument_for_core_grid_set_to_device_grid or test_optional_output_argument or test_falcon_query_key_value_matmul or test_alternating_dst_sync_mode_matmul or test_sharded_matmul_with_multiple_out_block_values or test_padded_2d_matmul or test_matmul_padding or test_matmul_height_sharded_input_with_padding or test_matmul_block_sharded_input_with_padding) and not tiny_tile and not tiny_tiles'
+
 echo ""
 echo "========================================"
 echo " Results: $PASS passed, $FAIL failed"
