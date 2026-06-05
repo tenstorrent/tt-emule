@@ -25,8 +25,8 @@ ALWI void gelu_tile(uint32_t idst) {
     }
 }
 
-// gelu'(x) = Φ(x) + x·φ(x), exact (matches gelu_tile's erf form).
-// φ(x) = exp(-x²/2)/√(2π); kInvSqrt2Pi = 1/√(2π).
+// gelu'(x) = Phi(x) + x*phi(x), exact (matches gelu_tile's erf form).
+// phi(x) = exp(-x^2/2)/sqrt(2*pi); kInvSqrt2Pi = 1/sqrt(2*pi).
 template <bool fast_and_approx = false>
 ALWI void gelu_derivative_tile_init() {}
 

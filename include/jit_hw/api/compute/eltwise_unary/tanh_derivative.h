@@ -4,7 +4,7 @@
 
 #pragma once
 // Emule shim for api/compute/eltwise_unary/tanh_derivative.h (tanh backward).
-// sech²(x) = 4·exp(-2|x|) / (1 + exp(-2|x|))² — cancellation-safe vs 1 - tanh²(x).
+// sech^2(x) = 4*exp(-2|x|) / (1 + exp(-2|x|))^2 - cancellation-safe vs 1 - tanh^2(x).
 // Real LLK: ckernel_sfpu_tanh_derivative.h::calculate_tanh_derivative_sech2.
 #include "jit_hw/api/compute/common.h"
 
