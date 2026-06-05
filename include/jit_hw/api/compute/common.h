@@ -582,11 +582,16 @@ inline void __emule_unpack_cb_tile_to(uint32_t icb, uint32_t itile, float* out) 
             std::memcpy(&out[i], &v, sizeof(uint32_t));
         }
     } else {
-        // bfloat16: UNPACK nfaces→row-major + bf16→f32 conversion
+        // bfloat16: UNPACK nfaces→row-major + bf16→f32 conversion.
+        // Thin tiles (rows ∈ {1,2,4,8,16}) use a 2-column-face layout where
+        // each face is `rows × 16`; need tile_rm_to_nfaces(i, rows) not the
+        // 32×32 LUT (rowmajor_to_nfaces) which assumes 4 faces of 16×16.
         uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
-        uint32_t n = __emule_compute::cb_tile_elems(icb);
+        const uint32_t page = __emule_compute::cb_page_size(icb);
+        const uint32_t rows = __emule_nfaces::tile_rows_from_pagesize(page, sizeof(uint16_t));
+        const uint32_t n    = rows * 32u;
         for (uint32_t i = 0; i < n; i++)
-            out[i] = __emule_bf16::to_f32(bf[__emule_nfaces::rowmajor_to_nfaces[i]]);
+            out[i] = __emule_bf16::to_f32(bf[__emule_nfaces::tile_rm_to_nfaces(i, rows)]);
     }
 }
 
