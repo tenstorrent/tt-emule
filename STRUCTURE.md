@@ -138,7 +138,7 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/eltwise_unary/exp.h` — `ckernel::` `exp_tile` (+`_init`); `enum class InputClamping`; `namespace p_sfpu`
 - `include/jit_hw/api/compute/eltwise_unary/fill.h` — `ckernel::` `fill_tile`, `fill_tile_int`, `fill_tile_bitcast` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/fmod.h` — `ckernel::` `fmod_tile`, `fmod_tile_init`
-- `include/jit_hw/api/compute/eltwise_unary/gelu.h` — `ckernel::` `gelu_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/gelu.h` — `ckernel::` `gelu_tile`, `gelu_derivative_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/hardmish.h` — `ckernel::` `hardmish_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/hardtanh.h` — `ckernel::` `hardtanh_tile` (+`_init`); `hardtanh_tile_pack`/`hardtanh_tile_init_pack`
 - `include/jit_hw/api/compute/eltwise_unary/i0.h` — `ckernel::` `i0_tile` (+`_init`)
@@ -169,6 +169,7 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/eltwise_unary/snake_beta.h` — `ckernel::` `snake_beta_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/softplus.h` — `ckernel::` `softplus_tile` (+`_init`); `softplus_tile_pack`/`softplus_tile_init_pack`
 - `include/jit_hw/api/compute/eltwise_unary/sqrt.h` — `ckernel::` `sqrt_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/tanh_derivative.h` — `ckernel::` `tanh_derivative_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/threshold.h` — `ckernel::` `threshold_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/trigonometry.h` — `ckernel::` `sin/cos/tan/tanh/asin/acos/atan/acosh/asinh/atanh/cosh/sinh_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/typecast.h` — `ckernel::` `typecast_tile` (+`_init`)

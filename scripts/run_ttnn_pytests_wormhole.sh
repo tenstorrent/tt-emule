@@ -301,6 +301,9 @@ run_pytest "elt_test_typecast_int" "$ELT_TEST_DIR/test_typecast_int.py"
 run_pytest "elt_test_unary_fp32" "$ELT_TEST_DIR/test_unary_fp32.py"
 run_pytest "elt_test_tanh_accuracy" "$ELT_TEST_DIR/test_tanh_accuracy.py"
 run_pytest "elt_test_tanh_fw_ulp" "$ELT_TEST_DIR/test_tanh_fw_ulp.py"
+run_pytest "elt_test_tanh_bw_ulp" "$ELT_TEST_DIR/test_tanh_bw_ulp.py"
+run_pytest "elt_test_gelu_bw_ulp" "$ELT_TEST_DIR/test_gelu_bw_ulp.py" -k 'not test_negative_values and not test_gelu_bw_ulp_summary'
+run_pytest "elt_test_gelu_bw_main_ulp" "$ELT_TEST_DIR/test_gelu_bw_main_ulp.py" -k 'not test_negative_values and not test_gelu_bw_ulp_summary'
 run_pytest "elt_test_unary_maximum" "$ELT_TEST_DIR/test_unary_maximum.py" -k 'not test_unary_max_fill_val_bf16'
 run_pytest "elt_test_where" "$ELT_TEST_DIR/test_where.py" -k 'not test_div_edgcase and not test_where_TSS_float_types and not test_where_subcore_grid and not test_where_tst and not test_where_tts'
 run_pytest "elt_test_unary_pow" "$ELT_TEST_DIR/test_unary_pow.py" --deselect "tests/ttnn/unit_tests/operations/eltwise/test_unary_pow.py::test_pow[exponent=-3.56]" --deselect "tests/ttnn/unit_tests/operations/eltwise/test_unary_pow.py::test_power_as_activation[op_type=UnaryOpType.POWER-exponent=0]"

@@ -25,4 +25,22 @@ ALWI void gelu_tile(uint32_t idst) {
     }
 }
 
+// gelu'(x) = Φ(x) + x·φ(x), exact (matches gelu_tile's erf form).
+// φ(x) = exp(-x²/2)/√(2π); kInvSqrt2Pi = 1/√(2π).
+template <bool fast_and_approx = false>
+ALWI void gelu_derivative_tile_init() {}
+
+template <bool fast_and_approx = false>
+ALWI void gelu_derivative_tile(uint32_t idst) {
+    __emule_dst_check(idst, "gelu_derivative_tile");
+    static const float kInvSqrt2 = 1.0f / std::sqrt(2.0f);
+    static const float kInvSqrt2Pi = 0.3989422804014327f;
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        float x = __emule_dst[idst][i];
+        float cdf = 0.5f * (1.0f + std::erf(x * kInvSqrt2));
+        float pdf = kInvSqrt2Pi * std::exp(-0.5f * x * x);
+        __emule_dst[idst][i] = cdf + x * pdf;
+    }
+}
+
 } // namespace ckernel
