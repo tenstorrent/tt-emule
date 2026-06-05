@@ -293,17 +293,17 @@ run_pytest "matmul_test_fused_activations_relu" "$TT_METAL_DIR/tests/ttnn/nightl
 run_pytest "matmul_test_batch_mismatch" "$MATMUL_TEST_DIR/test_matmul_batch_mismatch.py"
 # test_ring_matmul (WH-only) JIT-fails on missing remote-CB / gathered fused-bias-
 # activation kernel surface — tracked in #93. Unwired on WH pending that gap.
-# test_experimental.test_ttnn_matmul_dram_sharded outputs NaN on DRAM-sharded mcast
-# + bfp8_b + packer_l1_acc — tracked in #94. test_sharded_partial_op passes.
-run_pytest "matmul_test_experimental"   "$MATMUL_TEST_DIR/test_experimental.py" -k 'test_sharded_partial_op'
+run_pytest "matmul_test_experimental"   "$MATMUL_TEST_DIR/test_experimental.py"
 run_pytest "matmul_test_custom_grids"   "$MATMUL_TEST_DIR/test_custom_grids.py"
-# test_sparse_matmul: every test is bfp8_b-only and outputs NaN — tracked in #95
-# (same class as #94). Unwired pending the bfp8_b sharded matmul fix.
-# test_matmul_deepseek: bfp8 in1 read decode in matmul_tiles fixed; the
-# `test_kv_wm_matmul` canary now passes. Remaining failures are confined to
-# `test_matmul_l1_dram_sharded` + one `test_matmul_batched_dram_sharded`
-# parametrize (DRAM-sharded path, separate from this fix).
-run_pytest "matmul_test_deepseek_kv_wm" "$MATMUL_TEST_DIR/test_matmul_deepseek.py::test_kv_wm_matmul"
+# test_sparse_matmul: `*_with_nnz` functions pass after the bfp4_b + include_self
+# fixes. The three `*_without_nnz` variants hang (slow loop, not a numeric
+# bug) — left unwired pending a perf/sparsity-mask investigation.
+run_pytest "matmul_test_sparse_nnz"     "$MATMUL_TEST_DIR/test_sparse_matmul.py" \
+    -k 'with_nnz and not without_nnz'
+# test_matmul_deepseek: all tests pass except wkv_b2 (TinyTile, m=4 tile_h=4 —
+# emule's matmul_tiles assumes 32x32 tiles; tracked separately as TinyTile gap).
+run_pytest "matmul_test_deepseek"       "$MATMUL_TEST_DIR/test_matmul_deepseek.py" \
+    -k 'not wkv_b2'
 # test_matmul.py: curated 140-test subset. Excludes tiny_tile* (TinyTile gap)
 # and many mesh/DRAM-sharded variants. Includes the Phase A unblock target
 # (test_matmul_activation_with_sharded_input → silu fused-activation) and the
