@@ -119,6 +119,24 @@ static constexpr uint32_t __EMULE_DST_BYTES = __EMULE_TILE_ELEMS * sizeof(float)
 static thread_local float __emule_dst[__EMULE_DST_TILES][__EMULE_TILE_ELEMS];
 static thread_local bool __emule_l1_acc_enabled = false;
 
+// Pack-fused ReLU state — silicon STACC_RELU is a single packer CFG reg, so
+// thread-global like __emule_l1_acc_enabled.  `llk_pack_relu_config(ReluType)`
+// writes the mode; `pack_set_relu_threshold(float)` writes the threshold.
+// `pack_dst_to_buf` / `__llk_pack_tiled` / `__llk_pack_untilize` apply the
+// clamp before format conversion.
+static thread_local ReluType __emule_pack_relu_mode = ReluType::NO_RELU;
+static thread_local float    __emule_pack_relu_threshold = 0.0f;
+
+inline float __emule_apply_pack_relu(float v) {
+    switch (__emule_pack_relu_mode) {
+        case ReluType::NO_RELU:            return v;
+        case ReluType::ZERO_RELU:          return v < 0.0f ? 0.0f : v;
+        case ReluType::MIN_THRESHOLD_RELU: return v < __emule_pack_relu_threshold ? __emule_pack_relu_threshold : v;
+        case ReluType::MAX_THRESHOLD_RELU: return v > __emule_pack_relu_threshold ? __emule_pack_relu_threshold : v;
+    }
+    return v;
+}
+
 // Emule model of one SRC register bank. Real silicon's UNPACK path
 // routes CB tiles into SRCA/SRCB; for the DEST_TO_SRC{A,B} reuse path
 // (binary_dest_reuse_tiles) we need a working buffer that is NOT a DST
@@ -252,7 +270,7 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
             for (uint32_t k = 0; k < 16; ++k) {
                 const uint32_t ni = fr * 16 + k;
                 const uint32_t rm = __emule_nfaces::nfaces_to_rowmajor[ni];
-                row16[k] = __emule_dst[dst_slot][rm];
+                row16[k] = __emule_apply_pack_relu(__emule_dst[dst_slot][rm]);
             }
             uint8_t mant_row[16];
             __emule_bfp8::encode_face_row(row16, exp_base[fr], mant_row);
@@ -270,22 +288,32 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
             float* out = reinterpret_cast<float*>(buf);
             for (uint32_t i = 0; i < n; i++) {
                 uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
-                out[ni] += __emule_dst[dst_slot][i];
+                out[ni] += __emule_apply_pack_relu(__emule_dst[dst_slot][i]);
             }
-        } else {
-            // Bit-exact copy via memcpy — preserves INT32 bit patterns that are
-            // denormalized floats (would be flushed to zero by float assignment
+        } else if (__emule_pack_relu_mode == ReluType::NO_RELU) {
+            // Fast path: bit-exact copy via memcpy preserves INT32 bit patterns that
+            // are denormalized floats (would be flushed to zero by float assignment
             // when x86 DAZ/FTZ is set).
             uint32_t* out = reinterpret_cast<uint32_t*>(buf);
             for (uint32_t i = 0; i < n; i++) {
                 uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
                 std::memcpy(&out[ni], &__emule_dst[dst_slot][i], sizeof(uint32_t));
             }
+        } else {
+            // ReLU clamp path: must reinterpret as float, clamp, write back.
+            // Loses INT32 bit-exactness, but ReLU+INT32 isn't a coherent silicon
+            // configuration anyway.
+            float* out = reinterpret_cast<float*>(buf);
+            for (uint32_t i = 0; i < n; i++) {
+                uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
+                out[ni] = __emule_apply_pack_relu(__emule_dst[dst_slot][i]);
+            }
         }
     } else if (cb_is_uint16_format(ocb)) {
         // 16-bit integer output: write the low 16 bits of the DST int32 bit pattern.
         // (DST holds int values bit-punned into its fp32 storage — e.g. comparison
-        // results after typecast<*,UInt16>; no bf16 float conversion.)
+        // results after typecast<*,UInt16>; no bf16 float conversion.)  ReLU is
+        // skipped on int output (not a coherent silicon config).
         uint16_t* out = reinterpret_cast<uint16_t*>(buf);
         uint32_t n = cb_tile_elems(ocb);
         for (uint32_t i = 0; i < n; i++) {
@@ -301,12 +329,14 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
             for (uint32_t i = 0; i < n; i++) {
                 uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
                 bf[ni] = __emule_bf16::from_f32(
-                    __emule_bf16::to_f32(bf[ni]) + __emule_dst[dst_slot][i]);
+                    __emule_bf16::to_f32(bf[ni])
+                    + __emule_apply_pack_relu(__emule_dst[dst_slot][i]));
             }
         } else {
             for (uint32_t i = 0; i < n; i++) {
                 uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
-                bf[ni] = __emule_bf16::from_f32(__emule_dst[dst_slot][i]);
+                bf[ni] = __emule_bf16::from_f32(
+                    __emule_apply_pack_relu(__emule_dst[dst_slot][i]));
             }
         }
     }
@@ -521,9 +551,14 @@ ALWI void reconfig_data_format_srcb(uint32_t, uint32_t) {}
 ALWI void pack_reconfig_data_format(uint32_t) {}
 ALWI void pack_reconfig_data_format(uint32_t, uint32_t) {}
 
-// ---- Pack configuration (no-ops) ----
-ALWI void llk_pack_relu_config(ReluType) {}
-ALWI void pack_set_relu_threshold(float) {}
+// ---- Pack-fused ReLU configuration ----
+// Silicon STACC_RELU is a single packer CFG reg that clamps PACK output
+// per-element before format conversion.  emule mirrors with thread-global
+// state applied at every pack site.  Mode is set by `llk_pack_relu_config`,
+// threshold by `pack_set_relu_threshold`; `pack_relu_config(uint32_t)`
+// decodes the silicon-style packed config.
+ALWI void llk_pack_relu_config(ReluType type) { __emule_pack_relu_mode = type; }
+ALWI void pack_set_relu_threshold(float threshold) { __emule_pack_relu_threshold = threshold; }
 
 // Public-API forwarders for handwritten compute kernels that use silicon's
 // public pack_* names (rather than the llk_-prefixed forms).  Forward
@@ -534,7 +569,17 @@ ALWI void pack_init(uint32_t = 0, uint32_t = 0) {}
 ALWI void pack_dest_init(uint32_t = 0) {}
 ALWI void pack_reconfig_l1_acc(uint32_t enable) { llk_pack_reconfig_l1_acc(enable); }
 ALWI void pack_relu_config(ReluType t) { llk_pack_relu_config(t); }
-ALWI void pack_relu_config(uint32_t /*config*/) {}  // silicon BH/WH integer-config overload
+// silicon BH/WH integer-config overload: low 4 bits = mode (0=NO_RELU,
+// 3=MAX_THRESHOLD_RELU, else MIN_THRESHOLD_RELU); upper 16 bits = threshold
+// (uint16, reinterpreted to float by silicon — emule matches by casting the
+// 16-bit value to float).
+ALWI void pack_relu_config(uint32_t config) {
+    const ReluType mode = (config & 0xf) == 0 ? ReluType::NO_RELU
+                        : (config & 0xf) == 3 ? ReluType::MAX_THRESHOLD_RELU
+                                              : ReluType::MIN_THRESHOLD_RELU;
+    llk_pack_relu_config(mode);
+    pack_set_relu_threshold(static_cast<float>(config >> 16));
+}
 
 // llk_pack_hw_configure: BH (#ifdef ARCH_BLACKHOLE) binary_ng SFPU bcast kernels call
 // the templated form to configure the pack HW engine (the WH path skips it). emule packs
