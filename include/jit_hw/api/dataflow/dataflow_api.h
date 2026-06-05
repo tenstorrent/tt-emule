@@ -147,13 +147,23 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             return __emule_bridge_l1 + l1_addr;
         }
     }
-    // Normalize to a buffer-relative offset before comparing against the live
-    // tensor / padding ranges (which are relative, from buffer.address()).
-    // Sharded, CB/DFB, l1_alloc and >2MB bank accesses reach here as ABSOLUTE
-    // bridge-based addresses; comparing a raw absolute value against a relative
-    // range can never match -> false OOB. Same conversion the pointer-return
-    // path below applies via __emule_addr_to_offset.
-    uint32_t l1_off = __emule_addr_to_offset(l1_addr);
+    // Reduce to the within-slot L1 offset by masking the low 21 bits (2 MB worker
+    // slot). The high bits just encode which core / absolute bridge base the
+    // address came through, while the live tensor/padding ranges are stored as
+    // buffer-relative offsets (buffer.address()). Masking means two addresses that
+    // share their low 21 bits map to the same offset regardless of core — so a
+    // legitimate access isn't flagged just because its high bits differ from this
+    // thread's base. (Per-core L1 bases are 2 MB-aligned in both the L1Pool and the
+    // tt-metal external-backing builds, so for an in-slot address the mask equals
+    // the base-subtraction `__emule_addr_to_offset` does — but the mask is robust
+    // for any high bits, e.g. an absolute address from another core's slot.)
+
+    // KNOWN LIMITATION (accepted, see review): because the ranges are offset-based
+    // and a sharded tensor occupies the *same* offset on each of its shard cores,
+    // a write to that offset on a core where the tensor is NOT sharded passes this
+    // check (a false negative). Catching it would require per-core shard-placement
+    // tracking, not just offsets.
+    uint32_t l1_off = l1_addr & 0x1FFFFF;  // SLOT_MASK = 2 MB - 1
     if (__emule_l1_tensor_ranges != nullptr && l1_off >= __emule_l1_unreserved_base) {
         bool in_tensor = false;
         uint64_t matched_packed = 0;
