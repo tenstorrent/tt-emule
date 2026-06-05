@@ -149,7 +149,8 @@ public:
         uint32_t val = atom()->load(std::memory_order_acquire);
         __emule_multicast_write(mcast_addr,
                                 reinterpret_cast<const uint8_t*>(&val),
-                                sizeof(uint32_t));
+                                sizeof(uint32_t),
+                                has_flag(opts, NocOptions::MCAST_INCL_SRC));
     }
 
     // Argument order matches real api/dataflow/noc_semaphore.h: (value, num_dests).

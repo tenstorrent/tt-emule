@@ -119,9 +119,11 @@ public:
             l1_offset_;
         // Load atomic value before passing to multicast to avoid data race.
         uint32_t val = atom()->load(std::memory_order_acquire);
+        // Experimental Semaphore::set_multicast: assume non-loopback default.
         __emule_multicast_write(mcast_addr,
                                 reinterpret_cast<const uint8_t*>(&val),
-                                sizeof(uint32_t));
+                                sizeof(uint32_t),
+                                /*include_self=*/false);
     }
 
     // Multicast increment: atomically add value to semaphore on all cores.
