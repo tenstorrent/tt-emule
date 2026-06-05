@@ -299,8 +299,11 @@ run_pytest "matmul_test_experimental"   "$MATMUL_TEST_DIR/test_experimental.py" 
 run_pytest "matmul_test_custom_grids"   "$MATMUL_TEST_DIR/test_custom_grids.py"
 # test_sparse_matmul: every test is bfp8_b-only and outputs NaN — tracked in #95
 # (same class as #94). Unwired pending the bfp8_b sharded matmul fix.
-# test_matmul_deepseek: 26 of 27 tests fail on DRAM-sharded matmul (bf16 + bfp8)
-# — tracked in #96. Unwired pending DRAM-sharded matmul reduce fix.
+# test_matmul_deepseek: bfp8 in1 read decode in matmul_tiles fixed; the
+# `test_kv_wm_matmul` canary now passes. Remaining failures are confined to
+# `test_matmul_l1_dram_sharded` + one `test_matmul_batched_dram_sharded`
+# parametrize (DRAM-sharded path, separate from this fix).
+run_pytest "matmul_test_deepseek_kv_wm" "$MATMUL_TEST_DIR/test_matmul_deepseek.py::test_kv_wm_matmul"
 # test_matmul.py: curated 140-test subset. Excludes tiny_tile* (TinyTile gap)
 # and many mesh/DRAM-sharded variants. Includes the Phase A unblock target
 # (test_matmul_activation_with_sharded_input → silu fused-activation) and the

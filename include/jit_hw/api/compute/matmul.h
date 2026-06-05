@@ -7,6 +7,7 @@
 // matmul_tiles performs a 32x32 tile GEMM (bfloat16 inputs, float32 DST accumulate).
 // Uses AVX2/FMA intrinsics when available for ~4-8x speedup over scalar.
 
+#include "jit_hw/api/compute/bfp8.h"
 #include "jit_hw/api/compute/common.h"
 #include "jit_hw/api/compute/nfaces.h"
 #include "jit_hw/internal/llk_state.h"
@@ -38,8 +39,11 @@ ALWI void mm_init_short_with_dt(uint32_t in0_cb, uint32_t in1_cb,
 // ---- matmul_tiles: tile GEMM accumulate into DST ----
 // Reads tile A from CB[in0_cb] at tile offset in0_tile and tile B from
 // CB[in1_cb] at tile offset in1_tile.  Accumulates A*B into DST[idst].
-// Tiles are 32x32 bfloat16 (2048 bytes each = 1024 uint16_t elements).
 // DST stores float32 — acquire zeroes it, then matmul_tiles accumulates.
+// Per-operand format dispatch: fp32 / bf16 / bfp8_b decoded independently for
+// A and B (silicon's unpacker reconfig is per-operand; the prior single-format
+// branch on in0_cb mis-routed bfp8 in1 into the bf16 reader, walking past-end
+// memory and producing ~50% NaN).
 ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
                        uint32_t in0_tile, uint32_t in1_tile, uint32_t idst) {
     __emule_dst_check(idst, "matmul_tiles");
@@ -49,29 +53,29 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
     constexpr uint32_t DIM = 32;
     float a_rm[DIM * DIM];
     float b_rm[DIM * DIM];
-    if (__emule_compute::cb_is_32bit_format(in0_cb)) {
-        // Float32 path: UNPACK nfaces→row-major conversion.
-        const float* a_ptr = reinterpret_cast<const float*>(
-            __emule_compute::cb_read_ptr_at(in0_cb, in0_tile));
-        const float* b_ptr = reinterpret_cast<const float*>(
-            __emule_compute::cb_read_ptr_at(in1_cb, in1_tile));
-        for (uint32_t i = 0; i < DIM * DIM; i++) {
-            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
-            a_rm[i] = a_ptr[ni];
-            b_rm[i] = b_ptr[ni];
+    auto decode_to_rm = [](uint32_t cb, uint32_t tile_idx, float* rm_out) {
+        const uint8_t* base = __emule_compute::cb_read_ptr_at(cb, tile_idx);
+        if (__emule_compute::cb_is_32bit_format(cb)) {
+            const float* p = reinterpret_cast<const float*>(base);
+            for (uint32_t i = 0; i < DIM * DIM; i++) {
+                uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
+                rm_out[i] = p[ni];
+            }
+        } else if (__emule_compute::cb_is_bfp8_b_format(cb)) {
+            for (uint32_t i = 0; i < DIM * DIM; i++) {
+                uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
+                rm_out[i] = __emule_bfp8::to_f32(base, ni);
+            }
+        } else {
+            const uint16_t* p = reinterpret_cast<const uint16_t*>(base);
+            for (uint32_t i = 0; i < DIM * DIM; i++) {
+                uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
+                rm_out[i] = __emule_bf16::to_f32(p[ni]);
+            }
         }
-    } else {
-        // bfloat16 path: UNPACK nfaces→row-major + bf16→f32 conversion.
-        const uint16_t* a_ptr = reinterpret_cast<const uint16_t*>(
-            __emule_compute::cb_read_ptr_at(in0_cb, in0_tile));
-        const uint16_t* b_ptr = reinterpret_cast<const uint16_t*>(
-            __emule_compute::cb_read_ptr_at(in1_cb, in1_tile));
-        for (uint32_t i = 0; i < DIM * DIM; i++) {
-            uint32_t ni = __emule_nfaces::rowmajor_to_nfaces[i];
-            a_rm[i] = __emule_bf16::to_f32(a_ptr[ni]);
-            b_rm[i] = __emule_bf16::to_f32(b_ptr[ni]);
-        }
-    }
+    };
+    decode_to_rm(in0_cb, in0_tile, a_rm);
+    decode_to_rm(in1_cb, in1_tile, b_rm);
     // Apply IN1 transpose if mm_init(... transpose=1) was set — silicon does
     // this in the unpacker (THCON_SEC0_REG2_Haloize_mode_RMW); emule transposes
     // the decoded row-major view in-place before the FMA loop.
