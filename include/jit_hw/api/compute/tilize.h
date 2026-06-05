@@ -12,16 +12,27 @@
 //   tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_unpack_tilize.h
 //   tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_pack_fast_tilize.h
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #include "jit_hw/api/compute/common.h"
 #include "jit_hw/api/compute/compute_kernel_hw_startup.h"
 #include "jit_hw/internal/llk_state.h"
+#include "jit_hw/api/compute/common.h"
+#include "jit_hw/api/compute/nfaces.h"
+#include "jit_hw/api/bfp8.h"
+#include "jit_hw/api/bfloat16.h"
 
 inline void tilize_init(uint32_t, uint32_t, uint32_t) {
     __llk_unpack_is_tilize = true;
     __llk_pack_is_untilize = false;
 }
 inline void tilize_init_short(uint32_t, uint32_t) {
+    __llk_unpack_is_tilize = true;
+    __llk_pack_is_untilize = false;
+}
+inline void tilize_init_short_with_dt(uint32_t, uint32_t, uint32_t) {
     __llk_unpack_is_tilize = true;
     __llk_pack_is_untilize = false;
 }
@@ -126,4 +137,10 @@ inline void fast_tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb,
 }
 inline void fast_tilize_uninit(uint32_t = 0, uint32_t = 0, uint32_t = 0) {
     tilize_uninit();
+}
+
+// Block variant with explicit tile-index args (some op code uses 5-arg form).
+inline void tilize_block(uint32_t icb, uint32_t num_tiles, uint32_t ocb,
+                         uint32_t /*itile_start*/, uint32_t /*otile_start*/) {
+    tilize_block(icb, num_tiles, ocb);
 }
