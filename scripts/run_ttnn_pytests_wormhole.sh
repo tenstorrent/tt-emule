@@ -283,7 +283,7 @@ run_pytest "elt_test_unary_uint32" "$ELT_TEST_DIR/test_unary_uint32.py"
 # partial files: failing param subsets excluded (see deferrals note)
 run_pytest "elt_test_add" "$ELT_TEST_DIR/test_add.py" -k 'not test_add_and_apply_activations and not test_in_place_add_and_apply_activations'
 run_pytest "elt_test_binary_bcast_tcast" "$ELT_TEST_DIR/test_binary_bcast_tcast.py"
-run_pytest "elt_test_binary_composite" "$ELT_TEST_DIR/test_binary_composite.py" -k 'not test_remainder_ttnn'
+run_pytest "elt_test_binary_composite" "$ELT_TEST_DIR/test_binary_composite.py"
 run_pytest "elt_test_binary_fp32" "$ELT_TEST_DIR/test_binary_fp32.py" -k 'not test_binary_div_edge_case_ttnn'
 run_pytest "elt_test_binary_int32" "$ELT_TEST_DIR/test_binary_int32.py"
 run_pytest "elt_test_divide" "$ELT_TEST_DIR/test_divide.py"
@@ -292,7 +292,7 @@ run_pytest "elt_test_binaryng_fp32" "$ELT_TEST_DIR/test_binaryng_fp32.py"
 run_pytest "elt_test_composite" "$ELT_TEST_DIR/test_composite.py"
 run_pytest "elt_test_elt_binary" "$ELT_TEST_DIR/test_elt_binary.py"
 run_pytest "elt_test_exp2" "$ELT_TEST_DIR/test_exp2.py" -k 'not test_exp2_special_values'
-run_pytest "elt_test_remainder" "$ELT_TEST_DIR/test_remainder.py" -k 'not test_broken_remainder and not test_remainder_scalar'
+run_pytest "elt_test_remainder" "$ELT_TEST_DIR/test_remainder.py" -k 'not test_remainder_scalar'
 run_pytest "elt_test_sub" "$ELT_TEST_DIR/test_sub.py"
 run_pytest "elt_test_ternary" "$ELT_TEST_DIR/test_ternary.py"
 run_pytest "elt_test_typecast_int" "$ELT_TEST_DIR/test_typecast_int.py"

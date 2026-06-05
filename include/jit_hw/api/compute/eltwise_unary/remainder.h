@@ -27,7 +27,10 @@ ALWI void remainder_tile(uint32_t idst, uint32_t param0, uint32_t param1) {
     std::memcpy(&divisor, &param0, sizeof(float));
     (void)param1;  // reciprocal is a silicon-side fast-path hint; unused here.
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        __emule_dst[idst][i] = std::remainder(__emule_dst[idst][i], divisor);
+        // torch.remainder: a - b*floor(a/b) (sign follows divisor). NOT
+        // std::remainder, which is IEEE round-to-nearest (sign follows dividend).
+        const float a = __emule_dst[idst][i];
+        __emule_dst[idst][i] = a - divisor * std::floor(a / divisor);
     }
 }
 
