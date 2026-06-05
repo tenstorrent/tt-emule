@@ -249,8 +249,11 @@ public:
 
     // ----- async_write_multicast -----
     // Delegates to __emule_multicast_write which iterates the rectangle.
-    // NocOptions::MCAST_INCL_SRC is handled by the multicast write loop visiting
-    // all cores including the sender's (same host memory, no special case needed).
+    // NocOptions::MCAST_INCL_SRC selects silicon's NOC_CMD_BRCST_SRC_INCLUDE bit:
+    // when set, the sender's own coordinates inside the rectangle receive the
+    // packet; when clear, the sender NIU drops at itself. This MUST be
+    // forwarded to __emule_multicast_write — leaving it to register garbage
+    // produces non-deterministic data delivery for dual-role workers.
 
     template <
         NocOptions   opts = NocOptions::DEFAULT,
@@ -270,7 +273,7 @@ public:
         if (s) {
             __emule_multicast_write(static_cast<uint64_t>(mcast_noc_addr),
                                     reinterpret_cast<const uint8_t*>(s), size_bytes,
-                                    /*include_self=*/true);
+                                    has_flag(opts, NocOptions::MCAST_INCL_SRC));
         }
     }
 

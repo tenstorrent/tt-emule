@@ -40,3 +40,10 @@ static thread_local bool __llk_unpack_is_tilize = false;
 static thread_local uint32_t __llk_pack_offset = 0;
 static thread_local bool __llk_pack_is_untilize = false;
 static thread_local uint32_t __llk_pack_block_c = 0;
+
+// Matmul state: `transpose=1` passed to mm_init / mm_block_init means the
+// unpacker delivers the IN1 (SrcB) tile transposed before the math op
+// (see llk_unpack_AB_matmul.h:176 — `THCON_SEC0_REG2_Haloize_mode_RMW`).
+// Equivalent: compute A * B^T. emule has no SrcB modelling — `matmul_tiles`
+// reads this flag and transposes its decoded IN1 tile before the FMA loop.
+static thread_local bool __llk_matmul_transpose = false;

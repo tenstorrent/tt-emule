@@ -119,8 +119,7 @@ public:
             l1_offset_;
         // Load atomic value before passing to multicast to avoid data race.
         uint32_t val = atom()->load(std::memory_order_acquire);
-        // experimental::Noc multicast is non-loopback (sender skips itself),
-        // matching experimental::Noc::async_write_multicast.
+        // Experimental Semaphore::set_multicast: assume non-loopback default.
         __emule_multicast_write(mcast_addr,
                                 reinterpret_cast<const uint8_t*>(&val),
                                 sizeof(uint32_t),

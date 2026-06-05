@@ -13,7 +13,23 @@
 // is a single packer CFG reg, so all pack sites must honor it.
 inline void __llk_pack_tiled(uint32_t tile_idx, uint32_t ocb) {
     uint8_t* buf = __emule_compute::cb_write_ptr_at(ocb, __llk_pack_offset);
-    if (__emule_compute::cb_is_bfp8_b_format(ocb)) {
+    if (__emule_compute::cb_is_bfp4_b_format(ocb)) {
+        // Bfp4_b: 64 face-row exponents + 512 mantissa bytes (two 4-bit elems
+        // per byte). Symmetric with pack_dst_to_buf's Bfp4_b branch.
+        uint8_t* exp_base  = buf;
+        uint8_t* mant_base = buf + 64;
+        for (uint32_t fr = 0; fr < 64; ++fr) {
+            float row16[16];
+            for (uint32_t k = 0; k < 16; ++k) {
+                const uint32_t ni = fr * 16 + k;
+                const uint32_t rm = __emule_nfaces::nfaces_to_rowmajor[ni];
+                row16[k] = __emule_apply_pack_relu(__emule_dst[tile_idx][rm]);
+            }
+            uint8_t packed[8];
+            __emule_bfp4::encode_face_row(row16, exp_base[fr], packed);
+            std::memcpy(&mant_base[fr * 8], packed, 8);
+        }
+    } else if (__emule_compute::cb_is_bfp8_b_format(ocb)) {
         // Bfp8_b: 64 face-rows of 16 floats each, shared 8-bit exponent per
         // face-row. Walk in nfaces order so each row16 corresponds to one
         // exponent byte; DST is row-major fp32 so use the inverse LUT.

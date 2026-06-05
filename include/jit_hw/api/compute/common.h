@@ -15,6 +15,7 @@
 #include "jit_hw/api/cb_api.h"
 #include "jit_hw/api/compute/common_globals.h"
 #include "jit_hw/api/compute/nfaces.h"
+#include "jit_hw/api/compute/bfp4.h"
 #include "jit_hw/api/compute/bfp8.h"
 #include "jit_hw/internal/cb_interface.h"
 #include "jit_hw/ckernel.h"
@@ -255,27 +256,36 @@ inline uint32_t cb_tile_elems(uint32_t cb_id) {
     return __emule_cbs[cb_id].page_size / sizeof(uint16_t);
 }
 
+// Real per-CB data format (tt::DataFormat enum value) from the compile-time
+// unpack_src_format[] array (cb_api.h, fed by EMULE_CB_DATA_FORMATS). 255 == Invalid
+// (e.g. standalone tt_emule_lib builds with no define), in which case callers fall
+// back to the page_size heuristic. Block-float dispatch is enum-driven because
+// Bfp8_b (~1088B) and Bfp4_b (~576B) both fall in the same sub-2048 page range.
+inline uint8_t cb_data_format(uint32_t cb_id) { return ::unpack_src_format[cb_id]; }
+
 // Is this CB using a 32-bit data format (INT32, Float32)?
 // Heuristic: bf16 tiles = 2048 bytes (1024 × 2), 32-bit tiles > 2048.
 inline bool cb_is_32bit_format(uint32_t cb_id) {
     return __emule_cbs[cb_id].page_size > 2048;
 }
 
-// Is this CB using Bfp8_b? Bfp8_b tile = 64 face-row exponents + 1024
-// mantissa bytes = 1088 bytes for a 32x32 tile. Match the exact 1088-byte
-// page size — the previous "< 2048" predicate collided with thin tiles
-// (Tile([1,32]) = 64 bytes, Tile([2,32]) = 128 bytes, etc.) used by rope,
-// broadcast_rmsnorm, and other thin-input upstream ops.
+// Is this CB using Bfp8_b? Enum-driven (Bfp8_b vs Bfp4_b are indistinguishable
+// by page size alone). Falls back to the page-size heuristic only when the
+// format is unset (Invalid) — standalone builds, which don't exercise Bfp4_b.
 inline bool cb_is_bfp8_b_format(uint32_t cb_id) {
-    return __emule_cbs[cb_id].page_size == 1088;
+    const uint8_t fmt = cb_data_format(cb_id);
+    if (fmt != static_cast<uint8_t>(DataFormat::Invalid)) {
+        return fmt == static_cast<uint8_t>(DataFormat::Bfp8_b);
+    }
+    const uint32_t ps = __emule_cbs[cb_id].page_size;
+    return ps > 0 && ps < 2048;
 }
 
-// Real per-CB data format (tt::DataFormat enum value) from the compile-time
-// unpack_src_format[] array (cb_api.h, fed by EMULE_CB_DATA_FORMATS). 255 == Invalid.
-// page_size cleanly separates 32-bit (4096B) / Bfp8_b (1088B) / 16-bit (2048B), but it
-// CANNOT tell 16-bit int (UInt16) from bf16 — both are 2048B. The real format resolves
-// that one ambiguity; everything else stays on the reliable page_size dispatch.
-inline uint8_t cb_data_format(uint32_t cb_id) { return ::unpack_src_format[cb_id]; }
+// Is this CB using Bfp4_b? Enum-only — its page size overlaps Bfp8_b's range.
+inline bool cb_is_bfp4_b_format(uint32_t cb_id) {
+    return cb_data_format(cb_id) == static_cast<uint8_t>(DataFormat::Bfp4_b);
+}
+
 inline bool cb_is_uint16_format(uint32_t cb_id) {
     return cb_data_format(cb_id) == static_cast<uint8_t>(DataFormat::UInt16);
 }
@@ -288,6 +298,24 @@ inline bool cb_is_uint16_format(uint32_t cb_id) {
 // nfaces layout to use. For rows<32, 2 column-faces of rows×16 instead of 4
 // face-packed 16×16.
 inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
+    if (cb_is_bfp4_b_format(ocb)) {
+        // Bfp4_b: 64 face-row exponents + 512 mantissa bytes (two 4-bit elements
+        // per byte). Symmetric with __emule_bfp4::to_f32.
+        uint8_t* exp_base  = buf;
+        uint8_t* mant_base = buf + 64;
+        for (uint32_t fr = 0; fr < 64; ++fr) {
+            float row16[16];
+            for (uint32_t k = 0; k < 16; ++k) {
+                const uint32_t ni = fr * 16 + k;
+                const uint32_t rm = __emule_nfaces::nfaces_to_rowmajor[ni];
+                row16[k] = __emule_apply_pack_relu(__emule_dst[dst_slot][rm]);
+            }
+            uint8_t packed[8];
+            __emule_bfp4::encode_face_row(row16, exp_base[fr], packed);
+            std::memcpy(&mant_base[fr * 8], packed, 8);
+        }
+        return;
+    }
     if (cb_is_bfp8_b_format(ocb)) {
         // Bfp8_b: iterate in nfaces order so each face-row of 16 contiguous
         // mantissa bytes shares one exponent byte. DST is row-major fp32.
@@ -472,28 +500,56 @@ inline void __emule_eltwise_binary_tile(uint32_t icb0, uint32_t icb1,
     }
 }
 
-// add_tiles: UNPACK + MATH — DST[idst] = CB[icb0][itile0] + CB[icb1][itile1]
+// Forward decl: format-aware CB→row-major-float reader (defined below). Lets the
+// binary primitives decode block-float (Bfp8_b/Bfp4_b) inputs via the one central
+// reader instead of re-implementing every format.
+inline void __emule_unpack_cb_tile_to(uint32_t icb, uint32_t itile, float* out);
+
+// add/sub/mul_tiles dispatch: when operand 1 is a thin-tile broadcast (smaller
+// page than operand 0, e.g. a [1,W] mask) use the tile-shape-aware helper that
+// broadcasts operand 1 across rows. Otherwise UNPACK both operands via the
+// central format-aware reader, which handles block-float (Bfp8_b/Bfp4_b) and
+// mixed-format inputs (e.g. bf16 + Bfp4_b for MoE bias-add).
 ALWI void add_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
     __emule_dst_check(idst, "add_tiles");
     __emule_dst_mark_dirty(idst);
-    __emule_eltwise_binary_tile<EltwiseBinaryType::ELWADD>(icb0, icb1, itile0, itile1, idst);
+    if (__emule_thin_broadcast_b1(icb0, icb1)) {
+        __emule_eltwise_binary_tile<EltwiseBinaryType::ELWADD>(icb0, icb1, itile0, itile1, idst);
+        return;
+    }
+    float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
+    __emule_unpack_cb_tile_to(icb0, itile0, a);
+    __emule_unpack_cb_tile_to(icb1, itile1, b);
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] + b[i];
 }
 
-// sub_tiles: UNPACK + MATH — DST[idst] = CB[icb0][itile0] - CB[icb1][itile1]
 ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
     __emule_dst_check(idst, "sub_tiles");
     __emule_dst_mark_dirty(idst);
-    __emule_eltwise_binary_tile<EltwiseBinaryType::ELWSUB>(icb0, icb1, itile0, itile1, idst);
+    if (__emule_thin_broadcast_b1(icb0, icb1)) {
+        __emule_eltwise_binary_tile<EltwiseBinaryType::ELWSUB>(icb0, icb1, itile0, itile1, idst);
+        return;
+    }
+    float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
+    __emule_unpack_cb_tile_to(icb0, itile0, a);
+    __emule_unpack_cb_tile_to(icb1, itile1, b);
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] - b[i];
 }
 
-// mul_tiles: UNPACK + MATH — DST[idst] = CB[icb0][itile0] * CB[icb1][itile1]
 ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
     __emule_dst_check(idst, "mul_tiles");
     __emule_dst_mark_dirty(idst);
-    __emule_eltwise_binary_tile<EltwiseBinaryType::ELWMUL>(icb0, icb1, itile0, itile1, idst);
+    if (__emule_thin_broadcast_b1(icb0, icb1)) {
+        __emule_eltwise_binary_tile<EltwiseBinaryType::ELWMUL>(icb0, icb1, itile0, itile1, idst);
+        return;
+    }
+    float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
+    __emule_unpack_cb_tile_to(icb0, itile0, a);
+    __emule_unpack_cb_tile_to(icb1, itile1, b);
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] * b[i];
 }
 
 // pack_tile: write DST[idst] → CB[ocb] write slot.
@@ -550,6 +606,15 @@ ALWI void pack_tile_block(uint32_t ifrom_dst, uint32_t ocb, uint32_t ntiles) {
 // bf16 (page_size ≤ 2048) or raw 32-bit (page_size > 2048).
 inline void __emule_unpack_cb_tile_to(uint32_t icb, uint32_t itile, float* out) {
     uint8_t* buf = __emule_compute::cb_read_ptr_at(icb, itile);
+    if (__emule_compute::cb_is_bfp4_b_format(icb)) {
+        // Bfp4_b: UNPACK nfaces→row-major + decode shared exponent + 3-bit
+        // raw mantissa (two elements per byte). Symmetric with pack_dst_to_buf.
+        const uint32_t n = __EMULE_TILE_ELEMS;
+        for (uint32_t i = 0; i < n; i++) {
+            out[i] = __emule_bfp4::to_f32(buf, __emule_nfaces::rowmajor_to_nfaces[i]);
+        }
+        return;
+    }
     if (__emule_compute::cb_is_bfp8_b_format(icb)) {
         // Bfp8_b: UNPACK nfaces→row-major + decode shared exponent + 7-bit
         // raw mantissa to fp32. Decoder is symmetric with pack_dst_to_buf's

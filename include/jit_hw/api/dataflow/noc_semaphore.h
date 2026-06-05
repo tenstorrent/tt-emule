@@ -147,15 +147,10 @@ public:
             (static_cast<uint64_t>(noc_y_end)   << (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) |
             uint64_t(l1_offset_);
         uint32_t val = atom()->load(std::memory_order_acquire);
-        // include_self mirrors NocOptions::MCAST_INCL_SRC: when set, the sender's
-        // own core (if inside the rectangle) also receives the write; when clear,
-        // it is skipped (silicon's non-loopback NOC_CMD_BRCST_SRC_INCLUDE cleared).
-        constexpr bool include_self =
-            (static_cast<uint32_t>(opts) & static_cast<uint32_t>(NocOptions::MCAST_INCL_SRC)) != 0;
         __emule_multicast_write(mcast_addr,
                                 reinterpret_cast<const uint8_t*>(&val),
                                 sizeof(uint32_t),
-                                include_self);
+                                has_flag(opts, NocOptions::MCAST_INCL_SRC));
     }
 
     // Argument order matches real api/dataflow/noc_semaphore.h: (value, num_dests).

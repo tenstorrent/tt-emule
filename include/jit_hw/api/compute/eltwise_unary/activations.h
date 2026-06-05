@@ -40,6 +40,10 @@ ALWI void hardsigmoid_tile(uint32_t idst) {
         __emule_dst[idst][i] = std::clamp((x + 3.0f) / 6.0f, 0.0f, 1.0f);
     }
 }
+// Pack-thread variant: upstream dispatches the same SFPU LLK via PACK() for
+// matmul fused-activation overlap (#79). emule has no thread split — forward.
+ALWI void hardsigmoid_tile_init_pack() { hardsigmoid_tile_init(); }
+ALWI void hardsigmoid_tile_pack(uint32_t idst) { hardsigmoid_tile(idst); }
 
 // softsign: x / (1 + |x|)
 ALWI void softsign_tile_init() {}

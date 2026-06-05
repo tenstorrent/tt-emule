@@ -289,6 +289,31 @@ run_pytest "matmul_test_addmm" "$MATMUL_TEST_DIR/test_addmm.py" \
 run_pytest "matmul_test_fused_activations_relu" "$TT_METAL_DIR/tests/ttnn/nightly/unit_tests/operations/matmul/test_matmul_activations.py::test_matmul_with_fused_activations" \
     -k 'bf16 and (relu_str or relu_param)'
 
+# Issue #63: bring up the `ttnn matmul group` (tests/ttnn/unit_tests/operations/matmul/) on emule.
+run_pytest "matmul_test_batch_mismatch" "$MATMUL_TEST_DIR/test_matmul_batch_mismatch.py"
+# test_ring_matmul (WH-only) JIT-fails on missing remote-CB / gathered fused-bias-
+# activation kernel surface — tracked in #93. Unwired on WH pending that gap.
+run_pytest "matmul_test_experimental"   "$MATMUL_TEST_DIR/test_experimental.py"
+run_pytest "matmul_test_custom_grids"   "$MATMUL_TEST_DIR/test_custom_grids.py"
+# test_sparse_matmul: `*_with_nnz` functions pass after the bfp4_b + include_self
+# fixes. The three `*_without_nnz` variants hang (slow loop, not a numeric
+# bug) — left unwired pending a perf/sparsity-mask investigation.
+run_pytest "matmul_test_sparse_nnz"     "$MATMUL_TEST_DIR/test_sparse_matmul.py" \
+    -k 'with_nnz and not without_nnz'
+# test_matmul_deepseek: all tests pass except wkv_b2 (TinyTile, m=4 tile_h=4 —
+# emule's matmul_tiles assumes 32x32 tiles; tracked separately as TinyTile gap).
+run_pytest "matmul_test_deepseek"       "$MATMUL_TEST_DIR/test_matmul_deepseek.py" \
+    -k 'not wkv_b2'
+# test_matmul.py: curated 221-test subset. Excludes tiny_tile* (TinyTile gap),
+# multiple_output_blocks_per_core (slow loop, no numeric bug), and on_subdevice
+# (slow loop). Includes the Phase A unblock target
+# (test_matmul_activation_with_sharded_input → silu fused-activation), the
+# transpose tests (mm_init transpose=1 → IN1 in-place transpose in matmul_tiles),
+# and the DRAM-sharded / sharded / mesh-broadcast / bfp-tilize variants unblocked
+# by the bfp4_b + include_self + per-operand dispatch fixes on this branch.
+run_pytest "matmul_test_basic" "$MATMUL_TEST_DIR/test_matmul.py" \
+    -k '(test_matmul_with_matched_width_height or test_matmul_does_dot_product or test_matmul_same_shape or test_tutorial_matmul or test_small_matmul_pcc or test_matmul_with_core_grid or test_matmul_activation_with_sharded_input or test_matmul_by_passing_in_1D_systolic_array_program_config or test_pytorch_2_0_failed_cases or test_linear_with_optional_output_tensor or test_wide_matmul_with_argument_for_core_grid_set_to_device_grid or test_tall_matmul_with_argument_for_core_grid_set_to_device_grid or test_optional_output_argument or test_falcon_query_key_value_matmul or test_alternating_dst_sync_mode_matmul or test_sharded_matmul or test_padded_2d_matmul or test_matmul_padding or test_matmul_height_sharded_input_with_padding or test_matmul_block_sharded_input_with_padding or test_matmul_with_transpose_a_or_b or test_matmul_transpose_a_with_core_grid or test_matmul_reuse_config_sharded_fd_column or test_linear_fused_non_broadcast_bias_2d_mesh_multiple_blocks or test_padded_1d_matmul or test_matmul_with_transpose_and_configs or test_matmul_in0_in1_bias_sharded or test_interleaved_input_sharded_output_matmul or test_linear_with_non_tile_aligned_bias or test_matmul_column_wise_bfp_tilize_via_transpose_b or test_from_torch_col_tilize or test_matmul_compute_output_specs_with_allowed_worker_cores) and not tiny_tile and not tiny_tiles and not multiple_output_blocks_per_core and not on_subdevice'
+
 echo ""
 echo "========================================"
 echo " Results: $PASS passed, $FAIL failed"

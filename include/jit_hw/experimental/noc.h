@@ -11,10 +11,8 @@
 #include <cstring>
 #include <type_traits>
 
-// Wave-7a §1: include_self parameter — when false, sender's own (my_x, my_y)
-// is skipped (matches silicon non-loopback multicast).
-extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src, uint32_t size,
-                                        bool include_self);
+extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src,
+                                        uint32_t size, bool include_self);
 
 // Wormhole N150 default; Quasar/Blackhole compute the same value via
 // NOC_MAX_BURST_WORDS * NOC_WORD_BYTES.  Used to select between the
@@ -119,8 +117,8 @@ public:
         uintptr_t s = noc_traits_t<Src>::template src_addr<AddressType::LOCAL_L1>(src, *this, src_args);
         auto mcast_noc_addr = noc_traits_t<Dst>::template dst_addr_mcast<AddressType::NOC>(dst, *this, dst_args);
         if (s) {
-            // experimental::Noc multicast API is non-loopback: silicon clears
-            // NOC_CMD_BRCST_SRC_INCLUDE, sender skips itself.
+            // Experimental Noc class doesn't expose NocOptions; assume the
+            // non-loopback default (sender NIU drops at self).
             __emule_multicast_write(static_cast<uint64_t>(mcast_noc_addr),
                                     reinterpret_cast<const uint8_t*>(s), size_bytes,
                                     /*include_self=*/false);
