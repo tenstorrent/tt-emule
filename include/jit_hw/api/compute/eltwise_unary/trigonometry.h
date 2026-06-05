@@ -33,7 +33,11 @@ ALWI void tan_tile(uint32_t idst) {
         __emule_dst[idst][i] = std::tan(__emule_dst[idst][i]);
 }
 
+// Templated on fast_and_approx to match upstream compute_kernel_api.h; the
+// kernel SFPU_OP_CHAIN calls tanh_tile<0u>(0) / tanh_tile_init<0u>().
+template <bool fast_and_approx = false>
 ALWI void tanh_tile_init() {}
+template <bool fast_and_approx = false>
 ALWI void tanh_tile(uint32_t idst) {
     __emule_dst_check(idst, "tanh_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
