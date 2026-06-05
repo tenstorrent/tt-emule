@@ -48,7 +48,12 @@ ALWI void relu_max_tile_pack(uint32_t idst, uint32_t param0) {
 
 ALWI void relu_max_tile_int32(uint32_t idst, uint32_t param0) {
     __emule_dst_check(idst, "relu_max_tile_int32");
-    int32_t cap = static_cast<int32_t>(param0);
+    // The host passes the cap as an fp32 bit-pattern (std::bit_cast) even for the
+    // int32 variant — decode to float, then truncate to int. (relu_min int32
+    // differs: it passes a raw int, so relu_min_tile_int32 casts param0 directly.)
+    float capf;
+    std::memcpy(&capf, &param0, sizeof(float));
+    int32_t cap = static_cast<int32_t>(capf);
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
         int32_t v = __emule_dst_load_i32(idst, i);
         if (v > cap) v = cap;
