@@ -60,4 +60,39 @@ ALWI void atan_tile(uint32_t idst) {
         __emule_dst[idst][i] = std::atan(__emule_dst[idst][i]);
 }
 
+ALWI void acosh_tile_init() {}
+ALWI void acosh_tile(uint32_t idst) {
+    __emule_dst_check(idst, "acosh_tile");
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
+        __emule_dst[idst][i] = std::acosh(__emule_dst[idst][i]);
+}
+
+ALWI void asinh_tile_init() {}
+ALWI void asinh_tile(uint32_t idst) {
+    __emule_dst_check(idst, "asinh_tile");
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
+        __emule_dst[idst][i] = std::asinh(__emule_dst[idst][i]);
+}
+
+ALWI void atanh_tile_init() {}
+ALWI void atanh_tile(uint32_t idst) {
+    __emule_dst_check(idst, "atanh_tile");
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
+        __emule_dst[idst][i] = std::atanh(__emule_dst[idst][i]);
+}
+
+ALWI void cosh_tile_init() {}
+ALWI void cosh_tile(uint32_t idst) {
+    __emule_dst_check(idst, "cosh_tile");
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
+        __emule_dst[idst][i] = std::cosh(__emule_dst[idst][i]);
+}
+
+ALWI void sinh_tile_init() {}
+ALWI void sinh_tile(uint32_t idst) {
+    __emule_dst_check(idst, "sinh_tile");
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
+        __emule_dst[idst][i] = std::sinh(__emule_dst[idst][i]);
+}
+
 } // namespace ckernel
