@@ -34,17 +34,20 @@
 #define tt_reg_ptr
 #endif
 
-// NOC mode constants — silicon firmware sets these per-RISC build. upstream kernels
-// kernels read `noc_mode` for dispatch policy. emule has a single NOC,
-// so always DM_DEDICATED_NOC.
+// NOC mode constants — silicon firmware sets these per-RISC build. upstream
+// kernels read `noc_mode` for dispatch policy.
 #ifndef DM_DEDICATED_NOC
 #define DM_DEDICATED_NOC 0
 #endif
 #ifndef DM_DYNAMIC_NOC
 #define DM_DYNAMIC_NOC 1
 #endif
-#ifndef noc_mode
-inline constexpr int noc_mode = DM_DEDICATED_NOC;
-#endif
+// NOTE: the `noc_mode` variable itself is owned by jit_kernel_stubs.hpp
+// (`inline constexpr int noc_mode = DM_DYNAMIC_NOC;`). We deliberately do NOT
+// redefine it here: the `#ifndef noc_mode` guard only tests *macros*, not
+// variables, so defining it in both headers would be an ODR/redefinition error
+// in any TU including both — and the values would disagree (several upstream ops
+// `static_assert(noc_mode == DM_DYNAMIC_NOC)`). jit_kernel_stubs.hpp is part of
+// every kernel TU prelude, so the symbol is always available where kernels need it.
 
 #endif  // _RISC_COMMON_H_

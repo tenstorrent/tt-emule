@@ -146,14 +146,15 @@ inline void llk_pack(uint32_t tile_idx, uint32_t ocb) {
     else __llk_pack_tiled(tile_idx, ocb);
 }
 
-// 3-param version (used by untilize)
+// 3-template-param overload (used by untilize). Same (tile_idx, ocb) runtime
+// args as the others; overloads differ only by template-parameter count.
 template <int AccumMode, bool Untilize, bool IsApprox>
 inline void llk_pack(uint32_t tile_idx, uint32_t ocb) {
     if (__llk_pack_is_untilize) __llk_pack_untilize(tile_idx, ocb);
     else __llk_pack_tiled(tile_idx, ocb);
 }
 
-// 1-param version (used by custom_tilize / deepseek init paths)
+// 1-template-param overload (used by custom_tilize / deepseek init paths).
 template <int AccumMode>
 inline void llk_pack(uint32_t tile_idx, uint32_t ocb) {
     if (__llk_pack_is_untilize) __llk_pack_untilize(tile_idx, ocb);

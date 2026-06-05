@@ -60,10 +60,10 @@ inline VI decode_fused(float fp32_word) {
 }
 
 inline float encode_fused(float value, uint32_t index) {
-    // bf16 = high 16 bits of float32 (truncation, not round-to-nearest).
-    uint32_t fbits;
-    std::memcpy(&fbits, &value, sizeof(fbits));
-    uint32_t bf16 = (fbits >> 16) & 0xFFFFu;
+    // bf16 = round-to-nearest-even of float32, matching __emule_bf16::from_f32
+    // (and silicon's bf16 round-trip). Truncating to the high 16 bits instead
+    // would shift top-k ordering around ties and cause PCC mismatches.
+    uint32_t bf16 = __emule_bf16::from_f32(value);
     uint32_t out = (bf16 << 16) | (index & 0xFFFFu);
     float f;
     std::memcpy(&f, &out, sizeof(f));
@@ -197,8 +197,8 @@ ALWI void topk_xl_local_sort(uint32_t idst, bool ascending) {
 // ── topk_xl_merge ───────────────────────────────────────────────────────
 // Merge two sorted sequences in DST [idst, idst+SEQ_TILES) and
 // [idst+SEQ_TILES, idst+2*SEQ_TILES); top K stay in the first half.
-// We approximate by collecting both halves, taking the top-K by abs value
-// magnitude (use descending compare since silicon merge keeps the largest).
+// We approximate by collecting both halves and taking the top-N by raw decoded
+// value (descending compare, since silicon merge keeps the largest values).
 
 template <uint32_t K, bool fused = true>
 ALWI void topk_xl_merge(uint32_t idst) {

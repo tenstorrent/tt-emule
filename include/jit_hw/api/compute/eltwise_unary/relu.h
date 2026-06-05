@@ -29,7 +29,9 @@ ALWI void relu_tile_int32(uint32_t idst) {
 
 ALWI void relu_max_tile_init() {}
 
-// max(0, min(v, threshold))  — threshold passed as bf16/uint16 packed in uint32
+// max(0, min(v, threshold))  — threshold passed as the raw FP32 bit pattern in
+// a uint32 (memcpy'd back to float), matching the other parameterized ops here
+// (e.g. clamped_silu, leaky_relu_tile).
 ALWI void relu_max_tile(uint32_t idst, uint32_t threshold) {
     __emule_dst_check(idst, "relu_max_tile");
     float t;

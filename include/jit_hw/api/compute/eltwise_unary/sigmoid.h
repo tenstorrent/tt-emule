@@ -3,13 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// Emulator stub for sigmoid tile operations.
+// Emulator implementation of sigmoid tile operations.
 //
-// TODO (real impl): emule sigmoid_tile should apply sigmoid(x) =
-// 1 / (1 + exp(-x)) elementwise to __emule_dst[idst][0..1023], matching
-// silicon's SFPU sigmoid output bit-for-bit (within bfloat16 precision).
-// Current implementation is a no-op placeholder — kernels that depend on
-// real sigmoid output will not produce correct results yet.
+// sigmoid_tile applies sigmoid(x) = 1 / (1 + exp(-x)) elementwise to
+// __emule_dst[idst]. This is a Layer-1 (FP32 math) shadow; it does NOT
+// reproduce silicon's SFPU sigmoid output bit-for-bit, so PCC comparison
+// against silicon golden is best-effort within bfloat16 precision.
 
 #include <cmath>
 #include <cstdint>

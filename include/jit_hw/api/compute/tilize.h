@@ -19,7 +19,6 @@
 #include "jit_hw/api/compute/common.h"
 #include "jit_hw/api/compute/compute_kernel_hw_startup.h"
 #include "jit_hw/internal/llk_state.h"
-#include "jit_hw/api/compute/common.h"
 #include "jit_hw/api/compute/nfaces.h"
 #include "jit_hw/api/bfp8.h"
 #include "jit_hw/api/bfloat16.h"
