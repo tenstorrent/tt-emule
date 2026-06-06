@@ -39,9 +39,17 @@ enum class ProgrammableCoreType : uint8_t { TENSIX = 0, ACTIVE_ETH = 1, IDLE_ETH
 
 template <ProgrammableCoreType core_type = ProgrammableCoreType::TENSIX>
 class Semaphore {
+    // Lets relay_unicast / relay_multicast read dst_sem's private members
+    // without a public accessor — matches silicon's friend declaration.
+    template <ProgrammableCoreType OT>
+    friend class Semaphore;
+
 public:
-    // core_type is accepted for API compatibility but ignored in emulation.
-    explicit Semaphore(uint32_t semaphore_id) : local_l1_addr_(get_semaphore(semaphore_id)) {
+    // core_type is accepted for API compatibility but ignored in emulation —
+    // get_semaphore is non-templated for two-phase template lookup reasons
+    // (see comment in dataflow_api.h alongside the get_semaphore definition).
+    explicit Semaphore(uint32_t semaphore_id)
+        : local_l1_addr_(get_semaphore(semaphore_id)) {
         l1_offset_ = static_cast<uint32_t>(
             local_l1_addr_ - reinterpret_cast<uintptr_t>(__emule_bridge_l1));
     }
@@ -180,6 +188,42 @@ public:
             }
         }
     }
+
+    // Relay this sem's local value to a *different* sem on a remote core.
+    // Mirrors silicon: read our own sem, 4-byte write to dst_sem.get_l1_addr()
+    // on the target core via noc_semaphore_set_remote.
+    template <ProgrammableCoreType dst_core_type = core_type>
+    void relay_unicast(const Noc& noc, const Semaphore<dst_core_type>& dst_sem,
+                       uint32_t noc_x, uint32_t noc_y) {
+        uint64_t dst_noc_addr = ::get_noc_addr(noc_x, noc_y,
+                                               dst_sem.l1_offset_, noc.get_noc_id());
+        noc_semaphore_set_remote(l1_offset_, dst_noc_addr, noc.get_noc_id());
+    }
+
+    // Multicast variant: relay this sem's local value to a different sem at the
+    // same offset on every core in the rectangle. Mirrors silicon's branch on
+    // NocOptions::MCAST_INCL_SRC between the loopback and non-loopback paths.
+    template <NocOptions opts = NocOptions::DEFAULT,
+              ProgrammableCoreType dst_core_type = core_type>
+    void relay_multicast(const Noc& noc, const Semaphore<dst_core_type>& dst_sem,
+                         uint32_t noc_x_start, uint32_t noc_y_start,
+                         uint32_t noc_x_end,   uint32_t noc_y_end,
+                         uint32_t num_dests, bool linked = false) {
+        uint64_t mcast_addr = ::get_noc_multicast_addr(
+            noc_x_start, noc_y_start, noc_x_end, noc_y_end,
+            dst_sem.l1_offset_, noc.get_noc_id());
+        if constexpr (has_flag(opts, NocOptions::MCAST_INCL_SRC)) {
+            noc_semaphore_set_multicast_loopback_src(l1_offset_, mcast_addr,
+                                                     num_dests, linked,
+                                                     noc.get_noc_id());
+        } else {
+            noc_semaphore_set_multicast(l1_offset_, mcast_addr,
+                                        num_dests, linked, noc.get_noc_id());
+        }
+    }
+
+    // L1 offset accessor used by relay_* (also matches silicon's get_l1_addr()).
+    uintptr_t get_l1_addr() const { return local_l1_addr_; }
 
 private:
     uintptr_t local_l1_addr_;

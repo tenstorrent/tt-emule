@@ -48,10 +48,11 @@ enum class AllocatorBankType { L1, DRAM };
 
 template <AllocatorBankType bank_type>
 struct AllocatorBank {
-    // In emulation, bank routing is handled by __emule_dram_ptr / __emule_local_l1_ptr.
-    // This method exists for API compatibility; the actual resolution is in noc_traits_t.
-    uint64_t get_noc_addr_from_bank_id(uint32_t /*bank_id*/, uint32_t addr, uint8_t noc) const {
-        return ::get_noc_addr(my_x[noc], my_y[noc], addr, noc);
+    // Mirrors silicon: delegate to the templated global helper, which routes
+    // (bank_id, addr) to the owning core's NOC coords via the per-arch
+    // l1_bank_to_noc_xy / dram_bank_to_noc_xy tables.
+    uint64_t get_noc_addr_from_bank_id(uint32_t bank_id, uint32_t addr, uint8_t noc) const {
+        return ::get_noc_addr_from_bank_id<bank_type == AllocatorBankType::DRAM>(bank_id, addr, noc);
     }
 };
 
@@ -113,49 +114,30 @@ struct noc_traits_t<MulticastEndpoint> {
     }
 };
 
-// ---- noc_traits_t<AllocatorBank<L1>> ----
+// ---- noc_traits_t<AllocatorBank<...>> ----
+// Both L1 and DRAM resolve per-bank: (bank_id, addr) → NOC address via
+// get_noc_addr_from_bank_id<bank_type==DRAM>, then __emule_resolve_noc_addr to
+// a host pointer. The previous L1 specialization dropped bank_id and returned
+// __emule_local_l1_ptr(args.addr) directly — only correct if bank_id == 0 (and
+// even then only if the local core happens to be the owner). Drop that drift;
+// match silicon's single templated specialization.
 
-template <>
-struct noc_traits_t<AllocatorBank<AllocatorBankType::L1>> {
+template <AllocatorBankType bank_type>
+struct noc_traits_t<AllocatorBank<bank_type>> {
     struct src_args_type { uint32_t bank_id{}; uint32_t addr{}; };
     struct dst_args_type { uint32_t bank_id{}; uint32_t addr{}; };
 
     template <Noc::AddressType AT>
-    static uintptr_t src_addr(const AllocatorBank<AllocatorBankType::L1>&,
-                               const Noc&, const src_args_type& args) {
-        return reinterpret_cast<uintptr_t>(__emule_local_l1_ptr(args.addr));
-    }
-
-    template <Noc::AddressType AT>
-    static uintptr_t dst_addr(const AllocatorBank<AllocatorBankType::L1>&,
-                               const Noc&, const dst_args_type& args) {
-        return reinterpret_cast<uintptr_t>(__emule_local_l1_ptr(args.addr));
-    }
-};
-
-// ---- noc_traits_t<AllocatorBank<DRAM>> ----
-// DRAM resolves per-bank: (bank_id, addr) → NOC address via
-// get_noc_addr_from_bank_id<DRAM>, then __emule_resolve_noc_addr to a host
-// pointer. The legacy `__emule_dram_ptr(args.addr)` path is bank-unaware
-// (single global mmap view) and silently routes all banks to bank 0 — do
-// NOT reintroduce it here.
-
-template <>
-struct noc_traits_t<AllocatorBank<AllocatorBankType::DRAM>> {
-    struct src_args_type { uint32_t bank_id{}; uint32_t addr{}; };
-    struct dst_args_type { uint32_t bank_id{}; uint32_t addr{}; };
-
-    template <Noc::AddressType AT>
-    static uintptr_t src_addr(const AllocatorBank<AllocatorBankType::DRAM>&,
+    static uintptr_t src_addr(const AllocatorBank<bank_type>& src,
                                const Noc& noc, const src_args_type& args) {
-        uint64_t noc_addr = get_noc_addr_from_bank_id<true>(args.bank_id, args.addr, noc.get_noc_id());
+        uint64_t noc_addr = src.get_noc_addr_from_bank_id(args.bank_id, args.addr, noc.get_noc_id());
         return reinterpret_cast<uintptr_t>(__emule_resolve_noc_addr(noc_addr));
     }
 
     template <Noc::AddressType AT>
-    static uintptr_t dst_addr(const AllocatorBank<AllocatorBankType::DRAM>&,
+    static uintptr_t dst_addr(const AllocatorBank<bank_type>& dst,
                                const Noc& noc, const dst_args_type& args) {
-        uint64_t noc_addr = get_noc_addr_from_bank_id<true>(args.bank_id, args.addr, noc.get_noc_id());
+        uint64_t noc_addr = dst.get_noc_addr_from_bank_id(args.bank_id, args.addr, noc.get_noc_id());
         return reinterpret_cast<uintptr_t>(__emule_resolve_noc_addr(noc_addr));
     }
 };
