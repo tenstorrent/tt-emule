@@ -111,6 +111,7 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/tile_move_copy.h` — forwarding shim → `api/compute/common.h`
 - `include/jit_hw/api/compute/tilize.h` — `tilize_block`, `tilize_init`, `tilize_init_short`, `tilize_uninit`, `tilize_init_short_with_dt`, `tilize_uninit_with_dt`, `fast_tilize_block`, `fast_tilize_init`, `fast_tilize_init_skip_remap`, `fast_tilize_init_with_dt`, `fast_tilize_init_with_dt_skip_remap`, `fast_tilize_uninit`, `tilizeA_B_reduce_init`, `unpack_tilizeA_B_block`, `unpack_tilizeA_B_uninit`
 - `include/jit_hw/api/compute/transpose_wh.h` — `ckernel::` `transpose_wh_tile`, `transpose_wh_init`, `copy_tile`
+- `include/jit_hw/api/compute/transpose_wh_dest.h` — `ckernel::` `transpose_wh_dest`, `transpose_wh_dest_init_short` (in-place 32×32 DST transpose)
 - `include/jit_hw/api/compute/untilize.h` — `untilize_block`, `untilize_init`, `untilize_init_short`, `untilize_uninit`, `copy_tile`
 - `include/jit_hw/api/compute/vector_mode.h` — `ckernel::` `enum class VectorMode`
 - `include/jit_hw/api/compute/welford.h` — `ckernel::` `welford_init`, `welford_reinit`, `welford_clear`; TLS `__emule_welford_mean`/`__emule_welford_m2`/`__emule_welford_count`, `__emule_welford_clear`

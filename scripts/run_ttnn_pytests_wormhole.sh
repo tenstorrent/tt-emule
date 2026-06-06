@@ -341,6 +341,15 @@ run_pytest "dm_test_tosa_gather" "$DM_TEST_DIR/test_tosa_gather.py" \
 
 run_pytest "reduce_test_max" "$REDUCE_TEST_DIR/test_max.py"
 
+# #66 reduce-tail bring-up (single-device). test_intimg relies on the
+# transpose_wh_dest shim + 3-arg init_bcast added alongside the #80 pool work.
+run_pytest "reduce_test_row_major"        "$REDUCE_TEST_DIR/test_row_major_reduce.py"
+run_pytest "reduce_test_program_cache"    "$REDUCE_TEST_DIR/test_reduction_program_cache.py"
+run_pytest "reduce_test_intimg"           "$REDUCE_TEST_DIR/test_intimg.py"
+run_pytest "reduce_test_h_interleaved_2d" "$REDUCE_TEST_DIR/test_reduction_h_interleaved.py::test_2D_tensor"
+# topk compute is not yet faithful in emule; only the dtype-validation paths pass.
+run_pytest "reduce_test_topk_dtype_raise" "$REDUCE_TEST_DIR/test_topk.py::test_topk_input_dtypes_raise" "$REDUCE_TEST_DIR/test_topk.py::test_topk_preallocated_dtype_raise"
+
 run_pytest "matmul_test_linear" "$MATMUL_TEST_DIR/test_linear.py" -k 'test_linear_fp32_acc or test_vector_linear'
 
 run_pytest "matmul_test_addmm" "$MATMUL_TEST_DIR/test_addmm.py" \
