@@ -196,8 +196,8 @@ public:
     void relay_unicast(const Noc& noc, const Semaphore<dst_core_type>& dst_sem,
                        uint32_t noc_x, uint32_t noc_y) {
         uint64_t dst_noc_addr = ::get_noc_addr(noc_x, noc_y,
-                                               dst_sem.l1_offset_, noc.get_noc_id());
-        noc_semaphore_set_remote(l1_offset_, dst_noc_addr, noc.get_noc_id());
+                                               dst_sem.get_l1_addr(), noc.get_noc_id());
+        noc_semaphore_set_remote(get_l1_addr(), dst_noc_addr, noc.get_noc_id());
     }
 
     // Multicast variant: relay this sem's local value to a different sem at the
@@ -211,19 +211,21 @@ public:
                          uint32_t num_dests, bool linked = false) {
         uint64_t mcast_addr = ::get_noc_multicast_addr(
             noc_x_start, noc_y_start, noc_x_end, noc_y_end,
-            dst_sem.l1_offset_, noc.get_noc_id());
+            dst_sem.get_l1_addr(), noc.get_noc_id());
         if constexpr (has_flag(opts, NocOptions::MCAST_INCL_SRC)) {
-            noc_semaphore_set_multicast_loopback_src(l1_offset_, mcast_addr,
+            noc_semaphore_set_multicast_loopback_src(get_l1_addr(), mcast_addr,
                                                      num_dests, linked,
                                                      noc.get_noc_id());
         } else {
-            noc_semaphore_set_multicast(l1_offset_, mcast_addr,
+            noc_semaphore_set_multicast(get_l1_addr(), mcast_addr,
                                         num_dests, linked, noc.get_noc_id());
         }
     }
 
-    // L1 offset accessor used by relay_* (also matches silicon's get_l1_addr()).
-    uintptr_t get_l1_addr() const { return local_l1_addr_; }
+    // L1 offset accessor — returns the L1-relative offset used to construct
+    // NOC addresses (matches silicon's get_l1_addr() semantics). Not the host
+    // pointer (that's local_l1_addr_, private).
+    uint32_t get_l1_addr() const { return l1_offset_; }
 
 private:
     uintptr_t local_l1_addr_;

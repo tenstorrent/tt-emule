@@ -594,12 +594,15 @@ FORCE_INLINE void noc_async_read_one_packet_with_state_with_trid(
     uint32_t dst_l1_addr,
     uint32_t /*trid*/,
     uint8_t noc = 0) {
-    // shard_base_l1 is the truncated noc-addr (low 32 bits); reconstruct the
-    // full 64-bit NOC addr from the saved base (high bits encode node), then
-    // memcpy size bytes.
+    // shard_base_l1 + shard_offset is the L1 address on the source core.
+    // In emule it may be a firmware-style L1 offset or a truncated host
+    // pointer (from l1_alloc / CB APIs); __emule_addr_to_offset canonicalizes
+    // both to the proper L1 offset so the OR with the cached upper coords
+    // doesn't corrupt the high bits of the reconstructed noc addr.
     uint64_t base = __emule_noc_trid_state::shard_noc_addr_base[noc & 1];
     uint32_t size = __emule_noc_trid_state::shard_size[noc & 1];
-    uint64_t src_noc = (base & 0xFFFFFFFF00000000ULL) | ((uint64_t)(shard_base_l1 + shard_offset));
+    uint32_t l1_off = __emule_addr_to_offset(shard_base_l1 + shard_offset);
+    uint64_t src_noc = (base & 0xFFFFFFFF00000000ULL) | uint64_t(l1_off);
     uint8_t* src = __emule_resolve_noc_addr(src_noc);
     uint8_t* dst = __emule_local_l1_to_ptr(dst_l1_addr);
     if (src && dst && size) {
@@ -618,9 +621,12 @@ template <bool inc_num_issued = true>
 inline void noc_async_read_with_state(
     uint32_t src_local_l1_addr, uint32_t dst_local_l1_addr, uint32_t size,
     uint8_t noc = 0) {
+    // Canonicalize src — it can be either a firmware-style L1 offset or a
+    // truncated host pointer in emule; __emule_addr_to_offset normalizes both
+    // to a proper L1 offset so the OR with cached upper coords is well-formed.
     uint64_t upper = __emule_noc_trid_state::shard_noc_addr_base[noc & 1]
                    & 0xFFFFFFFF00000000ULL;
-    uint64_t full_src = upper | uint64_t(src_local_l1_addr);
+    uint64_t full_src = upper | uint64_t(__emule_addr_to_offset(src_local_l1_addr));
     noc_async_read(full_src, dst_local_l1_addr, size, noc);
 }
 inline void noc_async_read_inc_num_issued(uint32_t /*num_issued_reads_inc*/,

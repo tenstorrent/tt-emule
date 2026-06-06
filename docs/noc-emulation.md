@@ -31,7 +31,7 @@ Consequences:
   side-effects (or return `true` for completion probes).
 - **Dual-NOC state, single-NOC transfer path** — silicon has two NOC engines
   (NOC 0 and NOC 1) each with independent sticky cmd-buf state. Emule models
-  the **state surface** per NOC (see Section 5b) so a kernel that interleaves
+  the **state surface** per NOC (see Section 8.3) so a kernel that interleaves
   `set_state(noc=0)` and `set_state(noc=1)` gets two independent caches. The
   **transfer path** is single — emule executes one sync memcpy per API call
   regardless of which NOC was named, and there is no NOC0/NOC1 concurrency.
@@ -50,11 +50,12 @@ A 64-bit NOC address packs the destination's NOC coordinates with a local
 L1 offset:
 
 ```
-[ y_start (8b) | x_start (8b) | y_end (8b) | x_end (8b) | L1 offset (32b) ]
+[ y_start (N) | x_start (N) | y_end (N) | x_end (N) | L1 offset (L) ]
 ```
 
-(Bit widths vary per arch via `NOC_ADDR_NODE_ID_BITS` / `NOC_ADDR_LOCAL_BITS` —
-see `include/jit_hw/noc/noc_parameters.h`.)
+Where `N = NOC_ADDR_NODE_ID_BITS` (e.g. 6 on Wormhole) and `L =
+NOC_ADDR_LOCAL_BITS` (e.g. 36 on Wormhole). Both vary per arch — see
+`include/jit_hw/noc/noc_parameters.h`.
 
 For unicast: `x_end == x_start`, `y_end == y_start` — one core.
 For multicast: the start/end pair defines an inclusive rectangle.
@@ -81,8 +82,8 @@ Every dataflow API ultimately routes through one of these.
 Two host-mmap layouts:
 - **L1Pool mode** (`TT_EMULE_USE_L1_POOL`): a single contiguous mmap below 4GB
   serves as the L1 region for every emulated core. Local L1 offsets are direct
-  host pointers truncated to 32 bits via `addr & 0x1FFFFF` (per-arch
-  `NOC_ADDR_LOCAL_BITS` mask).
+  host pointers masked via `addr & 0x1FFFFF` (the 2 MiB L1Pool slot mask —
+  fixed, independent of `NOC_ADDR_LOCAL_BITS`).
 - **bridge_l1 mode** (default): `__emule_bridge_l1` holds the L1 mmap base for
   this thread's core. Local L1 offsets are computed as `addr - __emule_bridge_l1`.
 
@@ -375,9 +376,9 @@ These are NOT drift — emule deliberately collapses them:
 
 ## 10. Known drift / follow-ups
 
-Drift the audit (issue #77 + this PR) chose to defer. Each is documented in a
-follow-up issue; none affect correctness for the current single-chip,
-non-eth-fabric, TENSIX-only emule scope.
+Drift the audit chose to defer. Each is documented in a follow-up issue;
+none affect correctness for the current single-chip, non-eth-fabric,
+TENSIX-only emule scope.
 
 - `noc = 0` default mismatches vs silicon's `noc = noc_index`. Same value at
   runtime in emule's single-NOC model.
