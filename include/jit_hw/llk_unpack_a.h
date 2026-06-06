@@ -38,3 +38,31 @@ template <ckernel::BroadcastType BType = ckernel::BroadcastType::NONE,
           ckernel::EltwiseBinaryReuseDestType binary_reuse_dest = ckernel::EltwiseBinaryReuseDestType::NONE,
           bool unpack_to_dest = false>
 inline void llk_unpack_A(uint32_t /*operand*/, uint32_t /*tile_index*/) {}
+
+// LLK unpack init — silicon configures unpack source format / SrcA/SrcB
+// layout here; no-op stub in emule.
+template <ckernel::BroadcastType BType = ckernel::BroadcastType::NONE,
+          bool acc_to_dest = false,
+          ckernel::EltwiseBinaryReuseDestType binary_reuse_dest = ckernel::EltwiseBinaryReuseDestType::NONE>
+inline void llk_unpack_A_init(
+    uint32_t /*transpose_of_faces*/ = 0,
+    uint32_t /*within_face_16x16_transpose*/ = 0,
+    uint32_t /*operand*/ = 0) {}
+
+template <ckernel::BroadcastType BType = ckernel::BroadcastType::NONE>
+inline void llk_unpack_AB_init(
+    uint32_t /*icb0*/ = 0,
+    uint32_t /*icb1*/ = 0,
+    ckernel::Transpose /*transpose*/ = ckernel::Transpose::NoneT) {}
+
+template <ckernel::BroadcastType BType = ckernel::BroadcastType::NONE>
+inline void llk_unpack_AB(uint32_t /*icb0*/, uint32_t /*icb1*/,
+                          uint32_t /*tile_idx0*/, uint32_t /*tile_idx1*/) {}
+
+inline void llk_unpack_tilize_init(
+    uint32_t /*operand*/ = 0,
+    uint32_t /*ct_dim*/ = 0,
+    uint32_t /*face_r_dim*/ = 16,
+    uint32_t /*narrow_tile*/ = 0) {}
+
+// llk_math_wait_for_dest_available lives in llk_sync_stubs.h.

@@ -12,16 +12,26 @@
 //   tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_unpack_tilize.h
 //   tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_pack_fast_tilize.h
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #include "jit_hw/api/compute/common.h"
 #include "jit_hw/api/compute/compute_kernel_hw_startup.h"
 #include "jit_hw/internal/llk_state.h"
+#include "jit_hw/api/compute/nfaces.h"
+#include "jit_hw/api/bfp8.h"
+#include "jit_hw/api/bfloat16.h"
 
 inline void tilize_init(uint32_t, uint32_t, uint32_t) {
     __llk_unpack_is_tilize = true;
     __llk_pack_is_untilize = false;
 }
 inline void tilize_init_short(uint32_t, uint32_t) {
+    __llk_unpack_is_tilize = true;
+    __llk_pack_is_untilize = false;
+}
+inline void tilize_init_short_with_dt(uint32_t, uint32_t, uint32_t) {
     __llk_unpack_is_tilize = true;
     __llk_pack_is_untilize = false;
 }
@@ -58,16 +68,60 @@ inline void tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb) {
     const bool icb_is_32bit = __emule_compute::cb_is_32bit_format(icb);
     const bool ocb_is_32bit = __emule_compute::cb_is_32bit_format(ocb);
     const uint32_t in_elem_size  = icb_is_32bit ? 4 : 2;
+    // Input row stride: silicon's tilize unpacker reads with a TILE_DIM (32) row
+    // stride per tile regardless of output tile geometry. Callers pad input to
+    // 32 rows even when the useful data is thinner.
     const uint32_t row_stride    = ntiles * TILE_DIM * in_elem_size;
     uint8_t* const in_base = __emule_compute::cb_read_ptr_at(icb, 0);
 
+    // Output tile row count: thin tiles (rows ∈ {1,2,4,8,16}) are used by
+    // retilize / create_q_heads / similar ops. Derive from the OCB page size.
+    const uint32_t out_elem_size = ocb_is_32bit ? 4 : 2;
+    const uint32_t out_rows =
+        __emule_compute::cb_is_bfp8_b_format(ocb)
+            ? TILE_DIM
+            : __emule_nfaces::tile_rows_from_pagesize(
+                  __emule_compute::cb_page_size(ocb), out_elem_size);
+
+    // BFP8_b output: encode row-major bf16/fp32 input into 64 face-rows of
+    // (shared exponent + 16 mantissas). Layout: 64 exp bytes, then 64*16
+    // mantissa bytes (= 1088 bytes/tile). Mirrors the encoder used by
+    // __llk_pack_tiled for the BFP8_b OCB path.
+    if (__emule_compute::cb_is_bfp8_b_format(ocb)) {
+        for (uint32_t t = 0; t < ntiles; ++t) {
+            uint8_t* const out = __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++);
+            uint8_t* const exp_base  = out;
+            uint8_t* const mant_base = out + 64;
+            for (uint32_t fr = 0; fr < 64; ++fr) {
+                float row16[16];
+                for (uint32_t k = 0; k < 16; ++k) {
+                    const uint32_t rm = __emule_nfaces::nfaces_to_rowmajor[fr * 16 + k];
+                    const uint32_t rr = rm / TILE_DIM;
+                    const uint32_t cc = rm % TILE_DIM;
+                    const uint8_t* p = in_base + rr * row_stride + (t * TILE_DIM + cc) * in_elem_size;
+                    if (icb_is_32bit) {
+                        float v;
+                        std::memcpy(&v, p, sizeof(float));
+                        row16[k] = v;
+                    } else {
+                        uint16_t bf;
+                        std::memcpy(&bf, p, sizeof(uint16_t));
+                        row16[k] = __emule_bf16::to_f32(bf);
+                    }
+                }
+                __emule_bfp8::encode_face_row(row16, exp_base[fr], &mant_base[fr * 16]);
+            }
+        }
+        return;
+    }
+
     for (uint32_t t = 0; t < ntiles; ++t) {
         uint8_t* const out = __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++);
-        for (uint32_t r = 0; r < TILE_DIM; ++r) {
+        for (uint32_t r = 0; r < out_rows; ++r) {
             const uint8_t* row_in =
                 in_base + r * row_stride + t * TILE_DIM * in_elem_size;
             for (uint32_t c = 0; c < TILE_DIM; ++c) {
-                const uint32_t out_pos = __emule_nfaces::rowmajor_to_nfaces[r * TILE_DIM + c];
+                const uint32_t out_pos = __emule_nfaces::tile_rm_to_nfaces(r * TILE_DIM + c, out_rows);
                 if (icb_is_32bit && ocb_is_32bit) {
                     uint32_t v;
                     std::memcpy(&v, row_in + c * 4, 4);
@@ -126,4 +180,10 @@ inline void fast_tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb,
 }
 inline void fast_tilize_uninit(uint32_t = 0, uint32_t = 0, uint32_t = 0) {
     tilize_uninit();
+}
+
+// Block variant with explicit tile-index args (some op code uses 5-arg form).
+inline void tilize_block(uint32_t icb, uint32_t num_tiles, uint32_t ocb,
+                         uint32_t /*itile_start*/, uint32_t /*otile_start*/) {
+    tilize_block(icb, num_tiles, ocb);
 }
