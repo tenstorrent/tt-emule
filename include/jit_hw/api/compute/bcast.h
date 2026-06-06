@@ -36,6 +36,34 @@ inline void apply(uint32_t icb0, uint32_t icb1, uint32_t itile0, uint32_t itile1
                   uint32_t idst, uint32_t bcast_row_idx, Op op) {
     __emule_dst_check(idst, "bcast");
     __emule_dst_mark_dirty(idst);
+    // Block-float (Bfp8_b/Bfp4_b) inputs carry a shared exponent per face-row
+    // and cannot be read element-by-element: they MUST go through the central
+    // format-aware reader, which decodes the shared exponent. (They are always
+    // full 32-row tiles — faces are 16×16 — so the thin-tile path never applies
+    // to them; note rows_a/rows_b below are mis-derived for block-float since
+    // the page size doesn't map to a 2-byte element stride.) Route either-side
+    // block-float through __emule_unpack_cb_tile_to, matching main's behavior.
+    if (__emule_compute::cb_is_bfp8_b_format(icb0) ||
+        __emule_compute::cb_is_bfp4_b_format(icb0) ||
+        __emule_compute::cb_is_bfp8_b_format(icb1) ||
+        __emule_compute::cb_is_bfp4_b_format(icb1)) {
+        float tile_a[__EMULE_TILE_ELEMS];
+        float tile_b[__EMULE_TILE_ELEMS];
+        __emule_unpack_cb_tile_to(icb0, itile0, tile_a);
+        __emule_unpack_cb_tile_to(icb1, itile1, tile_b);
+        for (uint32_t r = 0; r < 32; ++r) {
+            for (uint32_t c = 0; c < 32; ++c) {
+                const uint32_t out_i = r * 32 + c;
+                float v = op(tile_a[out_i], tile_b[src_idx(D, r, c, bcast_row_idx)]);
+                if constexpr (acc_to_dest) {
+                    __emule_dst[idst][out_i] += v;
+                } else {
+                    __emule_dst[idst][out_i] = v;
+                }
+            }
+        }
+        return;
+    }
     // Tile-shape-aware: thin tiles (rows < 32) use a 2-column-face layout
     // rather than the 4-face 32×32 layout that the rowmajor_to_nfaces LUT
     // assumes. Required for Tile([1,32]) / Tile([2,32]) inputs used by rope,
