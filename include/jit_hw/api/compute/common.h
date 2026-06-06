@@ -293,7 +293,7 @@ inline bool cb_is_uint16_format(uint32_t cb_id) {
 // pack_dst_to_buf: PACK row-major DST → nfaces CB with L1 accumulation support.
 // When __emule_l1_acc_enabled, adds DST to existing CB contents instead of overwriting.
 //
-// Tile-shape aware (wave-8 W2): silicon supports thin output tiles (M×32 with
+// Tile-shape aware: silicon supports thin output tiles (M×32 with
 // M ∈ {1,2,4,8,16}). Page size determines how many DST rows to pack and which
 // nfaces layout to use. For rows<32, 2 column-faces of rows×16 instead of 4
 // face-packed 16×16.
@@ -566,7 +566,7 @@ ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
 // `out_of_order_output = false` (llk_pack_common_api.h:70-74): the explicit
 // offset is ignored, slot auto-advances. `<true>` honours the offset.
 //
-// pack_offset semantics (wave-7a §2): the explicit-slot path bypasses the
+// pack_offset semantics: the explicit-slot path bypasses the
 // auto-advance `__emule_pack_offset[ocb]++` that the no-arg path uses. To
 // keep `cb_push_back(ocb, n)` consistent, advance pack_offset past
 // `output_offset`. Mirrors silicon's single PACK pointer.

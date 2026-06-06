@@ -18,10 +18,6 @@
 //   - writes top-8 flat indices into DST[1] (caller packs to out_indices CB)
 //   - input_indices CB is pre-loaded into DST[1] by the caller via
 //     copy_tile, but we overwrite — silicon does the same.
-//
-// See .claude/references/emule-mapping.md §7 (the four layers + PoR
-// boundary) for why this lives at Layer 1 instead of as an SFPU model
-// or an op.hpp inline rewrite.
 
 #include "jit_hw/api/compute/common.h"
 #include "jit_hw/api/bfloat16.h"

@@ -11,6 +11,7 @@
 // methods (which would have wrong ABI when TT_EMULE_USE_XY_PAIR is active
 // in the host process but not in the JIT .so).
 #define __EMULE_JIT_MODE 1
+// TODO(#103): audit __EMULE_JIT_MODE usage across the codebase.
 
 // Mark this TU as a kernel build so silicon host-device message headers
 // take their firmware branch instead of the host-only #error branch.

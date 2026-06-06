@@ -19,7 +19,7 @@
 
 #include <algorithm>
 // Minimal sfpi:: shim for SFPU kernels that use vFloat/vInt/v_if.
-// TODO: replace with real scalar semantics to produce correct outputs.
+// TODO(#102): replace with real scalar semantics to produce correct outputs.
 #include "jit_hw/sfpi.h"
 
 #include <cmath>

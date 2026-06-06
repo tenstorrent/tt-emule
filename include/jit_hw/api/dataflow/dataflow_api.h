@@ -471,8 +471,8 @@ inline void noc_async_posted_writes_flushed(uint8_t noc = 0) {}
 inline void noc_async_read_barrier_with_trid(uint32_t trid, uint8_t noc = 0) {}
 inline void noc_async_write_barrier_with_trid(uint32_t trid, uint8_t noc = 0) {}
 inline void noc_async_write_flushed_with_trid(uint32_t trid, uint8_t noc = 0) {}
-// noc_async_read_set_trid lives further down in the wave-8 cluster with
-// shard-addr-base state tracking that dsa_indexer / dram_streaming_matmul
+// noc_async_read_set_trid lives further down in the trid / shard-state cluster
+// with shard-addr-base state tracking that dsa_indexer / dram_streaming_matmul
 // rely on. Only the write-side counterpart is here.
 inline void noc_async_write_set_trid(uint32_t trid = 0, uint8_t noc = 0) {}
 inline bool ncrisc_noc_read_with_transaction_id_flushed(uint32_t noc, uint32_t trid) { return true; }

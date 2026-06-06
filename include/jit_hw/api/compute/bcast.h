@@ -128,8 +128,7 @@ inline void add_bcast_scalar_init_short(uint32_t icb0 = 0, uint32_t icb1 = 1) {}
 // in this signature has no bcast_row_idx (the single-template-arg form does);
 // defaults to row 0.
 // `acc_to_dest` (silicon's `llk_math_eltwise_binary<...>` arg): when true the
-// op accumulates into DST instead of overwriting. Needed by deepseek MoE gate
-// (sage-blackhole audit, wave-7a §3).
+// op accumulates into DST instead of overwriting. Needed by deepseek MoE gate.
 template <EltwiseBinaryType op_type, BroadcastType bcast_type, bool acc_to_dest = false>
 inline void any_tiles_bcast(uint32_t icb0, uint32_t icb1, uint32_t itile0, uint32_t itile1, uint32_t idst) {
     auto op = [](float a, float b) {
