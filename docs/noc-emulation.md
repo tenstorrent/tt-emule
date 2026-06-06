@@ -14,20 +14,27 @@ Cross-reference: silicon's canonical user-facing API at
 
 tt-emule runs in **slow-dispatch mode**. Every NOC operation executes inline
 before the API returns — there are no in-flight transactions, no outstanding
-reads, no per-VC queues. The host thread that issues `noc_async_read` walks
-the resolver, copies bytes, and returns.
+reads, no per-VC queues, no per-NOC parallel pipelines. The host thread that
+issues `noc_async_read` walks the resolver, copies bytes, and returns. State
+caches are per-NOC (silicon has two NOC engines and emule models that state
+surface); the transfer path is one sync memcpy regardless of which NOC the
+API names.
 
 Consequences:
 - **Async / posted / non-posted distinctions collapse** — all are sync memcpy.
 - **Barriers are no-op** — there is nothing to wait for. `noc_async_read_barrier`,
   `noc_async_write_barrier`, `noc_async_writes_flushed`, `noc_async_full_barrier`
-  all return immediately.
+  all return immediately, and the per-NOC barrier semantics collapse vacuously
+  (no in-flight transactions on either NOC).
 - **TRID (transaction id) is no-op** — `noc_async_*_set_trid`,
   `*_barrier_with_trid`, `ncrisc_noc_*_with_transaction_id_*` return without
   side-effects (or return `true` for completion probes).
-- **Dual-NOC is single-NOC** — emule models one NOC. The `noc` arg (0 or 1) is
-  accepted and used only to index `my_x[noc]` / `my_y[noc]`; the actual transfer
-  path is identical for both.
+- **Dual-NOC state, single-NOC transfer path** — silicon has two NOC engines
+  (NOC 0 and NOC 1) each with independent sticky cmd-buf state. Emule models
+  the **state surface** per NOC (see Section 5b) so a kernel that interleaves
+  `set_state(noc=0)` and `set_state(noc=1)` gets two independent caches. The
+  **transfer path** is single — emule executes one sync memcpy per API call
+  regardless of which NOC was named, and there is no NOC0/NOC1 concurrency.
 
 This is correct **by design**, not drift: a kernel that produces the right
 value on silicon produces the right value on emule. Timing and ordering
@@ -303,15 +310,51 @@ Set by the program runner per emulated core, read by the JIT kernel:
 | `__emule_dfbs` | `__emule_dfb_iface*` | program runner per-program (Quasar) | every DFB API |
 | `noc_index` | `uint8_t` (constexpr 0) | `jit_kernel_stubs.hpp` | default noc arg |
 
+### 8.3 Per-NOC state
+
+Silicon has two NOC engines (NOC 0 and NOC 1) each with independent
+sticky cmd-buf state — `set_state(noc=0)` and `set_state(noc=1)` are
+independent caches in silicon. Emule mirrors this **at the state level
+only**; the transfer path is single (see Section 1). A kernel that
+interleaves set_state calls on both NOCs must read back independent
+caches, or it gets silently wrong data.
+
+Per-NOC TLS / globals in emule today:
+
+| TLS / global | Type | Indexed by | Used by |
+|---|---|---|---|
+| `my_x` / `my_y` | `uint8_t[2]` | `noc & 1` | `get_noc_addr(addr, noc)` |
+| `dram_bank_to_noc_xy` | per-arch table | `[noc][bank]` | DRAM bank → NOC coords |
+| `l1_bank_to_noc_xy` | per-arch table | `[noc][bank]` | L1 bank → NOC coords |
+| `__emule_noc_trid_state::shard_noc_addr_base` | `uint64_t[2]` | `noc & 1` | TRID-tagged stateful reads |
+| `__emule_noc_trid_state::shard_size` | `uint32_t[2]` | `noc & 1` | same |
+| `__emule_noc_trid_state::shard_vc` | `uint32_t[2]` | `noc & 1` | same |
+| `__emule_one_packet_state_size` | `uint32_t[2]` | `noc & 1` | `noc_async_read_one_packet_{set,with}_state` |
+| `__emule_write_one_packet_state_dst` | `uint64_t[2]` | `noc & 1` | `noc_async_write_one_packet_{set,with}_state` |
+| `__emule_write_one_packet_state_size` | `uint32_t[2]` | `noc & 1` | same |
+| `__emule_dw_st` | `__emule_dw_state[2]` | `noc & 1` | `noc_inline_dw_write_{set,with}_state` |
+
+Outstanding single-shared state that should eventually be per-NOC:
+
+- `noc_index` — currently `constexpr 0`. Making it a runtime per-thread
+  value is a separate follow-up (needs program runner support).
+
 ---
 
 ## 9. What's intentionally simplified
 
 These are NOT drift — emule deliberately collapses them:
 
-- **Barriers** are no-op. There is nothing in-flight to wait for.
-- **TRID counters** are no-op. No transaction tagging.
-- **Dual-NOC** is single-NOC. The `noc` arg only chooses `my_x[noc]`/`my_y[noc]`.
+- **Barriers** are no-op. There is nothing in-flight to wait for. Per-NOC
+  barrier semantics collapse vacuously because both NOCs have nothing
+  pending.
+- **TRID counters** are no-op. No transaction tagging needed when every
+  op is already complete by the time the API returns.
+- **Dual-NOC transfer-path concurrency** — silicon's two NOC engines can
+  carry independent transactions in parallel. Emule has no such
+  parallelism: every API call is one sync memcpy by the host thread
+  regardless of which NOC was named. (Per-NOC **state** is modeled —
+  see Section 8.3 — but per-NOC transfer concurrency is not.)
 - **Posted vs non-posted writes** collapse — every write is fully complete
   before the call returns.
 - **VC (virtual channel)** args are ignored. No NOC bandwidth model.
