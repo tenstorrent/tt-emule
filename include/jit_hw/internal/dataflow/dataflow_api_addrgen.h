@@ -10,6 +10,25 @@
 #include <cstdint>
 #include "jit_hw/api/compute/common_globals.h"  // DataFormat enum
 
+// NOC address-field extraction. Upstream silicon kernels (notably the
+// upstream tensor accessor) call
+// `NOC_UNICAST_ADDR_X / Y` directly without going through dataflow_api.h.
+// They include this addrgen shim transitively, so define the macros here
+// matching the emulation NOC encoding (X in bits [LOCAL_BITS : LOCAL+NODE_ID-1]).
+#ifndef NOC_ADDR_LOCAL_BITS
+#define NOC_ADDR_LOCAL_BITS 36
+#endif
+#ifndef NOC_ADDR_NODE_ID_BITS
+#define NOC_ADDR_NODE_ID_BITS 6
+#endif
+#ifndef NOC_UNICAST_ADDR_X
+#define NOC_UNICAST_ADDR_X(addr) (((uint64_t)(addr) >> NOC_ADDR_LOCAL_BITS) & 0x3Fu)
+#endif
+#ifndef NOC_UNICAST_ADDR_Y
+#define NOC_UNICAST_ADDR_Y(addr) \
+    (((uint64_t)(addr) >> (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) & 0x3Fu)
+#endif
+
 // Bank mapping arrays — populated by emulated_program_runner.cpp, resolved at dlopen.
 // Declared with C++ linkage (matching firmware declarations in dataflow_api_common.h).
 // Sized via JIT defines (NUM_DRAM_BANKS / NUM_L1_BANKS) so we match upstream's

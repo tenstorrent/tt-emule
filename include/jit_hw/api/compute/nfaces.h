@@ -54,4 +54,34 @@ constexpr std::array<uint32_t, 1024> make_nfaces_to_rowmajor() {
 
 inline constexpr auto nfaces_to_rowmajor = make_nfaces_to_rowmajor();
 
+// Tile shape-aware nfaces offset.
+// Silicon supports "thin" tiles with rows ∈ {1,2,4,8,16,32}, cols always = 32.
+// Layout: 2 column-faces (left cols 0-15, right cols 16-31), each face is
+// `rows × 16` row-major. For rows>16 (i.e. 32), there are also 2 row-faces,
+// giving 4 sub-faces of 16×16 — the standard 1024-element layout.
+//
+// elem_idx ranges 0 .. (rows*32 - 1) in row-major order (r * 32 + c).
+inline constexpr uint32_t tile_rm_to_nfaces(uint32_t elem_idx, uint32_t rows) {
+    if (rows >= 32) {
+        // Standard 32×32 4-face layout (cached LUT path).
+        return rowmajor_to_nfaces[elem_idx];
+    }
+    uint32_t r = elem_idx / 32;
+    uint32_t c = elem_idx % 32;
+    // Two faces of `rows × 16`. Sub-row stride within a face = 16.
+    uint32_t face_col = (c >= 16) ? 1u : 0u;
+    uint32_t face_elems = rows * 16;  // elements per face
+    return face_col * face_elems + r * 16u + (c % 16u);
+}
+
+// Compute rows-per-tile from CB page size + element byte width.
+// page_size = rows * 32 * elem_bytes  →  rows = page_size / (32 * elem_bytes)
+inline constexpr uint32_t tile_rows_from_pagesize(uint32_t page_size_bytes, uint32_t elem_bytes) {
+    if (elem_bytes == 0) return 32;
+    uint32_t rows = page_size_bytes / (32u * elem_bytes);
+    if (rows == 0) return 1u;
+    if (rows > 32) return 32u;
+    return rows;
+}
+
 } // namespace __emule_nfaces

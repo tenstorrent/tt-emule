@@ -18,6 +18,10 @@
 #include "api/compute/eltwise_unary/trigonometry.h"  // sole definer of tanh_tile (shared via #pragma once)
 
 #include <algorithm>
+// Minimal sfpi:: shim for SFPU kernels that use vFloat/vInt/v_if.
+// TODO(#102): replace with real scalar semantics to produce correct outputs.
+#include "jit_hw/sfpi.h"
+
 #include <cmath>
 #include <cstring>
 #include <cstdint>
