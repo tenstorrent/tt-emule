@@ -368,55 +368,67 @@ inline void noc_async_write_one_packet(uint32_t src_local_l1_addr, uint64_t dst_
 // defined further down with full shard-addr-base state tracking that the
 // dsa_indexer / dram_streaming_matmul kernels depend on. Only the
 // `_with_state` form (which doesn't carry trid) lives here.
-inline thread_local uint32_t __emule_one_packet_state_size = 0;
+// Per-NOC: silicon has independent NOC_TARG_ADDR/SIZE on (noc, read_cmd_buf);
+// emule mirrors that with [2] caches so set_state(noc=0) and set_state(noc=1)
+// don't clobber each other.
+inline thread_local uint32_t __emule_one_packet_state_size[2] = {0, 0};
 template <bool inc_num_issued = true, bool use_vc = false>
 inline void noc_async_read_one_packet_with_state(uint64_t src_noc_addr,
                                                  uint32_t dst_local_l1_addr,
                                                  uint32_t /*vc*/ = 0,
                                                  uint8_t noc = 0) {
     noc_async_read(src_noc_addr, dst_local_l1_addr,
-                   __emule_one_packet_state_size, noc);
+                   __emule_one_packet_state_size[noc & 1], noc);
 }
 
 // Write-side counterpart used by sharded writer kernels (e.g.
 // `writer_unary_transpose_wh_sharded_rm.cpp`). Silicon stores the dst
-// NOC address + packet size in the NOC cmd-buf state; `with_state`
-// then issues writes that reuse that state. Emule fans the state out
-// to a thread_local and uses noc_async_write for the actual transfer.
-inline thread_local uint64_t __emule_write_one_packet_state_dst = 0;
-inline thread_local uint32_t __emule_write_one_packet_state_size = 0;
+// NOC address + packet size per (noc, write_cmd_buf); emule mirrors the
+// per-NOC split with [2] caches and uses noc_async_write for the actual
+// transfer.
+inline thread_local uint64_t __emule_write_one_packet_state_dst[2] = {0, 0};
+inline thread_local uint32_t __emule_write_one_packet_state_size[2] = {0, 0};
 template <bool posted = false>
 inline void noc_async_write_one_packet_set_state(uint64_t dst_noc_addr,
                                                  uint32_t size,
-                                                 uint8_t /*noc*/ = 0,
+                                                 uint8_t noc = 0,
                                                  uint8_t /*vc*/ = 0) {
-    __emule_write_one_packet_state_dst = dst_noc_addr;
-    __emule_write_one_packet_state_size = size;
+    __emule_write_one_packet_state_dst[noc & 1] = dst_noc_addr;
+    __emule_write_one_packet_state_size[noc & 1] = size;
 }
 template <bool posted = false>
 inline void noc_async_write_one_packet_with_state(uint32_t src_local_l1_addr,
                                                   uint32_t /*dst_local_l1_addr*/,
                                                   uint8_t noc = 0) {
     noc_async_write(src_local_l1_addr,
-                    __emule_write_one_packet_state_dst,
-                    __emule_write_one_packet_state_size, noc);
+                    __emule_write_one_packet_state_dst[noc & 1],
+                    __emule_write_one_packet_state_size[noc & 1], noc);
 }
-template <uint32_t max_page_size>
+// Silicon adds `enable_noc_tracing` (and `posted` for write) template args
+// that control event-record / posted-vs-acked semantics. Both are no-ops in
+// emule but the template list must accept them so silicon-side callers that
+// pass explicit args still compile.
+template <uint32_t max_page_size, bool enable_noc_tracing = true>
 inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr, uint32_t size,
-                           uint8_t noc = 0, uint32_t vc = 0) {
+                           uint8_t noc = 0, uint32_t vc = NOC_UNICAST_WRITE_VC) {
     noc_async_read(src_noc_addr, dst_local_l1_addr, size, noc, vc);
 }
-template <uint32_t max_page_size>
+template <uint32_t max_page_size, bool enable_noc_tracing = true, bool posted = false>
 inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr, uint32_t size,
-                            uint8_t noc = 0, uint32_t vc = 0) {
+                            uint8_t noc = 0, uint32_t vc = NOC_UNICAST_WRITE_VC) {
     noc_async_write(src_local_l1_addr, dst_noc_addr, size, noc, vc);
 }
 
 // ---- Multicast write ----
 
+// Silicon: template<max_page_size> chooses one-packet vs multi-packet fast
+// path. emule collapses both to one per-core memcpy via __emule_multicast_write
+// regardless of max_page_size. The trailing `vc` is also accepted-and-ignored.
+template <uint32_t max_page_size = NOC_MAX_BURST_SIZE + 1>
 inline void noc_async_write_multicast(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
-    uint32_t size, uint32_t num_dests, bool linked = false, uint8_t noc = 0) {
+    uint32_t size, uint32_t num_dests, bool linked = false, uint8_t noc = 0,
+    uint8_t /*vc*/ = NOC_MULTICAST_WRITE_VC) {
     if (__emule_debug_multicast()) {
         uint32_t x_end   = (dst_mcast_noc_addr >> NOC_ADDR_LOCAL_BITS) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
         uint32_t y_end   = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
@@ -450,6 +462,18 @@ inline void noc_async_write_multicast_loopback_src(
     }
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     __emule_multicast_write(dst_mcast_noc_addr, src, size, /*include_self=*/true);
+}
+
+// Single-packet (size <= NOC_MAX_BURST_SIZE) multicast write. Silicon takes
+// a fast path that skips the multi-packet ncrisc helper; emule's multicast
+// is already a single per-core memcpy regardless of size, so this collapses
+// to the regular non-loopback multicast.
+template <bool enable_noc_tracing = true>
+inline void noc_async_write_multicast_one_packet(
+    uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
+    uint32_t size, uint32_t num_dests, bool linked = false, uint8_t noc = 0) {
+    noc_async_write_multicast(src_local_l1_addr, dst_mcast_noc_addr, size,
+                              num_dests, linked, noc);
 }
 
 // ---- Barriers ----
@@ -550,12 +574,10 @@ FORCE_INLINE void noc_async_read_one_packet_set_state(
     __emule_noc_trid_state::shard_size[noc & 1] = size;
     __emule_noc_trid_state::shard_vc[noc & 1] = vc;
     // The plain (non-trid) noc_async_read_one_packet_with_state reads the
-    // transfer size from __emule_one_packet_state_size, not the per-noc
-    // shard_size[] above. This is now the only set_state in the header (the
-    // old size-only overload was removed), so it must keep that global in
-    // sync — otherwise with_state reads size 0 and the transfer is a silent
-    // no-op (e.g. sharded permute / transpose_hc reader → all-zero output).
-    __emule_one_packet_state_size = size;
+    // transfer size from __emule_one_packet_state_size[noc & 1], not the per-noc
+    // shard_size[] above. Both are kept in sync so the non-trid with_state
+    // call sees the same size that was just programmed.
+    __emule_one_packet_state_size[noc & 1] = size;
 }
 
 FORCE_INLINE void noc_async_read_set_trid(uint32_t /*trid*/, uint8_t /*noc*/ = 0) {
@@ -572,18 +594,43 @@ FORCE_INLINE void noc_async_read_one_packet_with_state_with_trid(
     uint32_t dst_l1_addr,
     uint32_t /*trid*/,
     uint8_t noc = 0) {
-    // shard_base_l1 is the truncated noc-addr (low 32 bits); reconstruct the
-    // full 64-bit NOC addr from the saved base (high bits encode node), then
-    // memcpy size bytes.
+    // shard_base_l1 + shard_offset is the L1 address on the source core.
+    // In emule it may be a firmware-style L1 offset or a truncated host
+    // pointer (from l1_alloc / CB APIs); __emule_addr_to_offset canonicalizes
+    // both to the proper L1 offset so the OR with the cached upper coords
+    // doesn't corrupt the high bits of the reconstructed noc addr.
     uint64_t base = __emule_noc_trid_state::shard_noc_addr_base[noc & 1];
     uint32_t size = __emule_noc_trid_state::shard_size[noc & 1];
-    uint64_t src_noc = (base & 0xFFFFFFFF00000000ULL) | ((uint64_t)(shard_base_l1 + shard_offset));
+    uint32_t l1_off = __emule_addr_to_offset(shard_base_l1 + shard_offset);
+    uint64_t src_noc = (base & 0xFFFFFFFF00000000ULL) | uint64_t(l1_off);
     uint8_t* src = __emule_resolve_noc_addr(src_noc);
     uint8_t* dst = __emule_local_l1_to_ptr(dst_l1_addr);
     if (src && dst && size) {
         std::memcpy(dst, src, size);
     }
 }
+
+// Multi-packet stateful read pair. Silicon: set_state programs upper coords;
+// with_state provides local L1 src + size; inc_num_issued manually bumps the
+// counter. Emule: store src in the per-NOC shard cache for the upper-coord
+// reconstruction; counter is no-op (no in-flight transactions).
+inline void noc_async_read_set_state(uint64_t src_noc_addr, uint8_t noc = 0) {
+    __emule_noc_trid_state::shard_noc_addr_base[noc & 1] = src_noc_addr;
+}
+template <bool inc_num_issued = true>
+inline void noc_async_read_with_state(
+    uint32_t src_local_l1_addr, uint32_t dst_local_l1_addr, uint32_t size,
+    uint8_t noc = 0) {
+    // Canonicalize src — it can be either a firmware-style L1 offset or a
+    // truncated host pointer in emule; __emule_addr_to_offset normalizes both
+    // to a proper L1 offset so the OR with cached upper coords is well-formed.
+    uint64_t upper = __emule_noc_trid_state::shard_noc_addr_base[noc & 1]
+                   & 0xFFFFFFFF00000000ULL;
+    uint64_t full_src = upper | uint64_t(__emule_addr_to_offset(src_local_l1_addr));
+    noc_async_read(full_src, dst_local_l1_addr, size, noc);
+}
+inline void noc_async_read_inc_num_issued(uint32_t /*num_issued_reads_inc*/,
+                                          uint8_t /*noc*/ = 0) {}
 
 // ---- Semaphore operations ----
 
@@ -716,6 +763,14 @@ inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc,
     }
 }
 
+// 4-byte unicast write of a local L1 word to a remote semaphore. Silicon
+// uses write_reg_cmd_buf for this (separate cmd buffer from the data path);
+// in emule the resolver+memcpy is identical to noc_async_write of 4 bytes.
+inline void noc_semaphore_set_remote(
+    uint32_t src_local_l1_addr, uint64_t dst_noc_addr, uint8_t noc = 0) {
+    noc_async_write(src_local_l1_addr, dst_noc_addr, sizeof(uint32_t), noc);
+}
+
 // Multicast a semaphore value to multiple cores.
 inline void noc_semaphore_set_multicast(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
@@ -758,14 +813,38 @@ inline void noc_semaphore_set_multicast_loopback_src(
     __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t), /*include_self=*/true);
 }
 
-// noc_semaphore_inc_multicast: silicon atomic-inc broadcast. Stubbed in emule
-// because the only callers in the current allowlist gate this behind
-// `if constexpr (signal_kv_cache_ready)` and the tests set the flag to 0.
-// Body must parse but doesn't need to execute.
+// Atomic increment fanned across a rectangular grid of cores. Silicon uses
+// the NOC's `noc_fast_multicast_atomic_increment` (write_at_cmd_buf); emule
+// decodes the mcast rect from `addr`, walks (x,y) in the rect, and applies
+// a per-core atomic fetch_add at the resolved offset. Matches the body of
+// Semaphore::inc_multicast in noc_semaphore.h. `posted` template param is
+// accepted-and-ignored (no in-flight transactions in emule).
+template <bool posted = false>
 inline void noc_semaphore_inc_multicast(
-    uint64_t dst_mcast_noc_addr, uint32_t increment,
-    uint32_t num_dests, uint8_t noc = 0) {
-    (void)dst_mcast_noc_addr; (void)increment; (void)num_dests; (void)noc;
+    uint64_t addr, uint32_t incr, uint32_t /*num_dests*/,
+    uint8_t /*noc_id*/ = 0, uint8_t /*vc*/ = NOC_MULTICAST_WRITE_VC) {
+    uint32_t x_end   = (addr >> NOC_ADDR_LOCAL_BITS) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+    uint32_t y_end   = (addr >> (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+    uint32_t x_start = (addr >> (NOC_ADDR_LOCAL_BITS + 2 * NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+    uint32_t y_start = (addr >> (NOC_ADDR_LOCAL_BITS + 3 * NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
+    uint32_t off     = static_cast<uint32_t>(addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
+    uint32_t lo_x = (x_start < x_end) ? x_start : x_end;
+    uint32_t hi_x = (x_start < x_end) ? x_end : x_start;
+    uint32_t lo_y = (y_start < y_end) ? y_start : y_end;
+    uint32_t hi_y = (y_start < y_end) ? y_end : y_start;
+    for (uint32_t x = lo_x; x <= hi_x; x++) {
+        for (uint32_t y = lo_y; y <= hi_y; y++) {
+            uint64_t per_core = (static_cast<uint64_t>(y) << (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) |
+                                (static_cast<uint64_t>(x) << NOC_ADDR_LOCAL_BITS) | uint64_t(off);
+            uint8_t* ptr = __emule_resolve_noc_addr(per_core);
+            if (ptr) {
+                __atomic_fetch_add(reinterpret_cast<uint32_t*>(ptr), incr, __ATOMIC_SEQ_CST);
+            } else {
+                fprintf(stderr, "EMULE WARN: noc_semaphore_inc_multicast (%u,%u) "
+                        "offset=0x%x failed to resolve\n", x, y, off);
+            }
+        }
+    }
 }
 
 // NOC_MULTICAST_ADDR — silicon macro from noc_parameters.h. Emule's
@@ -826,7 +905,10 @@ struct __emule_dw_state {
     uint64_t addr = 0;
     uint32_t val = 0;
 };
-inline thread_local __emule_dw_state __emule_dw_st;
+// Per-NOC: silicon has independent NOC_TARG_ADDR/AT_DATA on (noc, write_at_cmd_buf);
+// emule mirrors that with a [2] cache so set_state(noc=0) and set_state(noc=1)
+// don't clobber each other.
+inline thread_local __emule_dw_state __emule_dw_st[2];
 
 // Apply byte-enable mask and write 32-bit value to a resolved host pointer.
 inline void __emule_dw_write_be(uint8_t* dst, uint32_t val, uint8_t be) {
@@ -907,9 +989,9 @@ inline void noc_inline_dw_write_set_state(
     uint8_t cmd_buf = write_at_cmd_buf,
     uint8_t noc = noc_index,
     uint8_t vc = NOC_UNICAST_WRITE_VC) {
-    __emule_dw_st.addr = addr;
+    __emule_dw_st[noc & 1].addr = addr;
     if constexpr (set_val) {
-        __emule_dw_st.val = val;
+        __emule_dw_st[noc & 1].val = val;
     }
 }
 
@@ -925,14 +1007,19 @@ inline void noc_inline_dw_write_with_state(
     uint32_t val, uint32_t addr = 0, uint8_t cmd_buf = write_at_cmd_buf, uint8_t noc = noc_index) {
     if constexpr (update_addr_lo) {
         // Replace the lower 32 bits of the address (the L1 offset).
-        __emule_dw_st.addr = (__emule_dw_st.addr & ~uint64_t(0xFFFFFFFF)) | addr;
+        __emule_dw_st[noc & 1].addr = (__emule_dw_st[noc & 1].addr & ~uint64_t(0xFFFFFFFF)) | addr;
+    }
+    if constexpr (update_addr_hi) {
+        // Replace the upper 32 bits of the address (the target core NOC coords).
+        __emule_dw_st[noc & 1].addr = (__emule_dw_st[noc & 1].addr & uint64_t(0xFFFFFFFF))
+                                   | (uint64_t(addr) << 32);
     }
     if constexpr (update_val) {
-        __emule_dw_st.val = val;
+        __emule_dw_st[noc & 1].val = val;
     }
-    uint8_t* dst = __emule_resolve_noc_addr(__emule_dw_st.addr);
+    uint8_t* dst = __emule_resolve_noc_addr(__emule_dw_st[noc & 1].addr);
     if (dst) {
-        __emule_dw_write_be(dst, __emule_dw_st.val, 0xF);
+        __emule_dw_write_be(dst, __emule_dw_st[noc & 1].val, 0xF);
     }
 }
 
