@@ -18,6 +18,7 @@
 
 #include "jit_hw/api/compute/common.h"
 #include "jit_hw/api/compute/compute_kernel_hw_startup.h"
+#include "jit_hw/api/compute/reduce.h"   // REDUCE_OP/REDUCE_DIM + __emule_reduce_col_into_dst (fused pool path)
 #include "jit_hw/internal/llk_state.h"
 #include "jit_hw/api/compute/nfaces.h"
 #include "jit_hw/api/bfp8.h"
@@ -186,4 +187,71 @@ inline void fast_tilize_uninit(uint32_t = 0, uint32_t = 0, uint32_t = 0) {
 inline void tilize_block(uint32_t icb, uint32_t num_tiles, uint32_t ocb,
                          uint32_t /*itile_start*/, uint32_t /*otile_start*/) {
     tilize_block(icb, num_tiles, ocb);
+}
+
+// ---- Fused tilize+reduce (pool/generic, upsample-bilinear) ----
+//
+// Real LLK: tt_metal/hw/inc/api/compute/tilize.h. Silicon streams tilized SrcA +
+// broadcast scaler SrcB through the FPU and the math op reduces them; the data is
+// never addressable between unpack and reduce. emule has no SrcA/SrcB latch, so
+// the reduce math lives here in unpack_tilizeA_B_block (reduce_tile_math stays a
+// no-op, mirroring how reduce.h keeps math in reduce_tile). Consumer sequence
+// (compute_pool_2d.cpp / bilinear.cpp): tilizeA_B_reduce_init → per-chunk
+// [unpack_tilizeA_B_block → reduce_tile_math(no-op)] → pack_untilize_dest →
+// unpack_tilizeA_B_uninit.
+template <bool neginf_srcA = true, bool zero_srcA_reduce = false>
+inline void tilizeA_B_reduce_init(uint32_t /*icb0*/, uint32_t /*icb1_scaler*/, uint32_t /*block*/,
+                                  uint32_t /*ocb*/, uint32_t /*num_faces*/ = 4,
+                                  uint32_t /*face_r_dim*/ = 16, uint32_t /*call_line*/ = 0) {
+    __llk_unpack_is_tilize = true;   // mirror tilize_init
+    __llk_pack_is_untilize = false;
+}
+
+// Tilize a block of `block` channel-tiles from the raw icb0 strip and column-
+// reduce each against the icb1 scaler (broadcast element 0), writing the pooled
+// row into DST[t] row 0. The pooling window is laid along the strip rows
+// (channels along cols); faces 0/1 hold the first `srca_face_r_dim` rows and
+// faces 2/3 (num_faces==4) a second band — rows beyond `live_rows` are the
+// padding silicon's neginf/zero SrcA preset masks, so we simply don't read them.
+// Per-chunk calls accumulate via the fresh/dirty DST tracking (MAX clamps,
+// SUM/AVG add), matching reduce_tile.
+template <bool neginf_srcA = true, std::uint32_t reload_srcB = true,
+          bool zero_srcA = false, bool zero_srcA_reduce = false>
+inline void unpack_tilizeA_B_block(uint32_t icb0, uint32_t icb1, uint32_t block,
+                                   uint32_t tile_idx_b, uint32_t num_faces = 4,
+                                   uint32_t srca_face_r_dim = 16) {
+    float scaler = 1.0f;
+    { float s[1024]; __emule_unpack_cb_tile_to(icb1, tile_idx_b, s); scaler = s[0]; }
+
+    constexpr uint32_t TILE_DIM = 32;
+    const bool in32 = __emule_compute::cb_is_32bit_format(icb0);
+    const uint32_t esz = in32 ? 4u : 2u;
+    const uint32_t row_stride = block * TILE_DIM * esz;
+    uint8_t* const in_base = __emule_compute::cb_read_ptr_at(icb0, 0);
+
+    uint32_t live_rows = srca_face_r_dim * (num_faces > 2 ? 2u : 1u);
+    if (live_rows > TILE_DIM) live_rows = TILE_DIM;
+
+    for (uint32_t t = 0; t < block; ++t) {
+        float src[1024];
+        for (uint32_t r = 0; r < live_rows; ++r) {
+            const uint8_t* row_in = in_base + r * row_stride + t * TILE_DIM * esz;
+            for (uint32_t c = 0; c < TILE_DIM; ++c) {
+                if (in32) {
+                    float v; std::memcpy(&v, row_in + c * 4, 4);
+                    src[r * TILE_DIM + c] = v;
+                } else {
+                    uint16_t bf; std::memcpy(&bf, row_in + c * 2, 2);
+                    src[r * TILE_DIM + c] = __emule_bf16::to_f32(bf);
+                }
+            }
+        }
+        const bool fresh = __emule_dst_take_fresh(t);
+        __emule_dst_mark_dirty(t);
+        __emule_reduce_col_into_dst<REDUCE_OP>(src, live_rows, scaler, fresh, t);
+    }
+}
+
+inline void unpack_tilizeA_B_uninit(uint32_t /*icb*/ = 0) {
+    __llk_unpack_is_tilize = false;   // mirror tilize_uninit (leave pack flag)
 }

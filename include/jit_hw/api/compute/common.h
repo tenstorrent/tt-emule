@@ -66,6 +66,8 @@ namespace ckernel {
 enum class EltwiseBinaryType { ELWADD, ELWSUB, ELWMUL };
 enum class BroadcastType { NONE, COL, ROW, SCALAR };
 enum class EltwiseBinaryReuseDestType { NONE, DEST_TO_SRCA, DEST_TO_SRCB };
+// ckernel_defs.h:54 — selects DST element ordering for SFPU pool ops.
+enum class DataLayout { TILE = 0, ROW_MAJOR = 1 };
 
 // Tile/face dimension constants. Upstream exposes these in ckernel via
 // `tt_llk_wormhole_b0/common/inc/ckernel_defs.h:89`; emule already has

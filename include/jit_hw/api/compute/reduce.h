@@ -29,6 +29,35 @@
 #define REDUCE_DIM ReduceDim::REDUCE_COL
 #endif
 
+// Shared column-reduce: reduce the first `live_rows` rows of a row-major 32x32
+// `src` into row 0 of DST[idst] — one result per column, scaled by `scaler`.
+// MAX overwrites on `fresh` then clamps (the all-negative fix, see reduce_tile);
+// SUM/AVG accumulate (+=). Reused by reduce_tile<REDUCE_COL> and the fused pool
+// tilizeA_B path (tilize.h) so both reduce with identical math.
+template <PoolType reduce_type>
+inline void __emule_reduce_col_into_dst(const float* src, uint32_t live_rows,
+                                        float scaler, bool fresh, uint32_t idst) {
+    for (uint32_t c = 0; c < 32; c++) {
+        float acc;
+        if constexpr (reduce_type == PoolType::MAX)
+            acc = -std::numeric_limits<float>::infinity();
+        else
+            acc = 0.0f;
+        for (uint32_t r = 0; r < live_rows; r++) {
+            const float val = src[r * 32 + c];
+            if constexpr (reduce_type == PoolType::MAX)
+                acc = std::max(acc, val);
+            else
+                acc += val;
+        }
+        const float result = acc * scaler;
+        if constexpr (reduce_type == PoolType::MAX)
+            __emule_dst[idst][c] = fresh ? result : std::max(__emule_dst[idst][c], result);
+        else
+            __emule_dst[idst][c] += result;
+    }
+}
+
 namespace ckernel {
 
 // ---- Init / uninit (hardware pipeline config — no-ops in emulation) ----
@@ -94,27 +123,7 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
 
     if constexpr (reduce_dim == ReduceDim::REDUCE_COL) {
         // Reduce columns: for each column c, sum/max across all rows → result in row 0
-        for (uint32_t c = 0; c < 32; c++) {
-            float acc;
-            if constexpr (reduce_type == PoolType::MAX)
-                acc = -std::numeric_limits<float>::infinity();
-            else
-                acc = 0.0f;
-
-            for (uint32_t r = 0; r < 32; r++) {
-                float val = src[r * 32 + c];
-                if constexpr (reduce_type == PoolType::MAX)
-                    acc = std::max(acc, val);
-                else
-                    acc += val;  // SUM and AVG both sum; scaler handles the 1/N
-            }
-            float result = acc * scaler;
-            if constexpr (reduce_type == PoolType::MAX) {
-                __emule_dst[idst][c] = fresh ? result : std::max(__emule_dst[idst][c], result);
-            } else {
-                __emule_dst[idst][c] += result;
-            }
-        }
+        __emule_reduce_col_into_dst<reduce_type>(src, 32, scaler, fresh, idst);
     } else if constexpr (reduce_dim == ReduceDim::REDUCE_ROW) {
         // Reduce rows: for each row r, sum/max across all cols → result in col 0
         for (uint32_t r = 0; r < 32; r++) {

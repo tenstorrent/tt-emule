@@ -310,6 +310,45 @@ inline RowView row(uint32_t idst, uint32_t r) {
 
 ALWI void topk_tile_init() {}
 
+// max_reduce_with_indices: max-pool with argmax. Reduces NR rows (NR = 9 if
+// num_rows<=9 else 32) per column into row 0 of DST[idst], carrying the
+// caller-seeded index slot DST[idst_idx] — the op does not generate indices.
+// Strict `>` keeps the lowest-row index on ties, faithful to the SFPSWAP
+// ALL_ROWS_MAX tree (no swap on equal). `accumulate` maxes against the running
+// accumulator at idst+1 / idst_idx+1 for large (chunked) kernels.
+// Real LLK: ckernel_sfpu_max_pool_indices.h (init programs an SFPU config bit
+// only → no-op here). Indices stored full-width; a UInt16 output CB is masked
+// to 16 bits by the pack path.
+template <ckernel::DataLayout layout = ckernel::DataLayout::TILE>
+ALWI void max_reduce_with_indices_init() {}
+
+template <int num_rows = 9, ckernel::DataLayout layout = ckernel::DataLayout::TILE,
+          bool accumulate = false, int ITERATIONS = 8>
+ALWI void max_reduce_with_indices(uint32_t idst, uint32_t idst_idx, uint32_t chunk = 0) {
+    static_assert(num_rows <= 32, "num_rows must be <= 32");
+    __emule_dst_check(idst, "max_reduce_with_indices.data");
+    __emule_dst_check(idst_idx, "max_reduce_with_indices.idx");
+    constexpr uint32_t NR = (num_rows <= 9) ? 9u : 32u;
+    for (uint32_t c = 0; c < 32; ++c) {
+        float   best_v = __emule_dst[idst][c];
+        int32_t best_i = __emule_dst_load_i32(idst_idx, c);
+        for (uint32_t r = 1; r < NR; ++r) {
+            const float v = __emule_dst[idst][r * 32 + c];
+            if (v > best_v) { best_v = v; best_i = __emule_dst_load_i32(idst_idx, r * 32 + c); }
+        }
+        if constexpr (accumulate) {
+            if (chunk > 0) {
+                const float av = __emule_dst[idst + 1][c];
+                if (av > best_v) { best_v = av; best_i = __emule_dst_load_i32(idst_idx + 1, c); }
+            }
+            __emule_dst[idst + 1][c] = best_v;
+            __emule_dst_store_i32(idst_idx + 1, c, best_i);
+        }
+        __emule_dst[idst][c] = best_v;
+        __emule_dst_store_i32(idst_idx, c, best_i);
+    }
+}
+
 // Local sort: per-row sort of each of the 32 rows.
 // idir == 0 → descending; idir == 1 → ascending.
 template <bool stable_sort = false>
