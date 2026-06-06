@@ -119,17 +119,22 @@ versions (same per-byte memcpy).
 
 Silicon programs NOC cmd-buf registers in `set_state`, then reuses them in
 `with_state` — letting many small reads share the upper-coord setup cost.
-Emule has no cmd-buf state, so it stashes minimal sticky state in TLS:
+Silicon's registers are per `(noc, cmd_buf)`. Emule mirrors that with per-NOC
+`[2]` TLS arrays so `set_state(noc=0)` and `set_state(noc=1)` don't clobber
+each other:
 
-| TLS | Holds | Used by |
+| TLS (per-NOC `[2]`, indexed by `noc & 1`) | Holds | Used by |
 |---|---|---|
-| `__emule_one_packet_state_size` | size from one-packet `set_state` | `_with_state`, `_with_state_with_trid` |
-| `__emule_one_packet_state_src`  | full src noc addr from `set_state` | `_with_state_with_trid` (upper coords) |
+| `__emule_one_packet_state_size` | size from one-packet read `set_state` | `noc_async_read_one_packet_with_state` |
+| `__emule_noc_trid_state::shard_noc_addr_base` | full src noc addr | `_with_state_with_trid` (upper coords) + multi-packet `_with_state` |
+| `__emule_noc_trid_state::shard_size` | size from per-NOC TRID `set_state` | same |
+| `__emule_noc_trid_state::shard_vc` | VC from per-NOC TRID `set_state` | same |
 | `__emule_write_one_packet_state_dst` | dst noc addr from write `set_state` | write `_with_state` |
 | `__emule_write_one_packet_state_size` | size from write `set_state` | write `_with_state` |
 
 `with_state` calls reconstruct the full noc addr from cached upper-32 + caller-
-supplied lower-32, then route through the resolver.
+supplied lower-32 (or use the explicit `src_noc_addr` arg directly for the
+plain one-packet `_with_state`), then route through the resolver.
 
 ### 3.4 TRID variants
 

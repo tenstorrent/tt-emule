@@ -404,22 +404,31 @@ inline void noc_async_write_one_packet_with_state(uint32_t src_local_l1_addr,
                     __emule_write_one_packet_state_dst[noc & 1],
                     __emule_write_one_packet_state_size[noc & 1], noc);
 }
-template <uint32_t max_page_size>
+// Silicon adds `enable_noc_tracing` (and `posted` for write) template args
+// that control event-record / posted-vs-acked semantics. Both are no-ops in
+// emule but the template list must accept them so silicon-side callers that
+// pass explicit args still compile.
+template <uint32_t max_page_size, bool enable_noc_tracing = true>
 inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr, uint32_t size,
-                           uint8_t noc = 0, uint32_t vc = 0) {
+                           uint8_t noc = 0, uint32_t vc = NOC_UNICAST_WRITE_VC) {
     noc_async_read(src_noc_addr, dst_local_l1_addr, size, noc, vc);
 }
-template <uint32_t max_page_size>
+template <uint32_t max_page_size, bool enable_noc_tracing = true, bool posted = false>
 inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr, uint32_t size,
-                            uint8_t noc = 0, uint32_t vc = 0) {
+                            uint8_t noc = 0, uint32_t vc = NOC_UNICAST_WRITE_VC) {
     noc_async_write(src_local_l1_addr, dst_noc_addr, size, noc, vc);
 }
 
 // ---- Multicast write ----
 
+// Silicon: template<max_page_size> chooses one-packet vs multi-packet fast
+// path. emule collapses both to one per-core memcpy via __emule_multicast_write
+// regardless of max_page_size. The trailing `vc` is also accepted-and-ignored.
+template <uint32_t max_page_size = NOC_MAX_BURST_SIZE + 1>
 inline void noc_async_write_multicast(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
-    uint32_t size, uint32_t num_dests, bool linked = false, uint8_t noc = 0) {
+    uint32_t size, uint32_t num_dests, bool linked = false, uint8_t noc = 0,
+    uint8_t /*vc*/ = NOC_MULTICAST_WRITE_VC) {
     if (__emule_debug_multicast()) {
         uint32_t x_end   = (dst_mcast_noc_addr >> NOC_ADDR_LOCAL_BITS) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
         uint32_t y_end   = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
