@@ -301,7 +301,8 @@ inline void __emule_check_blockfloat_supported(uint32_t cb_id, const char* calle
                           || fmt == static_cast<uint8_t>(DataFormat::Bfp2_b);
     if (unsupported) {
         fprintf(stderr, "[EMULE] %s: unsupported block-float format %u on CB %u "
-                        "(only Bfp8_b/Bfp4_b are emulated)\n", caller, fmt, cb_id);
+                        "(only Bfp8_b/Bfp4_b are emulated)\n",
+                caller, static_cast<unsigned>(fmt), static_cast<unsigned>(cb_id));
         std::abort();
     }
 }
