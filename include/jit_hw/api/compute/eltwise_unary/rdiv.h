@@ -16,8 +16,8 @@
 
 namespace ckernel {
 
-// RoundingMode mirrors the canonical silicon enum (ckernel_defs.h). emule
-// ignores rounding, but the template parameter must resolve for callers.
+// RoundingMode mirrors the canonical silicon enum (ckernel_defs.h);
+// rdiv_tile honors Trunc/Floor below.
 #ifndef __EMULE_ROUNDING_MODE_DEFINED
 #define __EMULE_ROUNDING_MODE_DEFINED
 enum class RoundingMode : uint8_t {
