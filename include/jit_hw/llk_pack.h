@@ -12,6 +12,7 @@
 // `__emule_pack_relu_threshold`) before format conversion — silicon STACC_RELU
 // is a single packer CFG reg, so all pack sites must honor it.
 inline void __llk_pack_tiled(uint32_t tile_idx, uint32_t ocb) {
+    __emule_compute::__emule_check_blockfloat_supported(ocb, "__llk_pack_tiled");
     uint8_t* buf = __emule_compute::cb_write_ptr_at(ocb, __llk_pack_offset);
     if (__emule_compute::cb_is_bfp4_b_format(ocb)) {
         // Bfp4_b: 64 face-row exponents + 512 mantissa bytes (two 4-bit elems
