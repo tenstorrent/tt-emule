@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
+#include "jit_hw/api/compute/common.h"
 // Emulator stub for GELU SFPU tile op.
 // Implements the exact GELU formula: 0.5 * x * (1 + erf(x / sqrt(2))).
 
@@ -21,6 +22,24 @@ ALWI void gelu_tile(uint32_t idst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
         float x = __emule_dst[idst][i];
         __emule_dst[idst][i] = 0.5f * x * (1.0f + std::erf(x * kInvSqrt2));
+    }
+}
+
+// gelu'(x) = Phi(x) + x*phi(x), exact (matches gelu_tile's erf form).
+// phi(x) = exp(-x^2/2)/sqrt(2*pi); kInvSqrt2Pi = 1/sqrt(2*pi).
+template <bool fast_and_approx = false>
+ALWI void gelu_derivative_tile_init() {}
+
+template <bool fast_and_approx = false>
+ALWI void gelu_derivative_tile(uint32_t idst) {
+    __emule_dst_check(idst, "gelu_derivative_tile");
+    static const float kInvSqrt2 = 1.0f / std::sqrt(2.0f);
+    static const float kInvSqrt2Pi = 0.3989422804014327f;
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        float x = __emule_dst[idst][i];
+        float cdf = 0.5f * (1.0f + std::erf(x * kInvSqrt2));
+        float pdf = kInvSqrt2Pi * std::exp(-0.5f * x * x);
+        __emule_dst[idst][i] = cdf + x * pdf;
     }
 }
 

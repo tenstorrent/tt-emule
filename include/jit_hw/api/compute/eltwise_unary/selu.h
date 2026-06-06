@@ -1,4 +1,5 @@
 #pragma once
+#include "jit_hw/api/compute/common.h"
 // Emulator stub for SELU SFPU tile op.
 // Upstream takes packed alpha/scale as uint32 params; for now we use
 // the standard fixed constants (alpha=1.6733, scale=1.0507).

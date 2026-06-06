@@ -45,9 +45,9 @@ ALWI void rsub_binary_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
 }
 
 ALWI void div_binary_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
+    // Silicon (in0 * recip(in1)): x/0 -> +/-inf, 0/0 -> NaN. Let IEEE produce it.
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[odst][i] = __emule_dst[idst1][i] != 0.f
-            ? __emule_dst[idst0][i] / __emule_dst[idst1][i] : 0.f;
+        __emule_dst[odst][i] = __emule_dst[idst0][i] / __emule_dst[idst1][i];
 }
 
 ALWI void power_binary_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {

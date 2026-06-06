@@ -21,9 +21,6 @@
 // (normalize until bit 2 set, strip leading 1, place at bits 22:20).
 // Encode (per face-row of 16): shared exp = max fp32 exponent; per element take
 // the top 3 bits of the 24-bit significand (shift 21 + (max_exp - exp)).
-//
-// Validated end-to-end against torch goldens: encode via test_typecast_int
-// (BFLOAT4_B output), decode via test_binary_bcast_tcast (BFLOAT4_B inputs).
 
 #include <cstdint>
 #include <cstring>
