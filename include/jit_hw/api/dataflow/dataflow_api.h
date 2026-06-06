@@ -549,6 +549,13 @@ FORCE_INLINE void noc_async_read_one_packet_set_state(
     __emule_noc_trid_state::shard_noc_addr_base[noc & 1] = src_noc_addr;
     __emule_noc_trid_state::shard_size[noc & 1] = size;
     __emule_noc_trid_state::shard_vc[noc & 1] = vc;
+    // The plain (non-trid) noc_async_read_one_packet_with_state reads the
+    // transfer size from __emule_one_packet_state_size, not the per-noc
+    // shard_size[] above. This is now the only set_state in the header (the
+    // old size-only overload was removed), so it must keep that global in
+    // sync — otherwise with_state reads size 0 and the transfer is a silent
+    // no-op (e.g. sharded permute / transpose_hc reader → all-zero output).
+    __emule_one_packet_state_size = size;
 }
 
 FORCE_INLINE void noc_async_read_set_trid(uint32_t /*trid*/, uint8_t /*noc*/ = 0) {
