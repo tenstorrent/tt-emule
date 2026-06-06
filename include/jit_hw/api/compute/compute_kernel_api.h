@@ -10,6 +10,7 @@
 // per-op header). On real silicon those ops are pulled in through
 // transitive includes; in tt-emule we declare them here directly.
 #include "api/compute/common.h"
+#include "api/compute/vector_mode.h"
 #include "api/compute/matmul.h"
 #include "api/compute/eltwise_binary.h"
 #include "api/compute/tile_move_copy.h"
@@ -82,7 +83,9 @@ ALWI void power_tile(uint32_t idst, uint32_t exponent_packed = 0) {
 }
 
 // --- sigmoid (1 / (1 + e^-x)) ---
+template <uint32_t sigmoid_mode = 0>
 ALWI void sigmoid_tile_init() {}
+template <VectorMode vector_mode = VectorMode::RC, uint32_t sigmoid_mode = 0>
 ALWI void sigmoid_tile(uint32_t idst) {
     __emule_dst_check(idst, "sigmoid_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
@@ -122,6 +125,122 @@ ALWI void signbit_tile(uint32_t idst) {
     __emule_dst_check(idst, "signbit_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
         __emule_dst[idst][i] = std::signbit(__emule_dst[idst][i]) ? 1.0f : 0.0f;
+}
+
+// --- signbit int32 (1 if value negative, else 0) ---
+ALWI void signbit_tile_int32_init() {}
+ALWI void signbit_tile_int32(uint32_t idst) {
+    __emule_dst_check(idst, "signbit_tile_int32");
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        int32_t v = __emule_dst_load_i32(idst, i);
+        __emule_dst_store_i32(idst, i, (v < 0) ? 1 : 0);
+    }
+}
+
+// --- log_with_base (log(x) * scale; base_scale is bit-rep of 1/ln(base)) ---
+template <bool fast_and_approx = false>
+ALWI void log_with_base_tile_init() {}
+template <bool fast_and_approx = false>
+ALWI void log_with_base_tile(uint32_t idst, uint32_t base_scale) {
+    __emule_dst_check(idst, "log_with_base_tile");
+    float scale;
+    std::memcpy(&scale, &base_scale, sizeof(float));
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
+        __emule_dst[idst][i] = std::log(__emule_dst[idst][i]) * scale;
+}
+
+// --- power_iterative (x^n, n a non-negative integer via iterative multiply) ---
+ALWI void power_iterative_tile_init() {}
+ALWI void power_iterative_tile(uint32_t idst, uint32_t param0) {
+    __emule_dst_check(idst, "power_iterative_tile");
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        float x = __emule_dst[idst][i];
+        float result = 1.0f;
+        for (uint32_t k = 0; k < param0; k++) result *= x;
+        __emule_dst[idst][i] = result;
+    }
+}
+
+// --- tiled_prod (cumulative product across the tile) ---
+// emule uses row-major element order; SFPU lane order differs.
+ALWI void tiled_prod_tile_init() {}
+ALWI void tiled_prod_tile(uint32_t idst) {
+    __emule_dst_check(idst, "tiled_prod_tile");
+    float result = 1.0f;
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        result *= __emule_dst[idst][i];
+        __emule_dst[idst][i] = result;
+    }
+}
+
+// --- unary_max / unary_min (fp32, compared against fp32 bit-pattern param0) ---
+ALWI void unary_max_tile_init() {}
+ALWI void unary_max_tile(uint32_t idst, uint32_t param0) {
+    __emule_dst_check(idst, "unary_max_tile");
+    float val;
+    std::memcpy(&val, &param0, sizeof(float));
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
+        __emule_dst[idst][i] = std::max(__emule_dst[idst][i], val);
+}
+
+ALWI void unary_min_tile_init() {}
+ALWI void unary_min_tile(uint32_t idst, uint32_t param0) {
+    __emule_dst_check(idst, "unary_min_tile");
+    float val;
+    std::memcpy(&val, &param0, sizeof(float));
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
+        __emule_dst[idst][i] = std::min(__emule_dst[idst][i], val);
+}
+
+// --- unary_max / unary_min (int32, param0 is the int32 value) ---
+ALWI void unary_max_int32_tile_init() {}
+ALWI void unary_max_int32_tile(uint32_t idst, uint32_t param0) {
+    __emule_dst_check(idst, "unary_max_int32_tile");
+    int32_t val = (int32_t)param0;
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
+        __emule_dst_store_i32(idst, i, std::max(__emule_dst_load_i32(idst, i), val));
+}
+
+ALWI void unary_min_int32_tile_init() {}
+ALWI void unary_min_int32_tile(uint32_t idst, uint32_t param0) {
+    __emule_dst_check(idst, "unary_min_int32_tile");
+    int32_t val = (int32_t)param0;
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
+        __emule_dst_store_i32(idst, i, std::min(__emule_dst_load_i32(idst, i), val));
+}
+
+// --- unary_max / unary_min (uint32, DST slot reinterpreted as uint32) ---
+ALWI void unary_max_uint32_tile_init() {}
+ALWI void unary_max_uint32_tile(uint32_t idst, uint32_t param0) {
+    __emule_dst_check(idst, "unary_max_uint32_tile");
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        uint32_t x = (uint32_t)__emule_dst_load_i32(idst, i);
+        __emule_dst_store_i32(idst, i, (int32_t)std::max(x, param0));
+    }
+}
+
+ALWI void unary_min_uint32_tile_init() {}
+ALWI void unary_min_uint32_tile(uint32_t idst, uint32_t param0) {
+    __emule_dst_check(idst, "unary_min_uint32_tile");
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        uint32_t x = (uint32_t)__emule_dst_load_i32(idst, i);
+        __emule_dst_store_i32(idst, i, (int32_t)std::min(x, param0));
+    }
+}
+
+// --- alt_complex_rotate90 (rotate adjacent 32-element SIMD chunk-pairs 90deg) ---
+// Row-major chunk-pair interpretation: for chunk pair (a,b), new_a=-b, new_b=a.
+ALWI void alt_complex_rotate90_tile_init() {}
+ALWI void alt_complex_rotate90_tile(uint32_t idst) {
+    __emule_dst_check(idst, "alt_complex_rotate90_tile");
+    for (uint32_t base = 0; base < __EMULE_TILE_ELEMS; base += 64) {
+        for (uint32_t j = 0; j < 32; j++) {
+            float a = __emule_dst[idst][base + j];
+            float b = __emule_dst[idst][base + 32 + j];
+            __emule_dst[idst][base + j] = -b;
+            __emule_dst[idst][base + 32 + j] = a;
+        }
+    }
 }
 
 // --- silu (x * sigmoid(x)) ---

@@ -114,3 +114,10 @@ ALWI void lgamma_adjusted_tile(uint32_t idst0, uint32_t idst1, uint32_t idst2, u
 }
 
 }  // namespace ckernel
+
+// The lgamma kernels declare their own `constexpr float M_PI`, which collides
+// with the M_PI macro from <cmath>. Undef it here (this header is included
+// before their definition); no emule code uses the macro.
+#ifdef M_PI
+#undef M_PI
+#endif

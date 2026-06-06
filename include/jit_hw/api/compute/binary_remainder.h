@@ -45,9 +45,17 @@ ALWI void remainder_binary_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; ++i) {
         const float a = __emule_dst[idst0][i];
         const float b = __emule_dst[idst1][i];
-        // a - b * floor(a / b) — Python/torch semantics. Matches
-        // torch.remainder; std::fmod would mismatch for negative dividend.
-        __emule_dst[odst][i] = (b == 0.0f) ? std::nanf("") : (a - b * std::floor(a / b));
+        // a - b * floor(a / b) — torch.remainder semantics (sign follows the
+        // divisor); std::fmod would mismatch for a negative dividend.
+        // By zero: silicon yields a NaN whose upper mantissa bits are zero, so it
+        // packs to -inf in bf16 yet stays NaN in fp32. A plain std::nanf has the
+        // mantissa MSB set and would pack to NaN, not inf.
+        if (b == 0.0f) {
+            const uint32_t nan_bits = 0xFF800001u;
+            std::memcpy(&__emule_dst[odst][i], &nan_bits, sizeof(float));
+        } else {
+            __emule_dst[odst][i] = a - b * std::floor(a / b);
+        }
     }
 }
 ALWI void remainder_binary_tile_init() {}

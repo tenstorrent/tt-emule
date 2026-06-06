@@ -1,4 +1,5 @@
 #pragma once
+#include "jit_hw/api/compute/common.h"
 // Emulator stub for log1p SFPU tile op.
 
 #include <cmath>

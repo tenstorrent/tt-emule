@@ -13,8 +13,10 @@
 
 namespace ckernel {
 
+template <bool APPROXIMATION_MODE = false>
 ALWI void mish_tile_init() {}
 
+template <bool APPROXIMATION_MODE = false>
 ALWI void mish_tile(uint32_t idst) {
     __emule_dst_check(idst, "mish_tile");
     constexpr float SAT_HI = 8.0f;

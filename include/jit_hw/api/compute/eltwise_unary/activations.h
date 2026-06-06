@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
+#include "jit_hw/api/compute/common.h"
 // Emulator stubs for activation / absolute-value tile operations.
 // DST is __emule_dst[][] (float array); operations are host-side math.
 

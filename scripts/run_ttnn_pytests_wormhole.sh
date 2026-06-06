@@ -245,6 +245,70 @@ run_pytest "reduce_test_cumsum_failing" "$REDUCE_TEST_DIR/test_cumsum.py::test_c
 
 run_pytest "elt_test_celu_21f" "$ELT_TEST_DIR/test_celu_21f.py::test_celu_allclose" "$ELT_TEST_DIR/test_celu_21f.py::test_celu_arange"
 
+# --- #60 eltwise coverage bring-up (BH+WH parity; deferrals in docs/notes/eltwise-60-deferrals.md) ---
+run_pytest "elt_test_binary_maximum" "$ELT_TEST_DIR/test_binary_maximum.py"
+run_pytest "elt_test_binary_minimum" "$ELT_TEST_DIR/test_binary_minimum.py"
+run_pytest "elt_test_binary_ng_bcast_fp32_dest_acc" "$ELT_TEST_DIR/test_binary_ng_bcast_fp32_dest_acc.py"
+run_pytest "elt_test_binary_ng_program_cache" "$ELT_TEST_DIR/test_binary_ng_program_cache.py"
+run_pytest "elt_test_binary_scalar" "$ELT_TEST_DIR/test_binary_scalar.py"
+run_pytest "elt_test_binary_uint16" "$ELT_TEST_DIR/test_binary_uint16.py"
+run_pytest "elt_test_binary_uint32" "$ELT_TEST_DIR/test_binary_uint32.py"
+run_pytest "elt_test_broadcast_to" "$ELT_TEST_DIR/test_broadcast_to.py"
+run_pytest "elt_test_div_ops" "$ELT_TEST_DIR/test_div_ops.py"
+run_pytest "elt_test_exp" "$ELT_TEST_DIR/test_exp.py"
+run_pytest "elt_test_expm1" "$ELT_TEST_DIR/test_expm1.py"
+run_pytest "elt_test_fill" "$ELT_TEST_DIR/test_fill.py"
+run_pytest "elt_test_fmod" "$ELT_TEST_DIR/test_fmod.py"
+run_pytest "elt_test_gcd" "$ELT_TEST_DIR/test_gcd.py"
+run_pytest "elt_test_hardtanh" "$ELT_TEST_DIR/test_hardtanh.py"
+run_pytest "elt_test_inplace" "$ELT_TEST_DIR/test_inplace.py"
+run_pytest "elt_test_mul" "$ELT_TEST_DIR/test_mul.py"
+run_pytest "elt_test_nextafter" "$ELT_TEST_DIR/test_nextafter.py"
+run_pytest "elt_test_polyval" "$ELT_TEST_DIR/test_polyval.py"
+run_pytest "elt_test_pow" "$ELT_TEST_DIR/test_pow.py"
+run_pytest "elt_test_round" "$ELT_TEST_DIR/test_round.py"
+run_pytest "elt_test_signbit" "$ELT_TEST_DIR/test_signbit.py"
+run_pytest "elt_test_silu" "$ELT_TEST_DIR/test_silu.py"
+run_pytest "elt_test_silu_row_major" "$ELT_TEST_DIR/test_silu_row_major.py"
+run_pytest "elt_test_sigmoid_accurate_21f" "$ELT_TEST_DIR/test_sigmoid_accurate_21f.py"
+run_pytest "elt_test_sigmoid_vector_modes" "$ELT_TEST_DIR/test_sigmoid_vector_modes.py"
+run_pytest "elt_test_snake_beta" "$ELT_TEST_DIR/test_snake_beta.py"
+run_pytest "elt_test_ternary_composite" "$ELT_TEST_DIR/test_ternary_composite.py"
+run_pytest "elt_test_typecast_sharded" "$ELT_TEST_DIR/test_typecast_sharded.py"
+run_pytest "elt_test_unary_activation" "$ELT_TEST_DIR/test_unary_activation.py"
+run_pytest "elt_test_unary_int32" "$ELT_TEST_DIR/test_unary_int32.py"
+run_pytest "elt_test_unary_minimum" "$ELT_TEST_DIR/test_unary_minimum.py"
+run_pytest "elt_test_unary_program_cache" "$ELT_TEST_DIR/test_unary_program_cache.py"
+run_pytest "elt_test_unary_sharding" "$ELT_TEST_DIR/test_unary_sharding.py"
+run_pytest "elt_test_unary_uint16" "$ELT_TEST_DIR/test_unary_uint16.py"
+run_pytest "elt_test_unary_uint32" "$ELT_TEST_DIR/test_unary_uint32.py"
+# partial files: failing param subsets excluded (see deferrals note)
+run_pytest "elt_test_add" "$ELT_TEST_DIR/test_add.py" -k 'not test_add_and_apply_activations and not test_in_place_add_and_apply_activations'
+run_pytest "elt_test_binary_bcast_tcast" "$ELT_TEST_DIR/test_binary_bcast_tcast.py"
+run_pytest "elt_test_binary_composite" "$ELT_TEST_DIR/test_binary_composite.py"
+run_pytest "elt_test_binary_fp32" "$ELT_TEST_DIR/test_binary_fp32.py" -k 'not test_binary_div_edge_case_ttnn'
+run_pytest "elt_test_binary_int32" "$ELT_TEST_DIR/test_binary_int32.py"
+run_pytest "elt_test_divide" "$ELT_TEST_DIR/test_divide.py"
+run_pytest "elt_test_binaryng_ND" "$ELT_TEST_DIR/test_binaryng_ND.py"
+run_pytest "elt_test_binaryng_fp32" "$ELT_TEST_DIR/test_binaryng_fp32.py"
+run_pytest "elt_test_composite" "$ELT_TEST_DIR/test_composite.py"
+run_pytest "elt_test_elt_binary" "$ELT_TEST_DIR/test_elt_binary.py"
+run_pytest "elt_test_exp2" "$ELT_TEST_DIR/test_exp2.py" -k 'not test_exp2_special_values'
+run_pytest "elt_test_remainder" "$ELT_TEST_DIR/test_remainder.py" -k 'not test_remainder_scalar'
+run_pytest "elt_test_sub" "$ELT_TEST_DIR/test_sub.py"
+run_pytest "elt_test_ternary" "$ELT_TEST_DIR/test_ternary.py"
+run_pytest "elt_test_typecast_int" "$ELT_TEST_DIR/test_typecast_int.py"
+run_pytest "elt_test_unary_fp32" "$ELT_TEST_DIR/test_unary_fp32.py"
+run_pytest "elt_test_tanh_accuracy" "$ELT_TEST_DIR/test_tanh_accuracy.py"
+run_pytest "elt_test_tanh_fw_ulp" "$ELT_TEST_DIR/test_tanh_fw_ulp.py"
+run_pytest "elt_test_tanh_bw_ulp" "$ELT_TEST_DIR/test_tanh_bw_ulp.py"
+run_pytest "elt_test_gelu_bw_ulp" "$ELT_TEST_DIR/test_gelu_bw_ulp.py" -k 'not test_negative_values and not test_gelu_bw_ulp_summary'
+run_pytest "elt_test_gelu_bw_main_ulp" "$ELT_TEST_DIR/test_gelu_bw_main_ulp.py" -k 'not test_negative_values and not test_gelu_bw_ulp_summary'
+run_pytest "elt_test_unary_maximum" "$ELT_TEST_DIR/test_unary_maximum.py" -k 'not test_unary_max_fill_val_bf16'
+run_pytest "elt_test_where" "$ELT_TEST_DIR/test_where.py" -k 'not test_div_edgcase and not test_where_TSS_float_types and not test_where_subcore_grid and not test_where_tst and not test_where_tts'
+run_pytest "elt_test_unary_pow" "$ELT_TEST_DIR/test_unary_pow.py" --deselect "tests/ttnn/unit_tests/operations/eltwise/test_unary_pow.py::test_pow[exponent=-3.56]" --deselect "tests/ttnn/unit_tests/operations/eltwise/test_unary_pow.py::test_power_as_activation[op_type=UnaryOpType.POWER-exponent=0]"
+# --- end #60 eltwise bring-up ---
+
 
 
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"

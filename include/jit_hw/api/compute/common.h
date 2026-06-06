@@ -290,6 +290,23 @@ inline bool cb_is_uint16_format(uint32_t cb_id) {
     return cb_data_format(cb_id) == static_cast<uint8_t>(DataFormat::UInt16);
 }
 
+// Block-float formats emule does not encode/decode (only Bfp8_b / Bfp4_b are
+// supported). Without this guard they fall through to the bf16 path and produce
+// silent garbage; abort with a clear message instead.
+inline void __emule_check_blockfloat_supported(uint32_t cb_id, const char* caller) {
+    const uint8_t fmt = cb_data_format(cb_id);
+    const bool unsupported = fmt == static_cast<uint8_t>(DataFormat::Bfp8)
+                          || fmt == static_cast<uint8_t>(DataFormat::Bfp4)
+                          || fmt == static_cast<uint8_t>(DataFormat::Bfp2)
+                          || fmt == static_cast<uint8_t>(DataFormat::Bfp2_b);
+    if (unsupported) {
+        fprintf(stderr, "[EMULE] %s: unsupported block-float format %u on CB %u "
+                        "(only Bfp8_b/Bfp4_b are emulated)\n",
+                caller, static_cast<unsigned>(fmt), static_cast<unsigned>(cb_id));
+        std::abort();
+    }
+}
+
 // pack_dst_to_buf: PACK row-major DST → nfaces CB with L1 accumulation support.
 // When __emule_l1_acc_enabled, adds DST to existing CB contents instead of overwriting.
 //
@@ -298,6 +315,7 @@ inline bool cb_is_uint16_format(uint32_t cb_id) {
 // nfaces layout to use. For rows<32, 2 column-faces of rows×16 instead of 4
 // face-packed 16×16.
 inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
+    __emule_check_blockfloat_supported(ocb, "pack_dst_to_buf");
     if (cb_is_bfp4_b_format(ocb)) {
         // Bfp4_b: 64 face-row exponents + 512 mantissa bytes (two 4-bit elements
         // per byte). Symmetric with __emule_bfp4::to_f32.
@@ -605,6 +623,7 @@ ALWI void pack_tile_block(uint32_t ifrom_dst, uint32_t ocb, uint32_t ntiles) {
 // path); both are layout-identical 1024-element float tiles. Format-aware:
 // bf16 (page_size ≤ 2048) or raw 32-bit (page_size > 2048).
 inline void __emule_unpack_cb_tile_to(uint32_t icb, uint32_t itile, float* out) {
+    __emule_compute::__emule_check_blockfloat_supported(icb, "__emule_unpack_cb_tile_to");
     uint8_t* buf = __emule_compute::cb_read_ptr_at(icb, itile);
     if (__emule_compute::cb_is_bfp4_b_format(icb)) {
         // Bfp4_b: UNPACK nfaces→row-major + decode shared exponent + 3-bit
