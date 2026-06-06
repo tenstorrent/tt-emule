@@ -33,12 +33,9 @@
 //   exp_out = max of the elements' fp32 exponent bytes  (treat 0.0 as exp 0)
 //   per element:
 //     significand_24  = (1 << 23) | (bits & 0x7FFFFF)  // restore implicit 1
-//     shift_amount    = exp_out - elem_exp + 17        // 17 lands bit-23 → bit-6
-//     raw_man         = (significand_24 >> shift_amount) & 0x7F  (clamp shift ≥31 to 0)
+//     align to exp_out (truncating), then round the 7-bit mantissa to nearest,
+//     ties to even, and saturate — matches silicon convert_u32_to_bfp.
 //     byte            = (sign << 7) | raw_man
-//
-// Validated against tt-metal's pack_as_bfp8_tiles/unpack_bfp8_tiles_into_float_vec
-// by tt-emule/tests/bfp8_roundtrip_test.cpp (bit-exact lane-by-lane).
 
 #include <cstdint>
 #include <cstring>
@@ -107,28 +104,32 @@ inline void encode_face_row(const float in16[16], uint8_t& exp_out, uint8_t mant
     }
     exp_out = static_cast<uint8_t>(max_exp);
 
-    // Pass 2: encode each element relative to the shared exponent.
+    // Pass 2: encode each element relative to the shared exponent. Mirrors
+    // silicon convert_u32_to_bfp (blockfloat_common.cpp): align to the shared
+    // exponent (truncating), then round the 7-bit mantissa to nearest, ties to
+    // even, and saturate. (Truncating the round drifts ~1 ULP — issue #51.)
+    constexpr uint32_t SHIFT = 17u;             // 24-bit significand -> 7-bit mantissa
+    constexpr uint32_t TIE   = 1u << (SHIFT - 1);
+    constexpr uint32_t MASK  = (1u << SHIFT) - 1u;
+    constexpr uint32_t MAXV  = 0x7Fu;
     for (int k = 0; k < 16; ++k) {
         uint32_t bits;
         std::memcpy(&bits, &in16[k], sizeof(bits));
-        const uint32_t sign = (bits >> 31) & 0x1u;
-        const uint32_t exp  = (bits >> 23) & 0xFFu;
-        const uint32_t mant = bits & 0x7FFFFFu;
+        uint32_t sign      = (bits >> 31) & 0x1u;
+        const uint32_t exp = (bits >> 23) & 0xFFu;
 
         uint32_t raw_man = 0;
-        if ((bits & 0x7FFFFFFFu) != 0) {
-            // Reconstruct 24-bit significand with implicit leading 1.
-            const uint32_t signif24 = (1u << 23) | mant;
-            // Shift right by 17 + (max_exp - exp) to land bit 23 of signif24
-            // at bit 6 of the 7-bit raw mantissa. If the shift is ≥ 32 or
-            // exp > max_exp (shouldn't happen since max_exp is the max), the
-            // result rounds to zero.
-            const uint32_t exp_delta = max_exp - exp;
-            const uint32_t shift_amt = 17u + exp_delta;
-            if (shift_amt < 32u) {
-                raw_man = (signif24 >> shift_amt) & 0x7Fu;
-            }
+        if (exp != 0) {  // zero / denormal encode to 0 (silicon returns 0)
+            uint32_t m = (1u << 23) | (bits & 0x7FFFFFu);
+            uint32_t exp_diff = max_exp - exp;
+            while (exp_diff > 31u) { m >>= 31; exp_diff -= 31u; }  // align (truncate)
+            m >>= exp_diff;
+            const uint32_t rv = m & MASK;                          // round-to-nearest-even
+            m >>= SHIFT;
+            if (rv > TIE || (rv == TIE && (m & 1u))) ++m;
+            raw_man = (m > MAXV) ? MAXV : m;
         }
+        if (raw_man == 0) sign = 0;
         mant_out[k] = static_cast<uint8_t>((sign << 7) | raw_man);
     }
 }

@@ -19,8 +19,9 @@
 //
 // Decode (per element): same shift-normalize as Bfp8_b but on a 3-bit mantissa
 // (normalize until bit 2 set, strip leading 1, place at bits 22:20).
-// Encode (per face-row of 16): shared exp = max fp32 exponent; per element take
-// the top 3 bits of the 24-bit significand (shift 21 + (max_exp - exp)).
+// Encode (per face-row of 16): shared exp = max fp32 exponent; per element
+// align the 24-bit significand to it (truncating), then round to a 3-bit
+// mantissa (nearest, ties to even) and saturate — matches silicon.
 
 #include <cstdint>
 #include <cstring>
@@ -73,23 +74,32 @@ inline void encode_face_row(const float in16[16], uint8_t& exp_out, uint8_t pack
     }
     exp_out = static_cast<uint8_t>(max_exp);
 
+    // Per element: align to the shared exponent (truncating), then round the
+    // 3-bit mantissa to nearest, ties to even, and saturate — matches silicon
+    // convert_u32_to_bfp (truncating the round drifts ~1 ULP, issue #51).
+    constexpr uint32_t SHIFT = 21u;             // 24-bit significand -> 3-bit mantissa
+    constexpr uint32_t TIE   = 1u << (SHIFT - 1);
+    constexpr uint32_t MASK  = (1u << SHIFT) - 1u;
+    constexpr uint32_t MAXV  = 0x7u;
     for (int j = 0; j < 8; ++j) packed_out[j] = 0;
     for (int k = 0; k < 16; ++k) {
         uint32_t bits;
         std::memcpy(&bits, &in16[k], sizeof(bits));
-        const uint32_t sign = (bits >> 31) & 0x1u;
-        const uint32_t exp  = (bits >> 23) & 0xFFu;
-        const uint32_t mant = bits & 0x7FFFFFu;
+        uint32_t sign      = (bits >> 31) & 0x1u;
+        const uint32_t exp = (bits >> 23) & 0xFFu;
 
         uint32_t raw_man = 0;
-        if ((bits & 0x7FFFFFFFu) != 0) {
-            const uint32_t signif24  = (1u << 23) | mant;
-            const uint32_t exp_delta = max_exp - exp;
-            const uint32_t shift_amt = 21u + exp_delta;  // 24 - 3 mantissa bits
-            if (shift_amt < 32u) {
-                raw_man = (signif24 >> shift_amt) & 0x7u;
-            }
+        if (exp != 0) {  // zero / denormal encode to 0 (silicon returns 0)
+            uint32_t m = (1u << 23) | (bits & 0x7FFFFFu);
+            uint32_t exp_diff = max_exp - exp;
+            while (exp_diff > 31u) { m >>= 31; exp_diff -= 31u; }  // align (truncate)
+            m >>= exp_diff;
+            const uint32_t rv = m & MASK;                          // round-to-nearest-even
+            m >>= SHIFT;
+            if (rv > TIE || (rv == TIE && (m & 1u))) ++m;
+            raw_man = (m > MAXV) ? MAXV : m;
         }
+        if (raw_man == 0) sign = 0;
         const uint8_t nib = static_cast<uint8_t>((sign << 3) | raw_man);
         if (k & 1) {
             packed_out[k >> 1] |= static_cast<uint8_t>(nib << 4);
