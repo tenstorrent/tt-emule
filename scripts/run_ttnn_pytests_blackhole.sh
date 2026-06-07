@@ -357,6 +357,7 @@ run_pytest "reduce_test_topk_dtype_raise" "$REDUCE_TEST_DIR/test_topk.py::test_t
 # non-deterministically hangs/segfaults (flaky), unsafe for regression.
 run_pytest "pool_test_global_avg_pool2d" "$POOL_TEST_DIR/test_global_avg_pool2d.py"
 run_pytest "pool_test_upsample_nearest"  "$POOL_TEST_DIR/test_upsample.py" -k 'not test_bilinear_multi_core'
+run_pytest "pool_test_rotate_nearest"    "$POOL_TEST_DIR/test_rotate.py" -k 'not bilinear'
 
 run_pytest "matmul_test_linear" "$MATMUL_TEST_DIR/test_linear.py" -k 'test_linear_fp32_acc or test_vector_linear'
 
