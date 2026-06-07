@@ -192,5 +192,17 @@ inline void llk_pack_init(uint32_t /*ocb*/) {}
 template <bool Untilize, bool IsTilize>
 inline void llk_pack_init(uint32_t /*ocb*/) {}
 
+// LLK pack-untilize init + pack data-format reconfig (pool is_output_tiled path).
+// HW packer config — no-ops in emule (pack untilize runs in pack_untilize_dest).
+template <std::uint32_t block_ct_dim = 8, std::uint32_t full_ct_dim = block_ct_dim,
+          bool diagonal = false, bool narrow_row = false,
+          std::uint32_t row_num_datums = 32>
+inline void llk_pack_untilize_init(uint32_t /*output*/, uint32_t /*face_r_dim*/ = 16,
+                                   uint32_t /*num_faces*/ = 4) {}
+
+template <bool is_fp32_dest_acc_en = false>
+inline void llk_pack_reconfig_data_format_disaggregated(
+    uint32_t /*new_output*/, uint32_t /*face_r_dim*/ = 16, uint32_t /*num_faces*/ = 4) {}
+
 // Pack-side dest sync stubs.
 // llk_packer_wait_for_math_done lives in llk_sync_stubs.h.

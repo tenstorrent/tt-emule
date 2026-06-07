@@ -15,7 +15,11 @@
 #include <cstdint>
 #include <cstddef>
 #include "tt_emule/device.hpp"
-#include "jit_hw/experimental/noc.h"
+// NOTE: deliberately does NOT include experimental/noc.h. This header is pulled
+// (via api/core_local_mem.h) into the device-2.0 pool TUs that want the GLOBAL
+// ::Noc; pulling experimental/noc.h here would leak experimental::Noc and shadow
+// ::Noc inside `namespace experimental`. The CoreLocalMem noc_traits_t<> for the
+// global ::Noc is supplied by api/core_local_mem.h.
 
 extern thread_local tt_emule::Core* __core;
 extern thread_local uint8_t* __emule_bridge_l1;
@@ -77,25 +81,8 @@ private:
     uintptr_t address_;
 };
 
-template <typename T, typename AddressType>
-struct noc_traits_t<CoreLocalMem<T, AddressType>> {
-    struct src_args_type {
-        uintptr_t offset_bytes = 0;
-    };
-    struct dst_args_type {
-        uintptr_t offset_bytes = 0;
-    };
-    struct dst_args_mcast_type {};
-
-    template <Noc::AddressType AT>
-    static uintptr_t src_addr(const CoreLocalMem<T, AddressType>& src, const Noc&, const src_args_type& args) {
-        return static_cast<uintptr_t>(src.get_address()) + args.offset_bytes;
-    }
-
-    template <Noc::AddressType AT>
-    static uintptr_t dst_addr(const CoreLocalMem<T, AddressType>& dst, const Noc&, const dst_args_type& args) {
-        return static_cast<uintptr_t>(dst.get_address()) + args.offset_bytes;
-    }
-};
+// noc_traits_t<CoreLocalMem<>> for the global ::Noc is defined in
+// api/core_local_mem.h (the only includer of this header). No experimental::Noc
+// specialization here — nothing pairs CoreLocalMem with experimental::Noc.
 
 }  // namespace experimental

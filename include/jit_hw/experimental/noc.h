@@ -10,6 +10,10 @@
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
+// NocOptions / NocOptVals / has_flag + the noc_async_*_barrier_with_trid bridge
+// fns (used by the templated barriers below). The new device-2.0 surface
+// (experimental_device_api.hpp) drives Noc state-reads + barriers via NocOptions.
+#include "jit_hw/api/dataflow/noc.h"
 
 extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src,
                                         uint32_t size, bool include_self);
@@ -125,7 +129,15 @@ public:
         }
     }
 
-    void async_read_barrier() const {}
+    // Templated on NocOptions to match the device-2.0 surface
+    // (experimental_device_api.hpp does noc.async_read_barrier<NocOptions::TXN_ID>({.trid})).
+    // Callable with no args (defaults) for the legacy barrier.
+    template <NocOptions opts = NocOptions::DEFAULT>
+    void async_read_barrier(const NocOptVals& noc_opts = {}) const {
+        if constexpr (has_flag(opts, NocOptions::TXN_ID)) {
+            noc_async_read_barrier_with_trid(noc_opts.trid, noc_id_);
+        }
+    }
     void async_write_barrier() const {}
     void async_writes_flushed() const {}
     void async_atomic_barrier() const {}
@@ -134,7 +146,7 @@ public:
     // Stages NOC read state for a subsequent async_read_with_state call.
     // Mirrors upstream contract: stash size; src is recomputed on each
     // async_read_with_state call from its `src` argument.
-    template <VcSelection vc_selection = VcSelection::DEFAULT,
+    template <NocOptions opts = NocOptions::DEFAULT,
               uint32_t max_page_size = NOC_MAX_BURST_SIZE + 1,
               typename Src>
     void set_async_read_state(
@@ -149,7 +161,7 @@ public:
     // transfer fits in one packet and the size is taken from the cached
     // state; otherwise the size_bytes argument is used.  In both cases the
     // src is always recomputed from the `src` argument.
-    template <VcSelection vc_selection = VcSelection::DEFAULT,
+    template <NocOptions opts = NocOptions::DEFAULT,
               uint32_t max_page_size = NOC_MAX_BURST_SIZE + 1,
               typename Src,
               typename Dst>
@@ -176,3 +188,10 @@ private:
 };
 
 }  // namespace experimental
+
+// Pull in the endpoint types + their noc_traits_t specializations (UnicastEndpoint,
+// MulticastEndpoint, AllocatorBank) so that wherever this header is included, the
+// experimental:: endpoint types and their traits are coherent — preventing the
+// mixed-resolution where experimental::noc_traits_t<UnicastEndpoint> would hit the
+// unspecialised primary. Included at the END so endpoints.h sees the complete Noc.
+#include "jit_hw/experimental/endpoints.h"

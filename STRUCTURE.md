@@ -50,10 +50,10 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/llk_defs.h` — aggregator: includes `llk_types.h`, `api/compute/common.h`, `nfaces.h`, `firmware_common.h`, `llk_state.h`
 - `include/jit_hw/llk_math_eltwise_binary.h` — empty shim (pragma-once only)
 - `include/jit_hw/llk_math_eltwise_unary_datacopy.h` — `enum class DataCopyType`; `copy_tile` datacopy helper
-- `include/jit_hw/llk_pack.h` — `__llk_pack_tiled`, `__llk_pack_untilize`
+- `include/jit_hw/llk_pack.h` — `__llk_pack_tiled`, `__llk_pack_untilize`; no-op stubs `llk_pack_init`, `llk_pack_untilize_init`, `llk_pack_reconfig_data_format_disaggregated`
 - `include/jit_hw/llk_sync_stubs.h` — `llk_wait_tiles`/`llk_pop_tiles`/`llk_push_tiles`/`llk_wait_for_free_tiles`; `namespace p_stall`, `semaphore`
 - `include/jit_hw/llk_types.h` — `enum class DstSync`, `MathFidelity`, `PoolType`, `ReduceDim`, `DataCopyType`; macros `FACE_R_DIM`, `TILE_C_DIM`
-- `include/jit_hw/llk_unpack_a.h` — `llk_unpack_tilize_block`; unpack tilize/untilize state setters
+- `include/jit_hw/llk_unpack_a.h` — `llk_unpack_tilize_block`, `llk_unpack_tilizeA_B_init` (no-op stub); unpack tilize/untilize state setters
 - `include/jit_hw/risc_common.h` — includes `internal/firmware_common.h`
 
 ## include/jit_hw/api/
@@ -210,7 +210,7 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 ## include/jit_hw/experimental/
 
 - `include/jit_hw/experimental/circular_buffer.h` — `experimental::CircularBuffer`, `struct CircularBufferView`; `enum class AddrSelector`; `noc_traits_t`
-- `include/jit_hw/experimental/core_local_mem.h` — `experimental::CoreLocalMem<>`; `get_unsafe_ptr`; `noc_traits_t`
+- `include/jit_hw/experimental/core_local_mem.h` — `experimental::CoreLocalMem<>`; `get_unsafe_ptr` (noc_traits_t<CoreLocalMem> lives in api/core_local_mem.h)
 - `include/jit_hw/experimental/dataflow_buffer.h` — `experimental::DataflowBuffer`, `struct DFBAccessor`; `dfb_get_write_ptr`/`dfb_get_read_ptr`
 - `include/jit_hw/experimental/endpoints.h` — `experimental::` `struct UnicastEndpoint`/`MulticastEndpoint`/`AllocatorBank`/`ReadSpec`/`WriteSpec`; `enum AllocatorBankType`
 - `include/jit_hw/experimental/kernel_args.h` — `experimental::` `struct RtaArg`/`CrtaArg`/`CtaVal`; `get_arg_addr`, `get_common_arg_addr`

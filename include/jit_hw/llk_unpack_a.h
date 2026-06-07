@@ -65,4 +65,13 @@ inline void llk_unpack_tilize_init(
     uint32_t /*face_r_dim*/ = 16,
     uint32_t /*narrow_tile*/ = 0) {}
 
+// Dual-operand tilize init (pool/upsample tilizeA_B_reduce path). HW unpacker
+// config — no-op in emule (the tilize+reduce math runs in unpack_tilizeA_B_block).
+template <bool neginf_srcA = true, std::uint32_t reload_srcB = true,
+          bool zero_srcA = false, bool zero_srcA_reduce = false>
+inline void llk_unpack_tilizeA_B_init(
+    uint32_t /*operandA*/, uint32_t /*operandB*/, uint32_t /*ct_dim*/,
+    uint32_t /*num_faces*/ = 4, uint32_t /*unpA_face_r_dim*/ = 16,
+    uint32_t /*unpB_face_r_dim*/ = 16) {}
+
 // llk_math_wait_for_dest_available lives in llk_sync_stubs.h.
