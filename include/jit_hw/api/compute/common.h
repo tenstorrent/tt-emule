@@ -265,22 +265,23 @@ inline uint32_t cb_tile_elems(uint32_t cb_id) {
 // Bfp8_b (~1088B) and Bfp4_b (~576B) both fall in the same sub-2048 page range.
 inline uint8_t cb_data_format(uint32_t cb_id) { return ::unpack_src_format[cb_id]; }
 
-// Is this CB using a 32-bit data format (INT32, Float32)?
-// Heuristic: bf16 tiles = 2048 bytes (1024 × 2), 32-bit tiles > 2048.
+// All cb_is_*_format checks are PURE dtype checks via cb_data_format
+// (unpack_src_format[]). No page-size heuristic: a CB's page size does not
+// determine its dtype — e.g. a multi-tile-wide bf16 CB (pool wide tilizeA_B
+// input) has page > 2048 yet is bf16, and Bfp8_b/Bfp4_b share a page range.
+// Invalid (unset) reads as "none of these formats".
+
+// Is this CB using a 32-bit data format (Float32, Int32, UInt32, RawUInt32)?
 inline bool cb_is_32bit_format(uint32_t cb_id) {
-    return __emule_cbs[cb_id].page_size > 2048;
+    const uint8_t fmt = cb_data_format(cb_id);
+    return fmt == static_cast<uint8_t>(DataFormat::Float32)
+        || fmt == static_cast<uint8_t>(DataFormat::Int32)
+        || fmt == static_cast<uint8_t>(DataFormat::UInt32)
+        || fmt == static_cast<uint8_t>(DataFormat::RawUInt32);
 }
 
-// Is this CB using Bfp8_b? Enum-driven (Bfp8_b vs Bfp4_b are indistinguishable
-// by page size alone). Falls back to the page-size heuristic only when the
-// format is unset (Invalid) — standalone builds, which don't exercise Bfp4_b.
 inline bool cb_is_bfp8_b_format(uint32_t cb_id) {
-    const uint8_t fmt = cb_data_format(cb_id);
-    if (fmt != static_cast<uint8_t>(DataFormat::Invalid)) {
-        return fmt == static_cast<uint8_t>(DataFormat::Bfp8_b);
-    }
-    const uint32_t ps = __emule_cbs[cb_id].page_size;
-    return ps > 0 && ps < 2048;
+    return cb_data_format(cb_id) == static_cast<uint8_t>(DataFormat::Bfp8_b);
 }
 
 // Is this CB using Bfp4_b? Enum-only — its page size overlaps Bfp8_b's range.
@@ -573,7 +574,7 @@ ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
 }
 
 // pack_tile: write DST[idst] → CB[ocb] write slot.
-// Format-aware: bf16 (page_size ≤ 2048) or raw 32-bit (page_size > 2048).
+// Format-aware via cb_data_format (bf16 vs raw 32-bit vs block-float).
 // When L1 acc enabled, accumulates into existing CB data instead of overwriting.
 ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
     __emule_dst_check(idst, "pack_tile");
@@ -622,8 +623,8 @@ ALWI void pack_tile_block(uint32_t ifrom_dst, uint32_t ocb, uint32_t ntiles) {
 // __emule_unpack_cb_tile_to: read CB[icb][itile] into a caller-supplied float
 // buffer, with nfaces→row-major conversion. The destination can be either a
 // DST slot (regular copy_tile path) or __emule_src_scratch (binary_dest_reuse_tiles
-// path); both are layout-identical 1024-element float tiles. Format-aware:
-// bf16 (page_size ≤ 2048) or raw 32-bit (page_size > 2048).
+// path); both are layout-identical 1024-element float tiles. Format-aware via
+// cb_data_format (bf16 vs raw 32-bit vs block-float / uint16).
 inline void __emule_unpack_cb_tile_to(uint32_t icb, uint32_t itile, float* out) {
     __emule_compute::__emule_check_blockfloat_supported(icb, "__emule_unpack_cb_tile_to");
     uint8_t* buf = __emule_compute::cb_read_ptr_at(icb, itile);
