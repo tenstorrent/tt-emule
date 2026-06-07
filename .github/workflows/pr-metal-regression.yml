@@ -208,7 +208,7 @@ jobs:
       fail-fast: false
       matrix:
         arch: [wormhole, blackhole]
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5]
     steps:
       - name: Checkout tt-emule (PR)
         uses: actions/checkout@v4
@@ -241,13 +241,13 @@ jobs:
         shell: bash
         run: bash tt-metal/install_dependencies.sh --sfpi
 
-      - name: Run TTNN pytest (${{ matrix.arch }}, shard ${{ matrix.shard }}/4)
+      - name: Run TTNN pytest (${{ matrix.arch }}, shard ${{ matrix.shard }}/5)
         env:
           TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
           BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
           TT_EMULE_ARCH: ${{ matrix.arch }}
           SHARD_INDEX:   ${{ matrix.shard }}
-          SHARD_COUNT:   4
+          SHARD_COUNT:   5
         shell: bash
         run: bash tt-emule/.github/scripts/ci-ttnn-pytests.sh
 
