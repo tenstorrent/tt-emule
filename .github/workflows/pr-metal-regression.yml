@@ -198,7 +198,7 @@ jobs:
           if-no-files-found: warn
 
   ttnn-pytest:
-    name: TTNN Pytests (${{ matrix.arch }}, shard ${{ matrix.shard }}/4)
+    name: TTNN Pytests (${{ matrix.arch }}, shard ${{ matrix.shard }}/5)
     needs: build
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 90
