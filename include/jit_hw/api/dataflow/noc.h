@@ -354,6 +354,12 @@ public:
 
 private:
     uint8_t  noc_id_;
-    mutable uint32_t  cached_size_      = 0;  // for set_async_read_state / set_async_write_state
-    mutable uintptr_t cached_write_dst_ = 0;  // for set_async_write_state
+    // NOC read/write state mirrors per-RISC hardware cmd-buf registers, NOT
+    // per-Noc-object state. Kernel helpers (e.g. experimental_device_api.hpp's
+    // set_read_state / read_with_state, pool clear_out_tiles / zero_out_page)
+    // take `Noc` BY VALUE, so set_async_read_state and async_read_with_state run
+    // on SEPARATE Noc copies — the cached size must persist across copies or the
+    // state-read copies 0 bytes. thread_local = per-RISC, matching silicon.
+    inline static thread_local uint32_t  cached_size_      = 0;
+    inline static thread_local uintptr_t cached_write_dst_ = 0;
 };

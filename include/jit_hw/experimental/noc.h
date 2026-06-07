@@ -183,8 +183,10 @@ public:
 
 private:
     uint8_t noc_id_;
-    // Mutable so the const-qualified state APIs above can write the cache.
-    mutable uint32_t cached_size_ = 0;
+    // Per-RISC NOC read-state register, not per-object: helpers take Noc by value,
+    // so set_async_read_state and async_read_with_state run on separate copies.
+    // thread_local persists the cached size across them (matches HW cmd-buf reg).
+    inline static thread_local uint32_t cached_size_ = 0;
 };
 
 }  // namespace experimental
