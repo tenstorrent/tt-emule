@@ -17,8 +17,15 @@ on:
       - 'docs/**'
       - 'LICENSE*'
       - 'NOTICE'
+      - '.github/CODEOWNERS'
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE*'
+      - 'NOTICE'
+      - '.github/CODEOWNERS'
 
 concurrency:
   group: pr-regression-${{ github.workflow }}-${{ github.ref }}

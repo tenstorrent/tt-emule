@@ -1,0 +1,10 @@
+# tt-emule code owners.
+#
+# Each line is a file pattern followed by one or more owners. Owners are
+# automatically requested for review on pull requests that touch matching paths.
+# Order matters: the LAST matching pattern for a given path takes precedence.
+#
+# The root pattern below makes these the default owners for the entire repo.
+# Add more specific patterns BELOW this line to delegate sub-trees later.
+
+*       @xanderchin @arminaleTT
