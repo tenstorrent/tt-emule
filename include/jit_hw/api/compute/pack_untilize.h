@@ -75,11 +75,12 @@ inline void pack_untilize_dest_init(uint32_t ocb = 0, uint32_t face_r_dim = 16,
 //
 // Silicon's hardware packer reads (block_rt_dim × block_ct_dim) DST tiles
 // and writes them to cb_out untilized in ROW-MAJOR layout: the output
-// region is (block_rt_dim * TILE_DIM) rows × (full_ct_dim * row_cols) cols
-// laid out contiguously, where row_cols = TILE_DIM normally or
-// row_num_datums when narrow_row is set.  This call writes the
-// `block_ct_dim`-wide column-block at column-block index `block_c_index`
-// of the full row.
+// region is (block_rt_dim * rows_per_tile) rows × (full_ct_dim * row_cols) cols
+// laid out contiguously, where rows_per_tile = num_faces_per_rdim_tile *
+// face_r_dim (32 for a full untilize; 1 for pool stick-packing with
+// face_r_dim=1/num_faces=2) and row_cols = TILE_DIM normally or row_num_datums
+// when narrow_row is set.  This call writes the `block_ct_dim`-wide column-block
+// at column-block index `block_c_index` of the full row.
 //
 // The cb's page_size is sync granularity only — it does NOT change the
 // physical L1 layout.  Consumers (writers, downstream CBs) expect
@@ -89,13 +90,20 @@ template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim,
           bool diagonal = false, bool narrow_row = false,
           uint32_t row_num_datums = 32, uint32_t tile_dst_ct_offset = 0, bool dense = false>
 inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
-                                uint32_t block_c_index = 0, uint32_t /*face_r_dim*/ = 16,
-                                uint32_t /*num_faces*/ = 4, uint32_t /*tile_dst_rt_offset*/ = 0) {
+                                uint32_t block_c_index = 0, uint32_t face_r_dim = 16,
+                                uint32_t num_faces = 4, uint32_t /*tile_dst_rt_offset*/ = 0) {
     static_assert(!diagonal, "pack_untilize_dest: diagonal packer mode not modelled");
     static_assert(!dense,    "pack_untilize_dest: dense packer mode not modelled");
 
     constexpr uint32_t TILE_DIM = 32;
     constexpr uint32_t row_cols = narrow_row ? row_num_datums : TILE_DIM;
+    // Rows written per DST tile = num_faces_per_rdim_tile * face_r_dim — mirrors
+    // silicon _llk_pack_untilize_ (face-group loop × MOP_OUTER_LOOP=face_r_dim).
+    // Pool stick-pack (face_r_dim=1, num_faces=2) → 1 row (DST row 0); full
+    // untilize (face_r_dim=16, num_faces=4) → 32 (unchanged). Writing TILE_DIM
+    // unconditionally over-wrote 31 stale rows into adjacent output sticks.
+    const uint32_t num_faces_per_rdim_tile = (num_faces > 2) ? 2u : 1u;
+    const uint32_t rows_per_tile = num_faces_per_rdim_tile * face_r_dim;
 
     // Format dispatch matches `pack_dst_to_buf` / `__llk_pack_untilize`:
     // silicon's packer engine is reconfigured per OCB format via
@@ -109,7 +117,7 @@ inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
     uint8_t* const base           = __emule_compute::cb_write_ptr_at(ocb, 0);
 
     auto target = [&](uint32_t rt, uint32_t ct, uint32_t r, uint32_t c) -> uint8_t* {
-        const uint32_t out_row = rt * TILE_DIM + r;
+        const uint32_t out_row = rt * rows_per_tile + r;
         const uint32_t out_col = (block_c_index * block_ct_dim + ct) * row_cols + c;
         return base + out_row * full_row_bytes + out_col * elem_size;
     };
@@ -117,9 +125,13 @@ inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
     for (uint32_t rt = 0; rt < block_rt_dim; ++rt) {
         for (uint32_t ct = 0; ct < block_ct_dim; ++ct) {
             const uint32_t dst_idx = tile_dst_ct_offset + rt * block_ct_dim + ct;
-            for (uint32_t r = 0; r < TILE_DIM; ++r) {
+            for (uint32_t r = 0; r < rows_per_tile; ++r) {
+                // Face-group source: first face_r_dim output rows come from DST
+                // rows [0,face_r_dim); the 2nd group (num_faces==4) from the
+                // bottom face at DST row 16. For face_r_dim==16 this is flat (r).
+                const uint32_t src_row = (r < face_r_dim) ? r : (16u + (r - face_r_dim));
                 for (uint32_t c = 0; c < row_cols; ++c) {
-                    const float src = __emule_dst[dst_idx][r * TILE_DIM + c];
+                    const float src = __emule_dst[dst_idx][src_row * TILE_DIM + c];
                     uint8_t* dst_ptr = target(rt, ct, r, c);
                     if (is_uint16) {
                         // uint16 output: write low 16 bits of DST int32 bit pattern.
