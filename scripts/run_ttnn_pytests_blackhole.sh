@@ -198,10 +198,10 @@ run_pytest "bf_test_to_layout"             "$BF_TEST_DIR/test_to_layout.py" \
     -k 'test_int_untilize or test_tensor_to_tile_layout_shape_verification or test_to_from_01d or test_to_layout_low_perf or test_to_layout_pad_value_on_host or test_to_layout_page_error or test_to_layout_wide_tensor or test_untilize_w1 or test_untilize_w2 or test_untilize_w3 or test_untilize_w4 or test_wan22_failure'
 
 run_pytest "bf_test_to_memory_config"      "$BF_TEST_DIR/test_to_memory_config.py" \
-    -k '(test_to_memory_config_block_sharded or test_to_memory_config_rm_interleaved_to_legacy_2D_sharded_large_row or test_to_memory_config_uint16) or (test_to_memory_config and not test_to_memory_config_)'
+    -k '(test_to_memory_config_block_sharded or test_to_memory_config_rm_interleaved_to_legacy_2D_sharded_large_row or test_to_memory_config_uint16) or (test_to_memory_config and not test_to_memory_config_)'  # #73 timeout-rerun: WH-promoted (542/0) but BH has multiple BH-specific failures — keep filter on BH
 
 run_pytest "bf_test_copy"                  "$BF_TEST_DIR/test_copy.py" \
-    -k '((test_copy_rm_interleaved_to_legacy_2D_sharded_large_row or test_copy_uint16) and not test_copy_uint16_to_memory_config) or (test_copy and not test_copy_)'
+    -k '((test_copy_rm_interleaved_to_legacy_2D_sharded_large_row or test_copy_uint16) and not test_copy_uint16_to_memory_config) or (test_copy and not test_copy_)'  # #73 timeout-rerun: WH-promoted (542/0) but BH has multiple BH-specific failures — keep filter on BH
 
 # test_pad_subcoregrids: round 7 win — 57/58 pass with the IS_NOT_POW2 fix +
 # InterleavedPow2AddrGenFast shim.
@@ -313,7 +313,7 @@ run_pytest "elt_test_unary_pow" "$ELT_TEST_DIR/test_unary_pow.py" --deselect "te
 
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
 
-run_pytest "dm_test_pad_not_sub_core" "$DM_TEST_DIR/test_pad.py::test_pad_tile" "$DM_TEST_DIR/test_pad.py::test_pad_rm" "$DM_TEST_DIR/test_pad.py::test_pad_with_program_cache" -k 'not sub_core'
+run_pytest "dm_test_pad" "$DM_TEST_DIR/test_pad.py"  # promoted (#73 timeout-rerun): 506 passed, 63 skipped, 8 xfailed, ~4 min (renamed from dm_test_pad_not_sub_core)
 run_pytest "dm_test_pad" "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width" "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width_with_program_cache" "$DM_TEST_DIR/test_pad.py::test_pad_program_cache_hit_updates_pad_value_buffer" "$DM_TEST_DIR/test_pad.py::test_pad_padding_validation_front_pad_not_supported" "$DM_TEST_DIR/test_pad.py::test_pad_padding_validation_length"
 
 run_pytest "dm_test_permute_not_sharded" "$DM_TEST_DIR/test_permute.py::test_permute_4d_fixed_w" "$DM_TEST_DIR/test_permute.py::test_permute_4d_cn" "$DM_TEST_DIR/test_permute.py::test_permute_4d_cnwh" "$DM_TEST_DIR/test_permute.py::test_permute_4d_wh" "$DM_TEST_DIR/test_permute.py::test_permute_5d" "$DM_TEST_DIR/test_permute.py::test_permute_5d_wyh" "$DM_TEST_DIR/test_permute.py::test_permute_5d_xh_pad" "$DM_TEST_DIR/test_permute.py::test_permute_8d_swapped" "$DM_TEST_DIR/test_permute.py::test_permutations_5d_fixed_w" "$DM_TEST_DIR/test_permute.py::test_permute_identity" -k 'not sharded'
@@ -326,7 +326,7 @@ run_pytest "dm_test_untilize_same_volume" "$DM_TEST_DIR/test_untilize.py::test_u
 # 8 residual ATOL≈3.2 failures on tensor_shape=[4,4,256,512]; the substring
 # filter also excludes the matching _uneven_input_shard_spec variant.
 # Adds ~418 of 476 passing sharded variants.
-run_pytest "dm_test_untilize_sharded"       "$DM_TEST_DIR/test_untilize.py" -k 'sharded and not multi_core_sharded_to_interleaved and not multi_core_nd_sharded_to_interleaved'
+run_pytest "dm_test_untilize"               "$DM_TEST_DIR/test_untilize.py"  # promoted (#73 timeout-rerun): 795 passed, ~6.7 min (renamed from dm_test_untilize_sharded)
 
 run_pytest "reduce_test_reduction_mean" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean_scaling" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean_scaling_factor"
 run_pytest "reduce_test_reduction_not_sharded" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_2d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_3d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_4d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_sum_2d_tensor_dims" -k 'not sharded'
