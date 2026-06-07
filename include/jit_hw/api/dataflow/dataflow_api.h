@@ -21,6 +21,10 @@
 #include "jit_hw/jit_kernel_stubs.hpp"
 #include "jit_hw/api/cb_api.h"
 #include "jit_hw/internal/dataflow/dataflow_api_addrgen.h"
+// host+device shared constants (VALID/INVALID semaphore sentinels, etc.).
+// Mirrors silicon api/dataflow/dataflow_api.h which #includes this — kernels
+// (e.g. topk reader/writer) use VALID/INVALID unqualified via this edge.
+#include "jit_hw/hostdevcommon/common_values.hpp"
 // noc_parameters.h must be in scope before tensor_accessor.h so that the
 // NOC_UNICAST_ADDR_X/Y macros (used at upstream tensor_accessor.h:235) resolve.
 #include "noc/noc_parameters.h"

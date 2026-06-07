@@ -38,6 +38,19 @@ public:
     uint32_t get_write_ptr() const { return ::get_write_ptr(cb_id_); }
     uint32_t get_read_ptr()  const { return ::get_read_ptr(cb_id_); }
 
+    // Read one uint32 element (raw, un-permuted) from a tile at the front of the
+    // CB. Mirrors silicon CircularBuffer::read_tile_value (api/dataflow/
+    // circular_buffer.h): byte addr = fifo_rd_ptr + page_size*tile_index, then
+    // index element_offset uint32s in. Used by reduction/manual_seed compute
+    // kernels. emule reads directly (no UNPACK→mailbox→MATH/PACK relay needed).
+    uint32_t read_tile_value(uint32_t tile_index, uint32_t element_offset) const {
+        uint8_t* p = __emule_local_l1_to_ptr(
+            get_read_ptr() + tile_index * get_tile_size() + element_offset * sizeof(uint32_t));
+        uint32_t v;
+        std::memcpy(&v, p, sizeof(uint32_t));
+        return v;
+    }
+
     // ---- Tile metadata ----
     // Provided unconditionally (real header guards with DATA_FORMATS_DEFINED,
     // but JIT kernels in the regression call these without that guard set).
