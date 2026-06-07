@@ -31,6 +31,9 @@ REDUCE_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/reduce"
 MATMUL_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/matmul"
 ELT_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/eltwise"
 FUSED_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/fused"
+TENSOR_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/tensor"
+PCA_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/per_core_allocation"
+BENCH_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/benchmarks"
 
 GTEST_XML_DIR="${GTEST_XML_DIR:-}"
 [ -n "$GTEST_XML_DIR" ] && mkdir -p "$GTEST_XML_DIR"
@@ -129,8 +132,8 @@ run_pytest "dm_test_clone" "$DM_TEST_DIR/test_clone.py::test_clone_shape" "$DM_T
 run_pytest "dm_test_creation" "$DM_TEST_DIR/test_creation.py::test_ones" "$DM_TEST_DIR/test_creation.py::test_zeros" "$DM_TEST_DIR/test_creation.py::test_full" "$DM_TEST_DIR/test_creation.py::test_arange_defaults" "$DM_TEST_DIR/test_creation.py::test_arange_tile_layout" "$DM_TEST_DIR/test_creation.py::test_empty" "$DM_TEST_DIR/test_creation.py::test_arange" "$DM_TEST_DIR/test_creation.py::test_full_with_opt_tensor" "$DM_TEST_DIR/test_creation.py::test_full_like" "$DM_TEST_DIR/test_creation.py::test_full_like_bf8b" "$DM_TEST_DIR/test_creation.py::test_empty_like" "$DM_TEST_DIR/test_creation.py::test_zeros_like" "$DM_TEST_DIR/test_creation.py::test_ones_like" "$DM_TEST_DIR/test_creation.py::test_zeros_bfp8" "$DM_TEST_DIR/test_creation.py::test_zeros_bfp4"
 
 # -k filter entries (capture passing subsets within partial-pass files)
-run_pytest "dm_test_repeat"                  "$DM_TEST_DIR/test_repeat.py" -k 'not BFLOAT8_B and not test_pc_with_different'
-run_pytest "dm_test_gather"                  "$DM_TEST_DIR/test_gather.py" -k 'not test_gather_general'
+run_pytest "dm_test_repeat"                  "$DM_TEST_DIR/test_repeat.py"  # promoted (issue #73): 109 passed, 242 skipped
+run_pytest "dm_test_gather"                  "$DM_TEST_DIR/test_gather.py"  # promoted (issue #73): 45 passed
 run_pytest "dm_test_concat_5d"               "$DM_TEST_DIR/test_concat.py" -k 'test_concat_5d'
 run_pytest "dm_test_concat_many_inputs"      "$DM_TEST_DIR/test_concat.py" -k 'test_concat_many_inputs'
 run_pytest "dm_test_fill_pad_float"          "$DM_TEST_DIR/test_fill_pad.py" -k 'test_fill_pad_float'
@@ -171,11 +174,9 @@ run_pytest "bf_test_comparison_mode"      "$BF_TEST_DIR/test_comparison_mode.py"
 # Partial-pass entries: -k filters exclude known-failing variants (test_chunk
 # and test_multi_device intentionally omitted).
 
-run_pytest "bf_test_to_and_from_device"    "$BF_TEST_DIR/test_to_and_from_device.py" \
-    -k 'not test_to_and_from_multiple_times'
+run_pytest "bf_test_to_and_from_device"    "$BF_TEST_DIR/test_to_and_from_device.py"  # promoted (issue #73): 20 passed
 
-run_pytest "bf_test_graph_trace_utils"     "$BF_TEST_DIR/test_graph_trace_utils.py" \
-    -k 'not test_no_dispatch_vs_normal_mode_comparison and not test_normal_mode_shows_real_addresses'
+run_pytest "bf_test_graph_trace_utils"     "$BF_TEST_DIR/test_graph_trace_utils.py"  # promoted (issue #73): 14 passed
 
 # pytest -k can't match `=`/`.` in parametrize names
 run_pytest "bf_test_graph_capture"         "$BF_TEST_DIR/test_graph_capture.py" \
@@ -185,8 +186,7 @@ run_pytest "bf_test_graph_capture"         "$BF_TEST_DIR/test_graph_capture.py" 
 run_pytest "bf_test_graph_report"          "$BF_TEST_DIR/test_graph_report.py" \
     -k 'not TestDurationExtraction and not TestFastOperationGraphTracking and not test_resnet50_e2e_graph_capture'
 
-run_pytest "bf_test_reshape"               "$BF_TEST_DIR/test_reshape.py" \
-    -k 'not test_reshape_block_shard and not test_reshape_cw_div2_rm and not test_reshape_cw_mul2_rm and not test_reshape_height_shard and not test_reshape_hw_div2_rm and not test_reshape_hw_mul2_rm and not test_reshape_hw_rm_with_program_cache and not test_reshape_sharded_permute_rm and not test_reshape_sharded_rm and not test_reshape_width_shard and not test_reshape_tile'
+run_pytest "bf_test_reshape"               "$BF_TEST_DIR/test_reshape.py"  # promoted (issue #73): 320 passed
 
 run_pytest "bf_test_roll"                  "$BF_TEST_DIR/test_roll.py" \
     -k 'test_roll_tile_padding'
@@ -197,15 +197,13 @@ run_pytest "bf_test_tilize_untilize_2D"    "$BF_TEST_DIR/test_tilize_untilize_2D
 run_pytest "bf_test_to_layout"             "$BF_TEST_DIR/test_to_layout.py" \
     -k 'test_int_untilize or test_tensor_to_tile_layout_shape_verification or test_to_from_01d or test_to_layout_low_perf or test_to_layout_pad_value_on_host or test_to_layout_page_error or test_to_layout_wide_tensor or test_untilize_w1 or test_untilize_w2 or test_untilize_w3 or test_untilize_w4 or test_wan22_failure'
 
-run_pytest "bf_test_to_memory_config"      "$BF_TEST_DIR/test_to_memory_config.py" \
-    -k '(test_to_memory_config_block_sharded or test_to_memory_config_rm_interleaved_to_legacy_2D_sharded_large_row or test_to_memory_config_uint16) or (test_to_memory_config and not test_to_memory_config_)'
+run_pytest "bf_test_to_memory_config"      "$BF_TEST_DIR/test_to_memory_config.py"  # promoted (#73 timeout-rerun): 542 passed, ~4.8 min
 
-run_pytest "bf_test_copy"                  "$BF_TEST_DIR/test_copy.py" \
-    -k '((test_copy_rm_interleaved_to_legacy_2D_sharded_large_row or test_copy_uint16) and not test_copy_uint16_to_memory_config) or (test_copy and not test_copy_)'
+run_pytest "bf_test_copy"                  "$BF_TEST_DIR/test_copy.py"  # promoted (#73 timeout-rerun): 542 passed, ~4.3 min
 
 # test_pad_subcoregrids: round 7 win — 57/58 pass with the IS_NOT_POW2 fix +
 # InterleavedPow2AddrGenFast shim.
-run_pytest "dm_test_pad_subcoregrids" "$DM_TEST_DIR/test_pad_subcoregrids.py" -k 'not test_pad_subcoregrids_rejects_sharded'
+run_pytest "dm_test_pad_subcoregrids" "$DM_TEST_DIR/test_pad_subcoregrids.py"  # promoted (issue #73): 58 passed
 
 # indexed_fill_sharded is de-scoped: deterministically hangs on the companion build (cold JIT
 # cache) in the emule parallel JIT compile — std::system forks clang from a ~130-thread process
@@ -215,13 +213,13 @@ run_pytest "dm_test_pad_subcoregrids" "$DM_TEST_DIR/test_pad_subcoregrids.py" -k
 
 run_pytest "reduce_test_sum" "$REDUCE_TEST_DIR/test_sum.py" -k 'test_sum and not test_sum_global and not test_sum_4d and not test_sum_nd_shard and not test_sum_subcores'
 
-run_pytest "dm_test_tilize_fp32_truncation" "$DM_TEST_DIR/test_tilize.py" -k 'test_tilize_fp32_truncation'
+run_pytest "dm_test_tilize" "$DM_TEST_DIR/test_tilize.py"  # promoted (issue #73): 58 passed, 30 skipped (covers test_tilize_test from issue #72)
 
 run_pytest "dm_test_tilizer" "$DM_TEST_DIR/test_tilizer.py"
 
 run_pytest "dm_test_dropout" "$DM_TEST_DIR/test_dropout.py"
 
-run_pytest "dm_test_reallocate" "$DM_TEST_DIR/test_reallocate.py" -k 'DRAM or sharded'
+run_pytest "dm_test_reallocate" "$DM_TEST_DIR/test_reallocate.py"  # promoted (issue #73): 21 passed
 
 run_pytest "dm_test_creation_full_like_opt_rm" "$DM_TEST_DIR/test_creation.py::test_full_like_opt_tensor" -k 'ROW_MAJOR'
 
@@ -313,31 +311,27 @@ run_pytest "elt_test_unary_pow" "$ELT_TEST_DIR/test_unary_pow.py" --deselect "te
 
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
 
-run_pytest "dm_test_pad_not_sub_core" "$DM_TEST_DIR/test_pad.py::test_pad_tile" "$DM_TEST_DIR/test_pad.py::test_pad_rm" "$DM_TEST_DIR/test_pad.py::test_pad_with_program_cache" -k 'not sub_core'
-run_pytest "dm_test_pad" "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width" "$DM_TEST_DIR/test_pad.py::test_pad_rm_small_to_large_width_with_program_cache" "$DM_TEST_DIR/test_pad.py::test_pad_program_cache_hit_updates_pad_value_buffer" "$DM_TEST_DIR/test_pad.py::test_pad_padding_validation_front_pad_not_supported" "$DM_TEST_DIR/test_pad.py::test_pad_padding_validation_length"
+run_pytest "dm_test_pad" "$DM_TEST_DIR/test_pad.py" \
+    -k 'not (test_pad_rm_sharded_stickwise and INT32)'  # promoted (#73 timeout-rerun): ~500 passed, ~6 min on CI (renamed from dm_test_pad_not_sub_core; whole-file covers test_pad_rm_small_to_large_width / program_cache_hit / padding_validation_*). INT32 sharded-stickwise variants excluded — pass locally but flake on CI with PCC drops (0.99 on WH, 0.65 on BH on different params); real bug in that path, not pure flake.
 
 run_pytest "dm_test_permute_not_sharded" "$DM_TEST_DIR/test_permute.py::test_permute_4d_fixed_w" "$DM_TEST_DIR/test_permute.py::test_permute_4d_cn" "$DM_TEST_DIR/test_permute.py::test_permute_4d_cnwh" "$DM_TEST_DIR/test_permute.py::test_permute_4d_wh" "$DM_TEST_DIR/test_permute.py::test_permute_5d" "$DM_TEST_DIR/test_permute.py::test_permute_5d_wyh" "$DM_TEST_DIR/test_permute.py::test_permute_5d_xh_pad" "$DM_TEST_DIR/test_permute.py::test_permute_8d_swapped" "$DM_TEST_DIR/test_permute.py::test_permutations_5d_fixed_w" "$DM_TEST_DIR/test_permute.py::test_permute_identity" -k 'not sharded'
 run_pytest "dm_test_permute" "$DM_TEST_DIR/test_permute.py::test_permute_5d_tiled_basic" "$DM_TEST_DIR/test_permute.py::test_permute_5d_tiled_swap" "$DM_TEST_DIR/test_permute.py::test_permute_squeeze" "$DM_TEST_DIR/test_permute.py::test_permute_for_specific_case" "$DM_TEST_DIR/test_permute.py::test_permute_on_4D_tensor_with_smaller_tuple_size" "$DM_TEST_DIR/test_permute.py::test_nil_volume_permute" "$DM_TEST_DIR/test_permute.py::test_transpose_wh_tiled_uint32"
 run_pytest "dm_test_permute_sharded" "$DM_TEST_DIR/test_permute.py::test_permute_sharded"
 
 run_pytest "dm_test_untilize_same_volume" "$DM_TEST_DIR/test_untilize.py::test_untilize_same_volume_different_shapes"
-# Untilize sharded harvest from the NUM_L1_BANKS fix (+418 sharded variants).
-# Excludes test_untilize_multi_core_{,nd_}sharded_to_interleaved — those have
-# 8 residual ATOL≈3.2 failures on tensor_shape=[4,4,256,512]; the substring
-# filter also excludes the matching _uneven_input_shard_spec variant.
-# Adds ~418 of 476 passing sharded variants.
-run_pytest "dm_test_untilize_sharded"       "$DM_TEST_DIR/test_untilize.py" -k 'sharded and not multi_core_sharded_to_interleaved and not multi_core_nd_sharded_to_interleaved'
+# Whole-file untilize run — promoted from the prior sharded-only filtered
+# subset after the timeout-rerun showed 795 passed, 4 skipped, 2 xfailed.
+# Supersedes the older filter that excluded test_untilize_multi_core_{,nd_}
+# sharded_to_interleaved (those previously had 8 residual ATOL≈3.2 failures
+# on tensor_shape=[4,4,256,512]) — those variants now pass.
+run_pytest "dm_test_untilize"               "$DM_TEST_DIR/test_untilize.py"  # promoted (#73 timeout-rerun): 795 passed, ~6.7 min (renamed from dm_test_untilize_sharded)
 
 run_pytest "reduce_test_reduction_mean" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean_scaling" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean_scaling_factor"
 run_pytest "reduce_test_reduction_not_sharded" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_2d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_3d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_4d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_sum_2d_tensor_dims" -k 'not sharded'
 run_pytest "reduce_test_reduction_min_not_sharded" "$REDUCE_TEST_DIR/test_reduction_min.py::test_min" "$REDUCE_TEST_DIR/test_reduction_min.py::test_min_global" -k 'not sharded'
 run_pytest "reduce_test_torch_compat" "$REDUCE_TEST_DIR/test_reduction.py::test_torch_compatibility"
 
-run_pytest "dm_test_tosa_gather" "$DM_TEST_DIR/test_tosa_gather.py" \
-    --deselect "tests/ttnn/unit_tests/operations/data_movement/test_tosa_gather.py::test_tosa_gather_general[N=128-K=64-C=128-W=32]" \
-    --deselect "tests/ttnn/unit_tests/operations/data_movement/test_tosa_gather.py::test_tosa_gather_general[N=2-K=32-C=96-W=32]" \
-    --deselect "tests/ttnn/unit_tests/operations/data_movement/test_tosa_gather.py::test_tosa_gather_general[N=64-K=128-C=256-W=128]" \
-    --deselect "tests/ttnn/unit_tests/operations/data_movement/test_tosa_gather.py::test_tosa_gather_general[N=128-K=128-C=128-W=64]"
+run_pytest "dm_test_tosa_gather" "$DM_TEST_DIR/test_tosa_gather.py"  # promoted (issue #73): 10 passed
 
 run_pytest "reduce_test_max" "$REDUCE_TEST_DIR/test_max.py"
 
@@ -368,6 +362,53 @@ run_pytest "matmul_test_sparse_nnz"     "$MATMUL_TEST_DIR/test_sparse_matmul.py"
 # emule's matmul_tiles assumes 32x32 tiles; tracked separately as TinyTile gap).
 run_pytest "matmul_test_deepseek"       "$MATMUL_TEST_DIR/test_matmul_deepseek.py" \
     -k 'not wkv_b2'
+# ---- per_core_allocation single-device (issue #70) ----
+run_pytest "pca_test_per_core_allocation" "$PCA_TEST_DIR/test_per_core_allocation.py"
+
+# ---- tensor/ directory: whole-dir batch (issue #69) ----
+# 906 single-device tests pass; multi-device variants self-skip.
+run_pytest "tensor_dir_all" "$TENSOR_TEST_DIR" -m "not disable_fast_runtime_mode"
+
+# ---- data_movement explicit function targets (issue #72) ----
+# 8 of 15 listed targets pass cleanly under emule. Remaining 7:
+#   - test_run_tilize_with_val_padding_test: collection fails (needs IPython)
+#   - test_pad: silicon-side @pytest.mark.skip (ttnn.pad row_major PCC error)
+#   - test_tiled_concat, test_embedding_bw_with_program_cache,
+#     test_tosa_scatter_normal, test_convert_to_hwc_dram_uneven_sharding,
+#     test_sort_indices: real failures (PCC / hang) — documented in #72 closeout
+run_pytest "dm_test_function_targets_batch" \
+    "$DM_TEST_DIR/test_untilize.py::test_untilize_single_core_interleaved_to_interleaved" \
+    "$DM_TEST_DIR/test_untilize_with_unpadding.py::test_untilize_with_unpadding_height_sharded" \
+    "$DM_TEST_DIR/test_fill_pad.py::test_fill_pad_complex_sharding" \
+    "$DM_TEST_DIR/test_slice.py::test_slice_usecase1" \
+    "$DM_TEST_DIR/test_interleaved_to_sharded.py::test_interleaved_to_sharded_nd_with_equivalent_2d"
+# Note: test_tilize_test, test_gather_general, test_pc_with_different_shapes_in_sequence
+# (also in issue #72) are now covered by the promoted dm_test_tilize / dm_test_gather /
+# dm_test_repeat whole-file entries — see issue #73 promotions.
+
+# ---- base_functionality + benchmarks single-device tail (issue #71) ----
+# 15 of 19 files pass; 4 omitted because they import HuggingFace transformers
+# (env dependency, not a mock-API issue):
+#   test_tracer, test_tracer_codegen, test_tracer_evaluate, test_model_preprocessing
+# These would pass if `transformers` is added to the emule venv.
+run_pytest "bf_test_tail_batch" \
+    "$BF_TEST_DIR/test_python_tracer.py" \
+    "$BF_TEST_DIR/test_async.py" \
+    "$BF_TEST_DIR/test_bh_20_cores_sharding.py" \
+    "$BF_TEST_DIR/test_cb_address_offset.py" \
+    "$BF_TEST_DIR/test_chunk.py" \
+    "$BF_TEST_DIR/test_concat_issue.py" \
+    "$BF_TEST_DIR/test_cpp_logging.py" \
+    "$BF_TEST_DIR/test_deallocate.py" \
+    "$BF_TEST_DIR/test_dram_sender_global_cb_py.py" \
+    "$BF_TEST_DIR/test_pre_and_post_operation_hook.py" \
+    "$BF_TEST_DIR/test_reshape_transpose.py" \
+    "$BF_TEST_DIR/test_single_device_trace.py" \
+    "$BF_TEST_DIR/test_sub_device.py" \
+    "$BF_TEST_DIR/test_tilize_pad_cb.py" \
+    "$BENCH_TEST_DIR/test_benchmark.py" \
+    -m "not disable_fast_runtime_mode"
+
 # test_matmul.py: curated 221-test subset. Excludes tiny_tile* (TinyTile gap),
 # multiple_output_blocks_per_core (slow loop, no numeric bug), and on_subdevice
 # (slow loop). Includes the Phase A unblock target
