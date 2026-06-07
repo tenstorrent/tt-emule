@@ -40,7 +40,7 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 
 - `include/jit_hw/chlkc_list.h` — empty shim (pragma-once only)
 - `include/jit_hw/ckernel.h` — `enum class CSR`; `namespace ckernel`; `csr_read<>` specializations
-- `include/jit_hw/ckernel_defs.h` — empty shim (pragma-once only)
+- `include/jit_hw/ckernel_defs.h` — `ckernel` tile/face dimension constants (`FACE_HEIGHT`, `FACE_WIDTH`, `TILE_HEIGHT`, `TILE_WIDTH`, `FACE_R_DIM`, `FACE_C_DIM`, `TILE_R_DIM`, `TILE_C_DIM`, `TILE_NUM_FACES`, `FACE_SIZE`)
 - `include/jit_hw/ckernel_include.h` — `enum firmware_msg_e`; `namespace ckernel`
 - `include/jit_hw/dev_mem_map.h` — macros `MEM_L1_UNCACHED_BASE`; `NUM_TRISC_CORES`/`NUM_DM_CORES`/`MEM_ZEROS_*` constants
 - `include/jit_hw/emule_cb_state.h` — `using __emule_cb_state = tt_emule::CBSyncState`; `extern thread_local __emule_cbs`
