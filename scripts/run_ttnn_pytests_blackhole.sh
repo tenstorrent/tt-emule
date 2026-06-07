@@ -31,6 +31,7 @@ REDUCE_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/reduce"
 MATMUL_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/matmul"
 ELT_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/eltwise"
 FUSED_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/fused"
+POOL_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/pool"
 
 GTEST_XML_DIR="${GTEST_XML_DIR:-}"
 [ -n "$GTEST_XML_DIR" ] && mkdir -p "$GTEST_XML_DIR"
@@ -349,6 +350,13 @@ run_pytest "reduce_test_intimg"           "$REDUCE_TEST_DIR/test_intimg.py"
 run_pytest "reduce_test_h_interleaved_2d" "$REDUCE_TEST_DIR/test_reduction_h_interleaved.py::test_2D_tensor"
 # topk compute is not yet faithful in emule; only the dtype-validation paths pass.
 run_pytest "reduce_test_topk_dtype_raise" "$REDUCE_TEST_DIR/test_topk.py::test_topk_input_dtypes_raise" "$REDUCE_TEST_DIR/test_topk.py::test_topk_preallocated_dtype_raise"
+
+# #62 pool (single-device). Unblocked by the Bucket-1 NoC/format fixes. Full-pass
+# files/subsets only; narrow-edge avg/max + bilinear + grid_sample are tracked
+# separately (BUG#2/#3). test_mpwi is excluded entirely — its multicore-semaphore path
+# non-deterministically hangs/segfaults (flaky), unsafe for regression.
+run_pytest "pool_test_global_avg_pool2d" "$POOL_TEST_DIR/test_global_avg_pool2d.py"
+run_pytest "pool_test_upsample_nearest"  "$POOL_TEST_DIR/test_upsample.py" -k 'not test_bilinear_multi_core'
 
 run_pytest "matmul_test_linear" "$MATMUL_TEST_DIR/test_linear.py" -k 'test_linear_fp32_acc or test_vector_linear'
 
