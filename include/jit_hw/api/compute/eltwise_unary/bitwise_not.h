@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
+#include "jit_hw/api/compute/common.h"
 // Emulator stub for bitwise_not SFPU tile op (int32 type-punned).
 
 #include <cstdint>

@@ -1,4 +1,5 @@
 #pragma once
+#include "jit_hw/api/compute/common.h"
 // Emulator stub for SFPU rand tile op.
 // Each element of DST is overwritten with a pseudorandom float in [from, from+scale].
 

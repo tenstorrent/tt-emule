@@ -14,10 +14,16 @@
 #include <cstring>
 
 // ---- Compute startup and init ----
+// Guard against double-definition: jit_kernel_stubs.hpp also has stub
+// overloads of the same signatures (for kernels that don't include this
+// header directly). If both files are included, first-wins via this macro.
+#ifndef __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED
+#define __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED
 inline void compute_kernel_hw_startup(uint32_t, uint32_t) {
     __llk_pack_offset = 0;
     __llk_pack_is_untilize = false;
     __llk_unpack_is_tilize = false;
+    __llk_matmul_transpose = false;
     // Reset PACK engine auto-advance offsets and L1 acc flag to prevent
     // stale state from prior kernel invocations in the same thread.
     std::memset(__emule_pack_offset, 0, sizeof(__emule_pack_offset));
@@ -26,3 +32,4 @@ inline void compute_kernel_hw_startup(uint32_t, uint32_t) {
 inline void compute_kernel_hw_startup(uint32_t a, uint32_t b, uint32_t) {
     compute_kernel_hw_startup(a, b);
 }
+#endif

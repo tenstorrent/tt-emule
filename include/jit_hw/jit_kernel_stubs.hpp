@@ -11,6 +11,43 @@
 // methods (which would have wrong ABI when TT_EMULE_USE_XY_PAIR is active
 // in the host process but not in the JIT .so).
 #define __EMULE_JIT_MODE 1
+// TODO(#103): audit __EMULE_JIT_MODE usage across the codebase.
+
+// Mark this TU as a kernel build so silicon host-device message headers
+// take their firmware branch instead of the host-only #error branch.
+#ifndef KERNEL_BUILD
+#define KERNEL_BUILD
+#endif
+
+// NOC mode constants — silicon firmware sets these per-RISC build. upstream kernels
+// has static_assert(noc_mode == DM_DYNAMIC_NOC) in several ops, so emule
+// reports dynamic mode. Universal because upstream code references them from both
+// compute and dataflow paths.
+#ifndef DM_DEDICATED_NOC
+#define DM_DEDICATED_NOC 0
+#endif
+#ifndef DM_DYNAMIC_NOC
+#define DM_DYNAMIC_NOC 1
+#endif
+inline constexpr int noc_mode = DM_DYNAMIC_NOC;
+
+// tensix_sync — silicon's TRISC sync barrier. emule runs all TRISCs on a
+// unified compute thread, so this is a no-op. Universal because compute
+// kernels call it directly from generated code (patched_kernel.cpp).
+inline void tensix_sync() {}
+
+// ALWI — silicon's "always inline" attribute used in tt-metal kernel
+// headers (ttnn/kernel_lib/tilize_helpers.hpp etc.) that don't pull in
+// api/compute/common.h before declaring ALWI-prefixed prototypes.
+// Universal because the ttnn-side tilize kernel includes
+// tilize_helpers.hpp before any common.h header.
+#ifndef ALWI
+#define ALWI inline __attribute__((always_inline))
+#endif
+
+// stdint.h — provides uint32_t in the global namespace (needed by ttnn
+// kernel_lib headers that use uint32_t without std:: qualification).
+#include <stdint.h>
 
 #include "internal/risc_attribs.h"
 #include "api/compile_time_args.h"
@@ -32,6 +69,21 @@
 
 #include <cstdint>
 #include <cstring>
+
+// compute_kernel_hw_startup lean overloads. Silicon's full version pulls in
+// heavy LLK state that corrupts SFPU INT32 paths (see comment above), so
+// we provide empty overloads here so kernels that call this from a path
+// not transiting api/compute/common.h still resolve. The full LLK setup
+// happens in api/compute/compute_kernel_hw_startup.h for kernels that
+// explicitly include it.
+// Guard so that api/compute/compute_kernel_hw_startup.h (which has its own
+// definition with real reset of __llk_pack_offset / __emule_l1_acc_enabled)
+// doesn't double-define. First-included wins.
+#ifndef __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED
+#define __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED
+inline void compute_kernel_hw_startup(uint32_t, uint32_t) {}
+inline void compute_kernel_hw_startup(uint32_t a, uint32_t b, uint32_t) { compute_kernel_hw_startup(a, b); }
+#endif
 
 // Forward declarations matching kernel_runner.cpp definitions.
 // The main executable exports these with -rdynamic; the JIT .so resolves them

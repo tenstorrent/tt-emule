@@ -5,37 +5,40 @@
 #pragma once
 #include <cstdint>
 
-// In emulation, L1 is host memory (mmap'd via L1Pool).
-// Kernels that cast L1 offsets to pointers (e.g. *(uint32_t*)(addr + MEM_L1_UNCACHED_BASE))
-// need MEM_L1_UNCACHED_BASE to be the host base pointer of the core's L1 region,
-// so that the sum is a valid host address.
-// __emule_bridge_l1 is set per-thread before kernel launch in emulated_program_runner.
+// emule shim for the per-arch firmware `dev_mem_map.h`.  Two purposes:
+//
+// 1. `MEM_L1_UNCACHED_BASE` — silicon kernels cast L1 offsets to pointers via
+//    `(void*)(addr + MEM_L1_UNCACHED_BASE)`.  On silicon, that constant is the
+//    fixed L1 base.  In emule, L1 is heap memory mmap'd per-core, so we
+//    redirect to the per-thread `__emule_bridge_l1` pointer that the runner
+//    sets before each kernel launch.
+//
+// 2. `MEM_ZEROS_BASE` / `MEM_ZEROS_SIZE` — the firmware-reserved L1 zeros
+//    region kernels NOC-read for cheap zero-fill (see ttnn's
+//    `kernel_lib/l1_helpers.hpp::zero_tile`).  Per-arch dispatch matches the
+//    runner's ARCH_* JIT defines (see `build_kernel_defines` in
+//    `tt_metal/impl/emulation/emulated_program_runner.cpp`).  Values mirror
+//    upstream's `(MEM_MAILBOX_END + 31) & ~31`:
+//      WH: tt_metal/hw/inc/internal/tt-1xx/wormhole/dev_mem_map.h
+//      BH: tt_metal/hw/inc/internal/tt-1xx/blackhole/dev_mem_map.h
+//      Q:  tt_metal/hw/inc/internal/tt-2xx/quasar/dev_mem_map.h
+
 extern thread_local uint8_t* __emule_bridge_l1;
 #define MEM_L1_UNCACHED_BASE ((uintptr_t)__emule_bridge_l1)
 
-// Quasar core counts used by compute/DM kernels.
-constexpr uint32_t NUM_TRISC_CORES = 4;
-constexpr uint32_t NUM_DM_CORES = 8;
-
-// L1 zeros block. Reads from MEM_ZEROS_BASE return MEM_ZEROS_SIZE bytes of
-// zero. Placed in the firmware-reserved region below tt-metal's
-// l1_unreserved_base so it never overlaps user buffer allocations.
-// Core::reset_l1_bump() rezeros the region between program runs.
-//
-// Earlier emule choice (0xFFE00) silently corrupted user buffers once L1 grew
-// past 0xFFE00: output buffers extended into the zeros block and got their
-// last 512 bytes zeroed mid-shard between program runs.
-//
-// constexpr (not #define) so we don't accidentally shadow the upstream
-// dev_mem_map.h declarations if jit_hw is ever linked into a target that also
-// pulls in the real headers.
 // MEM_ZEROS_SIZE is typed `int` to match upstream's `#define MEM_ZEROS_SIZE 512`
-// (which defaults to int). full_kernel_common.hpp's `std::min(bytes, MEM_ZEROS_SIZE)`
-// where `bytes` is `int` reports a deduction ambiguity if MEM_ZEROS_SIZE is
-// `uint32_t` here.
+// (defaults to int).  `std::min(bytes, MEM_ZEROS_SIZE)` where `bytes` is int
+// would report a deduction ambiguity if this were `uint32_t`.
 #ifndef MEM_ZEROS_SIZE
 constexpr int MEM_ZEROS_SIZE = 512;
 #endif
+
 #ifndef MEM_ZEROS_BASE
-constexpr uint32_t MEM_ZEROS_BASE = 0x32A0;
+#  if defined(ARCH_BLACKHOLE)
+constexpr uint32_t MEM_ZEROS_BASE = 0x32E0;
+#  elif defined(ARCH_QUASAR)
+constexpr uint32_t MEM_ZEROS_BASE = 0xE180;
+#  else  // ARCH_WORMHOLE (or unspecified)
+constexpr uint32_t MEM_ZEROS_BASE = 0x3280;
+#  endif
 #endif

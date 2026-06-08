@@ -24,4 +24,16 @@ ALWI void rsub_tile(uint32_t idst, uint32_t param0) {
 
 ALWI void rsub_tile_init() {}
 
+// int32 variant: output = scalar - x.
+ALWI void rsub_unary_int32_tile(uint32_t idst, uint32_t scalar) {
+    __emule_dst_check(idst, "rsub_unary_int32_tile");
+    int32_t s = (int32_t)scalar;
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        int32_t v = __emule_dst_load_i32(idst, i);
+        __emule_dst_store_i32(idst, i, s - v);
+    }
+}
+
+ALWI void rsub_unary_int32_tile_init() {}
+
 }  // namespace ckernel

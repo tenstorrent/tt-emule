@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
+#include "jit_hw/api/compute/common.h"
 // Emulator stub for logical_not SFPU tile op.
 // Result is 1.0 if input == 0, else 0.0.
 

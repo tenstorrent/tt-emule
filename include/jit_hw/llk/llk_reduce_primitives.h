@@ -46,30 +46,20 @@ template <ckernel::MathFidelity Fidelity, int Throttle, typename... Args>
 inline void llk_math_matmul_init(Args... /*ignored*/) {}
 template <typename... Args>
 inline void llk_unpack_AB_matmul_init(Args... /*ignored*/) {}
-// Upstream signatures (tt-llk wormhole_b0 llk_unpack_common.h /
-// llk_math_common.h):
-//   template <bool is_fp32_dest_acc_en, p_dim_stride_target dim_stride_target,
-//             bool to_from_int8 = false>
-//   inline void llk_unpack_reconfig_data_format_srca(uint32_t srca_new);
-//   inline void llk_unpack_reconfig_data_format_srca(uint32_t srca_old, uint32_t srca_new);
-// We accept the bool/enum template args explicitly so upstream call sites
-// like `llk_unpack_reconfig_data_format_srca<DST_ACCUM_MODE, p_dim_stride_target::IGNORE>(...)`
-// resolve without surfacing the prior `<int Mode, typename... Args>` parameter-
-// kind mismatch (enum value can't bind to a typename pack).
-template <bool is_fp32_dest_acc_en,
-          p_dim_stride_target dim_stride_target = p_dim_stride_target::IGNORE,
-          bool to_from_int8 = false>
-inline void llk_unpack_reconfig_data_format_srca(uint32_t /*srca_new*/) {}
-template <bool is_fp32_dest_acc_en,
-          p_dim_stride_target dim_stride_target = p_dim_stride_target::IGNORE,
-          bool to_from_int8 = false>
-inline void llk_unpack_reconfig_data_format_srca(uint32_t /*srca_old*/,
-                                                  uint32_t /*srca_new*/) {}
-template <bool is_fp32_dest_acc_en, bool to_from_int8 = false>
-inline void llk_math_reconfig_data_format_srca(uint32_t /*srca_new*/) {}
-template <bool is_fp32_dest_acc_en, bool to_from_int8 = false>
-inline void llk_math_reconfig_data_format_srca(uint32_t /*srca_old*/,
-                                               uint32_t /*srca_new*/) {}
+// Reconfig stubs. Upstream signatures vary — some calls bind explicit
+// `<bool is_fp32_dest_acc_en, p_dim_stride_target, bool to_from_int8>`
+// non-type template args, others omit some. Use `auto... TArgs` so any
+// combination of non-type args compiles. p_dim_stride_target itself is
+// declared in common.h at global scope; don't redeclare it here.
+// emule's compute path is format-agnostic so the body is a no-op regardless.
+template <auto... TArgs>
+inline void llk_unpack_reconfig_data_format_srca(uint32_t /*old_or_new*/ = 0, uint32_t /*new_operand*/ = 0) {}
+template <auto... TArgs>
+inline void llk_math_reconfig_data_format_srca(uint32_t /*old_or_new*/ = 0, uint32_t /*new_operand*/ = 0) {}
+template <auto... TArgs>
+inline void llk_unpack_reconfig_data_format_srcb(uint32_t /*old_or_new*/ = 0, uint32_t /*new_operand*/ = 0) {}
+template <auto... TArgs>
+inline void llk_math_reconfig_data_format_srcb(uint32_t /*old_or_new*/ = 0, uint32_t /*new_operand*/ = 0) {}
 
 inline void llk_unpack_AB_matmul(uint32_t in0_cb, uint32_t in1_cb, uint32_t in0_idx, uint32_t in1_idx) {
     __emule_matmul_state = {in0_cb, in1_cb, in0_idx, in1_idx};

@@ -75,4 +75,11 @@ ALWI void softplus_tile(uint32_t idst, uint32_t beta, uint32_t beta_reciprocal, 
     }
 }
 
+// Pack-thread variant: upstream dispatches the same SFPU LLK via PACK() for
+// matmul fused-activation overlap (#79). emule has no thread split — forward.
+ALWI void softplus_tile_init_pack() { softplus_tile_init(); }
+ALWI void softplus_tile_pack(uint32_t idst, uint32_t beta, uint32_t beta_reciprocal, uint32_t threshold) {
+    softplus_tile(idst, beta, beta_reciprocal, threshold);
+}
+
 }  // namespace ckernel

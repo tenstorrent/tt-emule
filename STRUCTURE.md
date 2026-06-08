@@ -59,7 +59,7 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 ## include/jit_hw/api/
 
 - `include/jit_hw/api/bfloat16.h` — `namespace __emule_bf16`: `to_f32`, `from_f32`
-- `include/jit_hw/api/cb_api.h` — `cb_wait_front`/`cb_pop_front`/`cb_reserve_back`/`cb_push_back`, `get_write_ptr`/`get_read_ptr`, `get_tile_size`/`get_tile_hw`/`get_tile_num_faces`, `__emule_cb_timeout_sec`
+- `include/jit_hw/api/cb_api.h` — `cb_wait_front`/`cb_pop_front`/`cb_reserve_back`/`cb_push_back`, `get_write_ptr`/`get_read_ptr`, `get_tile_size`/`get_tile_hw`/`get_tile_num_faces`, `get_dataformat`, `__emule_cb_timeout_sec`; constexpr arrays `unpack_tile_size`/`unpack_tile_r_dim`/`unpack_tile_c_dim`/`unpack_num_faces_r_dim`/`unpack_num_faces_c_dim`/`unpack_src_format`/`pack_dst_format`/`unpack_dst_format`/`pack_src_format`
 - `include/jit_hw/api/compile_time_args.h` — `get_compile_time_arg_val`, `get_ct_arg<>`; `KERNEL_COMPILE_TIME_ARGS`
 - `include/jit_hw/api/core_local_mem.h` — `noc_traits_t<CoreLocalMem<>>` specialization
 - `include/jit_hw/api/dfb_api.h` — `dfb_reserve_back`/`dfb_push_back`/`dfb_wait_front`/`dfb_pop_front`/`dfb_finish`, `dfb_get_write_ptr`/`dfb_get_read_ptr`/`dfb_get_entry_size`, `__emule_dfb_check_id`/`__emule_dfb_timeout_sec`
@@ -69,18 +69,19 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 
 - `include/jit_hw/api/compute/add_int_sfpu.h` — `ckernel::` `add_int_tile`, `add_int_tile_init`
 - `include/jit_hw/api/compute/atan2.h` — `ckernel::` `atan2_binary_tile`, `atan2_binary_tile_init`
-- `include/jit_hw/api/compute/bcast.h` — `namespace __emule_bcast` `enum class Dim`; `add_tiles`/`sub_tiles`/`mul_tiles` bcast forms, `unary_bcast_init`
+- `include/jit_hw/api/compute/bcast.h` — `namespace __emule_bcast` `enum class Dim` (`apply`/`src_idx`); `any_tiles_bcast`, `add/sub/mul_tiles_bcast`, `add/sub/mul_tiles_bcast_rows`/`_cols`/`_scalar`, `unary_bcast`/`unary_bcast_init`, `init_bcast`/`add_bcast_rows_init_short`/`add_bcast_cols_init_short`/`add_bcast_scalar_init_short`
+- `include/jit_hw/api/compute/bfp4.h` — `namespace __emule_bfp4`: `to_f32`, `encode_face_row` (BFP4_b codec)
 - `include/jit_hw/api/compute/bfp8.h` — `namespace __emule_bfp8`: `face_row`, `col_in_row` (BFP8 codec helpers)
 - `include/jit_hw/api/compute/binary_bitwise_sfpu.h` — `ckernel::` `bitwise_and/or/xor_binary_tile` (+`_init`), `binary_bitwise_tile_init`
-- `include/jit_hw/api/compute/binary_comp.h` — `ckernel::` `lt/le/gt/ge_int32_tile` (+`_init`)
+- `include/jit_hw/api/compute/binary_comp.h` — `ckernel::` `lt/le/gt/ge_int32_tile` (+`_init`); `lt/le/gt/ge_int_tile<DataFormat>` (+`_init`, Int32/UInt32/UInt16)
 - `include/jit_hw/api/compute/binary_fmod.h` — `ckernel::` `fmod_binary_tile`, `fmod_int32_tile` (+`_init`)
 - `include/jit_hw/api/compute/binary_max_min.h` — `ckernel::` `binary_max/min_tile`, `_int32_`, `_uint32_` variants (+`_init`)
 - `include/jit_hw/api/compute/binary_remainder.h` — `ckernel::` `remainder_binary_tile`, `remainder_int32_tile` (+`_init`)
 - `include/jit_hw/api/compute/binary_shift.h` — `ckernel::` `binary_left_shift_tile`, `binary_right_shift_tile`, `binary_logical_right_shift_tile`, `binary_shift_tile_init`
 - `include/jit_hw/api/compute/cb_api.h` — includes `compute/common.h` + `api/cb_api.h` (shim)
-- `include/jit_hw/api/compute/common.h` — macros `PACK`/`MATH`/`UNPACK`/`ALWI`, `DST_ACCUM_MODE`; `namespace __emule_compute`, `ckernel`; `enum class EltwiseBinaryType`/`BroadcastType`/`ReluType`/`EltwiseBinaryReuseDestType`/`p_dim_stride_target`/`MathFidelity`; `TILE_WIDTH`/`TILE_HEIGHT`/`TILE_HW`/`FACE_WIDTH`/`FACE_HEIGHT`/`FACE_HW`/`TILE_C_DIM`; `pack_tile`/`pack_tile_block`, `copy_tile`/`copy_tile_init`, `add_tiles`/`sub_tiles`/`mul_tiles`, `binary_tiles_init`, `binary_dest_reuse_tiles`, `__emule_dst_active_tiles`
+- `include/jit_hw/api/compute/common.h` — macros `PACK`/`MATH`/`UNPACK`/`ALWI`, `DST_ACCUM_MODE`; `namespace __emule_compute`, `ckernel`; `enum class EltwiseBinaryType`/`BroadcastType`/`ReluType`/`EltwiseBinaryReuseDestType`/`p_dim_stride_target`/`MathFidelity`; `TILE_WIDTH`/`TILE_HEIGHT`/`TILE_HW`/`FACE_WIDTH`/`FACE_HEIGHT`/`FACE_HW`/`TILE_C_DIM`; `pack_tile`/`pack_tile_block`, `copy_tile`/`copy_tile_init`, `add_tiles`/`sub_tiles`/`mul_tiles`, `binary_tiles_init`, `binary_dest_reuse_tiles`, `__emule_dst_active_tiles`/`__emule_dst_check`/`__emule_dst_load_i32`/`__emule_dst_store_i32`; `namespace __emule_compute` `cb_page_size`/`cb_tile_elems`/`cb_is_32bit_format`/`cb_is_bfp8_b_format`/`cb_is_bfp4_b_format`/`cb_data_format`/`cb_is_uint16_format`/`pack_dst_to_buf`/`__emule_unpack_cb_tile_to`; no-op stubs `reconfig_data_format_srca`/`reconfig_data_format_srcb`/`pack_reconfig_data_format`/`llk_pack_relu_config`/`pack_set_relu_threshold`/`llk_pack_hw_configure`/`pack_init`/`pack_dest_init`/`pack_reconfig_l1_acc`/`pack_relu_config`
 - `include/jit_hw/api/compute/common_globals.h` — `enum class DataFormat`; DST dirty/fresh tracking globals
-- `include/jit_hw/api/compute/compute_kernel_api.h` — `ckernel::` `square_tile`/`sigmoid_tile`/`sign_tile`/`signbit_tile`/`silu_tile`/`log_tile`/`exp2_tile`/`expm1_tile`/`power_tile` (+`_init`), `sfpu_reduce_init`, `topk_tile_init`; `namespace __emule_topk`; `struct RowView`
+- `include/jit_hw/api/compute/compute_kernel_api.h` — `ckernel::` `square_tile`/`sigmoid_tile`/`sign_tile`/`signbit_tile`/`signbit_tile_int32`/`silu_tile`/`log_tile`/`log_with_base_tile`/`exp2_tile`/`expm1_tile`/`power_tile`/`power_iterative_tile`/`tiled_prod_tile`/`unary_max_tile`/`unary_min_tile`/`unary_max_int32_tile`/`unary_min_int32_tile`/`unary_max_uint32_tile`/`unary_min_uint32_tile`/`alt_complex_rotate90_tile` (+`_init`), `silu_tile_pack`/`silu_tile_init_pack`, `sfpu_reduce_init`, `topk_tile_init`; `namespace __emule_topk`; `struct RowView`
 - `include/jit_hw/api/compute/compute_kernel_hw_startup.h` — `compute_kernel_hw_startup` (2-arg + 3-arg)
 - `include/jit_hw/api/compute/copy_dest_values.h` — `copy_block` (global scope); `ckernel::` `copy_dest_values`, `copy_dest_values_init`
 - `include/jit_hw/api/compute/cumprod.h` — `ckernel::` `cumprod_tile`, `cumprod_tile_init`; TLS `__emule_cumprod_acc`/`__emule_cumprod_acc_initialized`, `__emule_cumprod_reset_acc`
@@ -88,7 +89,7 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/div_int32_floor.h` — `ckernel::` `div_int32_floor_tile`, `div_int32_trunc_tile` (+`_init`)
 - `include/jit_hw/api/compute/div_int32_sfpu.h` — `ckernel::` `div_int32_tile`, `div_int32_tile_init`
 - `include/jit_hw/api/compute/eltwise_binary.h` — `ckernel::` `add_tiles_init`, `sub_tiles_init`, `mul_tiles_init`
-- `include/jit_hw/api/compute/eltwise_binary_sfpu.h` — `ckernel::` `add/sub/mul/div/rsub/power_binary_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_binary_sfpu.h` — `ckernel::` `add/sub/mul/div/rsub/power_binary_tile` (+`_init`); `eq/ne/lt/gt/le/ge_binary_tile` (+`_init`, float compares → 1.0/0.0)
 - `include/jit_hw/api/compute/gcd.h` — `ckernel::` `gcd_tile`, `gcd_tile_init`
 - `include/jit_hw/api/compute/isclose.h` — `ckernel::` `isclose_binary_tile`, `isclose_binary_tile_init`
 - `include/jit_hw/api/compute/lcm.h` — `ckernel::` `lcm_tile`, `lcm_tile_init`
@@ -108,16 +109,18 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/softmax.h` — re-export of `eltwise_unary/exp.h` + `eltwise_unary/recip.h` (no own symbols)
 - `include/jit_hw/api/compute/sub_int_sfpu.h` — `ckernel::` `sub_int_tile`, `rsub_int_tile` (+`_init`)
 - `include/jit_hw/api/compute/tile_move_copy.h` — forwarding shim → `api/compute/common.h`
-- `include/jit_hw/api/compute/tilize.h` — `tilize_block`, `tilize_init`, `fast_tilize_block`, `fast_tilize_init`
+- `include/jit_hw/api/compute/tilize.h` — `tilize_block`, `tilize_init`, `tilize_init_short`, `tilize_uninit`, `tilize_init_short_with_dt`, `tilize_uninit_with_dt`, `fast_tilize_block`, `fast_tilize_init`, `fast_tilize_init_skip_remap`, `fast_tilize_init_with_dt`, `fast_tilize_init_with_dt_skip_remap`, `fast_tilize_uninit`
 - `include/jit_hw/api/compute/transpose_wh.h` — `ckernel::` `transpose_wh_tile`, `transpose_wh_init`, `copy_tile`
-- `include/jit_hw/api/compute/untilize.h` — `untilize_block`, `untilize_init`, `copy_tile`
+- `include/jit_hw/api/compute/untilize.h` — `untilize_block`, `untilize_init`, `untilize_init_short`, `untilize_uninit`, `copy_tile`
 - `include/jit_hw/api/compute/vector_mode.h` — `ckernel::` `enum class VectorMode`
 - `include/jit_hw/api/compute/welford.h` — `ckernel::` `welford_init`, `welford_reinit`, `welford_clear`; TLS `__emule_welford_mean`/`__emule_welford_m2`/`__emule_welford_count`, `__emule_welford_clear`
 - `include/jit_hw/api/compute/xlogy.h` — `ckernel::` `xlogy_binary_tile`, `xlogy_binary_tile_init`
 
 ## include/jit_hw/api/compute/eltwise_unary/
 
-- `include/jit_hw/api/compute/eltwise_unary/activations.h` — `ckernel::` `abs_tile`, `abs_tile_int32`, `hardsigmoid_tile`, `softsign_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/activations.h` — `ckernel::` `abs_tile`, `abs_tile_int32`, `hardsigmoid_tile`, `softsign_tile` (+`_init`); `hardsigmoid_tile_pack`/`hardsigmoid_tile_init_pack`
+- `include/jit_hw/api/compute/eltwise_unary/addcdiv.h` — `ckernel::` `addcdiv_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/addcmul.h` — `ckernel::` `addcmul_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/binop_with_scalar.h` — `ckernel::` `add/sub/mul/div/rsub_unary_tile`, `add_unary_tile_int32`, `sub_unary_tile_int32`, `binop_with_scalar_tile_init`
 - `include/jit_hw/api/compute/eltwise_unary/bitwise_and.h` — `ckernel::` `bitwise_and_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/bitwise_not.h` — `ckernel::` `bitwise_not_tile` (+`_init`)
@@ -135,14 +138,15 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/eltwise_unary/exp.h` — `ckernel::` `exp_tile` (+`_init`); `enum class InputClamping`; `namespace p_sfpu`
 - `include/jit_hw/api/compute/eltwise_unary/fill.h` — `ckernel::` `fill_tile`, `fill_tile_int`, `fill_tile_bitcast` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/fmod.h` — `ckernel::` `fmod_tile`, `fmod_tile_init`
-- `include/jit_hw/api/compute/eltwise_unary/gelu.h` — `ckernel::` `gelu_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/gelu.h` — `ckernel::` `gelu_tile`, `gelu_derivative_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/hardmish.h` — `ckernel::` `hardmish_tile` (+`_init`)
-- `include/jit_hw/api/compute/eltwise_unary/hardtanh.h` — `ckernel::` `hardtanh_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/hardtanh.h` — `ckernel::` `hardtanh_tile` (+`_init`); `hardtanh_tile_pack`/`hardtanh_tile_init_pack`
 - `include/jit_hw/api/compute/eltwise_unary/i0.h` — `ckernel::` `i0_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/i1.h` — `ckernel::` `i1_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/identity.h` — `ckernel::` `identity_tile`, `identity_tile_uint32` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/isinf_isnan.h` — `ckernel::` `isinf_tile`, `isnan_tile`, `isfinite_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/left_shift.h` — `ckernel::` `left_shift_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/lerp.h` — `ckernel::` `lerp_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/lgamma.h` — `ckernel::` `lgamma_stirling_tile`, `lgamma_stirling_float_tile` (+`_init`); anon-ns `lgamma_eval_z`
 - `include/jit_hw/api/compute/eltwise_unary/log1p.h` — `ckernel::` `log1p_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/logical_not.h` — `ckernel::` `logical_not_tile` (+`_init`)
@@ -151,21 +155,23 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/eltwise_unary/polygamma.h` — `ckernel::` `polygamma_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/prelu.h` — `ckernel::` `prelu_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/rand.h` — `ckernel::` `rand_tile` (+`_init`)
-- `include/jit_hw/api/compute/eltwise_unary/rdiv.h` — empty stub
+- `include/jit_hw/api/compute/eltwise_unary/rdiv.h` — `ckernel::` `rdiv_tile` (+`_init`); `enum class RoundingMode`
 - `include/jit_hw/api/compute/eltwise_unary/recip.h` — `ckernel::` `recip_tile` (+`_init`)
-- `include/jit_hw/api/compute/eltwise_unary/relu.h` — `ckernel::` `relu_tile`, `relu_tile_int32` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/relu.h` — `ckernel::` `relu_tile`, `relu_tile_int32`, `relu_max_tile`, `relu_max_tile_pack`, `relu_max_tile_int32`, `relu_min_tile`, `relu_min_tile_int32`, `leaky_relu_tile` (+`_init`, incl. `relu_max_tile_init_pack`)
 - `include/jit_hw/api/compute/eltwise_unary/remainder.h` — `ckernel::` `remainder_tile`, `remainder_tile_init`
 - `include/jit_hw/api/compute/eltwise_unary/right_shift.h` — `ckernel::` `right_shift_tile` (+`_init`)
-- `include/jit_hw/api/compute/eltwise_unary/rounding.h` — `ckernel::` `floor_tile`, `ceil_tile`, `trunc_tile`, `frac_tile`, `rounding_op_tile_init`
-- `include/jit_hw/api/compute/eltwise_unary/rpow.h` — empty stub
+- `include/jit_hw/api/compute/eltwise_unary/rounding.h` — `ckernel::` `floor_tile`, `ceil_tile`, `trunc_tile`, `frac_tile`, `round_tile`, `rounding_op_tile_init`, `round_tile_init`
+- `include/jit_hw/api/compute/eltwise_unary/rpow.h` — `ckernel::` `rpow_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/rsqrt.h` — `ckernel::` `rsqrt_tile` (+`_init`)
-- `include/jit_hw/api/compute/eltwise_unary/rsub.h` — `ckernel::` `rsub_tile` (+`_init`)
-- `include/jit_hw/api/compute/eltwise_unary/selu.h` — `ckernel::` `selu_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/rsub.h` — `ckernel::` `rsub_tile`, `rsub_unary_int32_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/selu.h` — `ckernel::` `selu_tile` (+`_init`); `selu_tile_pack`/`selu_tile_init_pack`
 - `include/jit_hw/api/compute/eltwise_unary/sfpu_split_includes.h` — conditional includes under `SFPU_OP_*_INCLUDE` guards (no own symbols)
-- `include/jit_hw/api/compute/eltwise_unary/softplus.h` — `ckernel::` `softplus_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/snake_beta.h` — `ckernel::` `snake_beta_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/softplus.h` — `ckernel::` `softplus_tile` (+`_init`); `softplus_tile_pack`/`softplus_tile_init_pack`
 - `include/jit_hw/api/compute/eltwise_unary/sqrt.h` — `ckernel::` `sqrt_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/tanh_derivative.h` — `ckernel::` `tanh_derivative_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/threshold.h` — `ckernel::` `threshold_tile` (+`_init`)
-- `include/jit_hw/api/compute/eltwise_unary/trigonometry.h` — `ckernel::` `sin/cos/tan/tanh/asin/acos/atan_tile` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/trigonometry.h` — `ckernel::` `sin/cos/tan/tanh/asin/acos/atan/acosh/asinh/atanh/cosh/sinh_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/typecast.h` — `ckernel::` `typecast_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/where.h` — `ckernel::` `where_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/xielu.h` — `ckernel::` `xielu_tile` (+`_init`)
@@ -179,12 +185,12 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 ## include/jit_hw/api/dataflow/
 
 - `include/jit_hw/api/dataflow/circular_buffer.h` — `class CircularBuffer`, `struct CircularBufferView`; `enum class AddrSelector`; `noc_traits_t<CircularBuffer>` + `noc_traits_t<CircularBufferView>` specializations
-- `include/jit_hw/api/dataflow/dataflow_api.h` — `noc_async_read`/`noc_async_write` (+ `_one_packet`, `_tile`, `_page`), `noc_async_{read,write}_one_packet_{set_state,with_state}`, `noc_async_write_multicast`/`_multicast_loopback_src`, `noc_async_read_barrier`/`noc_async_write_barrier`/`noc_async_writes_flushed`/`noc_async_atomic_barrier`/`noc_async_full_barrier`, `noc_async_{read,write}_barrier_with_trid`/`noc_async_write_flushed_with_trid`/`noc_async_{read,write}_set_trid`, `ncrisc_noc_read_with_transaction_id_flushed`/`ncrisc_noc_nonposted_write_with_transaction_id_{flushed,sent}`, `noc_semaphore_set`/`_wait`/`_wait_min`/`_inc`/`_set_multicast`, `noc_inline_dw_write`, `dram_barrier`; `get_noc_addr`/`get_dram_noc_addr`/`get_l1_noc_addr`/`get_noc_multicast_addr`, `get_semaphore`; SFINAE traits `has_get_noc_addr_v`/`has_page_size_v`/`has_log_base_2_of_page_size_v`/`has_get_aligned_page_size_v`; thread-local state `__emule_one_packet_state_size`/`__emule_write_one_packet_state_{dst,size}`; `__emule_addr_to_offset`/`__emule_fixup_noc_addr`/`__emule_resolve_noc_addr`/`__emule_local_l1_to_ptr`; `struct CBInterface`, `__emule_dw_state`; NOC VC/burst macros, `EMULE_SEM_BASE`
+- `include/jit_hw/api/dataflow/dataflow_api.h` — `noc_async_read`/`noc_async_write` (+ `_one_packet`, `_one_packet_with_trid`, `_tile`, `_page`), `noc_async_{read,write}_one_packet_{set_state,with_state}`, `noc_async_read_one_packet_with_state_with_trid`, `noc_async_read_{set_state,with_state,inc_num_issued}`, `noc_async_write_multicast`/`_multicast_loopback_src`/`_multicast_one_packet`, `noc_async_read_barrier`/`noc_async_write_barrier`/`noc_async_writes_flushed`/`noc_async_atomic_barrier`/`noc_async_full_barrier`, `noc_async_{read,write}_barrier_with_trid`/`noc_async_write_flushed_with_trid`/`noc_async_{read,write}_set_trid`, `ncrisc_noc_read_with_transaction_id_flushed`/`ncrisc_noc_nonposted_write_with_transaction_id_{flushed,sent}`, `noc_semaphore_set`/`_wait`/`_wait_min`/`_inc`/`_inc_multicast`/`_set_multicast`/`_set_remote`, `noc_inline_dw_write`, `dram_barrier`; `get_noc_addr`/`get_dram_noc_addr`/`get_l1_noc_addr`/`get_noc_multicast_addr`, `get_semaphore` (non-templated, returns `uint32_t`); `enum class ProgrammableCoreType` (guarded — also defined in `noc_semaphore.h`); SFINAE traits `has_get_noc_addr_v`/`has_page_size_v`/`has_log_base_2_of_page_size_v`/`has_get_aligned_page_size_v`; per-NOC thread-local state `__emule_one_packet_state_size[2]`/`__emule_write_one_packet_state_{dst,size}[2]`/`__emule_dw_st[2]`/`__emule_noc_trid_state::{shard_noc_addr_base,shard_size,shard_vc}[2]`; `__emule_addr_to_offset`/`__emule_fixup_noc_addr`/`__emule_resolve_noc_addr`/`__emule_local_l1_to_ptr`; `struct __emule_dw_state`; `NOC_MULTICAST_ADDR`/`DYNAMIC_NOC_X`/`DYNAMIC_NOC_Y` macros; NOC VC/burst macros, `EMULE_SEM_BASE`
 - `include/jit_hw/tensix_types.h` — (empty include-shim, no symbols)
 - `include/jit_hw/api/dataflow/dataflow_buffer.h` — `class DataflowBuffer` (get_write_ptr/get_read_ptr methods), `struct DFBAccessor`; `noc_traits_t<DataflowBuffer>` specialization
 - `include/jit_hw/api/dataflow/endpoints.h` — `struct UnicastEndpoint`, `MulticastEndpoint`, `AllocatorBank`; `enum class AllocatorBankType`; `noc_traits_t` specializations for each (`get_noc_unicast_addr`/`get_noc_multicast_addr` are endpoint methods)
 - `include/jit_hw/api/dataflow/noc.h` — `class Noc` (async_read/async_write/barriers/inline_dw_write methods); `enum class NocOptions`/`Noc::AddressType`; `struct NocOptVals`/`DataflowBufferArgs`; `operator|`/`has_flag` (NocOptions); primary `noc_traits_t` template
-- `include/jit_hw/api/dataflow/noc_semaphore.h` — `class Semaphore`; `enum class ProgrammableCoreType`
+- `include/jit_hw/api/dataflow/noc_semaphore.h` — `class Semaphore` (templated on `ProgrammableCoreType`; `up`/`down`/`wait`/`wait_min`/`set`/`set_multicast`/`inc_multicast`/`relay_unicast`/`relay_multicast`/`get_l1_addr` methods); `enum class ProgrammableCoreType` (guarded — may also be defined in `dataflow_api.h`)
 
 ## include/jit_hw/api/debug/
 
@@ -218,6 +224,7 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 
 ## include/jit_hw/internal/
 
+- `include/jit_hw/internal/cb_interface.h` — `struct LocalCBInterface`, `struct RemoteSenderCBInterface`, `struct RemoteReceiverCBInterface`; `get_local_cb_interface`
 - `include/jit_hw/internal/circular_buffer_interface.h` — forwarding shim → `jit_hw/internal/llk_state.h`
 - `include/jit_hw/internal/firmware_common.h` — `WAYPOINT` macro; cache-op stubs
 - `include/jit_hw/internal/llk_state.h` — `struct CbInterface`; `get_local_cb_interface`, `get_operand_narrow_tile`, `get_output_narrow_tile`
