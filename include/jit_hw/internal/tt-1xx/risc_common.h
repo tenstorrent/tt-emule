@@ -43,11 +43,11 @@
 #define DM_DYNAMIC_NOC 1
 #endif
 // NOTE: the `noc_mode` variable itself is owned by jit_kernel_stubs.hpp
-// (`inline constexpr int noc_mode = DM_DYNAMIC_NOC;`). We deliberately do NOT
-// redefine it here: the `#ifndef noc_mode` guard only tests *macros*, not
-// variables, so defining it in both headers would be an ODR/redefinition error
-// in any TU including both — and the values would disagree (several upstream ops
-// `static_assert(noc_mode == DM_DYNAMIC_NOC)`). jit_kernel_stubs.hpp is part of
-// every kernel TU prelude, so the symbol is always available where kernels need it.
+// (`constexpr uint8_t noc_mode = NOC_MODE;`, mirroring the firmware
+// dataflow_api_common.h formula). We deliberately do NOT redefine it here: the
+// `#ifndef noc_mode` guard only tests *macros*, not variables, so defining it in
+// both headers would be an ODR/redefinition error in any TU including both.
+// jit_kernel_stubs.hpp is part of every kernel TU prelude, so the symbol is
+// always available where kernels need it. See docs/noc-mode-divergence.md.
 
 #endif  // _RISC_COMMON_H_

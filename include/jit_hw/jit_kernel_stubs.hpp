@@ -19,17 +19,15 @@
 #define KERNEL_BUILD
 #endif
 
-// NOC mode constants — silicon firmware sets these per-RISC build. upstream kernels
-// has static_assert(noc_mode == DM_DYNAMIC_NOC) in several ops, so emule
-// reports dynamic mode. Universal because upstream code references them from both
-// compute and dataflow paths.
+// NOC mode constants — silicon firmware sets these per-RISC build.
 #ifndef DM_DEDICATED_NOC
 #define DM_DEDICATED_NOC 0
 #endif
 #ifndef DM_DYNAMIC_NOC
 #define DM_DYNAMIC_NOC 1
 #endif
-inline constexpr int noc_mode = DM_DYNAMIC_NOC;
+// noc_mode / noc_index are defined together further down, next to the other
+// firmware-mirrored constants, once <cstdint> (uint8_t) is in scope.
 
 // tensix_sync — silicon's TRISC sync barrier. emule runs all TRISCs on a
 // unified compute thread, so this is a no-op. Universal because compute
@@ -164,8 +162,20 @@ extern thread_local uint32_t __emule_my_thread_id;
 #define tt_l1_ptr
 #endif
 
-// NOC index — always 0 for emulation (real firmware sets this per core).
+// noc_mode mirrors the firmware dataflow_api_common.h KERNEL_BUILD formula
+// (noc_mode = NOC_MODE): the host emits NOC_MODE per kernel type
+// (kernel.cpp::process_defines) — DM_DEDICATED_NOC by default. emule's compute
+// wrappers emit no NOC_MODE, so default it.
+//
+// noc_index is intentionally pinned to 0, NOT the faithful NOC_INDEX: emule's
+// non-zero-NOC address resolution is not yet correct, so a kernel assigned NOC 1
+// reads/writes wrong data (the long-standing hardcode masked this). Making
+// noc_index faithful is blocked on NOC-1 support. See docs/noc-mode-divergence.md.
+#ifndef NOC_MODE
+#define NOC_MODE DM_DEDICATED_NOC
+#endif
 constexpr uint8_t noc_index = 0;
+constexpr uint8_t noc_mode = NOC_MODE;
 
 static inline uintptr_t get_arg_addr(int arg_idx) {
     return reinterpret_cast<uintptr_t>(&__rt_args[arg_idx]);
