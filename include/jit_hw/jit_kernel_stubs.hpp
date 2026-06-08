@@ -162,19 +162,18 @@ extern thread_local uint32_t __emule_my_thread_id;
 #define tt_l1_ptr
 #endif
 
-// noc_mode mirrors the firmware dataflow_api_common.h KERNEL_BUILD formula
-// (noc_mode = NOC_MODE): the host emits NOC_MODE per kernel type
-// (kernel.cpp::process_defines) — DM_DEDICATED_NOC by default. emule's compute
-// wrappers emit no NOC_MODE, so default it.
-//
-// noc_index is intentionally pinned to 0, NOT the faithful NOC_INDEX: emule's
-// non-zero-NOC address resolution is not yet correct, so a kernel assigned NOC 1
-// reads/writes wrong data (the long-standing hardcode masked this). Making
-// noc_index faithful is blocked on NOC-1 support. See docs/noc-mode-divergence.md.
+// noc_index / noc_mode mirror the firmware dataflow_api_common.h KERNEL_BUILD
+// formula (noc_index = NOC_INDEX, noc_mode = NOC_MODE): the host emits these per
+// kernel type (kernel.cpp::process_defines) — BRISC→NOC0, NCRISC→NOC1, mode
+// DM_DEDICATED_NOC by default. emule's compute wrappers emit neither macro, so
+// default them. See docs/noc-mode-divergence.md.
+#ifndef NOC_INDEX
+#define NOC_INDEX 0
+#endif
 #ifndef NOC_MODE
 #define NOC_MODE DM_DEDICATED_NOC
 #endif
-constexpr uint8_t noc_index = 0;
+constexpr uint8_t noc_index = NOC_INDEX;
 constexpr uint8_t noc_mode = NOC_MODE;
 
 static inline uintptr_t get_arg_addr(int arg_idx) {
