@@ -68,19 +68,26 @@ faithful (`= NOC_INDEX`) was tried and **reverted**: it corrupts data for any ke
 Isolation proof: with `noc_index = 0` the simple tiled L1 write→CB→read test passes; with
 `noc_index = NOC_INDEX` it fails with a data mismatch — `noc_index` is the only variable.
 
-Root cause: **emule's non-zero-NOC address resolution is not correct.** NOC 1 uses a flipped
-coordinate system on silicon; emule's per-NOC tables (`my_x/my_y[noc]`, `*_bank_to_noc_xy[noc]`) and
-the `get_noc_addr(..., noc=1)` resolution path don't produce the right host address. The
-long-standing `noc_index = 0` hardcode silently forced every kernel onto NOC 0, masking this — emule
-has effectively never exercised NOC 1.
+Root cause (corrected via `/arch-lookup`, WH+BH): it is **NOT** a coordinate-flip problem.
+`get_noc_addr(x,y,addr,noc)` is NOC-index-independent on both arches (callers pass NOC-0/virtual
+coords; the NIU routes), and `my_x[1]==my_x[0]` is **faithful** — under coordinate virtualization
+`NOC_ID_LOGICAL` returns the same virtual self-coord for both NOCs (WH `noc_parameters.h:150`). So
+emule must **not** add a `noc1 = size-1-x` flip to `get_noc_addr` or `my_x[1]` (that would diverge).
+The actual gap is that emule's per-NOC **bank tables** `dram_bank_to_noc_xy[1]` / `l1_bank_to_noc_xy[1]`
+(emulated_program_runner.cpp) aren't populated — only `[0]` is — so a kernel running on `noc_index=1`
+reads **garbage bank coordinates** (this is why faithful `noc_index` corrupted the tiled L1 test,
+which uses interleaved/bank addressing). The `noc_index=0` hardcode forced every kernel onto NOC 0,
+masking it.
 
 **Decision:** `noc_index` stays pinned to 0 for now (documented divergence). Making it faithful is
-the real "NOC index sanitization" work and is **blocked on fixing emule's NOC-1 resolution**
-(`emulated_program_runner.cpp` per-NOC coordinate/bank-table population + the resolve path) —
-tracked as a follow-up. `noc_mode` (above) is fixed now because it is safe; `noc_index` is not.
+the "NOC index sanitization" follow-up and is **blocked on populating the per-NOC bank tables `[1]`**
+in `emulated_program_runner.cpp` — NOT on a coordinate flip. `noc_mode` (above) is fixed now because
+it is safe; faithful `noc_index` is deferred until the `[1]` bank tables are filled.
 
 ## Related
 This was surfaced during the Metal 2.0 data-movement uplift. The same `jit_kernel_stubs.hpp`
 definitions also collide with the real `dataflow_api_common.h` for Metal 2.0 DM kernels (a separate
-redefinition fix). The 8 DM/DRAM tests additionally need Metal 2.0 `SetProgramRunArgs` runtime-arg
-support in `emulated_program_runner.cpp` (tracked separately). See `project_umd_untangle` memory.
+redefinition fix, via an empty interception shim). The 8 DM/DRAM tests' segfault was the
+experimental-NOC `UnicastEndpoint` local-source resolving to NOC core (0,0) instead of the issuing
+core's own L1; fixed in `api/dataflow/endpoints.h` by branching the endpoint traits on `AddressType`
+(LOCAL_L1 → `my_x/my_y[noc]`). See `project_umd_untangle` memory.
