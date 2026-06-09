@@ -8,6 +8,7 @@
 
 #include "jit_hw/emule_cb_state.h"
 #include "jit_hw/emule_dfb_state.h"
+#include "jit_hw/emule_asan.h"
 #include "jit_hw/api/compute/common_globals.h"
 #include "jit_hw/emule_wait.h"
 #include <cstdint>
@@ -103,13 +104,12 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
     auto& cb = __emule_cbs[cb_id];
     // Always on: gating this would deadlock the CV wait below. See ASAN.md.
     if (n > cb.num_pages) {
-        fprintf(stderr,
+        __emule_asan_panic(
                 "[ASAN ERROR] CB Reservation Overflow: CB %u has %u total pages, "
                 "but kernel requested to reserve %u pages. This would hang on silicon! "
                 "(page_size=%u) [phys (%u,%u) logical (%u,%u)]\n",
                 cb_id, cb.num_pages, n, cb.page_size,
                 my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
-        std::abort();
     }
     // Lock-free fast path (safe for SPSC — only consumer decrements occupied).
     if ((cb.num_pages - cb.occupied.load(std::memory_order_acquire)) >= n) {
@@ -209,11 +209,10 @@ inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
     // silicon). cb_push_back has no such requirement — only writes precede a
     // push, so an unbarriered read there is harmless.
     if (__emule_asan_enabled() && __emule_pending_noc_reads > 0) {
-        fprintf(stderr,
+        __emule_asan_panic(
                 "[ASAN ERROR] Race Condition: cb_pop_front(cb_id=%u) called while a NoC read is still pending "
                 "(%u outstanding) — missing noc_async_read_barrier()\n",
                 cb_id, __emule_pending_noc_reads);
-        abort();
     }
     // Saturate at 0; popping more than waited is suspect but mustn't underflow.
     if (n <= __emule_cb_waited_pages[cb_id]) {

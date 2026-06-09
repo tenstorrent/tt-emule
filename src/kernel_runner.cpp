@@ -32,6 +32,7 @@ thread_local tt_emule::EmuleDFBInterface* __emule_dfbs     = nullptr;
 // dataflow_api.h short-circuit as no-ops.
 thread_local uint32_t __emule_sem_l1_range_start = 0;
 thread_local uint32_t __emule_sem_l1_range_end = 0;
+thread_local const char* __emule_kernel_name = nullptr;
 thread_local uint32_t __emule_pending_noc_reads = 0;
 thread_local uint32_t __emule_l1_unreserved_base = 0;
 thread_local const uint64_t* __emule_l1_tensor_ranges = nullptr;

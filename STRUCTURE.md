@@ -46,6 +46,7 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/emule_cb_state.h` — `using __emule_cb_state = tt_emule::CBSyncState`; `extern thread_local __emule_cbs`
 - `include/jit_hw/emule_dfb_state.h` — `using __emule_dfb_iface = tt_emule::EmuleDFBInterface`; `extern thread_local __emule_dfbs`, `__emule_tc_array`
 - `include/jit_hw/emule_wait.h` — `__emule_cv_wait` (cv.wait by default; `cv.wait_for`+`<chrono>` under `EMULE_WAIT_TIMEOUT`)
+- `include/jit_hw/emule_asan.h` — unified ASAN diagnostic trace: `__emule_asan_panic` (called by every `[ASAN ERROR]` site instead of `abort()`), `__emule_asan_print_trace`, `__emule_asan_symbolize`; `extern thread_local __emule_kernel_name`
 - `include/jit_hw/jit_kernel_stubs.hpp` — `__EMULE_JIT_MODE`; fwd `tt_emule::Core`/`Device`; `extern "C"` `__emule_dram_ptr`, `__emule_local_l1_to_ptr`; `get_arg_addr`, `get_common_arg_addr`
 - `include/jit_hw/llk_defs.h` — aggregator: includes `llk_types.h`, `api/compute/common.h`, `nfaces.h`, `firmware_common.h`, `llk_state.h`
 - `include/jit_hw/llk_math_eltwise_binary.h` — empty shim (pragma-once only)
