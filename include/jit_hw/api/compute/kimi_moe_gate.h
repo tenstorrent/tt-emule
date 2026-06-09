@@ -47,7 +47,10 @@ ALWI void kimi_moe_gate_init(uint32_t /*icb0*/, uint32_t /*icb1*/) {
 template <bool normalize = false, int num_experts = 8, bool is_32bit = false>
 ALWI void kimi_moe_gate(uint32_t icb0, uint32_t icb1,
                         uint32_t eps_packed, uint32_t scale_packed) {
-    constexpr uint32_t TOTAL = 512;        // padded expert count
+    // Silicon SFPU is `top8_of_384` — only the first 384 elements participate
+    // in the top-K ranking even though the device tile holds 512 (padded).
+    // Positions 384..511 are simply not considered by the SFPU. Match that.
+    constexpr uint32_t TOTAL = 384;        // active experts (matches silicon top8_of_384)
     constexpr uint32_t DEV_ROWS = 32;      // device tile rows
     constexpr uint32_t DEV_COLS = 16;      // device tile cols
     (void)DEV_ROWS; (void)DEV_COLS;
@@ -57,18 +60,17 @@ ALWI void kimi_moe_gate(uint32_t icb0, uint32_t icb1,
     const uint16_t* bias_ptr = reinterpret_cast<const uint16_t*>(
         __emule_compute::cb_read_ptr_at(icb1, 0));
 
-    // bias_dev[r_d][c_d] for the (32, 16) device tile. r_d * 16 + c_d is
-    // the device's linear offset (matches act_dev's linear order).
-    auto bias_at = [&](uint32_t i) -> float {
-        // Map original-flat i → device-flat offset for bias.
-        uint32_t face = i / 256u;            // 0 or 1
-        uint32_t r_d_lower = (i % 256u) % 16u;
-        uint32_t c_d = (i % 256u) / 16u;
-        uint32_t r_d = face * 16u + r_d_lower;
-        return __emule_bf16::to_f32(bias_ptr[r_d * 16u + c_d]);
-    };
+    // Both act and bias for the (32,16) device tile are accessed linearly:
+    // a (32,16) tile splits into 2 stacked 16x16 faces, and for a flat index
+    // i, the nfaces position works out to i (face 0 covers i=0..255, face 1
+    // covers i=256..511, and within each face row-major is identical to
+    // linear). The test reshapes both inputs (1,1,512) → (32,16) without a
+    // transpose, so the kernel sees them in the same order golden does.
     auto act_at = [&](uint32_t i) -> float {
-        return __emule_bf16::to_f32(act_ptr[i]);  // linear order preserved
+        return __emule_bf16::to_f32(act_ptr[i]);
+    };
+    auto bias_at = [&](uint32_t i) -> float {
+        return __emule_bf16::to_f32(bias_ptr[i]);
     };
 
     float scores[TOTAL];
@@ -111,6 +113,10 @@ ALWI void kimi_moe_gate(uint32_t icb0, uint32_t icb1,
     }
 
     // Write DST. DST[0] = scores; DST[1] = bit-packed indices.
+    //
+    // Layout: silicon places the K outputs at col0 of row0..K-1 of face 0
+    // (see glm_moe_gate.h for the matching pack-subrect contract). Row-major
+    // DST index for face 0 row r col 0 is r*32+0.
     __emule_dst_check(0, "kimi_moe_gate.scores");
     __emule_dst_check(1, "kimi_moe_gate.indices");
     __emule_dst_mark_dirty(0);
@@ -119,12 +125,13 @@ ALWI void kimi_moe_gate(uint32_t icb0, uint32_t icb1,
         __emule_dst[0][i] = 0.0f;
         __emule_dst[1][i] = 0.0f;
     }
+    // Silicon convention: index lives in low 16 bits of the DST word.
     for (int i = 0; i < K; ++i) {
-        __emule_dst[0][i] = topk_scores[i];
-        uint32_t idx_bits = static_cast<uint32_t>(topk_indices[i]) << 16;
+        __emule_dst[0][i * 32] = topk_scores[i];
+        uint32_t idx_bits = static_cast<uint32_t>(topk_indices[i]);
         float idx_as_float;
         std::memcpy(&idx_as_float, &idx_bits, sizeof(float));
-        __emule_dst[1][i] = idx_as_float;
+        __emule_dst[1][i * 32] = idx_as_float;
     }
 }
 

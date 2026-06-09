@@ -92,7 +92,7 @@ ALWI void topk_xl_add_lsb_indices_init() {}
 
 ALWI void topk_xl_remove_msb_values_init() {}
 
-ALWI void topk_xl_separate_indices_init() {}
+ALWI void topk_xl_separate_indices_init(uint32_t /*group_id_bit_shift*/ = 0) {}
 
 // ── topk_xl_copy_tile ────────────────────────────────────────────────────
 // Unpacks `num_elements` values from CB (starting at in_tile_index_base) into
