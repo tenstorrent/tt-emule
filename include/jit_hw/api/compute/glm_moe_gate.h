@@ -48,23 +48,19 @@ ALWI void glm_moe_gate(uint32_t icb0, uint32_t icb1,
     const uint16_t* bias_ptr = reinterpret_cast<const uint16_t*>(
         __emule_compute::cb_read_ptr_at(icb1, 0));
 
-    // Rebuild (8, 32) views from the (16, 16) device tile. Identical layout
-    // mapping to deepseek_moe_gate.h.
+    // Rebuild (8, 32) views from the (16, 16) device tile. Unlike the
+    // deepseek shim, GLM does NOT pre-transpose bias on the host — the test
+    // reshapes torch_bias (1,8,32) → (1,16,16) without a transpose, so both
+    // act and bias share the same linear layout: flat index k = r_g*32 + c_g
+    // matches device offset (k/16)*16 + (k%16) = k for the (16,16) tile.
     float scores[N];        // scores from act (no sigmoid for GLM)
     float bias_scores[N];
-    for (uint32_t r_g = 0; r_g < GR; ++r_g) {
-        for (uint32_t c_g = 0; c_g < GC; ++c_g) {
-            uint32_t a_r = r_g * 2u + (c_g / 16u);
-            uint32_t a_c = c_g % 16u;
-            float s = __emule_bf16::to_f32(act_ptr[a_r * 16u + a_c]);
-            s = __emule_bf16::to_f32(__emule_bf16::from_f32(s));
-            uint32_t b_r = c_g % 16u;
-            uint32_t b_c = 2u * r_g + (c_g / 16u);
-            float bs = s + __emule_bf16::to_f32(bias_ptr[b_r * 16u + b_c]);
-            const uint32_t k = r_g * GC + c_g;
-            scores[k] = s;
-            bias_scores[k] = __emule_bf16::to_f32(__emule_bf16::from_f32(bs));
-        }
+    for (uint32_t k = 0; k < N; ++k) {
+        float s  = __emule_bf16::to_f32(act_ptr[k]);
+        s = __emule_bf16::to_f32(__emule_bf16::from_f32(s));
+        float bs = s + __emule_bf16::to_f32(bias_ptr[k]);
+        scores[k] = s;
+        bias_scores[k] = __emule_bf16::to_f32(__emule_bf16::from_f32(bs));
     }
 
     // Flat top-K by bias_score descending; carry the (8,32) flat index.
@@ -94,6 +90,12 @@ ALWI void glm_moe_gate(uint32_t icb0, uint32_t icb1,
 
     // Write DST. DST[0] = scores; DST[1] = bit-packed indices; DST[2] =
     // top-K bias_scores when !normalize (silicon emits these via pack_tile(2)).
+    //
+    // Layout: silicon places the K outputs at col0 of row0..K-1 of face 0
+    // (kernel comment: "output is found in col0 of row0-7"). Row-major DST
+    // index for face 0 row r col 0 is r*32+0. The pack subrect set up by
+    // TTI_SETADCXX(PAC, K-1, 0) + _llk_pack_mop_config_(K, 16, 1, 1) reads
+    // exactly these positions.
     __emule_dst_check(0, "glm_moe_gate.scores");
     __emule_dst_check(1, "glm_moe_gate.indices");
     __emule_dst_mark_dirty(0);
@@ -102,18 +104,22 @@ ALWI void glm_moe_gate(uint32_t icb0, uint32_t icb1,
         __emule_dst[0][i] = 0.0f;
         __emule_dst[1][i] = 0.0f;
     }
+    // Silicon convention: index lives in low 16 bits of the DST word (matches
+    // the topk fused-pair encoding and what pack-to-uint16 consumes). For
+    // pack-to-bf16 the low 16 bits become a tiny denormal — unused by this op
+    // (the indices CB is uint16-formatted).
     for (int i = 0; i < num_experts; ++i) {
-        __emule_dst[0][i] = topk_scores[i];
-        uint32_t idx_bits = static_cast<uint32_t>(topk_indices[i]) << 16;
+        __emule_dst[0][i * 32] = topk_scores[i];
+        uint32_t idx_bits = static_cast<uint32_t>(topk_indices[i]);
         float idx_as_float;
         std::memcpy(&idx_as_float, &idx_bits, sizeof(float));
-        __emule_dst[1][i] = idx_as_float;
+        __emule_dst[1][i * 32] = idx_as_float;
     }
     if constexpr (!normalize) {
         __emule_dst_check(2, "glm_moe_gate.bias_scores");
         __emule_dst_mark_dirty(2);
         for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; ++i) __emule_dst[2][i] = 0.0f;
-        for (int i = 0; i < num_experts; ++i) __emule_dst[2][i] = topk_bias_scores[i];
+        for (int i = 0; i < num_experts; ++i) __emule_dst[2][i * 32] = topk_bias_scores[i];
     }
 }
 

@@ -29,6 +29,12 @@ inline void pack_untilize_uninit(uint32_t cb_out = 0) {}
 template <uint32_t cols_per_dst_pass, uint32_t total_col_tiles>
 inline void pack_untilize_init(uint32_t /*icb*/, uint32_t /*ocb*/) {}
 
+// Single-template-arg variant used by sparse_gather_streaming.
+// Matches upstream pack_untilize.h:150's default form where total_col_tiles
+// defaults to cols_per_dst_pass.
+template <uint32_t block_ct_dim>
+inline void pack_untilize_init(uint32_t /*icb*/, uint32_t /*ocb*/) {}
+
 // Skip-BH-DEST-remap variant — emule has no DEST remap state, so this is the
 // same no-op as `pack_untilize_init` above. Required for the kernel-lib's
 // `if constexpr (configure_remap)` else-branch to parse.
