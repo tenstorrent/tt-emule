@@ -238,6 +238,10 @@ run_pytest "elt_test_relational"        "$ELT_TEST_DIR/test_relational.py" -k 'n
 run_pytest "elt_test_unary_comp"        "$ELT_TEST_DIR/test_unary.py::test_unary_comp_ops"
 run_pytest "elt_test_binary_ng_typecast_cmp" "$ELT_TEST_DIR/test_binary_ng_typecast.py" -k 'test_binary_ng_typecast_lt or (test_binary_w_typecast and (ge or gt or le or lt or eq or ne))'
 run_pytest "elt_test_binary_sharded_col_major_cmp" "$ELT_TEST_DIR/test_binary_bcast.py::test_binary_sharded_col_major" -k 'eq or ne or gt or ge or lt or le'
+# #123 (align_power_of_2 dedup) regression guard — volume_tensors was JIT-blocked pre-fix.
+run_pytest "elt_test_binary_bcast_volume_tensors" "$ELT_TEST_DIR/test_binary_bcast.py::test_01_volume_tensors"
+# #125 (llk_math_eltwise_binary_init shim + wiring) regression guard — batch_norm was 0/1537 pre-fix.
+run_pytest "fused_test_batch_norm_pgmcache" "$FUSED_TEST_DIR/test_batch_norm.py::test_batch_norm_program_cache_and_default"
 
 run_pytest "fused_test_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_large_fill_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_accuracy" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_stable_neg_values" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_4096x4096_fp32" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_large_kernel_block_size" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_3D" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout_large"
 run_pytest "reduce_test_cumprod" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_backward" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_failing_cases"
