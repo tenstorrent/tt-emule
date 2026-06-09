@@ -24,9 +24,15 @@ public:
     uint32_t get_cb_id() const { return cb_id_; }
 
     // ---- CB FIFO operations ----
-    void reserve_back(int32_t n)  { cb_reserve_back(cb_id_, n); }
+    // reserve_back/wait_front forward the kernel call site (__builtin_FILE/LINE
+    // default args) so the Dirty-CB check names the kernel line, not this header.
+    void reserve_back(int32_t n, const char* f = __builtin_FILE(), uint32_t l = __builtin_LINE()) {
+        cb_reserve_back(cb_id_, n, f, l);
+    }
     void push_back(int32_t n)     { cb_push_back(cb_id_, n); }
-    void wait_front(int32_t n)    { cb_wait_front(cb_id_, n); }
+    void wait_front(int32_t n, const char* f = __builtin_FILE(), uint32_t l = __builtin_LINE()) {
+        cb_wait_front(cb_id_, n, f, l);
+    }
     void pop_front(int32_t n)     { cb_pop_front(cb_id_, n); }
 
     // Non-blocking availability checks — in emulation always return true

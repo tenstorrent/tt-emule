@@ -18,9 +18,13 @@ public:
     explicit CircularBuffer(uint32_t cb_id) : cb_id_(cb_id) {}
     uint32_t get_cb_id() const { return cb_id_; }
 
-    void reserve_back(int32_t n) { cb_reserve_back(cb_id_, n); }
+    void reserve_back(int32_t n, const char* f = __builtin_FILE(), uint32_t l = __builtin_LINE()) {
+        cb_reserve_back(cb_id_, n, f, l);
+    }
     void push_back(int32_t n)    { cb_push_back(cb_id_, n); }
-    void wait_front(int32_t n)   { cb_wait_front(cb_id_, n); }
+    void wait_front(int32_t n, const char* f = __builtin_FILE(), uint32_t l = __builtin_LINE()) {
+        cb_wait_front(cb_id_, n, f, l);
+    }
     void pop_front(int32_t n)    { cb_pop_front(cb_id_, n); }
 
     bool pages_reservable_at_back(int32_t n) const { return true; }

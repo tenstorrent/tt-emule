@@ -44,6 +44,10 @@ thread_local uint32_t* __emule_l1_resolved_ranges_count = nullptr;
 thread_local uint32_t __emule_l1_resolved_ranges_capacity = 0;
 thread_local uint32_t __emule_cb_reserved_pages[32] = {};
 thread_local uint32_t __emule_cb_waited_pages[32] = {};
+thread_local const char* __emule_cb_reserve_file[32] = {};
+thread_local uint32_t __emule_cb_reserve_line[32] = {};
+thread_local const char* __emule_cb_wait_file[32] = {};
+thread_local uint32_t __emule_cb_wait_line[32] = {};
 thread_local bool __emule_cb_boundary_strict = false;
 
 extern "C" uint8_t* __emule_dram_ptr(uint64_t offset) {

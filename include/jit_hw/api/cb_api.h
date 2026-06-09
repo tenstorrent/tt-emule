@@ -23,6 +23,17 @@ extern thread_local uint32_t __emule_logical_x;
 extern thread_local uint32_t __emule_logical_y;
 extern thread_local uint32_t __emule_pending_noc_reads;
 
+// Per-CB source location of the most recent cb_reserve_back / cb_wait_front, so
+// the post-exit Dirty-CB check (which fires after the kernel has unwound off the
+// stack and thus has no kernel frame to backtrace) can still name the kernel
+// file:line of the unmatched reserve/wait. Captured cheaply at the call site via
+// __builtin_FILE/__builtin_LINE default args (compile-time; respects #line, so
+// it resolves to the real kernel source).
+extern thread_local const char* __emule_cb_reserve_file[32];
+extern thread_local uint32_t __emule_cb_reserve_line[32];
+extern thread_local const char* __emule_cb_wait_file[32];
+extern thread_local uint32_t __emule_cb_wait_line[32];
+
 // ---- cb_addr_shift ----
 // Silicon convention: addresses stored in 16-byte units (matches fifo_rd_ptr
 // encoding in LocalCBInterface). the cb_reconfig kernel reads
@@ -100,8 +111,13 @@ inline int __emule_cb_timeout_sec() {
     return val;
 }
 
-inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
+inline void cb_reserve_back(
+    uint32_t cb_id, uint32_t n,
+    const char* __site_file = __builtin_FILE(), uint32_t __site_line = __builtin_LINE()) {
     auto& cb = __emule_cbs[cb_id];
+    // Record the call site for the Dirty-CB check (see __emule_cb_reserve_file).
+    __emule_cb_reserve_file[cb_id] = __site_file;
+    __emule_cb_reserve_line[cb_id] = __site_line;
     // Always on: gating this would deadlock the CV wait below. See ASAN.md.
     if (n > cb.num_pages) {
         __emule_asan_panic(
@@ -167,8 +183,13 @@ inline void cb_push_back(uint32_t cb_id, uint32_t n) {
     }
 }
 
-inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
+inline void cb_wait_front(
+    uint32_t cb_id, uint32_t n,
+    const char* __site_file = __builtin_FILE(), uint32_t __site_line = __builtin_LINE()) {
     auto& cb = __emule_cbs[cb_id];
+    // Record the call site for the Dirty-CB check (see __emule_cb_wait_file).
+    __emule_cb_wait_file[cb_id] = __site_file;
+    __emule_cb_wait_line[cb_id] = __site_line;
     if (n > cb.num_pages) {
         fprintf(stderr, "EMULE BUG: cb_wait_front(cb_id=%u, n=%u) requests more than capacity "
                 "(num_pages=%u, page_size=%u) [phys (%u,%u) logical (%u,%u)]\n",
@@ -235,9 +256,19 @@ inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
 }
 
 // ---- int32_t overloads (D2M int32 support emits int32_t tile counts) ----
-inline void cb_reserve_back(uint32_t cb_id, int32_t n) { cb_reserve_back(cb_id, static_cast<uint32_t>(n)); }
+// reserve/wait forward the call site so the Dirty-CB check still records the
+// kernel location rather than this overload's line.
+inline void cb_reserve_back(
+    uint32_t cb_id, int32_t n,
+    const char* __site_file = __builtin_FILE(), uint32_t __site_line = __builtin_LINE()) {
+    cb_reserve_back(cb_id, static_cast<uint32_t>(n), __site_file, __site_line);
+}
 inline void cb_push_back(uint32_t cb_id, int32_t n)    { cb_push_back(cb_id, static_cast<uint32_t>(n)); }
-inline void cb_wait_front(uint32_t cb_id, int32_t n)   { cb_wait_front(cb_id, static_cast<uint32_t>(n)); }
+inline void cb_wait_front(
+    uint32_t cb_id, int32_t n,
+    const char* __site_file = __builtin_FILE(), uint32_t __site_line = __builtin_LINE()) {
+    cb_wait_front(cb_id, static_cast<uint32_t>(n), __site_file, __site_line);
+}
 inline void cb_pop_front(uint32_t cb_id, int32_t n)    { cb_pop_front(cb_id, static_cast<uint32_t>(n)); }
 
 // ---- Pointer accessors ----
