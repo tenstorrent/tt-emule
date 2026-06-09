@@ -88,6 +88,7 @@ inline void tensix_sync() {}
 #include "dev_mem_map.h"
 #include "emule_cb_state.h"
 #include "emule_dfb_state.h"
+#include "emule_asan.h"
 #include "tools/profiler/kernel_profiler.hpp"
 
 // CB-interface surface. Silicon kernels (and consumer kernel-lib templates
@@ -172,10 +173,9 @@ extern thread_local bool __emule_cb_boundary_strict;
 inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
     if (__emule_sem_l1_range_end > 0 &&
         l1_addr >= __emule_sem_l1_range_start && l1_addr < __emule_sem_l1_range_end) {
-        fprintf(stderr,
+        __emule_asan_panic(
                 "[ASAN ERROR] Illegal Semaphore Access: Offset 0x%x is inside the reserved Semaphore region [0x%x, 0x%x)\n",
                 l1_addr, __emule_sem_l1_range_start, __emule_sem_l1_range_end);
-        abort();
     }
     // CB ranges must be matched before OOB — CB memory isn't registered in
     // LiveL1Ranges and would otherwise look out-of-bounds.
@@ -200,7 +200,7 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                 // (A genuine write past the CB's allocated region is still caught
                 // downstream by the OOB-tensor check.)
                 if ((reserved > 0 || waited > 0) && !(write_dist < reserved) && !(read_dist < waited)) {
-                    fprintf(stderr,
+                    __emule_asan_panic(
                             "[ASAN ERROR] CB Boundary Violation: Attempted to access CB %u at offset 0x%x "
                             "(byte %u of %u, page %u of %u). "
                             "Write window: write_idx=%u, %u page(s) reserved. "
@@ -209,7 +209,6 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                             access_page, cb.num_pages,
                             cb.write_idx, reserved,
                             cb.read_idx, waited);
-                    abort();
                 }
             }
             uint32_t l1_base_cb = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
@@ -248,10 +247,9 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             }
         }
         if (!in_tensor) {
-            fprintf(stderr,
+            __emule_asan_panic(
                     "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
                     l1_off);
-            abort();
         }
         if (__emule_l1_resolved_ranges != nullptr &&
             __emule_l1_resolved_ranges_count != nullptr) {
@@ -275,10 +273,9 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             uint32_t logical_end = static_cast<uint32_t>(packed >> 32);
             uint32_t physical_end = static_cast<uint32_t>(packed);
             if (l1_off >= logical_end && l1_off < physical_end) {
-                fprintf(stderr,
+                __emule_asan_panic(
                         "[ASAN ERROR] Tensor Padding Violation: Attempted to write to a padded memory region at address 0x%x (logical_end=0x%x, physical_end=0x%x)\n",
                         l1_off, logical_end, physical_end);
-                abort();
             }
         }
     }

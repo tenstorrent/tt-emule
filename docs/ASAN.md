@@ -342,6 +342,31 @@ Kernel side (tt-emule/include/jit_hw/):
   Reservation Overflow check and the gated NoC Barrier Missing check.
 - `api/dataflow/dataflow_api.h` — second copy of `__emule_local_l1_to_ptr`
   (guarded), NOC transfer alignment checks.
+- `emule_asan.h` — unified diagnostic trace. `__emule_asan_panic()` (which every
+  check calls instead of `abort()`) prints the kernel/core/processor context +
+  a symbolized backtrace. See *Diagnostic trace* below.
 
 Tests (tt-metal/tests/tt_metal/tt_metal/api/test_*.cpp) — one file per
 sanitizer category.
+
+## Diagnostic trace
+
+Every `[ASAN ERROR]` calls `__emule_asan_panic()` (in `emule_asan.h`) rather than
+a bare `abort()`. That prints:
+
+1. **Kernel identity** — when a kernel is on the stack: the kernel source path
+   (`__emule_kernel_name`, a thread-local set per launch in the runner's
+   `launch_cores` and cleared at teardown) plus logical/physical core and
+   processor/neo/trisc, all read from the existing identity thread-locals.
+   Host-API checks (no kernel context) skip this block.
+2. **Symbolized backtrace** — `backtrace()` + `dladdr` to find each frame's
+   module; frames inside a JIT kernel `.so` are resolved to kernel-source
+   `file:line` via `llvm-symbolizer` (→ `addr2line` → raw `backtrace_symbols`).
+   The walk stops at `__emule_kernel_entry`.
+
+For frames to resolve, the runner compiles JIT kernels with `-g
+-fno-omit-frame-pointer` **when ASAN is on** (still `-O2`; the ASAN flag is part
+of the JIT cache key so debug `.so` files don't pollute the normal cache). The
+header is self-contained (libc/POSIX only) so it compiles into both kernel `.so`
+files and libtt_metal. New checks get the trace for free — just call
+`__emule_asan_panic()` after the `fprintf`.
