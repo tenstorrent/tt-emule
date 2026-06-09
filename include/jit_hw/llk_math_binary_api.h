@@ -10,6 +10,7 @@
 // `llk_math_eltwise_binary.h`; surface it under this name as well so kernel
 // includes that say `#include "llk_math_binary_api.h"` resolve.
 
+#include <cstdint>
 #include "llk_math_eltwise_binary.h"
 
 // `llk_math_eltwise_binary_init<>` — silicon configures the unpacker/math
