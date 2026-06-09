@@ -13,8 +13,8 @@
 //
 // `pack_block_contiguous` itself is rarely invoked in the
 // matmul_fused_act / matmul flow today (it is on the Blackhole-only
-// tiny-tile path); provide a memcpy fallback so the symbol resolves
-// if a kernel does reach it.
+// tiny-tile path); emule currently provides a no-op stub so the symbol
+// resolves if a kernel includes/references it.
 
 #include <cstdint>
 
