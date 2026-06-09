@@ -178,6 +178,18 @@ inline bool __emule_pack_subrect_active() {
         || __emule_pack_num_faces != 4;
 }
 
+// Restore the full-tile pack defaults (32×32 across 4 faces). emule runs every
+// compute engine on one host thread, so a kernel that programs a sub-rectangle
+// via TTI_SETADCXX / _llk_pack_mop_config_ would otherwise leave stale settings
+// that silently reshape packing for the next kernel. compute_kernel_hw_startup
+// calls this alongside the other pack-state resets.
+inline void __emule_reset_pack_subrect() {
+    __emule_pack_x_end      = 31;
+    __emule_pack_face_r_dim = 16;
+    __emule_pack_num_faces  = 4;
+    __emule_pack_num_tiles  = 1;
+}
+
 // p_setadc::PAC is silicon's engine-selector bitmask for the pack engine.
 // The actual numeric value matches the silicon CSR bit (bit 2 = 0b100); for
 // emule it just needs to be a constant that TTI_SETADCXX can compare against.
@@ -190,6 +202,9 @@ namespace p_setadc {
 // TTI_SETADCXX(adc, x_end, mask): silicon writes the X-dimension end-value
 // into the ADC register of the selected engine. Emule captures the PAC
 // engine's x_end into thread-local; other engines are ignored.
+// Guarded: if a TU also pulls a real LLK/TTI header that defines this macro,
+// use that one rather than triggering a redefinition error.
+#ifndef TTI_SETADCXX
 #define TTI_SETADCXX(adc, x_end_val, mask) \
     do { \
         if ((adc) == ::p_setadc::PAC) { \
@@ -197,6 +212,7 @@ namespace p_setadc {
         } \
         (void)(mask); \
     } while (0)
+#endif
 
 // _llk_pack_mop_config_(face_r_dim, tile_c_dim, num_faces, num_tiles):
 // silicon programs the pack MOP descriptor. Emule captures face_r_dim
@@ -389,6 +405,24 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
         const uint32_t rows    = __emule_pack_face_r_dim;
         const uint32_t n_faces = __emule_pack_num_faces;
 
+        // Validate the kernel-programmed rectangle against the DST face layout
+        // (16 rows × 16 cols, 4 faces) and the output CB page size. The values
+        // come straight from TTI_SETADCXX / _llk_pack_mop_config_ in the kernel;
+        // an out-of-range config would index past __emule_dst / `buf` and corrupt
+        // emulation state, so fail loudly instead.
+        const uint32_t elem_bytes = cb_is_32bit_format(ocb) ? 4u : 2u;  // uint16/bf16 → 2
+        const uint32_t out_elems  = n_faces * rows * cols;
+        if (cols > 16u || rows > 16u || n_faces > 4u ||
+            out_elems * elem_bytes > cb_page_size(ocb)) {
+            fprintf(stderr,
+                "[EMULE] pack_dst_to_buf: invalid pack-subrect config on CB %u "
+                "(cols=%u rows=%u faces=%u → %u elems × %uB = %uB > page %uB; "
+                "DST face bound is 16×16 across 4 faces)\n",
+                static_cast<unsigned>(ocb), cols, rows, n_faces, out_elems,
+                elem_bytes, out_elems * elem_bytes, cb_page_size(ocb));
+            std::abort();
+        }
+
         auto subrect_dst_rm = [&](uint32_t f, uint32_t r, uint32_t c) -> uint32_t {
             const uint32_t f_dst_row_base = (f / 2u) * 16u;
             const uint32_t f_dst_col_base = (f % 2u) * 16u;
@@ -396,19 +430,40 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
         };
 
         if (cb_is_32bit_format(ocb)) {
-            uint32_t* out = reinterpret_cast<uint32_t*>(buf);
+            // Mirror the full-tile 32-bit path's semantics: honor ReLU and L1
+            // accumulation. Only the no-ReLU / no-acc case keeps the bit-exact
+            // memcpy (preserves INT32 bit patterns that float assignment would
+            // flush under x86 DAZ/FTZ).
             uint32_t out_idx = 0;
-            for (uint32_t f = 0; f < n_faces; ++f) {
-                for (uint32_t r = 0; r < rows; ++r) {
-                    for (uint32_t c = 0; c < cols; ++c) {
-                        const uint32_t dst_rm = subrect_dst_rm(f, r, c);
-                        std::memcpy(&out[out_idx++], &__emule_dst[dst_slot][dst_rm], sizeof(uint32_t));
-                    }
-                }
+            if (__emule_l1_acc_enabled) {
+                float* out = reinterpret_cast<float*>(buf);
+                for (uint32_t f = 0; f < n_faces; ++f)
+                    for (uint32_t r = 0; r < rows; ++r)
+                        for (uint32_t c = 0; c < cols; ++c)
+                            out[out_idx++] += __emule_apply_pack_relu(
+                                __emule_dst[dst_slot][subrect_dst_rm(f, r, c)]);
+            } else if (__emule_pack_relu_mode == ReluType::NO_RELU) {
+                uint32_t* out = reinterpret_cast<uint32_t*>(buf);
+                for (uint32_t f = 0; f < n_faces; ++f)
+                    for (uint32_t r = 0; r < rows; ++r)
+                        for (uint32_t c = 0; c < cols; ++c)
+                            std::memcpy(&out[out_idx++],
+                                        &__emule_dst[dst_slot][subrect_dst_rm(f, r, c)],
+                                        sizeof(uint32_t));
+            } else {
+                float* out = reinterpret_cast<float*>(buf);
+                for (uint32_t f = 0; f < n_faces; ++f)
+                    for (uint32_t r = 0; r < rows; ++r)
+                        for (uint32_t c = 0; c < cols; ++c)
+                            out[out_idx++] = __emule_apply_pack_relu(
+                                __emule_dst[dst_slot][subrect_dst_rm(f, r, c)]);
             }
             return;
         }
         if (cb_is_uint16_format(ocb)) {
+            // Int output: low 16 bits of the DST int32 bit pattern. ReLU / L1-acc
+            // aren't coherent silicon configs on integer output, so skip them
+            // (same as the full-tile uint16 path).
             uint16_t* out = reinterpret_cast<uint16_t*>(buf);
             uint32_t out_idx = 0;
             for (uint32_t f = 0; f < n_faces; ++f) {
@@ -423,15 +478,22 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
             }
             return;
         }
-        // Default: bf16 output (page_size ≤ 2048, non-block-float).
+        // Default: bf16 output (page_size ≤ 2048, non-block-float). Mirror the
+        // full-tile bf16 path: accumulate into the existing buffer when L1 acc
+        // is enabled, otherwise overwrite. ReLU is applied in both cases.
         uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
         uint32_t out_idx = 0;
         for (uint32_t f = 0; f < n_faces; ++f) {
             for (uint32_t r = 0; r < rows; ++r) {
                 for (uint32_t c = 0; c < cols; ++c) {
-                    const uint32_t dst_rm = subrect_dst_rm(f, r, c);
-                    bf[out_idx++] = __emule_bf16::from_f32(
-                        __emule_apply_pack_relu(__emule_dst[dst_slot][dst_rm]));
+                    const float v = __emule_apply_pack_relu(
+                        __emule_dst[dst_slot][subrect_dst_rm(f, r, c)]);
+                    if (__emule_l1_acc_enabled) {
+                        bf[out_idx] = __emule_bf16::from_f32(__emule_bf16::to_f32(bf[out_idx]) + v);
+                    } else {
+                        bf[out_idx] = __emule_bf16::from_f32(v);
+                    }
+                    ++out_idx;
                 }
             }
         }

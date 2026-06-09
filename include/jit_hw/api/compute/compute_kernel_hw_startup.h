@@ -28,6 +28,10 @@ inline void compute_kernel_hw_startup(uint32_t, uint32_t) {
     // stale state from prior kernel invocations in the same thread.
     std::memset(__emule_pack_offset, 0, sizeof(__emule_pack_offset));
     __emule_l1_acc_enabled = false;
+    // Same rationale for the pack-subrect (TTI_SETADCXX / _llk_pack_mop_config_)
+    // capture — restore the full-tile defaults so a prior kernel's sub-rectangle
+    // config doesn't leak into this one.
+    __emule_reset_pack_subrect();
 }
 inline void compute_kernel_hw_startup(uint32_t a, uint32_t b, uint32_t) {
     compute_kernel_hw_startup(a, b);
