@@ -24,6 +24,11 @@
 // noc_parameters.h must be in scope before tensor_accessor.h so that the
 // NOC_UNICAST_ADDR_X/Y macros (used at upstream tensor_accessor.h:235) resolve.
 #include "noc/noc_parameters.h"
+// NOC counter/barrier surface that consumer kernel-lib headers reference
+// (NocBarrierType / inc_noc_counter_val / proc_type / noc_cmd_buf_ready /
+// noc_*_writes_*_issued/acked storage). Silicon backs these in firmware
+// `.cc` files; emule provides per-thread no-op storage.
+#include "noc_nonblocking_api.h"
 #include "api/tensor/tensor_accessor.h"
 #include <cstdio>
 #include <cstdlib>
