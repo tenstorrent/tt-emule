@@ -143,18 +143,12 @@ inline void __emule_welford_finalize(uint32_t mean_dst_idx, uint32_t scale_idx, 
     __emule_dst_mark_dirty(mean_dst_idx + 1);
     std::memset(__emule_dst[mean_dst_idx], 0, __EMULE_DST_BYTES);
     std::memset(__emule_dst[mean_dst_idx + 1], 0, __EMULE_DST_BYTES);
-    if (to_face) {
-        // mean in row 0, variance in row 1 of the first face (groupnorm).
-        for (uint32_t c = 0; c < 32; ++c) {
-            __emule_dst[mean_dst_idx][c] = __emule_welford_mean[c];
-            __emule_dst[mean_dst_idx + 1][c] = __emule_welford_m2[c] * inv;
-        }
-    } else {
-        // mean and variance both in row 0 (layernorm finalize_to_row).
-        for (uint32_t c = 0; c < 32; ++c) {
-            __emule_dst[mean_dst_idx][c] = __emule_welford_mean[c];
-            __emule_dst[mean_dst_idx + 1][c] = __emule_welford_m2[c] * inv;
-        }
+    // In emule we write mean/variance into row 0 of their respective DST tiles.
+    // (Silicon's *_to_face vs *_to_row differ in how the SFPU lays out lanes in DST.)
+    (void)to_face;
+    for (uint32_t c = 0; c < 32; ++c) {
+        __emule_dst[mean_dst_idx][c] = __emule_welford_mean[c];
+        __emule_dst[mean_dst_idx + 1][c] = __emule_welford_m2[c] * inv;
     }
 }
 
