@@ -8,6 +8,7 @@
 // but runs on x86 host using bank mapping arrays populated by emulated_program_runner.
 
 #include <cstdint>
+#include "jit_hw/api/alignment.h"               // align_power_of_2
 #include "jit_hw/api/compute/common_globals.h"  // DataFormat enum
 
 // NOC address-field extraction. Upstream silicon kernels (notably the
@@ -74,11 +75,6 @@ extern thread_local uint8_t my_y[2];
 #define NOC_XY_ADDR(x, y, addr) \
     (((((uint64_t)(y) << 6) | (uint64_t)(x)) << NOC_ADDR_COORD_SHIFT) | (uint64_t)(addr))
 #endif
-
-// Alignment helper (matches firmware api/alignment.h)
-inline constexpr uint32_t align_power_of_2(uint32_t addr, uint32_t alignment) {
-    return ((addr - 1) | (alignment - 1)) + 1;
-}
 
 // NUM_DRAM_BANKS / NUM_L1_BANKS — passed as JIT defines from program runner.
 #ifndef NUM_DRAM_BANKS

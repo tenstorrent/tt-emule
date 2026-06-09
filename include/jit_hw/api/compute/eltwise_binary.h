@@ -8,6 +8,9 @@
 // binary_op_init_common and binary_dest_reuse_tiles{,_init} are also in common.h.
 // This header adds the per-op *_init stubs (no-ops in emulation).
 #include "api/compute/common.h"
+#ifdef TRISC_MATH
+#include "jit_hw/llk_math_eltwise_binary.h"  // llk_math_eltwise_binary_init
+#endif
 
 // Note: add_int_sfpu.h / sub_int_sfpu.h / mul_int_sfpu.h are pulled in
 // transitively via common.h (see bottom of common.h).
