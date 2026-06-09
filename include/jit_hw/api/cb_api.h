@@ -185,13 +185,6 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
 }
 
 inline void cb_push_back(uint32_t cb_id, uint32_t n) {
-    if (__emule_asan_enabled() && __emule_pending_noc_reads > 0) {
-        fprintf(stderr,
-                "[ASAN ERROR] Race Condition: cb_push_back(cb_id=%u) called while a NoC read is still pending "
-                "(%u outstanding) — missing noc_async_read_barrier()\n",
-                cb_id, __emule_pending_noc_reads);
-        abort();
-    }
     // Shrink the reserved window before the FIFO advance — keeps any concurrent
     // boundary check consistent.
     if (n <= __emule_cb_reserved_pages[cb_id]) {
@@ -279,6 +272,18 @@ inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
 }
 
 inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
+    // All outstanding NoC reads must be barriered before a pop frees the page:
+    // popping releases the page for the producer to refill, and a read still
+    // landing into it would race the refill (consumer reads stale/torn data on
+    // silicon). cb_push_back has no such requirement — only writes precede a
+    // push, so an unbarriered read there is harmless.
+    if (__emule_asan_enabled() && __emule_pending_noc_reads > 0) {
+        fprintf(stderr,
+                "[ASAN ERROR] Race Condition: cb_pop_front(cb_id=%u) called while a NoC read is still pending "
+                "(%u outstanding) — missing noc_async_read_barrier()\n",
+                cb_id, __emule_pending_noc_reads);
+        abort();
+    }
     // Saturate at 0; popping more than waited is suspect but mustn't underflow.
     if (n <= __emule_cb_waited_pages[cb_id]) {
         __emule_cb_waited_pages[cb_id] -= n;

@@ -92,7 +92,7 @@ The host populates these thread-locals before each kernel invocation
 | `__emule_cb_reserved_pages[32]` | Per-CB write-window size; updated by `cb_reserve_back`/`cb_push_back` |
 | `__emule_cb_waited_pages[32]` | Per-CB read-window size; updated by `cb_wait_front`/`cb_pop_front` |
 | `__emule_l1_resolved_ranges` / `_count` / `_capacity` | Object-intent log (kernel writes; runner reads after join) |
-| `__emule_pending_noc_reads` | Outstanding noc_async_read count; consumed by NoC Barrier Missing check in cb_push_back |
+| `__emule_pending_noc_reads` | Outstanding noc_async_read count; consumed by NoC Barrier Missing check in cb_pop_front |
 
 All these declarations live in `tt-emule/include/jit_hw/jit_kernel_stubs.hpp`
 (extern) and are defined in `emulated_program_runner.cpp` and
@@ -124,13 +124,18 @@ that resolve NOC coordinates to a Core*. If the lookup fails (no core
 allocated at that coordinate), abort. Catches programs that
 multicast/unicast to nonexistent endpoints.
 
-**Dirty CB (post-launch)** — After `launch_cores` joins, walk every
-core's CB array. Any `cb.occupied > 0` means push count > pop count —
-the leftover pages will back-pressure the next program launch.
-Per-kernel attribution is also attempted earlier inside the kernel
-thread but only when one kernel ran on the core (multi-kernel
-producer+consumer programs intentionally leave producer occupied > 0
-at producer exit).
+**Dirty CB (per-kernel exit)** — A CB is "flushed" when every
+`cb_reserve_back` was committed by a matching `cb_push_back` and every
+`cb_wait_front` was released by a matching `cb_pop_front`. At each
+kernel's exit the runner reads the per-kernel thread-local counters
+`__emule_cb_reserved_pages[cb]` (bumped by reserve, shrunk by push) and
+`__emule_cb_waited_pages[cb]` (set by wait_front, shrunk by pop); either
+holding a non-zero net unmatched count means the kernel reserved/waited
+without the matching push/pop and left the CB un-flushed (its write/read
+pointer desyncs on silicon). This is a per-kernel property, checked
+inside the kernel thread before the thread-locals are cleared — NOT a
+post-join occupancy scan. Leftover occupancy alone is fine: a producer
+that reserves+pushes but is never consumed ends occupied yet flushed.
 
 ### Kernel-side checks (in `__emule_local_l1_to_ptr`)
 
@@ -186,12 +191,15 @@ because it has to take the DRAM mmap base). Scans
 **CB Reservation Overflow** — `cb_reserve_back(cb_id, n)`: if
 `n > cb.num_pages`, abort. Always on (see master switch section).
 
-**NoC Barrier Missing** — `cb_push_back`: if
+**NoC Barrier Missing** — `cb_pop_front`: if
 `__emule_pending_noc_reads > 0`, abort. The counter is incremented by
 every `noc_async_read*` and zeroed by `noc_async_read_barrier`.
-Detecting at `cb_push_back` time is the load-bearing moment: the
-consumer is about to observe the CB page, and if a read into that page
-is still in flight the consumer reads garbage.
+Detecting at `cb_pop_front` time is the load-bearing moment: the pop
+frees the page for the producer to refill, so every read must have
+completed first — a read still in flight when the page is released
+races the refill and corrupts data. `cb_push_back` carries no such
+requirement: only writes precede a push, so an unbarriered read there
+is harmless.
 
 **NOC Transfer Alignment** — Three variants in `dataflow_api.h`,
 depending on src/dst type (DRAM/L1 × L1/DRAM). The check is on the low
