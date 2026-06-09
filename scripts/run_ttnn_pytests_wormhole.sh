@@ -343,6 +343,7 @@ run_pytest "reduce_test_torch_compat" "$REDUCE_TEST_DIR/test_reduction.py::test_
 run_pytest "dm_test_tosa_gather" "$DM_TEST_DIR/test_tosa_gather.py"  # promoted (issue #73): 10 passed
 
 run_pytest "reduce_test_max" "$REDUCE_TEST_DIR/test_max.py"
+run_pytest "reduce_test_ema" "$REDUCE_TEST_DIR/test_ema.py"
 
 run_pytest "matmul_test_linear" "$MATMUL_TEST_DIR/test_linear.py" -k 'test_linear_fp32_acc or test_vector_linear'
 
