@@ -1,0 +1,1 @@
+timeout 600 /opt/ttmlir-toolchain/venv/bin/pytest --timeout 60 -xv tests/ttnn/unit_tests/operations/data_movement/test_pad.py --junitxml=/localdev/arminale/tt-emule/snapshots/bh_sanity_dryrun/test_pad.xml
