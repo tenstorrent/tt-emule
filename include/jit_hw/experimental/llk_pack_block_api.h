@@ -20,8 +20,7 @@
 
 template <bool zero_output = false>
 inline void llk_pack_block_contiguous_mop_config(const std::uint32_t /*output*/) {
-    // No-op under emule: no MOP/addr-mod config needed when pack is a
-    // memcpy fallback.
+    // No-op under emule: there is no MOP/addr-mod hardware to configure.
 }
 
 template <bool is_fp32_dest_acc_en>

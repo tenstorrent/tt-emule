@@ -15,8 +15,10 @@
 //
 // Storage strategy: per-thread counter arrays (`thread_local`) so each
 // JIT-compiled .so gets its own definition without needing a separate
-// firmware .cc. The values increment as kernels run but emule's NOC model
-// doesn't read them back for correctness.
+// firmware .cc. The counters are never updated — `inc/set/get_noc_counter_val<>`
+// below are no-ops (get returns 0) — because emule's NOC is synchronous and
+// nothing reads them back for correctness; the storage exists only so the
+// kernel-lib templates that name these symbols resolve.
 
 #include <cstdint>
 #include "noc/noc_parameters.h"
@@ -94,9 +96,10 @@ inline constexpr uint32_t MEM_NOC_ATOMIC_RET_VAL_ADDR = 0;
 // ---- Command-buffer write/read register macros ----
 // Silicon: program NOC command buffers via NOC_CMD_BUF_WRITE_REG / READ_REG
 // MMIO macros. Under emule we don't actually program a NOC — these need to
-// be inert at expansion time. Provide no-op variadic macros that swallow
-// their arguments without evaluating side effects we'd lose (the macros'
-// arguments are typically register IDs and address calculations).
+// be inert at expansion time. Provide no-op variadic macros that ignore
+// their arguments entirely (they expand to `((void)0)` / `(0u)` and never
+// evaluate the arguments). The arguments are register IDs and address
+// calculations with no side effects we need to preserve.
 #ifndef NOC_CMD_BUF_WRITE_REG
 #define NOC_CMD_BUF_WRITE_REG(...) ((void)0)
 #endif
