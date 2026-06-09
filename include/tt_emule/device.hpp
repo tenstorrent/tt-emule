@@ -147,7 +147,6 @@ public:
         s.write_idx = 0;
         s.read_idx  = 0;
         s.occupied  = 0;
-        s.total_popped = 0;
     }
 
     void reset_cb_sync() {
@@ -159,7 +158,6 @@ public:
             s.write_idx = 0;
             s.read_idx  = 0;
             s.occupied  = 0;
-            s.total_popped = 0;
         }
     }
 

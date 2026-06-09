@@ -124,13 +124,18 @@ that resolve NOC coordinates to a Core*. If the lookup fails (no core
 allocated at that coordinate), abort. Catches programs that
 multicast/unicast to nonexistent endpoints.
 
-**Dirty CB (post-launch)** — After `launch_cores` joins, walk every
-core's CB array. Any `cb.occupied > 0` means push count > pop count —
-the leftover pages will back-pressure the next program launch.
-Per-kernel attribution is also attempted earlier inside the kernel
-thread but only when one kernel ran on the core (multi-kernel
-producer+consumer programs intentionally leave producer occupied > 0
-at producer exit).
+**Dirty CB (per-kernel exit)** — A CB is "flushed" when every
+`cb_reserve_back` was committed by a matching `cb_push_back` and every
+`cb_wait_front` was released by a matching `cb_pop_front`. At each
+kernel's exit the runner reads the per-kernel thread-local counters
+`__emule_cb_reserved_pages[cb]` (bumped by reserve, shrunk by push) and
+`__emule_cb_waited_pages[cb]` (set by wait_front, shrunk by pop); either
+holding a non-zero net unmatched count means the kernel reserved/waited
+without the matching push/pop and left the CB un-flushed (its write/read
+pointer desyncs on silicon). This is a per-kernel property, checked
+inside the kernel thread before the thread-locals are cleared — NOT a
+post-join occupancy scan. Leftover occupancy alone is fine: a producer
+that reserves+pushes but is never consumed ends occupied yet flushed.
 
 ### Kernel-side checks (in `__emule_local_l1_to_ptr`)
 
