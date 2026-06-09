@@ -137,6 +137,7 @@ run_pytest "dm_test_repeat"                  "$DM_TEST_DIR/test_repeat.py"  # pr
 run_pytest "dm_test_gather"                  "$DM_TEST_DIR/test_gather.py" -k 'not test_gather_general'  # issue #73: PASS on WH (45/45), but BH has 3 BH-specific PCC failures in test_gather_general — keep filter on BH
 run_pytest "dm_test_concat_5d"               "$DM_TEST_DIR/test_concat.py" -k 'test_concat_5d'
 run_pytest "dm_test_concat_many_inputs"      "$DM_TEST_DIR/test_concat.py" -k 'test_concat_many_inputs'
+run_pytest "dm_test_concat_sharded"          "$DM_TEST_DIR/test_concat.py::test_sharded_concat" "$DM_TEST_DIR/test_concat.py::test_concat_sharded_pad" "$DM_TEST_DIR/test_concat.py::test_sharded_concat_with_groups"  # sharded S2S concat guard (#131): local CB→CB copy was all-zeros before noc_async_read/write_one_packet_with_state reconstructed coords from set_state
 run_pytest "dm_test_fill_pad_float"          "$DM_TEST_DIR/test_fill_pad.py" -k 'test_fill_pad_float'
 run_pytest "dm_test_fill_pad_int"            "$DM_TEST_DIR/test_fill_pad.py" -k 'test_fill_pad_int'
 run_pytest "dm_test_embedding_tiled_input"   "$DM_TEST_DIR/test_embedding.py" -k 'test_embedding_tiled_input'
@@ -327,6 +328,7 @@ run_pytest "dm_test_pad" "$DM_TEST_DIR/test_pad.py" \
 
 run_pytest "dm_test_permute_not_sharded" "$DM_TEST_DIR/test_permute.py::test_permute_4d_fixed_w" "$DM_TEST_DIR/test_permute.py::test_permute_4d_cn" "$DM_TEST_DIR/test_permute.py::test_permute_4d_cnwh" "$DM_TEST_DIR/test_permute.py::test_permute_4d_wh" "$DM_TEST_DIR/test_permute.py::test_permute_5d" "$DM_TEST_DIR/test_permute.py::test_permute_5d_wyh" "$DM_TEST_DIR/test_permute.py::test_permute_5d_xh_pad" "$DM_TEST_DIR/test_permute.py::test_permute_8d_swapped" "$DM_TEST_DIR/test_permute.py::test_permutations_5d_fixed_w" "$DM_TEST_DIR/test_permute.py::test_permute_identity" -k 'not sharded'
 run_pytest "dm_test_permute" "$DM_TEST_DIR/test_permute.py::test_permute_5d_tiled_basic" "$DM_TEST_DIR/test_permute.py::test_permute_5d_tiled_swap" "$DM_TEST_DIR/test_permute.py::test_permute_squeeze" "$DM_TEST_DIR/test_permute.py::test_permute_for_specific_case" "$DM_TEST_DIR/test_permute.py::test_permute_on_4D_tensor_with_smaller_tuple_size" "$DM_TEST_DIR/test_permute.py::test_nil_volume_permute" "$DM_TEST_DIR/test_permute.py::test_transpose_wh_tiled_uint32"
+run_pytest "dm_test_permute_rm" "$DM_TEST_DIR/test_permute.py::test_permute" "$DM_TEST_DIR/test_permute.py::test_transpose" "$DM_TEST_DIR/test_permute.py::test_permute_negative_dim" "$DM_TEST_DIR/test_permute.py::test_permute_5d_blocked"  # ROW_MAJOR int32/uint32 permute guard (#131): this small-page-CB path was scrambled before cb_is_32bit_format became enum-driven
 run_pytest "dm_test_permute_sharded" "$DM_TEST_DIR/test_permute.py::test_permute_sharded"
 
 run_pytest "dm_test_untilize_same_volume" "$DM_TEST_DIR/test_untilize.py::test_untilize_same_volume_different_shapes"

@@ -336,9 +336,21 @@ inline uint32_t cb_tile_elems(uint32_t cb_id) {
 // Bfp8_b (~1088B) and Bfp4_b (~576B) both fall in the same sub-2048 page range.
 inline uint8_t cb_data_format(uint32_t cb_id) { return ::unpack_src_format[cb_id]; }
 
-// Is this CB using a 32-bit data format (INT32, Float32)?
-// Heuristic: bf16 tiles = 2048 bytes (1024 × 2), 32-bit tiles > 2048.
+// Is this CB using a 32-bit data format (Float32 / Int32 / UInt32 / Tf32)?
+// Enum-driven from the real DataFormat — the page-size heuristic (>2048) only
+// holds for full 32×32 tiles, so it misclassifies stick-sized CBs (e.g. the
+// row-major permute path's 128-byte cb_in/cb_out) and processes int32 as bf16.
+// Falls back to the page-size heuristic only when the format is unset (Invalid,
+// e.g. standalone tt_emule_lib builds with no EMULE_CB_DATA_FORMATS define).
 inline bool cb_is_32bit_format(uint32_t cb_id) {
+    const uint8_t fmt = cb_data_format(cb_id);
+    if (fmt != static_cast<uint8_t>(DataFormat::Invalid)) {
+        return fmt == static_cast<uint8_t>(DataFormat::Float32)
+            || fmt == static_cast<uint8_t>(DataFormat::Int32)
+            || fmt == static_cast<uint8_t>(DataFormat::UInt32)
+            || fmt == static_cast<uint8_t>(DataFormat::Tf32)
+            || fmt == static_cast<uint8_t>(DataFormat::RawUInt32);
+    }
     return __emule_cbs[cb_id].page_size > 2048;
 }
 

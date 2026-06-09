@@ -377,12 +377,26 @@ inline void noc_async_write_one_packet(uint32_t src_local_l1_addr, uint64_t dst_
 // emule mirrors that with [2] caches so set_state(noc=0) and set_state(noc=1)
 // don't clobber each other.
 inline thread_local uint32_t __emule_one_packet_state_size[2] = {0, 0};
+// Per-NOC set_state/with_state base (coords + size). Declared here so the
+// one_packet with_state forms below can reconstruct full addrs; the trid /
+// multi-packet readers further down reuse the same caches.
+namespace __emule_noc_trid_state {
+inline thread_local uint64_t shard_noc_addr_base[2] = {0, 0};
+inline thread_local uint32_t shard_size[2] = {0, 0};
+inline thread_local uint32_t shard_vc[2] = {0, 0};
+}
 template <bool inc_num_issued = true, bool use_vc = false>
 inline void noc_async_read_one_packet_with_state(uint64_t src_noc_addr,
                                                  uint32_t dst_local_l1_addr,
                                                  uint32_t /*vc*/ = 0,
                                                  uint8_t noc = 0) {
-    noc_async_read(src_noc_addr, dst_local_l1_addr,
+    // Silicon's with_state updates only NOC_TARG_ADDR_LO (the source L1 offset)
+    // and reuses the coords programmed by set_state. The arg is an offset, not a
+    // full addr — OR in the saved base's upper coords (mirrors noc_async_read_with_state).
+    const uint64_t upper = __emule_noc_trid_state::shard_noc_addr_base[noc & 1]
+                         & 0xFFFFFFFF00000000ULL;
+    const uint64_t full_src = upper | uint64_t(__emule_addr_to_offset(src_noc_addr));
+    noc_async_read(full_src, dst_local_l1_addr,
                    __emule_one_packet_state_size[noc & 1], noc);
 }
 
@@ -403,10 +417,14 @@ inline void noc_async_write_one_packet_set_state(uint64_t dst_noc_addr,
 }
 template <bool posted = false>
 inline void noc_async_write_one_packet_with_state(uint32_t src_local_l1_addr,
-                                                  uint32_t /*dst_local_l1_addr*/,
+                                                  uint32_t dst_local_l1_addr,
                                                   uint8_t noc = 0) {
-    noc_async_write(src_local_l1_addr,
-                    __emule_write_one_packet_state_dst[noc & 1],
+    // Silicon's with_state updates NOC_RET_ADDR_LO (the dest L1 offset) per call
+    // and reuses the dest coords programmed by set_state. The 2nd arg is an offset,
+    // not a full addr — OR in the saved base's upper coords (symmetric to the read).
+    const uint64_t upper = __emule_write_one_packet_state_dst[noc & 1] & 0xFFFFFFFF00000000ULL;
+    const uint64_t full_dst = upper | uint64_t(__emule_addr_to_offset(dst_local_l1_addr));
+    noc_async_write(src_local_l1_addr, full_dst,
                     __emule_write_one_packet_state_size[noc & 1], noc);
 }
 // Silicon adds `enable_noc_tracing` (and `posted` for write) template args
@@ -565,12 +583,7 @@ FORCE_INLINE void noc_async_write_one_packet_with_trid_with_state(
 #ifndef NOC_CLEAR_OUTSTANDING_REQ_MASK
 #define NOC_CLEAR_OUTSTANDING_REQ_MASK 0u
 #endif
-
-namespace __emule_noc_trid_state {
-inline thread_local uint64_t shard_noc_addr_base[2] = {0, 0};
-inline thread_local uint32_t shard_size[2] = {0, 0};
-inline thread_local uint32_t shard_vc[2] = {0, 0};
-}
+// __emule_noc_trid_state is declared earlier (above noc_async_read_one_packet_with_state).
 
 template <bool inline_src = true>
 FORCE_INLINE void noc_async_read_one_packet_set_state(
