@@ -61,7 +61,7 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/bfloat16.h` — `namespace __emule_bf16`: `to_f32`, `from_f32`
 - `include/jit_hw/api/cb_api.h` — `cb_wait_front`/`cb_pop_front`/`cb_reserve_back`/`cb_push_back`, `get_write_ptr`/`get_read_ptr`, `get_tile_size`/`get_tile_hw`/`get_tile_num_faces`, `get_dataformat`, `__emule_cb_timeout_sec`; constexpr arrays `unpack_tile_size`/`unpack_tile_r_dim`/`unpack_tile_c_dim`/`unpack_num_faces_r_dim`/`unpack_num_faces_c_dim`/`unpack_src_format`/`pack_dst_format`/`unpack_dst_format`/`pack_src_format`
 - `include/jit_hw/api/compile_time_args.h` — `get_compile_time_arg_val`, `get_ct_arg<>`; `KERNEL_COMPILE_TIME_ARGS`
-- `include/jit_hw/api/core_local_mem.h` — `noc_traits_t<CoreLocalMem<>>` specialization
+- `include/jit_hw/api/core_local_mem.h` — `CoreLocalMem<T, AddressType>`; `CORE_LOCAL_MEM_RAW_OFFSET_THRESHOLD`; `noc_traits_t<CoreLocalMem<>>` specialization
 - `include/jit_hw/api/dfb_api.h` — `dfb_reserve_back`/`dfb_push_back`/`dfb_wait_front`/`dfb_pop_front`/`dfb_finish`, `dfb_get_write_ptr`/`dfb_get_read_ptr`/`dfb_get_entry_size`, `__emule_dfb_check_id`/`__emule_dfb_timeout_sec`
 - `include/jit_hw/api/kernel_thread_globals.h` — `get_num_threads`, `get_my_thread_id`
 
@@ -208,15 +208,7 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 
 ## include/jit_hw/experimental/
 
-- `include/jit_hw/experimental/circular_buffer.h` — `experimental::CircularBuffer`, `struct CircularBufferView`; `enum class AddrSelector`; `noc_traits_t`
-- `include/jit_hw/experimental/core_local_mem.h` — `experimental::CoreLocalMem<>`; `get_unsafe_ptr`; `noc_traits_t`
-- `include/jit_hw/experimental/dataflow_buffer.h` — `experimental::DataflowBuffer`, `struct DFBAccessor`; `dfb_get_write_ptr`/`dfb_get_read_ptr`
-- `include/jit_hw/experimental/endpoints.h` — `experimental::` `struct UnicastEndpoint`/`MulticastEndpoint`/`AllocatorBank`/`ReadSpec`/`WriteSpec`; `enum AllocatorBankType`
 - `include/jit_hw/experimental/kernel_args.h` — `experimental::` `struct RtaArg`/`CrtaArg`/`CtaVal`; `get_arg_addr`, `get_common_arg_addr`
-- `include/jit_hw/experimental/lock.h` — `experimental::Lock`
-- `include/jit_hw/experimental/noc.h` — `experimental::Noc`, `class DataflowBuffer`; `enum class AddressType`/`TxnIdMode`/`VcSelection`; `struct DataflowBufferArgs`; `NOC_MAX_BURST_SIZE`
-- `include/jit_hw/experimental/noc_semaphore.h` — `experimental::Semaphore`
-- `include/jit_hw/experimental/tensor.h` — `experimental::noc_traits_t<TensorAccessor>` specialization
 
 ## include/jit_hw/hostdevcommon/
 
