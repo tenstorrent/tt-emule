@@ -31,6 +31,7 @@ REDUCE_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/reduce"
 MATMUL_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/matmul"
 ELT_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/eltwise"
 FUSED_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/fused"
+POOL_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/pool"
 TENSOR_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/tensor"
 PCA_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/per_core_allocation"
 BENCH_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/benchmarks"
@@ -240,6 +241,8 @@ run_pytest "elt_test_binary_sharded_col_major_cmp" "$ELT_TEST_DIR/test_binary_bc
 run_pytest "elt_test_binary_bcast_volume_tensors" "$ELT_TEST_DIR/test_binary_bcast.py::test_01_volume_tensors"
 # #125 (llk_math_eltwise_binary_init shim + wiring) regression guard — batch_norm was 0/1537 pre-fix.
 run_pytest "fused_test_batch_norm_pgmcache" "$FUSED_TEST_DIR/test_batch_norm.py::test_batch_norm_program_cache_and_default"
+# #124 (experimental::Noc shadow removal) regression guard — test_upsample was JIT-blocked pre-fix.
+run_pytest "pool_test_upsample_nearest_interleaved" "$POOL_TEST_DIR/test_upsample.py::test_upsample_nearest_interleaved"
 
 run_pytest "fused_test_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_large_fill_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_accuracy" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_stable_neg_values" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_4096x4096_fp32" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_large_kernel_block_size" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_3D" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout_large"
 run_pytest "reduce_test_cumprod" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_backward" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_failing_cases"
