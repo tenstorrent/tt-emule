@@ -245,6 +245,8 @@ run_pytest "elt_test_binary_bcast_volume_tensors" "$ELT_TEST_DIR/test_binary_bca
 run_pytest "fused_test_batch_norm_pgmcache" "$FUSED_TEST_DIR/test_batch_norm.py::test_batch_norm_program_cache_and_default"
 # #124 (experimental::Noc shadow removal) regression guard — test_upsample was JIT-blocked pre-fix.
 run_pytest "pool_test_upsample_nearest_interleaved" "$POOL_TEST_DIR/test_upsample.py::test_upsample_nearest_interleaved"
+# #127 (async_read_barrier template — cascade of #124) regression guard; exercises async_read_barrier_with_trid path.
+run_pytest "pool_test_upsample_multicore_corerange" "$POOL_TEST_DIR/test_upsample.py::test_upsample_multicore_corerange"
 
 run_pytest "fused_test_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_large_fill_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_accuracy" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_stable_neg_values" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_4096x4096_fp32" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_large_kernel_block_size" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_3D" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout_large"
 run_pytest "reduce_test_cumprod" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_backward" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_failing_cases"
