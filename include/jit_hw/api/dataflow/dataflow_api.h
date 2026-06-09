@@ -25,6 +25,9 @@
 // reference INVALID/VALID unqualified and rely on this transitive include.
 #include "jit_hw/hostdevcommon/common_values.hpp"
 #include "jit_hw/internal/dataflow/dataflow_api_addrgen.h"
+// Provides VALID/INVALID semaphore flag constants (upstream dataflow_api.h pulls
+// these transitively; mcast sender/receiver kernels use them unqualified).
+#include "hostdevcommon/common_values.hpp"
 // noc_parameters.h must be in scope before tensor_accessor.h so that the
 // NOC_UNICAST_ADDR_X/Y macros (used at upstream tensor_accessor.h:235) resolve.
 #include "noc/noc_parameters.h"

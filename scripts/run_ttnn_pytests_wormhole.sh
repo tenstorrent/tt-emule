@@ -305,7 +305,9 @@ run_pytest "elt_test_binaryng_ND" "$ELT_TEST_DIR/test_binaryng_ND.py"
 run_pytest "elt_test_binaryng_fp32" "$ELT_TEST_DIR/test_binaryng_fp32.py"
 run_pytest "elt_test_composite" "$ELT_TEST_DIR/test_composite.py"
 run_pytest "elt_test_elt_binary" "$ELT_TEST_DIR/test_elt_binary.py"
-run_pytest "elt_test_exp2" "$ELT_TEST_DIR/test_exp2.py" -k 'not test_exp2_special_values'
+# special_values variants exercise denormal inputs emule flushes to zero (DAZ/FTZ);
+# 'not special_values' excludes both test_exp2_special_values and *_fp32_special_values.
+run_pytest "elt_test_exp2" "$ELT_TEST_DIR/test_exp2.py" -k 'not special_values'
 run_pytest "elt_test_remainder" "$ELT_TEST_DIR/test_remainder.py" -k 'not test_remainder_scalar'
 run_pytest "elt_test_sub" "$ELT_TEST_DIR/test_sub.py"
 run_pytest "elt_test_ternary" "$ELT_TEST_DIR/test_ternary.py"
