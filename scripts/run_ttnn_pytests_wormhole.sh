@@ -341,17 +341,10 @@ run_pytest "reduce_test_reduction_mean" "$REDUCE_TEST_DIR/test_reduction_mean.py
 run_pytest "reduce_test_reduction_not_sharded" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_2d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_3d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_4d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_sum_2d_tensor_dims" -k 'not sharded'
 run_pytest "reduce_test_reduction_min_not_sharded" "$REDUCE_TEST_DIR/test_reduction_min.py::test_min" "$REDUCE_TEST_DIR/test_reduction_min.py::test_min_global" -k 'not sharded'
 run_pytest "reduce_test_torch_compat" "$REDUCE_TEST_DIR/test_reduction.py::test_torch_compatibility"
-# var/std: the use_legacy=False (Welford) path is fixed by the #107 welford-model rewrite (#131).
-# The 6 deselected nodes are a pre-existing legacy (use_legacy=True) 2D-reduce accuracy bug on the
-# single-tile dim=(-2,-1) 32x32 case (ATOL~28, both arches) — unrelated to Welford; tracked separately.
+# var/std: use_legacy=False (Welford, #107) + use_legacy=True (legacy 2-pass). The legacy single-tile
+# dim=(-2,-1) cases need the REDUCE_SCALAR scaler² fix (reduce.h) — silicon applies the HW scaler twice.
 run_pytest "reduce_test_var_std" \
-    "$REDUCE_TEST_DIR/test_reduction.py::test_var" "$REDUCE_TEST_DIR/test_reduction.py::test_std" \
-    --deselect "tests/ttnn/unit_tests/operations/reduce/test_reduction.py::test_var[use_legacy=True-correction=True-keepdim=True-dim=(-2, -1)-w=32-h=32-batch_size=1]" \
-    --deselect "tests/ttnn/unit_tests/operations/reduce/test_reduction.py::test_var[use_legacy=True-correction=False-keepdim=True-dim=(-2, -1)-w=32-h=32-batch_size=1]" \
-    --deselect "tests/ttnn/unit_tests/operations/reduce/test_reduction.py::test_std[use_legacy=True-keepdim=True-correction=True-dim=(-2, -1)-w=32-h=32-batch_size=1]" \
-    --deselect "tests/ttnn/unit_tests/operations/reduce/test_reduction.py::test_std[use_legacy=True-keepdim=True-correction=False-dim=(-2, -1)-w=32-h=32-batch_size=1]" \
-    --deselect "tests/ttnn/unit_tests/operations/reduce/test_reduction.py::test_std[use_legacy=True-keepdim=False-correction=True-dim=(-2, -1)-w=32-h=32-batch_size=1]" \
-    --deselect "tests/ttnn/unit_tests/operations/reduce/test_reduction.py::test_std[use_legacy=True-keepdim=False-correction=False-dim=(-2, -1)-w=32-h=32-batch_size=1]"
+    "$REDUCE_TEST_DIR/test_reduction.py::test_var" "$REDUCE_TEST_DIR/test_reduction.py::test_std"
 
 run_pytest "dm_test_tosa_gather" "$DM_TEST_DIR/test_tosa_gather.py"  # promoted (issue #73): 10 passed
 
