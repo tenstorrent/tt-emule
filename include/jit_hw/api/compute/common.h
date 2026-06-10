@@ -147,6 +147,10 @@ static constexpr uint32_t __EMULE_TILE_ELEMS = 1024;
 static constexpr uint32_t __EMULE_DST_BYTES = __EMULE_TILE_ELEMS * sizeof(float);
 static thread_local float __emule_dst[__EMULE_DST_TILES][__EMULE_TILE_ELEMS];
 static thread_local bool __emule_l1_acc_enabled = false;
+// add/sub/mul_tiles accumulate-into-DST mode, set by *_tiles_init(..., acc_to_dest).
+// Silicon: acc_to_dest=true makes ELTWISE_BINARY compute DST[idst] = in0 OP in1 + DST[idst]
+// (e.g. fast_reduce_nc sums input tiles into one DST slot via add_tiles + zero in1).
+static thread_local bool __emule_binary_acc_to_dest = false;
 
 // Pack-fused ReLU state — silicon STACC_RELU is a single packer CFG reg, so
 // thread-global like __emule_l1_acc_enabled.  `llk_pack_relu_config(ReluType)`
@@ -626,9 +630,10 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
 
 namespace ckernel {
 
-// binary_op_init_common — no-op (hardware pipeline init)
-ALWI void binary_op_init_common(uint32_t, uint32_t, uint32_t) {}
-ALWI void binary_op_init_common(uint32_t, uint32_t, uint32_t, uint32_t) {}
+// binary_op_init_common — resets the binary accumulate-to-DST mode so a stale
+// thread_local flag from a prior kernel can't leak into the next one.
+ALWI void binary_op_init_common(uint32_t, uint32_t, uint32_t) { __emule_binary_acc_to_dest = false; }
+ALWI void binary_op_init_common(uint32_t, uint32_t, uint32_t, uint32_t) { __emule_binary_acc_to_dest = false; }
 
 // binary_tiles_init — no-op (per-op hardware init)
 template<bool FullInit = true, EltwiseBinaryType BinaryType = EltwiseBinaryType::ELWADD>
@@ -649,8 +654,17 @@ ALWI void mul_tiles_init_f() {}
 // [1, W] mask tile. For row-major position i = r*32 + c, we return buf1[c].
 //
 // Returns true if icb1 is a thin-tile broadcast (page_size mismatch).
+// A thin-tile broadcast operand has fewer ROWS than operand 0 (e.g. a [1,W]
+// mask). Compare row counts, not raw page sizes: an fp32 full tile (4096B) and
+// a bf16 full tile (2048B) are both 32-row tiles — the page gap is dtype width,
+// not a broadcast. Comparing raw pages misclassified the fp32+bf16-zero operands
+// of fast_reduce_nc's fp32-intermediate stage as a broadcast.
+inline uint32_t __emule_cb_tile_rows(uint32_t cb) {
+    const uint32_t elem = __emule_compute::cb_is_32bit_format(cb) ? 4u : 2u;
+    return __emule_nfaces::tile_rows_from_pagesize(__emule_compute::cb_page_size(cb), elem);
+}
 inline bool __emule_thin_broadcast_b1(uint32_t icb0, uint32_t icb1) {
-    return __emule_compute::cb_page_size(icb1) < __emule_compute::cb_page_size(icb0);
+    return __emule_cb_tile_rows(icb1) < __emule_cb_tile_rows(icb0);
 }
 
 // Tile-shape-aware binary-op helper. The {add,sub,mul}_tiles primitives all
@@ -734,7 +748,10 @@ ALWI void add_tiles(uint32_t icb0, uint32_t icb1,
     float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
     __emule_unpack_cb_tile_to(icb0, itile0, a);
     __emule_unpack_cb_tile_to(icb1, itile1, b);
-    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] + b[i];
+    if (__emule_binary_acc_to_dest)
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] += a[i] + b[i];
+    else
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] + b[i];
 }
 
 ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
@@ -748,7 +765,10 @@ ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
     float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
     __emule_unpack_cb_tile_to(icb0, itile0, a);
     __emule_unpack_cb_tile_to(icb1, itile1, b);
-    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] - b[i];
+    if (__emule_binary_acc_to_dest)
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] += a[i] - b[i];
+    else
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] - b[i];
 }
 
 ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
@@ -762,7 +782,10 @@ ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
     float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
     __emule_unpack_cb_tile_to(icb0, itile0, a);
     __emule_unpack_cb_tile_to(icb1, itile1, b);
-    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] * b[i];
+    if (__emule_binary_acc_to_dest)
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] += a[i] * b[i];
+    else
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] * b[i];
 }
 
 // pack_tile: write DST[idst] → CB[ocb] write slot.
