@@ -9,17 +9,10 @@ top-level map see [IMPLEMENTATION_REPORT.md](../IMPLEMENTATION_REPORT.md).
 
 ---
 
-## Design philosophy
-
-1. **Zero fake headers.** Tests link the real `Metalium::Metal` library and use
-   real tt-metal headers/fixtures. Emulation is injected at the UMD boundary, not
-   behind mock headers — so a tt-metal header change surfaces as a compile error,
-   not silent divergence.
-2. **Memory isolation in `tt_emule::Core`.** All device memory (worker L1, DRAM
-   banks) is owned by `tt_emule::Core` inside `SWEmuleChip`; the runner uses that
-   mmap'd memory directly — no copy-in/out, and it persists across program runs.
-3. **Minimal `jit_hw/` surface.** Stub headers implement only what the target
-   kernels need; real tt-metal headers are reused where possible.
+The three design principles that govern this integration (zero fake headers,
+memory isolation in `tt_emule::Core`, minimal `jit_hw/` surface) are stated in
+[IMPLEMENTATION_REPORT.md § Design philosophy](../IMPLEMENTATION_REPORT.md#design-philosophy).
+This doc is the mechanics.
 
 ---
 

@@ -58,6 +58,30 @@ focused reference; start here and follow the links.
 
 ---
 
+## Design philosophy
+
+The integration follows three principles — they are the reason the emulator stays
+faithful and low-maintenance, and they govern every change:
+
+1. **Zero fake headers.** Tests link the real `Metalium::Metal` library and use
+   real tt-metal headers, fixtures, and buffer utilities. Emulation is injected at
+   the UMD (User-Mode Driver) boundary, not via mock headers. A tt-metal header
+   change surfaces immediately as a compile error in emulated tests, rather than
+   silently diverging behind a fake-header layer.
+
+2. **Memory isolation in `tt_emule::Core`.** All device memory — worker L1 and
+   DRAM banks — is owned by `tt_emule::Core` objects inside `SWEmuleChip`. There
+   is no intermediate copy-in / copy-out stage: the program runner points its
+   bridge pointers straight at Core's mmap'd memory, and that memory persists
+   across program runs, matching hardware semantics.
+
+3. **Minimal API surface in `jit_hw/`.** Stub headers implement only what the
+   target kernel needs to compile and execute correctly. Where possible, real
+   tt-metal headers are included rather than duplicated — keeping the shim surface
+   (and the rebase burden) as small as possible.
+
+---
+
 ## Architecture at a glance
 
 **Threading model (per arch).**
@@ -98,9 +122,9 @@ authoritative file/symbol index see [STRUCTURE.md](STRUCTURE.md).
 Authoritative pass/fail state lives outside this report so it cannot drift:
 
 - **C++ regression** — per-arch `scripts/run_regression_<arch>.sh` (CI matrix:
-  wormhole/blackhole/quasar); allowlists in
-  `.github/known-failures-{wormhole,blackhole,quasar}.txt`, cross-checked by
-  `classify-results.py`.
+  wormhole/blackhole/quasar), cross-checked by `classify-results.py`. Wormhole and
+  Blackhole are **zero-tolerance** (no allowlist — any failure fails the PR);
+  Quasar's expected failures are listed in `.github/known-failures-quasar.txt`.
 - **ttnn pytest** — per-arch `scripts/run_ttnn_pytests_<arch>.sh` (CI matrix:
   wormhole/blackhole).
 - **D2M golden tests** — `run_d2m_regression.sh`; analysis in
