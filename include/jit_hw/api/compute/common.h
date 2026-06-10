@@ -660,6 +660,13 @@ ALWI void mul_tiles_init_f() {}
 // not a broadcast. Comparing raw pages misclassified the fp32+bf16-zero operands
 // of fast_reduce_nc's fp32-intermediate stage as a broadcast.
 inline uint32_t __emule_cb_tile_rows(uint32_t cb) {
+    // Block-float tiles (Bfp8_b 1088B / Bfp4_b 576B) are always full 32-row tiles;
+    // their page size doesn't encode rows, so the bf16/fp32 formula under-counts
+    // (17 / 9) and would misclassify them as a thin broadcast. The main add/sub/mul
+    // path decodes block-float via __emule_unpack_cb_tile_to; only the bf16/fp32-only
+    // __emule_eltwise_binary_tile broadcast helper would mis-read them.
+    if (__emule_compute::cb_is_bfp8_b_format(cb) || __emule_compute::cb_is_bfp4_b_format(cb))
+        return 32u;
     const uint32_t elem = __emule_compute::cb_is_32bit_format(cb) ? 4u : 2u;
     return __emule_nfaces::tile_rows_from_pagesize(__emule_compute::cb_page_size(cb), elem);
 }
