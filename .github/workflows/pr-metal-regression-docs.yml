@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Companion gate for PR Metal Regression. The main workflow ignores docs/
+# markdown/.claude paths, so a docs-only PR never triggers it and its "All
+# checks passed" gate would never report — blocking a required-check merge.
+# This workflow runs on exactly those ignored paths and reports the same gate
+# check name as an immediate success.
+#
+# The `paths:` list below MUST stay an exact mirror of pr-metal-regression.yml's
+# `paths-ignore:` list. If one changes, update both.
+name: PR Metal Regression (docs-only gate)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.md'
+      - 'docs/**'
+      - '.claude/**'
+      - 'LICENSE*'
+      - 'NOTICE'
+      - '.github/CODEOWNERS'
+
+jobs:
+  all-passed:
+    name: All checks passed
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change — regression not required. Gate satisfied."

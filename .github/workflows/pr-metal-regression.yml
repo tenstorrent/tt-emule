@@ -15,6 +15,7 @@ on:
     paths-ignore:
       - '**.md'
       - 'docs/**'
+      - '.claude/**'      # agent config/skills — never affects regression
       - 'LICENSE*'
       - 'NOTICE'
       - '.github/CODEOWNERS'
@@ -23,9 +24,16 @@ on:
     paths-ignore:
       - '**.md'
       - 'docs/**'
+      - '.claude/**'
       - 'LICENSE*'
       - 'NOTICE'
       - '.github/CODEOWNERS'
+  # Merge-queue provisioning: when the merge queue is enabled (Settings →
+  # Branches), GitHub dispatches `merge_group` for each queued group. Run the
+  # FULL suite here with NO path filter — a merge gate should verify the real
+  # merge result, and omitting paths avoids the known merge-queue footgun where
+  # a path-skipped required check leaves the queue waiting forever.
+  merge_group:
 
 concurrency:
   group: pr-regression-${{ github.workflow }}-${{ github.ref }}
@@ -268,3 +276,29 @@ jobs:
             ${{ runner.temp }}/ttnn-junit-xml/*.xml
           retention-days: 30
           if-no-files-found: warn
+
+  # Aggregator gate: a single, statically-named check that succeeds only when
+  # every matrix leg above succeeds. Branch protection requires THIS check
+  # (instead of the 13 dynamically-named build/test/ttnn-pytest checks), so the
+  # required-checks list stays stable as the matrix changes.
+  all-passed:
+    name: All checks passed
+    # Run even when a dependency failed/was skipped, so the gate always reports.
+    if: ${{ always() }}
+    needs: [build, test, ttnn-pytest]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job did not succeed
+        # needs.<matrix-job>.result is the aggregate over all legs: success only
+        # if every leg succeeded. We fail on failure/cancelled and treat
+        # success/skipped as OK (a failed `build` still trips this via its own
+        # 'failure', even though it leaves downstream jobs 'skipped').
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "One or more required jobs did not succeed:"
+          echo "  build:       ${{ needs.build.result }}"
+          echo "  test:        ${{ needs.test.result }}"
+          echo "  ttnn-pytest: ${{ needs.ttnn-pytest.result }}"
+          exit 1
+      - name: All required jobs passed
+        run: echo "All required jobs passed."
