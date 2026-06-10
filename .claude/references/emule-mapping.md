@@ -29,9 +29,9 @@ returns `__emule_bridge_l1 + l1_addr` for firmware offsets, or casts
 back to host pointer for already-absolute values.
 Lives in `tt-emule/include/jit_hw/jit_kernel_stubs.hpp`.
 
-**Pitfall (wave-1 worker_8)**: `Core::reset_l1_bump()` must NOT memset
-the top of L1 — the tt-metal allocator puts user buffers there. Wiping
-zeroed host-written tensor data and broke dsa_cache_update.
+**Pitfall**: `Core::reset_l1_bump()` must NOT memset the top of L1 — the
+tt-metal allocator places user buffers there, so wiping it corrupts
+host-written tensor data.
 
 ### 1.2 DRAM
 
@@ -57,7 +57,7 @@ zeroed host-written tensor data and broke dsa_cache_update.
 
 | Silicon | Emule |
 |---|---|
-| Wormhole: `(y << 32) \| (x << 26) \| addr` (32+6+38 bits) | Blackhole-style is the emule default: `(y << 42) \| (x << 36) \| addr` (`NOC_ADDR_LOCAL_BITS=36`, `NOC_ADDR_NODE_ID_BITS=6`). Multicast: `(y_start << 54) \| (x_start << 48) \| (y_end << 42) \| (x_end << 36) \| addr` |
+| Coordinates packed above a local-L1 offset; bit widths vary per arch | Unicast `(y << NODE_ID_BITS+LOCAL_BITS) \| (x << LOCAL_BITS) \| offset`; multicast adds an end-coord pair. `NOC_ADDR_LOCAL_BITS=36`, `NOC_ADDR_NODE_ID_BITS=6`. **See `docs/noc-emulation.md` §2.1 for the authoritative encoding** (don't rely on this row for exact bit positions). |
 
 ### 2.2 NOC transactions
 
@@ -123,7 +123,7 @@ Owner: `tt-emule/include/jit_hw/api/compute/nfaces.h`.
 | `matmul_tiles` uses MM accumulator with optional transpose | `__emule_dst[idst][r*32+c] += sum_k A[r,k]*B[k,c]` (or transposed if `__emule_mm_transpose_in1`). AVX2-enabled FMA inner loop. |
 | `recip_tile`, `exp_tile`, `sigmoid_tile`, `silu_tile`, `relu_tile` | `expf`, `1/x`, `1/(1+exp(-x))`, `x*sigmoid(x)`, `max(0,x)` per element on row-major DST |
 | `reduce_tile<MAX/SUM, REDUCE_ROW/COL/SCALAR>` | Real per-axis reduction on DST |
-| `sub_tiles_bcast<COL>` etc. (wave-3) | `any_tiles_bcast<op, bcast, bool acc_to_dest=false>` with `bcast_b(r,c) = load_b(r,0)` for COL, `load_b(0,c)` for ROW, `load_b(0,0)` for SCALAR. `acc_to_dest=true` accumulates DST in place; `false` overwrites. Silicon's `llk_math_eltwise_binary<...>` takes this as a runtime flag; emule does it as compile-time template. Wave-7a §3 fix — deepseek_mul_tiles_bcast_scalar always passes `true`. |
+| `sub_tiles_bcast<COL>` etc. | `any_tiles_bcast<op, bcast, bool acc_to_dest=false>` with `bcast_b(r,c) = load_b(r,0)` for COL, `load_b(0,c)` for ROW, `load_b(0,0)` for SCALAR. `acc_to_dest=true` accumulates DST in place; `false` overwrites. Silicon's `llk_math_eltwise_binary<...>` takes this as a runtime flag; emule does it as a compile-time template. (Note: callers like `deepseek_mul_tiles_bcast_scalar` pass `acc_to_dest=true`.) |
 
 Owner files:
 - `tt-emule/include/jit_hw/api/compute/common.h` (add/sub/mul_tiles, pack_tile)
@@ -138,8 +138,7 @@ Owner files:
 |---|---|
 | `sfpi::vFloat`, `v_if(cond) {...}`, `sfpi::dst_reg[k]`, `sfpi::reinterpret` — SIMD on SFPU | Modeled as a 32-lane SIMD type **executed scalar-per-lane** (`sfpi.h`), not bit-exact to the silicon SFPU. Usable for simple sfpi bodies; deep/complex sfpi chains are still often cleaner to semantic-rewrite (Strategy C). |
 
-Owner: `tt-emule/include/jit_hw/sfpi.h`. Real sfpi:: math is wave-7
-work (W7.1 in the plan).
+Owner: `tt-emule/include/jit_hw/sfpi.h`.
 
 ### 3.6 Cross-RISC synchronization
 
@@ -157,7 +156,7 @@ Gated in `mcast/op.hpp` post-mcast sync block.
 
 | Silicon | Emule |
 |---|---|
-| Producer-consumer ring; sync via in-L1 semaphores | `CBSyncState` struct: mutex + condvar + read_ptr + write_ptr + occupied. `cb_wait_front(cb, n)` blocks on condvar until `occupied >= n`. `cb_push_back(cb, n)` increments + notifies. |
+| Producer-consumer ring; sync via in-L1 semaphores | `CBSyncState` struct: `base` + `page_size` + `num_pages` + `page_mask` + `write_idx` + `read_idx` + atomic `occupied` + mutex + 2 condvars. `cb_wait_front(cb, n)` blocks until `occupied >= n`; `cb_push_back(cb, n)` advances `write_idx`/`occupied` + notifies. See `docs/cb-emulation.md`. |
 
 Owner: `tt-emule/include/tt_emule/cb_sync_state.hpp`; per-core array
 in `tt_emule::Core::cb_sync_states_[MAX_CBS]`.
