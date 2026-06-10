@@ -384,7 +384,7 @@ and per-op test runs centrally after the workers return.
   batch shim authoring.
 - `STRUCTURE.md` — file-level index of `src/` + `include/` with top-level
   symbols. Grep first when triaging.
-- `IMPLEMENTATION_REPORT.md` §JIT Kernel API Coverage — what's currently
-  shimmed.
+- `STRUCTURE.md` — the authoritative index of what's currently shimmed
+  (every `include/jit_hw/api/compute/` file + its `<op>_tile` symbols).
 - See `/implement-mock` References for the broader project conventions
   (`CLAUDE.md`, `BUILD_GUIDE.md`).
