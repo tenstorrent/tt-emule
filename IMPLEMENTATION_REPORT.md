@@ -32,6 +32,11 @@ focused reference; start here and follow the links.
 - [tilize-untilize-pack.md](docs/tilize-untilize-pack.md) — UNPACK/PACK, nfaces↔
   row-major conversion, tilize/untilize/pack-untilize.
 
+**Kernel API**
+- [kernel-api-layers.md](docs/kernel-api-layers.md) — the layer-1 / 1.5 / 2 / 3
+  kernel-API abstraction stack and which rung emule intercepts; how to choose a
+  bring-up strategy by the layer a kernel bottoms out at.
+
 **Communication**
 - [noc-emulation.md](docs/noc-emulation.md) — NOC address encoding/resolution,
   async read/write, multicast, semaphore operations, per-NOC state.

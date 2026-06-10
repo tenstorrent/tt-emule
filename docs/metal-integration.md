@@ -16,6 +16,11 @@ This doc is the mechanics.
 
 ---
 
+> **Note on "Layer N".** The Layer 1–4 numbering below is the *build/integration*
+> axis — how emule plugs into tt-metal. It is unrelated to the *kernel-API*
+> layer-1 / 1.5 / 2 / 3 abstraction stack (what API a kernel targets); for that
+> see [kernel-api-layers.md](kernel-api-layers.md).
+
 ## Layer 1 — UMD device injection: `SWEmuleChip`
 
 `tt_metal/third_party/umd/device/{api/umd/device/chip/sw_emule_chip.hpp,

@@ -111,7 +111,9 @@ Pass bar:
 - **tt-metal regression**: totals must match the last known good
   baseline (no previously-passing test now failing):
   ```bash
-  TT_METAL_DIR=<tt-metal-checkout> bash run_regression.sh
+  # default arch is wormhole n150; use the per-arch script (also
+  # run_regression_blackhole.sh / run_regression_quasar.sh as needed)
+  TT_METAL_DIR=<tt-metal-checkout> bash scripts/run_regression_wormhole.sh 2>&1 | tee regression-wormhole.log
   ```
 
 If any of the above slips, see "Recovery" below.

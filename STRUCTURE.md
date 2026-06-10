@@ -38,32 +38,62 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 
 ## include/jit_hw/ (root)
 
+- `include/jit_hw/__emule_fabric_stubs.h` — comprehensive fabric stub (multichip out of scope): `using PACKET_HEADER_TYPE`; `struct PacketHeader`/`LowLatencyPacketHeader`/`HybridMeshPacketHeader`; `namespace tt::tt_fabric` `Noc*CommandHeader` structs, `class RoutingPlaneConnectionManager`, `open_connections`/`close_connections` no-ops
 - `include/jit_hw/chlkc_list.h` — empty shim (pragma-once only)
 - `include/jit_hw/ckernel.h` — `enum class CSR`; `namespace ckernel`; `csr_read<>` specializations
 - `include/jit_hw/ckernel_defs.h` — empty shim (pragma-once only)
 - `include/jit_hw/ckernel_include.h` — `enum firmware_msg_e`; `namespace ckernel`
+- `include/jit_hw/ckernel_sfpu_exp.h` — stub of silicon SFPU exp ckernel (functional impl in `api/compute/eltwise_unary/exp.h`)
+- `include/jit_hw/ckernel_sfpu_recip.h` — stub of silicon SFPU recip ckernel (functional impl in `api/compute/eltwise_unary/recip.h`)
+- `include/jit_hw/ckernel_sfpu_sigmoid.h` — stub of silicon SFPU sigmoid ckernel (functional impl in `api/compute/eltwise_unary/sigmoid.h`)
+- `include/jit_hw/ckernel_sfpu_silu.h` — stub of silicon SFPU silu ckernel (emule scalar impl in `api/compute/eltwise_unary/sigmoid.h`)
+- `include/jit_hw/core_config.h` — `enum class ProgrammableCoreType`; `MaxProcessorsPerCoreType`/`MaxProcessorsForThreadingVariables`/`MAX_NUM_NOCS_PER_CORE` constants
 - `include/jit_hw/dev_mem_map.h` — macros `MEM_L1_UNCACHED_BASE`; `NUM_TRISC_CORES`/`NUM_DM_CORES`/`MEM_ZEROS_*` constants
 - `include/jit_hw/emule_cb_state.h` — `using __emule_cb_state = tt_emule::CBSyncState`; `extern thread_local __emule_cbs`
 - `include/jit_hw/emule_dfb_state.h` — `using __emule_dfb_iface = tt_emule::EmuleDFBInterface`; `extern thread_local __emule_dfbs`, `__emule_tc_array`
 - `include/jit_hw/emule_wait.h` — `__emule_cv_wait` (cv.wait by default; `cv.wait_for`+`<chrono>` under `EMULE_WAIT_TIMEOUT`)
+- `include/jit_hw/eth_fw_api.h` — stub of silicon ethernet firmware API (empty; multichip/ethernet out of scope)
+- `include/jit_hw/eth_l1_address_map.h` — `namespace eth_l1_mem::address_map`; `MAX_NUM_CONCURRENT_TRANSACTIONS`
 - `include/jit_hw/jit_kernel_stubs.hpp` — `__EMULE_JIT_MODE`; fwd `tt_emule::Core`/`Device`; `extern "C"` `__emule_dram_ptr`, `__emule_local_l1_to_ptr`; `get_arg_addr`, `get_common_arg_addr`
 - `include/jit_hw/llk_defs.h` — aggregator: includes `llk_types.h`, `api/compute/common.h`, `nfaces.h`, `firmware_common.h`, `llk_state.h`
+- `include/jit_hw/llk_io_pack.h` — empty shim (CB state lives in `__emule_cbs` TLS; packer IO mapping not needed)
+- `include/jit_hw/llk_io_unpack.h` — empty shim (unpacker counterpart to `llk_io_pack.h`)
+- `include/jit_hw/llk_math_binary_api.h` — `llk_math_eltwise_binary_init`, `llk_math_eltwise_binary_init_with_operands` (no-op LLK shims)
 - `include/jit_hw/llk_math_eltwise_binary.h` — empty shim (pragma-once only)
 - `include/jit_hw/llk_math_eltwise_unary_datacopy.h` — `enum class DataCopyType`; `copy_tile` datacopy helper
+- `include/jit_hw/llk_math_eltwise_unary_sfpu_init.h` — shim → `llk_math_unary_sfpu.h`
+- `include/jit_hw/llk_math_eltwise_unary_sfpu_params.h` — `_llk_math_eltwise_unary_sfpu_params_` template
+- `include/jit_hw/llk_math_matmul_api.h` — emule shadow LLK math matmul API (pulled by upstream `custom_tilize.h` under `TRISC_MATH`)
+- `include/jit_hw/llk_math_reduce_api.h` — emule shadow LLK math reduce API (pulled by upstream `custom_tilize.h` under `TRISC_MATH`)
+- `include/jit_hw/llk_math_unary_datacopy_api.h` — emule shadow LLK math unary datacopy API (for custom upstream kernels)
+- `include/jit_hw/llk_math_unary_sfpu.h` — `llk_math_eltwise_unary_sfpu_init`/`_init_param`, `llk_math_sfpu_deepseek_moe_gate_topk_init` (no-op SFPU init shims)
 - `include/jit_hw/llk_pack.h` — `__llk_pack_tiled`, `__llk_pack_untilize`
 - `include/jit_hw/llk_sync_stubs.h` — `llk_wait_tiles`/`llk_pop_tiles`/`llk_push_tiles`/`llk_wait_for_free_tiles`; `namespace p_stall`, `semaphore`
 - `include/jit_hw/llk_types.h` — `enum class DstSync`, `MathFidelity`, `PoolType`, `ReduceDim`, `DataCopyType`; macros `FACE_R_DIM`, `TILE_C_DIM`
 - `include/jit_hw/llk_unpack_a.h` — `llk_unpack_tilize_block`; unpack tilize/untilize state setters
+- `include/jit_hw/llk_unpack_AB_api.h` — `llk_unpack_AB_init`, `llk_unpack_AB` (no-op LLK shims)
+- `include/jit_hw/llk_unpack_common_api.h` — stub of silicon LLK unpack common API (function surface lives in `llk_unpack_a.h`)
+- `include/jit_hw/llk_unpack_tilize_api.h` — emule shadow LLK unpack tilize API (pulled by upstream `custom_tilize.h` under `TRISC_UNPACK`)
+- `include/jit_hw/noc_nonblocking_api.h` — `enum class NocBarrierType`; per-NOC `thread_local` counters; `inc/set/get_noc_counter_val<>` (no-ops), `noc_cmd_buf_ready`, `proc_type`/`read_cmd_buf`/`write_cmd_buf`/`write_reg_cmd_buf`; `NOC_CMD_BUF_WRITE_REG`/`READ_REG` no-op macros
+- `include/jit_hw/noc_overlay_parameters.h` — stub of silicon NOC overlay parameters (empty; no overlay HW)
+- `include/jit_hw/noc_parameters.h` — stub of silicon NOC parameters (empty; encoding provided by `internal/dataflow/dataflow_api_addrgen.h`)
 - `include/jit_hw/risc_common.h` — includes `internal/firmware_common.h`
+- `include/jit_hw/sfpi.h` — `namespace sfpi`; `enum class RoundMode`/`LRegs`; TLS `__emule_sfpi_dst_base`/`__emule_sfpi_cursor`; `SFPSHFT2_*` constants (SFPU vector-API shim)
+- `include/jit_hw/stream_io_map.h` — stub of silicon stream I/O map (empty; no stream engine)
+- `include/jit_hw/tensix.h` — stub of silicon TENSIX core header (empty; single-thread-per-core model)
 
 ## include/jit_hw/api/
 
+- `include/jit_hw/api/alignment.h` — `align_power_of_2`, `align`, `is_power_of_2` (constexpr; emule shadow of silicon alignment API)
 - `include/jit_hw/api/bfloat16.h` — `namespace __emule_bf16`: `to_f32`, `from_f32`
+- `include/jit_hw/api/bfp8.h` — `namespace __emule_bfp8`: BFP8_b codec (`bfp8_byte_to_bf16`/`_to_f32`, `row_max_exp_f32`, `f32_to_bfp8_byte`, `rowmajor_bf16_tile_to_bfp8`); `TILE_*`/`FACE_*`/`EXP_BYTES`/`TILE_BYTES` constants
 - `include/jit_hw/api/cb_api.h` — `cb_wait_front`/`cb_pop_front`/`cb_reserve_back`/`cb_push_back`, `get_write_ptr`/`get_read_ptr`, `get_tile_size`/`get_tile_hw`/`get_tile_num_faces`, `get_dataformat`, `__emule_cb_timeout_sec`; constexpr arrays `unpack_tile_size`/`unpack_tile_r_dim`/`unpack_tile_c_dim`/`unpack_num_faces_r_dim`/`unpack_num_faces_c_dim`/`unpack_src_format`/`pack_dst_format`/`unpack_dst_format`/`pack_src_format`
 - `include/jit_hw/api/compile_time_args.h` — `get_compile_time_arg_val`, `get_ct_arg<>`; `KERNEL_COMPILE_TIME_ARGS`
 - `include/jit_hw/api/core_local_mem.h` — `CoreLocalMem<T, AddressType>`; `CORE_LOCAL_MEM_RAW_OFFSET_THRESHOLD`; `noc_traits_t<CoreLocalMem<>>` specialization
 - `include/jit_hw/api/dfb_api.h` — `dfb_reserve_back`/`dfb_push_back`/`dfb_wait_front`/`dfb_pop_front`/`dfb_finish`, `dfb_get_write_ptr`/`dfb_get_read_ptr`/`dfb_get_entry_size`, `__emule_dfb_check_id`/`__emule_dfb_timeout_sec`
 - `include/jit_hw/api/kernel_thread_globals.h` — `get_num_threads`, `get_my_thread_id`
+- `include/jit_hw/api/rt_arg.h` — `namespace rt_args`: `enum class Dispatch`, `struct Arg`/`ArrayArg`, `get<>()` template
+- `include/jit_hw/api/socket_api.h` — stub of silicon socket API: `struct SocketReceiverInterface`/`SocketSenderInterface`; `create_{receiver,sender}_socket[_interface]`, `set_{receiver,sender}_socket_page_size`, `socket_wait_for_pages` (no-ops; multichip out of scope)
 
 ## include/jit_hw/api/compute/
 
@@ -86,16 +116,21 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/copy_dest_values.h` — `copy_block` (global scope); `ckernel::` `copy_dest_values`, `copy_dest_values_init`
 - `include/jit_hw/api/compute/cumprod.h` — `ckernel::` `cumprod_tile`, `cumprod_tile_init`; TLS `__emule_cumprod_acc`/`__emule_cumprod_acc_initialized`, `__emule_cumprod_reset_acc`
 - `include/jit_hw/api/compute/cumsum.h` — `ckernel::` `cumsum_tile`, `cumsum_tile_init`; TLS `__emule_cumsum_acc`
+- `include/jit_hw/api/compute/deepseek_moe_gate.h` — `ckernel::` `deepseek_moe_gate`, `deepseek_moe_gate_init` (Layer-1 PoR shadow; template `enable_sigmoid`/`is_32bit`)
 - `include/jit_hw/api/compute/div_int32_floor.h` — `ckernel::` `div_int32_floor_tile`, `div_int32_trunc_tile` (+`_init`)
 - `include/jit_hw/api/compute/div_int32_sfpu.h` — `ckernel::` `div_int32_tile`, `div_int32_tile_init`
 - `include/jit_hw/api/compute/eltwise_binary.h` — `ckernel::` `add_tiles_init`, `sub_tiles_init`, `mul_tiles_init`
 - `include/jit_hw/api/compute/eltwise_binary_sfpu.h` — `ckernel::` `add/sub/mul/div/rsub/power_binary_tile` (+`_init`); `eq/ne/lt/gt/le/ge_binary_tile` (+`_init`, float compares → 1.0/0.0)
+- `include/jit_hw/api/compute/ema.h` — `ckernel::` `ema_init`, `ema_clear_previous_output`, `ema_tile`; TLS `__emule_ema_alpha`/`__emule_ema_beta`/`__emule_ema_prev` (exponential moving average SFPU op)
 - `include/jit_hw/api/compute/gcd.h` — `ckernel::` `gcd_tile`, `gcd_tile_init`
+- `include/jit_hw/api/compute/glm_moe_gate.h` — `ckernel::` `glm_moe_gate`, `glm_moe_gate_init` (Layer-1 PoR shadow; template `normalize`/`num_experts`/`is_32bit`)
 - `include/jit_hw/api/compute/isclose.h` — `ckernel::` `isclose_binary_tile`, `isclose_binary_tile_init`
+- `include/jit_hw/api/compute/kimi_moe_gate.h` — `ckernel::` `kimi_moe_gate`, `kimi_moe_gate_init` (Layer-1 PoR shadow; sibling of deepseek/glm gates)
 - `include/jit_hw/api/compute/lcm.h` — `ckernel::` `lcm_tile`, `lcm_tile_init`
 - `include/jit_hw/api/compute/logsigmoid.h` — `ckernel::` `logsigmoid_tile` (3-arg in0/in1/out), `logsigmoid_tile_init`
 - `include/jit_hw/api/compute/mask.h` — `ckernel::` `mask_tile`, `mask_posinf_tile` (+`_init`)
 - `include/jit_hw/api/compute/matmul.h` — `ckernel::` `matmul_tiles`, `matmul_block`, `mm_init`, `mm_block_init`; `EMULE_MATMUL_USE_AVX2`
+- `include/jit_hw/api/compute/matmul_fused_act_emule.h` — `ckernel::` `custom_mm_block_init`/`custom_mm_block_init_short`; `namespace packer`/`semaphore`; `TTI_SEMWAIT`/`TTI_STALLWAIT`/`TT_SETC16` no-op macros (MatmulFusedAct kernel-body shim)
 - `include/jit_hw/api/compute/mul_int_sfpu.h` — `ckernel::` `mul_int_tile`, `mul_int_tile_init`
 - `include/jit_hw/api/compute/nfaces.h` — `namespace __emule_nfaces`: `rowmajor_to_nfaces[]`, `nfaces_to_rowmajor[]` LUTs
 - `include/jit_hw/api/compute/pack.h` — empty shim (pragma-once only)
@@ -106,10 +141,12 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/reg_api.h` — `tile_regs_acquire`/`tile_regs_commit`/`tile_regs_wait`/`tile_regs_release`; `ALWI` macro; `__emule_dst_active_tiles`
 - `include/jit_hw/api/compute/remainder_int32.h` — `ckernel::` `remainder_int32_tile`, `remainder_int32_tile_init`
 - `include/jit_hw/api/compute/reshuffle.h` — `ckernel::` `reshuffle_rows_tile`, `reshuffle_rows_tile_init`
+- `include/jit_hw/api/compute/rmsnorm.h` — `ckernel::` `rmsnorm_compute_impl` (Layer-1 emule shadow of the RMSNorm algorithm)
 - `include/jit_hw/api/compute/softmax.h` — re-export of `eltwise_unary/exp.h` + `eltwise_unary/recip.h` (no own symbols)
 - `include/jit_hw/api/compute/sub_int_sfpu.h` — `ckernel::` `sub_int_tile`, `rsub_int_tile` (+`_init`)
 - `include/jit_hw/api/compute/tile_move_copy.h` — forwarding shim → `api/compute/common.h`
 - `include/jit_hw/api/compute/tilize.h` — `tilize_block`, `tilize_init`, `tilize_init_short`, `tilize_uninit`, `tilize_init_short_with_dt`, `tilize_uninit_with_dt`, `fast_tilize_block`, `fast_tilize_init`, `fast_tilize_init_skip_remap`, `fast_tilize_init_with_dt`, `fast_tilize_init_with_dt_skip_remap`, `fast_tilize_uninit`
+- `include/jit_hw/api/compute/topk_xl.h` — `ckernel::` `namespace __emule_topk_xl` (`VI`/`decode_fused`/`encode_fused`/`tiles_per_seq_fused`); `topk_xl_init`/`topk_xl_copy_tile_init`/`topk_xl_reinit_mop_after_copy`/`topk_xl_add_lsb_indices_init` (Layer-1 PoR distributed top-K shadow)
 - `include/jit_hw/api/compute/transpose_wh.h` — `ckernel::` `transpose_wh_tile`, `transpose_wh_init`, `copy_tile`
 - `include/jit_hw/api/compute/untilize.h` — `untilize_block`, `untilize_init`, `untilize_init_short`, `untilize_uninit`, `copy_tile`
 - `include/jit_hw/api/compute/vector_mode.h` — `ckernel::` `enum class VectorMode`
@@ -128,6 +165,7 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/eltwise_unary/bitwise_xor.h` — `ckernel::` `bitwise_xor_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/cbrt.h` — `ckernel::` `cbrt_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/clamp.h` — `ckernel::` `clamp_tile`, `clamp_tile_int32` (+`_init`)
+- `include/jit_hw/api/compute/eltwise_unary/clamped_silu.h` — `ckernel::` `clamped_silu_tile`, `clamped_silu_tile_init`; `CLAMPED_SILU_TILE_MODE_GATE`/`_UP` (Layer-1 shadow; GPT-OSS SwiGLU)
 - `include/jit_hw/api/compute/eltwise_unary/comp.h` — `ckernel::` `eqz/nez/ltz/lez/gtz/gez_tile`, `unary_eq/ne/lt/le/gt/ge_tile` (+`_init`); `_int32` variants of all, plus `eqz/nez_tile_uint16`/`_uint32`
 - `include/jit_hw/api/compute/eltwise_unary/digamma.h` — `ckernel::` `digamma_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/dropout.h` — `ckernel::` `dropout_tile`, `dropout_kernel_init`; TLS `__emule_dropout_rng_state`, `__emule_dropout_next` (xorshift32)
@@ -166,6 +204,8 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/eltwise_unary/rsub.h` — `ckernel::` `rsub_tile`, `rsub_unary_int32_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/selu.h` — `ckernel::` `selu_tile` (+`_init`); `selu_tile_pack`/`selu_tile_init_pack`
 - `include/jit_hw/api/compute/eltwise_unary/sfpu_split_includes.h` — conditional includes under `SFPU_OP_*_INCLUDE` guards (no own symbols)
+- `include/jit_hw/api/compute/eltwise_unary/sigmoid.h` — `ckernel::` `sigmoid_tile`, `sigmoid_tile_init`
+- `include/jit_hw/api/compute/eltwise_unary/silu.h` — `ckernel::` `silu_tile`, `silu_tile_init` (x · sigmoid(x))
 - `include/jit_hw/api/compute/eltwise_unary/snake_beta.h` — `ckernel::` `snake_beta_tile` (+`_init`)
 - `include/jit_hw/api/compute/eltwise_unary/softplus.h` — `ckernel::` `softplus_tile` (+`_init`); `softplus_tile_pack`/`softplus_tile_init_pack`
 - `include/jit_hw/api/compute/eltwise_unary/sqrt.h` — `ckernel::` `sqrt_tile` (+`_init`)
@@ -181,6 +221,10 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/api/compute/experimental/fast_untilize.h` — `ckernel::` `fast_untilize_block`, `fast_untilize_init`, `fast_untilize_init_skip_remap`, `fast_untilize_uninit`
 - `include/jit_hw/api/compute/experimental/fill_arange.h` — `experimental::` `fill_arange_tile`, `write_row_mask_tile`, `write_col_mask_tile`
 - `include/jit_hw/api/compute/experimental/semaphore.h` — `ckernel::Semaphore`
+
+## include/jit_hw/api/compute/sentinel/
+
+- `include/jit_hw/api/compute/sentinel/compute_kernel_sentinel.h` — `ckernel::` `enum class Operand`; `state_configure` no-op templates (+ `using ::Operand`/`::state_configure` re-exports). Sentinel-state tracking not needed in emule's unified-thread model
 
 ## include/jit_hw/api/dataflow/
 
@@ -209,6 +253,15 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 ## include/jit_hw/experimental/
 
 - `include/jit_hw/experimental/kernel_args.h` — `experimental::` `struct RtaArg`/`CrtaArg`/`CtaVal`; `get_arg_addr`, `get_common_arg_addr`
+- `include/jit_hw/experimental/llk_pack_block_api.h` — `llk_pack_block_contiguous`, `llk_pack_block_contiguous_mop_config` (block-contiguous pack helpers used by `api/compute/experimental/`)
+
+## include/jit_hw/fabric/
+
+- `include/jit_hw/fabric/fabric_edm_packet_header.hpp` — stub: `struct PacketHeader`/`LowLatencyPacketHeader`/`HybridMeshPacketHeader`; `NOC_SEND_TYPE_LAST`/`CHIP_SEND_TYPE_LAST` constants (fabric out of scope; surface only so includes resolve)
+
+## include/jit_hw/hostdev/
+
+- `include/jit_hw/hostdev/dev_msgs.h` — stub of silicon host-device message headers (`launch_msg_t`/`watcher_msg_t`/`profiler_msg_buffer_t` mailbox layouts); surface only
 
 ## include/jit_hw/hostdevcommon/
 
@@ -226,6 +279,15 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 ## include/jit_hw/internal/dataflow/
 
 - `include/jit_hw/internal/dataflow/dataflow_api_addrgen.h` — `struct InterleavedAddrGen`, `InterleavedAddrGenFast`, `InterleavedPow2AddrGen`; `namespace interleaved_addr_gen`; `NUM_DRAM_BANKS`/`NUM_L1_BANKS`/`NOC_XY_ADDR`/`DRAM_ALIGNMENT`/`L1_ALIGNMENT` macros
+
+## include/jit_hw/internal/ethernet/
+
+- `include/jit_hw/internal/ethernet/dataflow_api.h` — stub of silicon ethernet dataflow API (no ethernet engine in emule)
+- `include/jit_hw/internal/ethernet/erisc.h` — stub of silicon ethernet RISC header; `aerisc_run_flag` (pulled transitively by `kernel_profiler.hpp`)
+
+## include/jit_hw/internal/tt-1xx/
+
+- `include/jit_hw/internal/tt-1xx/risc_common.h` — stub of silicon `internal/tt-1xx/risc_common.h`: `NOC_X`/`NOC_Y`/`tt_reg_ptr` macros; RISC-V firmware-side helper surface
 
 ## include/jit_hw/internal/tt-2xx/quasar/overlay/
 
@@ -251,3 +313,25 @@ artifacts (`generated/`, `*.log`) and non-source trees are intentionally absent.
 - `include/jit_hw/tt-metalium/circular_buffer_constants.h` — `NUM_CIRCULAR_BUFFERS`, `UINT32_WORDS_PER_*_BUFFER_CONFIG` constants
 - `include/jit_hw/tt-metalium/constants.hpp` — `tt::constants::` `TILE_HEIGHT`/`TILE_WIDTH`/`TILE_HW`/`FACE_*`
 - `include/jit_hw/tt-metalium/tt_backend_api_types.hpp` — `tt::` `enum class DataFormat`
+
+## include/jit_hw/tt-metalium/experimental/fabric/
+
+- `include/jit_hw/tt-metalium/experimental/fabric/fabric_edm_types.hpp` — stub of silicon EDM (Ethernet Data Mover) packet types + routing surface (fabric out of scope)
+
+## include/jit_hw/tt_metal/fabric/hw/inc/
+
+Silicon fabric include paths; every file is a one-line redirect to `jit_hw/__emule_fabric_stubs.h` (multichip out of scope — they exist so upstream `#include` paths resolve):
+
+- `include/jit_hw/tt_metal/fabric/hw/inc/api_common.h`
+- `include/jit_hw/tt_metal/fabric/hw/inc/noc_addr.h`
+- `include/jit_hw/tt_metal/fabric/hw/inc/packet_header_pool.h`
+- `include/jit_hw/tt_metal/fabric/hw/inc/tt_fabric_api.h`
+- `include/jit_hw/tt_metal/fabric/hw/inc/edm_fabric/edm_fabric_utils.hpp`
+- `include/jit_hw/tt_metal/fabric/hw/inc/edm_fabric/edm_fabric_worker_adapters.hpp`
+- `include/jit_hw/tt_metal/fabric/hw/inc/edm_fabric/fabric_connection_interface.hpp`
+- `include/jit_hw/tt_metal/fabric/hw/inc/edm_fabric/fabric_connection_manager.hpp`
+- `include/jit_hw/tt_metal/fabric/hw/inc/edm_fabric/fabric_edm_packet_header_validate.hpp`
+- `include/jit_hw/tt_metal/fabric/hw/inc/edm_fabric/fabric_stream_regs.hpp`
+- `include/jit_hw/tt_metal/fabric/hw/inc/edm_fabric/routing_plane_connection_manager.hpp`
+- `include/jit_hw/tt_metal/fabric/hw/inc/linear/api.h`
+- `include/jit_hw/tt_metal/fabric/hw/inc/mesh/api.h`
