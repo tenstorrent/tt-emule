@@ -4,6 +4,24 @@ Historical per-version diffs of the implementation report. Latest entry first.
 
 ---
 
+## v14 → docs restructure (2026-06-10)
+
+Re-verified every factual claim in the report against current source, then
+restructured `IMPLEMENTATION_REPORT.md` from a monolithic v-numbered report into
+a concise **entry point + documentation index**. The deep subsystem content moved
+into focused standalone docs (matching the `noc-emulation.md` model):
+
+- New: `docs/{l1,dram,dest,cb}-emulation.md` (per-subsystem mock references) and
+  `docs/metal-integration.md` (the extracted tt-metal integration chapter).
+- Corrected stale claims surfaced by the re-verification: SFPU/bcast/transpose_wh/
+  tilize/pack_untilize/quantization are **real implementations** (not stubs); the
+  JIT cache is **persistent on disk** (`/tmp/tt_emule_jit_cache_$UID`), not
+  in-memory-only; `cb_is_32bit_format` is **enum-driven** (page-size is fallback);
+  `__emule_fixup_noc_addr` was removed (encode+decode only); the `kernel_api/`
+  "dual API" no longer exists; `NUM_DRAM_BANKS` is dynamic from the SoC descriptor
+  (12 on WH-N150, non-pow2). Dropped the broken `docs/TEST_COVERAGE_TODO.md` ref.
+- Removed dead reports: `docs/DFB_TEST_FAILURE_REPORT.md`, `docs/historical_reports/`.
+
 ## v13 → v14 (2026-06-01)
 
 LLK bring-up campaign across rounds 1-6. Closes the long tail of ttnn ops

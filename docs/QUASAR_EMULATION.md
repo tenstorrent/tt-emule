@@ -143,7 +143,7 @@ All compute ops that read from CBs (`copy_tile`, `add_tiles`, `sub_tiles`, `mul_
 
 **Test evidence:** `test_matmul_X_tile.cpp:TensixMatmulBlock, TensixMatmulBlockInitShort` — nfaces layout conversion is required for matmul PCC to pass with non-trivial input data.
 
-**TODO: No dedicated UNPACK-only test exists.** See `docs/TEST_COVERAGE_TODO.md`.
+**TODO: No dedicated UNPACK-only test exists.**
 
 ### 5.3 PACK Engine (DST → L1)
 

@@ -45,7 +45,11 @@ tt-emule provides two things:
 - Actual async NOC (all DMA is synchronous `memcpy`)
 - Ethernet/dispatch fabric, UMD, or Metal dispatch layers
 - NOC stream overlay registers (`noc_overlay_parameters.h`)
-- Real tile layout conversions (`tilize_block`/`untilize_block` are identity copies)
+- Hardware timing of tile layout conversions (nfaces↔row-major is done in
+  software at the pack/unpack boundary, not by UNPACK/PACK engines)
+
+For the architecture overview and the full documentation index, see
+**[IMPLEMENTATION_REPORT.md](IMPLEMENTATION_REPORT.md)**.
 
 ---
 

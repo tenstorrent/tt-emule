@@ -1,629 +1,149 @@
-# Implementation Report v9: Software-Emulated Device (tt-emule) Integration into tt-metal
+# tt-emule: Software-Emulated Tenstorrent Device
 
-## Table of Contents
+tt-emule is a standalone C++ software emulator for Tenstorrent device-level APIs.
+It models the multi-core execution model — per-core L1 SRAM, banked DRAM,
+circular-buffer synchronization, NOC communication, semaphores, and the DEST
+register file — entirely on the host CPU, so kernels can be developed, run, and
+debugged without silicon. It plugs into tt-metal at the UMD boundary, letting
+real `ttnn` / D2M workloads execute unmodified on the host.
 
-1. [tt-emule Overview](#1-tt-emule-overview)
-2. [Integration into tt-metal](#2-integration-into-tt-metal)
-3. [Pros, Cons, and Maintainability](#3-pros-cons-and-maintainability)
+This document is the **entry point and doc index**. Each subsystem has its own
+focused reference; start here and follow the links.
 
 ---
 
-## 1. tt-emule Overview
-
-### Purpose
-
-tt-emule is a standalone C++ software emulator for Tenstorrent device-level APIs. It emulates the multi-core execution model of Tenstorrent hardware — including per-core L1 SRAM, shared DRAM, circular buffer (CB) synchronization, NOC (Network-on-Chip) communication, semaphore-based cross-core synchronization, and the DST register file — entirely on the host CPU. This enables kernel development, testing, and debugging without access to physical silicon.
-
-### Architecture
-
-tt-emule supports two hardware threading models:
-
-#### Wormhole / Blackhole
-
-Each emulated core runs three concurrent threads mirroring hardware:
-
-| Thread | Entry Point | Role |
-|--------|-------------|------|
-| NOC Reader | `reader_kernel_main()` | Reads data from DRAM/L1 into circular buffers via NOC |
-| Compute | `compute_kernel_main()` | Processes tiles from input CBs, writes results to output CBs |
-| NOC Writer | `writer_kernel_main()` | Writes computed results from CBs back to DRAM/L1 via NOC |
-
-Threads synchronize through circular buffers backed by mutex + condition variable pairs (`CBSyncState`).
-
-#### Quasar (Tensix Neo)
-
-Each emulated Neo runs up to 12 concurrent threads:
-
-| Thread Type | Count per Neo | Entry Point | Role |
-|-------------|---------------|-------------|------|
-| DM (DM0–DM7) | up to 8 | DM kernel `main()` | Data movement: DRAM/L1 reads/writes via NOC, DFB push/pop |
-| Compute (E0–E3) | up to 4 | Compute kernel `main()` | UNPACK/MATH/PACK pipeline on shared DST register file |
-
-All 12 cores share a single 4 MB L1. DFBs (Dataflow Buffers) replace WH's SPSC circular buffers with MPMC synchronization via tile counters. CSR reads (`mhartid`, `NEO_ID`, `TRISC_ID`) are regex-patched at JIT time to read thread-local variables. See [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) for the full Quasar reference.
-
-#### Shared Across Architectures
-
-The compute thread operates on a private DST register file (16 slots in bf16 mode / 8 slots in fp32 mode, × 1024 float32 elements) with mode-aware bounds checking via `__emule_dst_check()`. Multiple cores execute concurrently in separate threads, enabling cross-core communication via multicast NOC writes and semaphore signaling — matching the real hardware execution model.
-
-### Memory Model
-
-All memory is owned by `tt_emule::Core` objects. Worker cores draw their memory from a shared `L1Pool` — a single contiguous `MAP_32BIT` mmap with 2 MB aligned slots — enabling bitmask offset extraction (`addr & 0x1FFFFF`) in a single AND instruction. DRAM cores use individual mmaps.
-
-```cpp
-// L1Pool — single contiguous MAP_32BIT mmap, 2 MB aligned slots
-class L1Pool {
-    static constexpr size_t SLOT_SIZE = 2 * 1024 * 1024;  // 2 MB
-    static constexpr size_t SLOT_MASK = SLOT_SIZE - 1;
-    uint8_t* base_;    // SLOT_SIZE-aligned base
-    size_t   num_slots_;
-    static uint32_t to_offset(uint32_t addr) { return addr & SLOT_MASK; }
-};
-
-enum class CoreRole { WORKER, DRAM };
-
-class Core {
-    uint8_t*  l1_      = nullptr;      // from L1Pool slot (WORKER) or individual mmap (DRAM)
-    uint32_t  l1_base_ = 0;            // truncated address for kernel use
-    size_t    l1_size_ = L1_SIZE;       // 1 MB (WORKER) or bank size (DRAM)
-    CoreRole  role_    = CoreRole::WORKER;
-    CBSyncState cb_sync_states_[MAX_CBS] = {};
-    DstRegisterFile dst_;
-};
-```
-
-Worker cores use L1-sized regions (1 MB) allocated from L1Pool slots; DRAM cores use bank-sized individual mmaps. The `get_core(tt_xy_pair)` factory lazy-creates with the appropriate role. If the pool is exhausted, worker cores fall back to individual `MAP_32BIT` mmaps.
-
-The pool is sized at 2x the Tensix core count from the SOC descriptor to provide headroom for cores created via virtual coordinates that differ from physical coordinates.
-
-#### Quasar Memory Model
-
-Quasar Neos have larger L1 and a different DRAM model than WH/BH:
-
-- **L1**: 4 MB shared across all 12 cores in a Neo (8 DM + 4 compute). Emulated as a bump allocator on the host heap (`Core::l1_alloc()`). The JIT path reads the L1 size from the SOC YAML via `SWEmuleChip`.
-- **Firmware L1 address translation**: Device kernels reference L1 via firmware-range offsets (e.g., `0x1000`). `__emule_local_l1_to_ptr()` distinguishes these from host pointers and translates via `__emule_bridge_l1`. NOC operations and JIT-patched `reinterpret_cast<T*>(get_arg_val(N))` patterns use this translation.
-- **DRAM**: `NUM_DRAM_BANKS` is set to the real architecture channel count (Quasar=2, WH=6, BH=8) at `emulated_program_runner.cpp:700`. All bank NOC coordinates are registered in `__emule_core_map` (lines 1012-1031), enabling multi-bank interleaving via `InterleavedAddrGen`.
-- **Bridge DFBs**: When a compute kernel bridges two DFBs with the same `(entry_size, num_entries)`, the runner allocates L1 once and reuses the base address for both, modeling the hardware register file passthrough.
-
-### Address Translation
-
-A key challenge in emulation is that on real hardware, L1 addresses (e.g. `0xFFE30` for a semaphore) are directly dereferenceable by firmware. In emulation, L1 is mmap'd at a host address like `0x41B50000`, so raw L1 offsets are invalid pointers.
-
-tt-emule uses a **host-pointer-everywhere** convention: all addresses returned to kernels (`get_write_ptr`, `get_read_ptr`, `get_semaphore`) are host pointers truncated to `uint32_t`. Three helper functions handle translation at well-defined points:
-
-- **`__emule_addr_to_offset(addr)`** — **Encode point.** Extracts the L1 offset from a host pointer. With L1Pool (`TT_EMULE_USE_L1_POOL`), this is a single bitmask: `addr & 0x1FFFFF`. Without the pool (standalone builds), it falls back to TLS subtraction: `addr - l1_base`. Called by `get_noc_addr` and `get_noc_multicast_addr`.
-
-- **`__emule_fixup_noc_addr(noc_addr)`** — **Fixup point.** Sanitizes the addr bits [35:0] of an already-encoded 64-bit NOC address by applying `__emule_addr_to_offset` to the lower bits. This is necessary because real tt-metal kernels construct NOC addresses by ORing host pointers into pre-computed bases: `uint64_t addr = noc_base | l1_host_ptr` (e.g., matmul sender kernels building data multicast addresses). Called by `noc_async_read`, `noc_async_write`, `noc_async_write_multicast`, `noc_semaphore_inc`, and `noc_semaphore_set_multicast`.
-
-- **`__emule_resolve_noc_addr(noc_addr)`** — **Decode point.** Decodes (x, y, offset) from a 64-bit NOC address, looks up the target core in `__emule_core_map`, and returns a host pointer via `core->l1_ptr(offset)`. Implemented as an `extern "C"` bridge function in the program runner.
-
-The L1Pool bitmask approach eliminates the TLS lookup and conditional branch that the old subtraction-based conversion required, reducing encode-point overhead to a single AND instruction.
-
-### Semaphore Layout
-
-Semaphores are placed in the kernel config region of L1, matching real firmware layout:
-
-```
-sem_addr = kernel_config_base + prog_config.sem_offset + sem_id * L1_ALIGNMENT
-```
-
-Where `kernel_config_base` is the HAL's `KERNEL_CONFIG` address (`MEM_MAP_END`, ~0x8730 on Wormhole), `sem_offset` is computed by `finalize_sems()` and stored in `ProgramConfig`, and `L1_ALIGNMENT` = 16 bytes. The emulated program runner reads these values from the same `ProgramConfig` that real firmware uses, ensuring address-level fidelity.
-
-For standalone tt-emule builds (where no HAL or ProgramConfig exists), a fallback default of `0xFFE00` is used.
-
-### Circular Buffer Synchronization
-
-#### Wormhole/Blackhole: CBSyncState
-
-`CBSyncState` is the FIFO primitive for WH/BH kernel execution paths:
-
-```cpp
-struct CBSyncState {
-    uint8_t*  base      = nullptr;
-    uint32_t  page_size = 0;
-    uint32_t  num_pages = 0;
-    uint32_t  write_idx = 0;
-    uint32_t  read_idx  = 0;
-    uint32_t  occupied  = 0;
-    std::mutex              mu;
-    std::condition_variable space_cv;   // producer waits for free space
-    std::condition_variable data_cv;    // consumer waits for data
-};
-```
-
-Four inline operations (`cb_sync_reserve`, `cb_sync_push`, `cb_sync_wait`, `cb_sync_pop`) implement the producer-consumer protocol. Both standalone and JIT kernel paths use the same `CBSyncState` struct. The CB API also provides a lock-free fast path for SPSC scenarios.
-
-**JIT wait path is `<chrono>`-free by default.** The JIT kernel-facing CB/DFB/semaphore waits (`jit_hw/emule_wait.h`, `cb_api.h`, `dfb_api.h`, `noc_semaphore.h`) block on `cv.wait(pred)` and spin with `sched_yield()`/`usleep(1)` — deliberately avoiding `<chrono>` and `<thread>`, which on libstdc++ transitively pull the C++20 `<format>`/iostream machinery and cost ~1 s of frontend parse per kernel (roughly half the cold JIT compile). Silicon kernels include neither, so this is zero divergence. Setting `TT_EMULE_WAIT_TIMEOUT=1` makes the emule program runner define `EMULE_WAIT_TIMEOUT` for the JIT compile, restoring the bounded `cv.wait_for` + per-op hang diagnostic (which CB/DFB deadlocked, and an abort) for debugging. The define is part of the JIT cache key, so toggling it recompiles cleanly.
-
-#### Quasar: Tile Counter Synchronization
-
-On Quasar, a single Neo has 24 logical processors sharing one L1, so SPSC circular buffers are insufficient. DFBs (Dataflow Buffers) provide MPMC synchronization via **tile counters** — one per consumer, each with an independent `posted`/`acked` counter pair.
-
-Key data structures (`include/tt_emule/tile_counter.hpp`, `include/tt_emule/dfb_sync_state.hpp`):
-
-- **`TileCounter`**: atomic `posted`/`acked` + `capacity` + mutex + 2 CVs (`space_cv` for producer, `data_cv` for consumer). `occupancy = posted - acked`, `free_space = capacity - occupancy`.
-- **`TileCounterArray`**: `num_neos × 32` counters in a flat array, owned by `Core`, shared across all threads. Four operations: `inc_posted`, `inc_acked`, `wait_free_space`, `wait_occupancy`.
-- **`EmuleDFBInterface`**: per-thread per-DFB view with up to 4 round-robin TC slots, stride, active flag, and read/write entry indices.
-
-Two access patterns:
-- **STRIDED**: entries interleaved across consumers. `M = max(P, C)`, producer p owns TC slots `{p + k*P}`, consumer c owns `{c + k*C}`. `stride_size = M * entry_size`.
-- **BLOCKED**: all consumers see all data. Producer posts to ALL consumer TCs simultaneously (`broadcast_tc = true`). Consumer drains each TC fully before advancing (`drain_per_tc = true`). Each TC slot has its own sub-range. P*C counter scheme.
-
-See [DFB_EMULATION.md](docs/DFB_EMULATION.md) for the full synchronization deep dive, access pattern details, and program lifecycle.
-
-#### DFB↔CB Bridge
-
-Compute kernels use the CB API (`cb_push_back`, `cb_pop_front`) while DM kernels use the DFB API (`dfb_push_back`, `dfb_pop_front`). The bridge connects both sides:
-
-- `dfb_push_back` calls `cb_sync_push` to update CB `occupied` so compute's `cb_wait_front` sees pushed tiles.
-- `cb_push_back` calls `inc_posted` on the DFB's tile counters so DM's `dfb_wait_front` sees compute's output.
-- `dfb_pop_front` calls `cb_sync_pop`; `cb_pop_front` calls `inc_acked`.
-
-This allows the same L1 buffer to be accessed via CB API from compute and DFB API from DM, which is how upstream Quasar kernels are structured.
-
-### Compute Engine
-
-The compute engine emulates the hardware's UNPACK → MATH → PACK pipeline. On real hardware, three TRISC cores (UNPACK, MATH, PACK) run in parallel; in emulation, all three share one host thread via `PACK(x) x`, `MATH(x) x`, `UNPACK(x) x` macros.
-
-**DST Register File** (`include/jit_hw/api/compute/common.h`): `__emule_dst[16][1024]` — 16 tile slots × 1024 float32 elements (64 KB). Active slot count depends on `DST_ACCUM_MODE`: 16 for bf16 (default), 8 for fp32. `__emule_dst_check()` enforces the mode-aware limit.
-
-**UNPACK Engine** (`include/jit_hw/api/compute/nfaces.h`): On real hardware, UNPACK reads tile data from L1 in **nfaces format** (4 sequential 16×16 faces) and produces row-major data in SRC registers. Emulation converts via a constexpr LUT: `dst[i] = buf[rowmajor_to_nfaces[i]]`, with simultaneous bf16→f32 conversion where needed. All compute ops that read from CBs perform this conversion.
-
-**PACK Engine** (`include/jit_hw/api/compute/common.h`): Reverse of UNPACK — row-major DST → nfaces L1, with optional f32→bf16 conversion. **Auto-advance**: each `pack_tile` call writes to `cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++)`, then increments the offset. Reset occurs in `cb_reserve_back` / `dfb_reserve_back`. **L1 accumulation**: `llk_pack_reconfig_l1_acc(1)` switches pack to additive mode (adds DST to existing CB contents).
-
-**Implemented Compute Operations:**
-
-| Operation | Function | File |
-|-----------|----------|------|
-| Tile copy | `copy_tile`, `copy_block_matmul_partials` | `common.h` |
-| Pack | `pack_tile`, `pack_tile_block` | `common.h` |
-| Add / Sub / Mul | `add_tiles`, `sub_tiles`, `mul_tiles` | `common.h` |
-| Matmul | `matmul_tiles`, `matmul_block` (AVX2/FMA when available) | `matmul.h` |
-| Reduce | `reduce_tile` (ROW/COL/SCALAR × SUM/MAX) | `reduce.h` |
-| L1 acc toggle | `llk_pack_reconfig_l1_acc` | `common.h` |
-
-Stubbed operations (compile but no-op): SFPU element-wise ops, broadcast, transpose_wh, tilize/untilize compute path, pack_untilize, quantization. See [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) section 5.5 for the full list.
-
-### Codebase Structure
-
-```
-tt-emule/
-├── include/
-│   ├── tt_emule/        Host-side types: Device, Core, L1Pool, Buffer, Program,
-│   │                    CircularBuffer, CBSyncState, DstRegisterFile,
-│   │                    TileCounter, TileCounterArray, EmuleDFBInterface,
-│   │                    DFBSyncState, DataflowBuffer
-│   ├── kernel_api/      Standalone device-side API (links tt_emule directly)
-│   ├── jit_hw/          JIT kernel stubs (resolved via dlopen + -rdynamic)
-│   │   ├── api/compute/      Compute op headers (top-level + eltwise_unary SFPU)
-│   │   ├── api/dataflow/     NOC ops, multicast, semaphores, addrgen page ops
-│   │   ├── api/tensor/       TensorAccessor for page-based addressing
-│   │   ├── api/dfb_api.h     DFB operations with timeout and DFB↔CB bridge
-│   │   ├── internal/         Banking infra, RISC attribs, mod_div_lib
-│   │   └── experimental/     CoreLocalMem, Noc, AllocatorBank, Lock stubs
-│   └── ttkernel/        Forwarding headers for tt-metal kernel include paths
-├── src/                 host_api.cpp, kernel_runner.cpp, jit_kernel.cpp
-├── tests/               standalone gtests: tilize/, dram/ (DRAM model),
-│                        integration/ (emulation toggle)
-└── docs/                DFB_EMULATION.md, QUASAR_EMULATION.md, changelog.md, etc.
-```
-
-The tree above is a high-level overview. For an authoritative, complete file-level index — every file under `src/` and `include/` with the top-level symbols it contains — see [STRUCTURE.md](STRUCTURE.md). It is kept in sync with the source as files and symbols change.
-
-### JIT Kernel API Coverage
-
-The `jit_hw/` directory provides stub implementations covering:
-
-| Category | Key APIs |
-|----------|----------|
-| Compute | `matmul_tiles`, `matmul_block`, `add/sub/mul_tiles`, `pack_tile`, `copy_tile`, `reduce_tile` (row/col/scalar × sum/max), `bcast`, `tilize/untilize`, `pack_untilize` (with `experimental::pack_untilize_block`), `transpose_wh`, `quantization`, `cumsum_tile`/`cumprod_tile` (stateful), `welford_init`/`reinit`/`clear` (statistics), `mask_tile`/`mask_posinf_tile`, `logsigmoid_tile`, `reshuffle_rows_tile`, eltwise_unary SFPU ops (`abs_tile`, `exp_tile`, `negative_tile`, `typecast_tile`, and ~40 more — see [STRUCTURE.md](STRUCTURE.md) §`include/jit_hw/api/compute/eltwise_unary/` for the full list incl. bitwise_and/or/xor, cbrt, digamma, dropout, elu, erfinv, fmod, hardmish, hardtanh, i0/i1, identity, isinf_isnan, left_shift/right_shift, lgamma, mish, polygamma, prelu, remainder, rsub, softplus, threshold, xielu), binary bitwise/shift/comp/fmod/max_min, `gcd/lcm`, `xlogy`, `copy_dest_values` |
-| Compute nfaces | `__emule_nfaces::rowmajor_to_nfaces` constexpr LUT — UNPACK/PACK engine layout conversion between nfaces (L1) and row-major (DST) |
-| Dataflow | `noc_async_read/write`, `noc_async_write_multicast`, `noc_inline_dw_write` (unicast/multicast/stateful), semaphore ops, `InterleavedAddrGen<DRAM/L1>`, banking arrays |
-| CB sync | `cb_reserve_back`, `cb_push_back`, `cb_wait_front`, `cb_pop_front` (uint32_t and int32_t overloads), DFB↔CB bridge |
-| DFB sync | `dfb_reserve_back`, `dfb_push_back`, `dfb_wait_front`, `dfb_pop_front`, `dfb_finish`, `dfb_get_write_ptr`/`dfb_get_read_ptr`, timeout detection |
-| CSR emulation | `csr_read<CSR::NEO_ID>()`, `csr_read<CSR::TRISC_ID>()` via TLS `__emule_neo_id`, `__emule_trisc_id` |
-| LLK defs | `llk_unpack_A`, `llk_wait_tiles`, `llk_pop_tiles`, `llk_push_tiles`, `llk_wait_for_free_tiles`, `get_output_id`, `FACE_R_DIM`, `TILE_C_DIM`, coordinate APIs (`get_absolute_logical_x/y`) |
-| Tensor | `TensorAccessor`, `TensorAccessorArgs` |
-| Infrastructure | compile-time args, bfloat16, dprint, assert stubs, DataFormat enum, tile constants |
-| Experimental | `Noc`, `CircularBuffer`, `AllocatorBank`, `Lock`, `CoreLocalMem` |
-| Compatibility | `ckernel.h`, `ckernel_defs.h`, `common_values.hpp`, `risc_attribs.h` (`InlineWriteDst`, `write_at_cmd_buf`), `dprint.h` (debug print stubs) |
-
-### Dual API Paths
-
-tt-emule provides two parallel API surfaces for kernel code:
-
-| Aspect | `kernel_api/` (Standalone) | `jit_hw/` (JIT for tt-metal) |
-|--------|---------------------------|------------------------------|
-| **Linking** | Static link to `tt_emule_lib` | dlopen'd `.so`, symbols via `-rdynamic` |
-| **L1 addresses** | `uint8_t*` (host pointers) | `uint32_t` (truncated from mmap below 4 GB) |
-| **CB backing** | `tt_emule::CircularBuffer` | `CBSyncState` array on `tt_emule::Core` |
-| **Tile format** | Float32 (4096 bytes/tile) | bfloat16 (2048 bytes) or INT32 (4096 bytes) |
-| **Context** | Thread-local `__core`, `__device` | Same, plus bridge pointers for DRAM/NOC resolution |
-
-Both paths share a single `CBSyncState` struct and `cb_sync_*` free functions.
-
-### Test Results
-
-The emulated C++ regression runs as three parallel CI matrix jobs (`wormhole`, `blackhole`, `quasar`), driven by the per-arch `scripts/run_regression_<arch>.sh` (invoked in CI via `.github/scripts/ci-regression.sh`). The `ttnn-pytest` CI job also runs as a matrix across `wormhole` and `blackhole`, driven by per-arch `scripts/run_ttnn_pytests_<arch>.sh` (invoked via `.github/scripts/ci-ttnn-pytests.sh`); the BH script is a verbatim mirror of WH apart from the cluster descriptor and `MESH_DEVICE`. The D2M golden-test regression runs through `run_d2m_regression.sh`. The C++ and ttnn-pytest jobs live in `.github/workflows/pr-metal-regression.yml`; the D2M regression is in `pr-d2m-regression.yml`.
-
-Authoritative state lives outside this report so it stays in sync:
-
-- **C++ regression allowlist** — `.github/known-failures-{wormhole,blackhole,quasar}.txt`. CI's `classify-results.py` cross-checks per-test.
-- **D2M failure allowlist** — tracked per op-family in [issue #6](https://github.com/tenstorrent/tt-emule/issues/6) (sub-issues #7–#17). Tests on the allowlist pass on real hardware; failures are emulator-side.
-- **Quasar feature coverage** — [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) §8 has a feature-by-feature table with test evidence.
-- **D2M failure analysis** — [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
+## Documentation index
+
+**Memory**
+- [l1-emulation.md](docs/l1-emulation.md) — per-core L1 SRAM, host-pointer
+  convention, address translation, L1Pool vs bridge_l1.
+- [dram-emulation.md](docs/dram-emulation.md) — banked/interleaved DRAM, bank
+  topology from the SoC descriptor, interleaved addr-gen, non-pow2 banks.
+- [mem-zeros-handling.md](docs/mem-zeros-handling.md) — the MEM_ZEROS L1 region
+  and the zero-init contract.
+
+**Compute**
+- [dest-emulation.md](docs/dest-emulation.md) — the DEST register file, acquire/
+  pack lifecycle, `DEST_AUTO_LIMIT` capacity modes.
+- [cb-emulation.md](docs/cb-emulation.md) — circular-buffer FIFO sync, the
+  kernel CB API, DFB↔CB bridge.
+- [cb-dataformat.md](docs/cb-dataformat.md) — per-CB data-format dispatch
+  (bf16 vs uint16 vs block-float).
+- [tilize-untilize-pack.md](docs/tilize-untilize-pack.md) — UNPACK/PACK, nfaces↔
+  row-major conversion, tilize/untilize/pack-untilize.
+
+**Communication**
+- [noc-emulation.md](docs/noc-emulation.md) — NOC address encoding/resolution,
+  async read/write, multicast, semaphore operations, per-NOC state.
+- [DFB_EMULATION.md](docs/DFB_EMULATION.md) — Quasar Dataflow Buffers (MPMC tile
+  counters, STRIDED/BLOCKED).
+
+**Architecture**
+- [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) — Quasar (Tensix Neo) threading,
+  CSR emulation, full reference (incl. §8 feature-coverage table).
+- [QUASAR_MATMUL_REPORT.md](docs/QUASAR_MATMUL_REPORT.md) — Quasar matmul
+  bring-up (point-in-time).
+- [riscv-intdiv-by-zero.md](docs/riscv-intdiv-by-zero.md) — Quasar RISC-V
+  integer divide-by-zero behavior.
+
+**Integration & build**
+- [metal-integration.md](docs/metal-integration.md) — how emule injects into
+  tt-metal (UMD chip, runtime activation, JIT runner, guards).
+- [BUILD_GUIDE.md](BUILD_GUIDE.md) / [GETTING_STARTED.md](GETTING_STARTED.md) —
+  build + test setup.
+- [STRUCTURE.md](STRUCTURE.md) — authoritative file-level index of `src/` +
+  `include/` and the top-level symbols in each.
+- [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md) — D2M failure analysis.
+- [docs/changelog.md](docs/changelog.md) — per-version history of this report.
 
 ---
 
-## 2. Integration into tt-metal
-
-### Design Philosophy
-
-The integration follows three key principles:
-
-1. **Zero fake headers.** Tests link the real `Metalium::Metal` library and use real tt-metal headers, fixtures, and buffer utilities. Emulation is injected at the UMD (User-Mode Driver) boundary, not via mock headers.
-
-2. **Memory isolation in `tt_emule::Core`.** All device memory — worker L1, DRAM banks — is owned by `tt_emule::Core` objects inside `SWEmuleChip`. There is no intermediate copy-in/copy-out stage. The program runner uses Core's mmap'd memory directly, and it persists across program runs.
-
-3. **Minimal API surface in `jit_hw/`.** Stub headers only implement what is needed for the target kernel to compile and execute correctly. Where possible, real tt-metal headers are included rather than duplicated.
-
-### Integration Layers
-
-#### Layer 1: UMD Device Injection — SWEmuleChip
-
-```
-tt_metal/third_party/umd/device/
-├── api/umd/device/chip/sw_emule_chip.hpp
-└── chip/sw_emule_chip.cpp
-```
-
-`SWEmuleChip` extends `Chip` with memory-backed I/O (all non-memory operations — barriers, resets, power management, host channels — are no-ops):
-
-```cpp
-class SWEmuleChip : public Chip {
-    std::mutex core_mutex_;
-    std::unique_ptr<tt_emule::L1Pool> worker_pool_;          // 2MB-aligned slots
-    size_t next_slot_ = 0;
-    std::unordered_map<tt_xy_pair, size_t> core_to_slot_;    // core -> pool slot
-    std::unordered_map<tt_xy_pair, std::unique_ptr<tt_emule::Core>> cores_;
-    std::unordered_map<tt_xy_pair, uint32_t> dram_core_to_channel_;
-    uint32_t l1_size_;
-    uint64_t dram_bank_size_;
-};
-```
-
-- **L1Pool for worker cores.** At construction, allocates a single contiguous `MAP_32BIT` mmap with 2x the Tensix core count slots (from `soc.get_cores(CoreType::TENSIX).size()`). Worker cores get their L1 from pool slots; DRAM cores use individual mmaps. Pool exhaustion falls back to individual `MAP_32BIT` mmaps.
-- **Lazy core creation.** `get_core(tt_xy_pair)` creates a `tt_emule::Core` on first access with the correct role (`WORKER` or `DRAM`) and memory source (pool slot or individual mmap).
-- **Forward declaration only.** The header forward-declares `tt_emule::Core` and `tt_emule::L1Pool`, avoiding UMD include path contamination.
-- **Uniform I/O.** All `read_from_device` / `write_to_device` overrides delegate to `get_core(xy)->l1_ptr(offset)` + `memcpy` — uniform for both worker and DRAM cores.
-
-Chip instantiation in `cluster.cpp` (guarded by `#ifdef TT_UMD_BUILD_EMULE`):
-
-```cpp
-if (chip_type == ChipType::SWEMULE) {
-    return std::make_unique<SWEmuleChip>(soc_desc);
-}
-```
-
-#### Layer 2: Runtime Activation
-
-Activation is controlled by environment variables:
-
-```
-TT_METAL_EMULE_MODE=1                 -> TargetDevice::Emule + force slow dispatch
-TT_METAL_MOCK_CLUSTER_DESC_PATH=...   -> SOC descriptor for core/DRAM topology (required)
-TT_METAL_SLOW_DISPATCH_MODE=1         -> Required (no HWCommandQueue in emulation)
-```
-
-Both the build flag and the env var are required. The `TT_METAL_USE_EMULE=ON` CMake flag compiles in the emulated code paths (`SWEmuleChip`, `execute_program_emulated`, JIT runner) behind `#ifdef TT_METAL_USE_EMULE` (the UMD chip behind `#ifdef TT_UMD_BUILD_EMULE`, which `TT_METAL_USE_EMULE` propagates). Without it, these code paths do not exist in the binary. The env var then selects the emulated path at runtime — `TT_METAL_EMULE_MODE=1` requires `TT_METAL_MOCK_CLUSTER_DESC_PATH` to be set or the runtime throws. A single binary built with this flag supports both silicon and emulated execution — the env var toggles which path is taken.
-
-#### Layer 3: JIT Kernel Execution
-
-The emulated program runner is the core integration component:
-
-```
-tt_metal/impl/emulation/
-├── emulated_program_runner.hpp
-└── emulated_program_runner.cpp
-```
-
-**JIT Compilation Pipeline:**
-
-1. Kernel source `.cpp` -> temp directory with `wrapper.cpp` (kernel `#define`s + `#include "jit_kernel_stubs.hpp"` + Metal 2.0 namespace blocks + `#include kernel.cpp`)
-2. The build's configured C++ compiler and standard (`TT_EMULE_CXX_COMPILER` / `TT_EMULE_CXX_STANDARD`, set by CMake to `${CMAKE_CXX_COMPILER}` / `${CMAKE_CXX_STANDARD}` — clang-20 / C++20 in the standard build) invoked as `<compiler> -std=c++<std> -fPIC -shared` with tt-emule and kernel-directory include paths
-3. Compile-time args as `-DKERNEL_COMPILE_TIME_ARGS=v0,v1,...`; named args via `-DKERNEL_COMPILE_TIME_ARG_MAP`
-4. Metal 2.0 named-binding namespaces (`args::`/`dfb::`/`sem::`/`ta::`) emitted inline into `wrapper.cpp` by `emit_metal2_namespaces()`. Replaces the `kernel_args_generated.h` + `kernel_bindings_generated.h` that upstream's `tt_metal/jit_build/genfiles.cpp` would produce — kept text-equivalent to `write_kernel_{args,bindings}_generated_header` so kernels using `args::NAME`, `dfb::NAME`, `sem::NAME`, `ta::NAME` resolve identically to the silicon JIT build. Contained entirely in `emulated_program_runner.cpp` (no public-API leak into `genfiles.hpp`).
-5. Quasar-specific patches applied via regex before compilation:
-   - `mhartid` CSR: `asm volatile("csrr %0, mhartid" ...)` → `var = __processor_id;`
-   - RISC-V fence: `asm volatile("fence")` → `__sync_synchronize()`
-   - Raw L1 pointer casts: `reinterpret_cast<T*>(get_arg_val(N))` → adds `__emule_bridge_l1` offset
-   - Metal 2.0 named-arg L1 pointer casts: `reinterpret_cast<T*>(static_cast<uintptr_t>(get_arg(args::NAME)))` → routed through `__emule_local_l1_to_ptr`
-6. `dlopen` + `dlsym("__emule_kernel_entry")` -> `std::function<void()>`
-7. Results cached by `(source_path : compile_args : defines [: metal2_binding_suffix])` key; the suffix (`:dfb:NAME=ID:sem:NAME=ID:ta:NAME=CTA,CRTA:rta:NAME:crta:NAME`) is computed via `Metal2BindingsSnapshot::cache_key_suffix()` from the Kernel's public binding-accessor methods so two Metal 2.0 kernels sharing source/CTAs/defines but binding different IDs don't collide on the cached `.so`. Cache misses compiled in parallel via `std::async`.
-
-**Program Execution — direct Core memory, no copies:**
-
-```
-Phase 1a: Collect kernels per logical core from ProgramImpl
-    For each HalProgrammableCoreType x each kernel:
-        Build JIT cache key, check cache
-        Group by logical core with {cache_key, rt_args, common_rt_args}
-
-Phase 1b: Compile cache misses in parallel (std::async)
-
-Phase 1c: Resolve pending kernels to function pointers
-
-Phase 2: Execute all cores concurrently
-    For each physical core:
-        1. core = sw_emu->get_core(physical_xy)
-        2. core->reset_cb_sync() / init_cb_sync(...)
-        3. Initialize semaphores at HAL-derived addresses
-        4. Set thread-local bridge pointers:
-             __emule_bridge_l1   = core->l1_data()
-             __emule_bridge_dram = dram_core->l1_data()
-             __emule_cbs         = core->cb_sync_array()
-             __emule_core_map    = &core_map  (for cross-core NOC resolution)
-           Quasar-specific TLS:
-             __emule_dfbs        = dfb_interfaces_for_this_thread
-             __emule_tc_array    = core->tile_counters()
-             __emule_neo_id      = neo_id (0-3)
-             __emule_trisc_id    = trisc_id (0-3)
-        5. WH/BH: Launch reader + compute + writer threads
-           Quasar: Launch 1 thread per active DM processor
-                   + 1 thread per active compute engine
-        6. Join all threads
-        7. Done — no copy-back, no munmap
-```
-
-**Semaphore Initialization:**
-
-Semaphores are initialized in each core's L1 at addresses matching the real firmware layout. The base address is computed from the HAL kernel config region and ProgramConfig:
-
-```cpp
-const auto& hal = MetalContext::instance().hal();
-uint32_t kernel_config_base = hal.get_dev_addr(HalProgrammableCoreType::TENSIX,
-                                                HalL1MemAddrType::KERNEL_CONFIG);
-uint32_t emule_sem_base = kernel_config_base + prog_config.sem_offset;
-// Each semaphore: emule_sem_base + sem_id * 16
-```
-
-This is passed to JIT kernels as `EMULE_SEM_BASE` so that `get_semaphore(id)` returns the correct L1 address.
-
-**DFB Setup (Quasar only):**
-
-For programs with Dataflow Buffers, the runner performs additional setup before thread launch:
-
-1. Allocate L1 for each DFB: `entry_size * num_entries` bytes via `core->l1_alloc()`. Bridge DFBs (compute kernel connecting input and output DFBs with same dimensions) share the same L1 backing via `dim_key` deduplication.
-2. Initialize tile counters: `M = max(P, C)` counter slots per DFB, each with `capacity = num_entries / M`.
-3. Build per-thread `EmuleDFBInterface` arrays: producer p gets TC slots `{p + k*P}`, consumer c gets `{c + k*C}` (STRIDED). BLOCKED mode sets `broadcast_tc = true` and uses P*C counter scheme.
-4. For BLOCKED consumer assignment: `counter_id = counter_base + p*C + c`.
-
-See [DFB_EMULATION.md](docs/DFB_EMULATION.md) section 5.5 for the full details of JIT/Metal path DFB setup.
-
-**Memory Bridge (JIT <-> host process):**
-
-Thread-local pointers and `extern "C"` bridge functions are exported via `-rdynamic` so that dlopen'd `.so` files resolve them at load time:
-
-```cpp
-// Thread-local bridge pointers
-thread_local uint8_t*          __emule_bridge_l1   = nullptr;
-thread_local uint8_t*          __emule_bridge_dram = nullptr;
-thread_local __emule_cb_state* __emule_cbs         = nullptr;
-thread_local tt_emule::Core*   __core              = nullptr;
-
-// C-linkage bridge functions
-extern "C" uint8_t* __emule_dram_ptr(uint64_t offset);
-extern "C" uint8_t* __emule_local_l1_ptr(uint64_t offset);
-extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
-extern "C" void     __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src, uint32_t size);
-```
-
-This avoids the ABI hazard of JIT kernels inlining any `Device` or `Core` methods — kernels only touch opaque `extern "C"` functions.
-
-#### Layer 4: Dispatch Interception
-
-In `tt_metal.cpp`, `LaunchProgram()` checks the target device type:
-
-```cpp
-#ifdef TT_METAL_USE_EMULE
-if (MetalContext::instance().get_cluster().get_target_device_type() == tt::TargetDevice::Emule) {
-    emule::execute_program_emulated(device, program);
-} else
-#endif
-{
-    // Real hardware dispatch path...
-}
-```
-
-This is the single branch point where emulated execution diverges from silicon dispatch. `CompileProgram` and `WriteRuntimeArgsToDevice` still run to populate `ProgramImpl` data structures; only the hardware dispatch path is bypassed. `finalize_offsets()` also runs before dispatch, which is what populates `ProgramConfig.sem_offset` — making the HAL-based semaphore base available to the emulated runner.
-
-A second interception in `ConfigureDeviceWithProgram()` skips binary writing for emulated mode.
-
-### Guard Pattern: `is_mock_or_emulated()`
-
-`is_mock_or_emulated()` call sites short-circuit hardware-specific operations across these subsystems:
-
-| Subsystem | Files | Operations Skipped |
-|-----------|-------|--------------------|
-| Dispatch queues | `fd_mesh_command_queue.cpp`, `sd_mesh_command_queue.cpp` | HW queue operations |
-| Firmware | `risc_firmware_initializer.cpp` | RISC firmware load |
-| Context init | `metal_context.cpp` | Fabric, FW, watcher, dprint |
-| Program dispatch | `program.cpp`, `dispatch.cpp` | Dispatch data population |
-| Device init | `device.cpp`, `device_manager.cpp` | HAL/HW initialization |
-| Fabric | `control_plane.cpp`, `channel_trimming_export.cpp` | Fabric control plane |
-| Buffer/event dispatch | `buffers/dispatch.cpp`, `event/dispatch.cpp` | HW buffer/event ops |
-| Other | `system_memory_manager.cpp`, `prefetch.cpp`, `core_descriptor.cpp`, etc. | Misc HW operations |
-
-Definition (in `tt_cluster.hpp`):
-
-```cpp
-bool is_mock_or_emulated() const {
-    return this->target_type_ == tt::TargetDevice::Mock ||
-           this->target_type_ == tt::TargetDevice::Emule;
-}
-```
-
-### Architecture Stack
-
-```
-User Code (ttnn::matmul, ttnn::add, etc.)
-    +-- tt-metal API (CreateBuffer, CreateProgram, LaunchProgram)
-            +-- [TT_METAL_USE_EMULE guard] execute_program_emulated()
-                    |-- JIT compile: kernel .cpp -> .so via configured C++ compiler + dlopen
-                    |-- Per-core: SWEmuleChip::get_core() -> tt_emule::Core*
-                    |-- Init CB sync states from ProgramImpl
-                    |-- Compute sem base from HAL kernel config + ProgramConfig
-                    |-- Populate banking arrays from metal_SocDescriptor
-                    +-- [WH/BH] Launch N cores x 3 threads, set TLS context
-                        |   |-- reader_kernel_main()  --- NOC read, CB push
-                        |   |-- compute_kernel_main() --- DST math, CB pop/push
-                        |   +-- writer_kernel_main()  --- CB pop, NOC write
-                        |
-                        +-- [Quasar] Launch N cores x (DM + compute) threads
-                            |-- dm_kernel_main() x P   --- DFB push/pop, NOC read/write
-                            +-- compute_main() x Q     --- UNPACK/MATH/PACK, CB↔DFB bridge
-
-tt::umd::SWEmuleChip (extends Chip)
-    +-- L1Pool: single MAP_32BIT mmap, 2MB-aligned slots for all worker cores
-    +-- Per-{x,y} lazy-created tt_emule::Core (pool slot or individual mmap)
-    +-- write_to_device / read_from_device -> memcpy to/from Core::l1_ptr()
-
-tt_emule::L1Pool
-    |-- Single contiguous MAP_32BIT mmap (num_slots x 2MB + alignment overhead)
-    |-- SLOT_SIZE=2MB, SLOT_MASK=0x1FFFFF
-    +-- to_offset(addr) -> addr & SLOT_MASK (one AND instruction)
-
-tt_emule::Core
-    |-- L1 from L1Pool slot (WORKER) or individual mmap (DRAM)
-    |-- CBSyncState[32] for multi-thread CB sync
-    |-- DstRegisterFile for compute thread
-    |-- TileCounterArray for DFB sync (Quasar)
-    |-- DFBSyncState[32] for per-DFB metadata (Quasar)
-    +-- l1_base_addr() -> 32-bit truncated address for JIT kernels
-```
-
-### CMake Configuration
-
-A single flag controls the build:
-
-| Flag | Scope | Effect |
-|------|-------|--------|
-| `TT_METAL_USE_EMULE` | tt_metal library + UMD | Compiles `emulated_program_runner.cpp`, defines `TT_METAL_USE_EMULE=1` in `tt_metal`/`impl`/`llrt`, propagates `TT_UMD_BUILD_EMULE=ON` to the UMD subbuild (enabling `SWEmuleChip`), defines JIT include paths, adds `-rdynamic` |
-
-```bash
-cmake -S . -B build_emule -G Ninja \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DTT_METAL_USE_EMULE=ON \
-  -DTT_EMULE_PATH=/path/to/tt-emule \
-  -DWITH_PYTHON_BINDINGS=ON -DENABLE_TRACY=OFF \
-  -DTT_METAL_BUILD_TESTS=ON -DTTNN_BUILD_TESTS=ON
-```
-
-See [BUILD_GUIDE.md](BUILD_GUIDE.md) for the full build/test setup, including the post-build symlinks and tt-mlir D2M wiring.
-
-### Test Infrastructure
-
-Tests in `tt_emule/` are organized in tiers and use standard tt-metal fixtures — no custom test infrastructure.
-
-The C++ regression is driven by the per-arch scripts under `scripts/`; CI runs them as parallel matrix jobs. The D2M golden-test regression runs through `run_d2m_regression.sh` against the tt-mlir test suite. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md) for failure analysis.
-
-### tt-metal Files Modified
-
-tt-metal modifications for emulation support:
-
-| Category | Files |
-|----------|-------|
-| New: program runner | `emulated_program_runner.{hpp,cpp}` |
-| New: UMD chip | `sw_emule_chip.{hpp,cpp}` |
-| New: test infrastructure | `tt_emule/CMakeLists.txt`, `tt_emule/ttnn_tests/CMakeLists.txt` |
-| New: Quasar test files | `test_dfb_emulation.cpp`, `test_dataflow_buffer.cpp`, `test_quasar_compute_kernels.cpp`, `test_quasar_semaphores.cpp`, `test_dm_loopback.cpp`, `test_single_dm_l1_write.cpp`, `test_riscv_atomics.cpp`, `test_globals_tls.cpp`, `test_matmul_X_tile.cpp`, data_movement tests |
-| Modified: dispatch | `tt_metal.cpp` (`#ifdef TT_METAL_USE_EMULE` branch) |
-| Modified: guards | `is_mock_or_emulated()` call sites in `impl/`, `llrt/`, `umd/` |
-| Modified: enum additions | `rtoptions.cpp`, `tt_cluster.hpp`, UMD types |
-| Modified: CMake | top-level `CMakeLists.txt` + UMD build glue |
+## Architecture at a glance
+
+**Threading model (per arch).**
+
+- **Wormhole / Blackhole** — each emulated core runs three host threads mirroring
+  hardware: a NOC reader, a compute thread, and a NOC writer. They synchronize
+  through circular buffers ([cb-emulation.md](docs/cb-emulation.md)).
+- **Quasar (Tensix Neo)** — each Neo runs up to 12 threads (up to 8 DM + up to 4
+  compute) sharing one larger L1, with Dataflow Buffers
+  ([DFB_EMULATION.md](docs/DFB_EMULATION.md)) replacing SPSC CBs and CSR reads
+  regex-patched to thread-locals. See [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md).
+
+**Shared.** All device memory is owned by `tt_emule::Core` objects (worker L1 and
+DRAM banks alike) — the runner uses that mmap'd memory directly, no copy-in/out,
+persisting across program runs. The compute thread operates on a private DEST
+register file modeled as `float[16][1024]` (16 bf16 / 8 fp32 slots) with
+mode-aware bounds checking ([dest-emulation.md](docs/dest-emulation.md)). Cores
+run concurrently in separate threads, so cross-core multicast and semaphore
+signaling exercise real concurrency.
+
+**How it runs inside tt-metal.** A single dispatch branch in `tt_metal.cpp`
+(under `#ifdef TT_METAL_USE_EMULE`) routes to `execute_program_emulated`, which
+JIT-compiles each kernel `.cpp` to a `.so` (via the build's configured C++
+compiler), `dlopen`s it, and launches the per-core threads against
+`SWEmuleChip`-owned memory. Full detail in
+[metal-integration.md](docs/metal-integration.md).
+
+**Codebase layout.** Host-side types live in `include/tt_emule/` (`Device`,
+`Core`, `L1Pool`, `CBSyncState`, `DstRegisterFile`, tile-counter/DFB types); the
+JIT kernel surface in `include/jit_hw/` (`api/compute/`, `api/dataflow/`,
+`api/tensor/`, `internal/`, `experimental/`); host glue in `src/`. For the
+authoritative file/symbol index see [STRUCTURE.md](STRUCTURE.md).
 
 ---
 
-## 3. Pros, Cons, and Maintainability
+## Test surface
 
-### Pros
+Authoritative pass/fail state lives outside this report so it cannot drift:
 
-**Development velocity without hardware.** Developers can write, compile, and test kernels on any x86 Linux machine. The full loop — kernel compilation, buffer I/O, multi-threaded multi-core execution with CB synchronization and NOC communication — runs in seconds without requiring a Tenstorrent card.
-
-**Zero fake headers reduces drift.** By linking the real `Metalium::Metal` library and using real tt-metal headers, tests exercise the actual host API code paths. Header changes in tt-metal are immediately visible as compile errors in emulated tests, rather than silently diverging behind a fake header layer.
-
-**Memory isolation eliminates copy overhead.** `tt_emule::Core` is the single memory owner for both worker L1 and DRAM banks. The program runner sets bridge pointers directly to Core's mmap'd region — no copy-in / copy-out, no temporary allocations, no munmap lifecycle. Core memory persists across program runs, matching hardware semantics.
-
-**Multi-core execution is realistic.** All cores launch concurrently in separate threads, with cross-core communication via NOC multicast writes and semaphore atomic operations. This catches real concurrency bugs that single-threaded harnesses miss.
-
-**Semaphore layout matches hardware.** The HAL-based semaphore base (`kernel_config_base + prog_config.sem_offset`) uses the same values `finalize_sems()` produces for real firmware. Any change to semaphore placement in tt-metal is automatically reflected in emulation.
-
-**Runtime toggle from a single binary.** A binary built with `TT_METAL_USE_EMULE=ON` supports both silicon and emulated execution — the `TT_METAL_EMULE_MODE` environment variable selects which path is taken at runtime. The build flag is a prerequisite: without it, the emulated code paths (`SWEmuleChip`, `execute_program_emulated`) are not compiled in (`#ifdef TT_METAL_USE_EMULE`).
-
-**Interleaved DRAM banking is production-accurate.** Bank mapping arrays (`dram_bank_to_noc_xy`, `bank_to_dram_offset`, etc.) are populated from the real `metal_SocDescriptor` at program execution time. `InterleavedAddrGen<DRAM>` computes proper banked NOC addresses matching the real firmware's banking logic.
-
-**DFB MPMC synchronization is hardware-accurate.** The tile counter model (`TileCounter` + `TileCounterArray` + `EmuleDFBInterface`) replicates the hardware's per-consumer posted/acked counter pair with correct BLOCKED drain semantics (`drain_per_tc`). The DFB regression covers STRIDED and BLOCKED access patterns across the full P/C matrix (DM-DM and DM-Tensix-DM topologies).
-
-**UNPACK/PACK nfaces layout conversion is verified by matmul PCC.** The constexpr nfaces LUT (`nfaces.h`) ensures that bfloat16 tile data is correctly converted between L1 (nfaces) and DST (row-major) formats. Matmul PCC tests exercise both UNPACK (nfaces→rowmajor) and PACK (rowmajor→nfaces) conversions end-to-end via `test_matmul_X_tile.cpp` (tile GEMM with AVX2/FMA against golden reference, full UNPACK→MATH→PACK pipeline through the DFB↔CB bridge).
-
-**Incrementally extensible.** New compute ops are single-file headers in `jit_hw/api/compute/`, following a consistent DST-to-DST pattern with format-aware load/store.
-
-**D2M golden test coverage.** Broad coverage across layout transforms, buffer allocation, matmul (single-core, multi-core, double-buffered, 3D/4D batched), reductions, DMA, TMS, tilize/untilize, virtual grids, and tensor collapsing. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md) for the current allowlist.
-
-### Cons
-
-**Behavioral fidelity gap.** The emulator approximates hardware behavior but does not replicate it:
-- NOC operations are synchronous `memcpy` (no latency modeling, no bandwidth contention)
-- DST register file uses float32 internally; bfloat16 precision loss only occurs at pack/unpack boundaries, not during intermediate computation
-- No tile pipeline stalls, no resource conflicts, no firmware overhead
-- No watcher/dprint server — `DPRINT` is a host `printf` stub
-
-Tests that pass in emulation may fail on silicon due to timing, precision, or resource constraints.
-
-**Dual API surface.** `kernel_api/` and `jit_hw/` remain separate API surfaces with different type conventions (`uint8_t*` vs `uint32_t`, `Tile` vs raw bfloat16). Adding a new kernel API function requires implementation in both paths.
-
-**JIT compilation overhead.** Each unique kernel requires a `g++` invocation (typically 1--3 seconds). Results are cached within a process but not persisted across runs. Cache misses are compiled in parallel via `std::async`, but test suites with many distinct kernels still pay full compilation cost on every invocation.
-
-**`MAP_32BIT` address space pressure.** The JIT path relies on `mmap` with `MAP_32BIT` to ensure L1 pointers fit in `uint32_t`. The 32-bit address space region (~2 GB) is shared across all cores. L1Pool mitigates this by consolidating worker L1 into a single contiguous allocation; the per-arch grids (Wormhole / Blackhole) fit easily. DRAM cores use regular mmap outside the 32-bit region. The remaining risk is that non-pool fallback cores (from pool exhaustion) still compete for the same 32-bit space.
-
-**Format detection heuristic.** The `page_size > 2048` heuristic used by `copy_tile` and `pack_tile` to distinguish bfloat16 from 32-bit formats is fragile. It works for current tile sizes but would break for new formats with different tile sizes.
-
-**No persistent JIT cache.** The in-memory JIT cache is lost when the process exits. Suites with many distinct kernels pay compilation cost on every run.
-
-**Address translation complexity.** The host-pointer convention requires careful translation at three well-defined points: encode (`__emule_addr_to_offset` in `get_noc_addr`/`get_noc_multicast_addr`), fixup (`__emule_fixup_noc_addr` in NOC operation functions), and decode (`__emule_resolve_noc_addr` in the program runner). The fixup point exists because real tt-metal kernels construct NOC addresses by ORing host pointers into pre-computed NOC bases. With L1Pool, the fixup is a fast bitmask (`addr & 0x1FFFFF`) rather than a TLS lookup, but each new NOC-level function must still remember to apply it.
-
-**Nfaces conversion not exercised in isolation.** The UNPACK and PACK engines are tested only indirectly via compute operations (matmul, add_tiles, etc.) that happen to exercise them. No dedicated UNPACK-only or PACK-only test exists. A bug in the nfaces LUT for a specific face/element combination might not be caught if no existing compute test triggers that access pattern. See `docs/TEST_COVERAGE_TODO.md`.
-
-**D2M coverage gaps.** Known gaps: BFP8 typecast PCC, unaligned tensor reductions, and partial-tile masking. Per-test allowlist tracked in [issue #6](https://github.com/tenstorrent/tt-emule/issues/6).
-
-### Maintainability
-
-**Low ongoing cost for tt-emule standalone.** The standalone emulator is self-contained with no external dependencies beyond the C++ standard library and pthreads. Changes to tt-metal do not affect standalone tests.
-
-**Medium ongoing cost for tt-metal integration.** The primary maintenance burden is keeping JIT stubs (`jit_hw/`) aligned with tt-metal kernel APIs. When tt-metal adds or changes a kernel API function, the corresponding stub must be created or updated. `jit_hw/` covers the most common operations but represents a fraction of the full kernel API surface.
-
-**Rebase risk is bounded.** The tt-metal integration is concentrated in:
-- `tt_metal/impl/emulation/` — the program runner
-- `SWEmuleChip` in UMD (with L1Pool)
-- `is_mock_or_emulated()` one-liner guards in `impl/`, `llrt/`, `umd/`
-- One dispatch branch in `tt_metal.cpp`
-
-Rebasing onto new tt-metal versions primarily requires:
-1. Checking that `is_mock_or_emulated()` guards cover any new hardware-dependent code paths
-2. Updating JIT stubs if kernel APIs change
-3. Verifying that `ProgramImpl` and `CircularBufferConfig` interfaces haven't changed
-
-**Guard pattern is predictable.** All guards follow the same `is_mock_or_emulated()` pattern. New hardware-dependent code paths in tt-metal that need guarding are identifiable by crashes when running in emulated mode — they fail loudly rather than producing silent corruption.
-
-**Test maintenance scales with op coverage.** Each new ttnn operation requires: (1) a JIT stub header if the compute kernel uses uncovered APIs, (2) a test binary entry in `tt_emule/ttnn_tests/CMakeLists.txt`, and (3) a `run_test` line in `run_regression.sh`. The pattern is mechanical.
-
-**Single point of truth for CB sync is durable.** Any bug fix to circular buffer synchronization is made in one place (`CBSyncState` + `cb_sync_*` functions) and propagated automatically.
-
-**Banking infrastructure is self-maintaining.** Bank mapping arrays are populated dynamically from the SOC descriptor at runtime, so adding support for new chip architectures requires no code changes — only a new cluster descriptor YAML file.
-
-**HAL-based semaphore placement is self-maintaining.** By reading `kernel_config_base` and `sem_offset` from the HAL and ProgramConfig respectively, the emulator automatically tracks any changes to the L1 memory map or semaphore layout in tt-metal. No hardcoded constants to update.
-
+- **C++ regression** — per-arch `scripts/run_regression_<arch>.sh` (CI matrix:
+  wormhole/blackhole/quasar); allowlists in
+  `.github/known-failures-{wormhole,blackhole,quasar}.txt`, cross-checked by
+  `classify-results.py`.
+- **ttnn pytest** — per-arch `scripts/run_ttnn_pytests_<arch>.sh` (CI matrix:
+  wormhole/blackhole).
+- **D2M golden tests** — `run_d2m_regression.sh`; analysis in
+  [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
+- **Quasar feature coverage** — [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) §8.
 
 ---
 
-*See [docs/changelog.md](docs/changelog.md) for per-version diffs of this report.*
+## Strategic assessment
+
+**Strengths**
+- *Develop without hardware* — full kernel compile + multi-core run on any x86
+  Linux host in seconds.
+- *Zero fake headers* — links real `Metalium::Metal`; tt-metal header changes
+  surface as compile errors, not silent drift.
+- *No copy overhead* — `tt_emule::Core` is the single owner of L1 + DRAM; the
+  runner points bridge pointers straight at its mmap.
+- *Realistic concurrency* — cores run as real threads; catches cross-core bugs a
+  single-threaded harness misses.
+- *Self-maintaining fidelity where it counts* — semaphore placement comes from
+  the HAL + `ProgramConfig`; bank topology from the `metal_SocDescriptor`; both
+  track tt-metal automatically. A persistent on-disk JIT cache
+  (`/tmp/tt_emule_jit_cache_$UID`) survives across runs.
+
+**Limitations**
+- *Correctness model, not a perf model* — NOC ops are synchronous `memcpy` (no
+  latency, bandwidth, contention, or pipeline stalls); `DPRINT` is a host
+  `printf`; no watcher. A test green in emule can still fail on silicon for
+  timing/precision/resource reasons.
+- *DEST is fp32 internally* — bf16 rounding occurs only at pack/unpack
+  boundaries, not per MATH step.
+- *`MAP_32BIT` pressure* — worker L1 must fit the shared sub-4 GB region; L1Pool
+  consolidates it, but heavy core counts compete for the space.
+- *JIT compile cost* — each unique kernel costs a compiler invocation (~1–3 s);
+  the persistent cache amortizes repeats, but a fresh cache pays full cost.
+
+**Maintainability.** The tt-metal footprint is small and concentrated (the
+`emulated_program_runner`, `SWEmuleChip`, one dispatch branch, and
+`is_mock_or_emulated()` guards), so rebase risk is bounded — see the rebase
+surface in [metal-integration.md](docs/metal-integration.md). The main ongoing
+cost is keeping `jit_hw/` stubs aligned with tt-metal kernel APIs; guards fail
+loudly (not silently) when a new HW path needs covering.
+
+---
+
+*Version history: [docs/changelog.md](docs/changelog.md).*
