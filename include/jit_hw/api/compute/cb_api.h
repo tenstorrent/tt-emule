@@ -39,3 +39,13 @@ ALWI uint32_t get_tile_address(uint32_t cb_id, uint32_t tile_index) {
     uint8_t* ptr = __emule_compute::cb_read_ptr_at(cb_id, tile_index);
     return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr));
 }
+
+// read_tile_value — silicon reads a uint32_t at element_offset from the CB
+// tile's L1 bytes on UNPACK and mailboxes it to MATH/PACK (upstream
+// api/compute/cb_api.h, CB mailbox helpers for tt-metal#27979; used by the
+// embedding_backward compute kernel for the chunk-count handoff). emule runs
+// all TRISC roles on one thread, so the mailbox collapses to a plain read of
+// the same raw tile bytes.
+ALWI uint32_t read_tile_value(uint32_t cb_id, uint32_t tile_index, uint32_t element_offset) {
+    return reinterpret_cast<uint32_t*>(__emule_compute::cb_read_ptr_at(cb_id, tile_index))[element_offset];
+}
