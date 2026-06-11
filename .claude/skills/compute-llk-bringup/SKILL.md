@@ -44,7 +44,7 @@ For each target op:
 ## Step 1 — Triage
 
 Before writing anything, check whether the op is already covered. Many "missing"
-ops are in shared shims. **`STRUCTURE.md` is the canonical file-level index**
+ops are in shared shims. **`.claude/references/structure.yaml` is the canonical file-level index**
 — grep it for the op name to see whether a file already defines `<op>_tile`.
 
 Common shared homes (not exhaustive):
@@ -89,7 +89,7 @@ Three references per op, in order of priority:
    Source of truth for the **math formula** — polynomial coefficients,
    Cody-Waite reductions, saturation branches.
 3. **A reference emule shim** for the boilerplate. Pick by category if possible — see
-   `STRUCTURE.md` for the catalog. Useful representatives:
+   `.claude/references/structure.yaml` for the catalog. Useful representatives:
    - per-element stateless: `eltwise_unary/relu.h`
    - thread_local state: `eltwise_unary/dropout.h`
    - int32 DST: any `eltwise_unary/bitwise_*.h`
@@ -110,7 +110,7 @@ and copy its skeleton. The standard pieces (`#pragma once`, SPDX header,
 the same across all of them — they're already correct in the existing files
 and stay correct as `common.h` evolves.
 
-Pick by pattern if possible. It might not always be possible. `STRUCTURE.md` 
+Pick by pattern if possible. It might not always be possible. `.claude/references/structure.yaml` 
 catalogs every shim under `include/jit_hw/api/compute/` with its top-level 
 symbols — grep there to find the closest match to your target op's shape, 
 then open that file as the boilerplate template. 
@@ -165,7 +165,7 @@ include path resolves the emule version automatically when the kernel does
 `#include "api/compute/<name>.h"`.
 
 Per the project rule in `CLAUDE.md`: when you add a source file or a
-top-level symbol, update its entry in `STRUCTURE.md` in the same change.
+top-level symbol, update its entry in `.claude/references/structure.yaml` in the same change.
 
 ## Step 6 — Build + test
 
@@ -214,7 +214,7 @@ Caveats on `pytest -k`:
 
 Commit per bring-up with a concise message:
 ```bash
-git add include/jit_hw/<files> STRUCTURE.md scripts/run_ttnn_pytests.sh
+git add include/jit_hw/<files> .claude/references/structure.yaml scripts/run_ttnn_pytests.sh
 git commit -m "<shim-name>: <one-line summary> (<n>/<n> pass)"
 ```
 
@@ -363,7 +363,7 @@ verify before assuming.
    the failure. Each `rm -rf /tmp/tt_emule_jit_cache_$(id -u)` should be
    deliberate (e.g. after a shim edit), not a cargo-cult retry.
 3. **Don't duplicate shims** that `activations.h` or `compute_kernel_api.h`
-   already define. ODR conflicts result. Grep `STRUCTURE.md` first.
+   already define. ODR conflicts result. Grep `.claude/references/structure.yaml` first.
 4. **Don't invent upstream signatures.** If upstream has no header, return
    STUCK or ask. Some activation-family ops are composed in-kernel and
    have no standalone API.
@@ -373,7 +373,7 @@ verify before assuming.
 
 For sweeps that bring up ≥4 shims at once, dispatch one sub-agent per
 shim via `/parallel-mock-implementation`. The orchestrator (you)
-handles `sfpu_split_includes.h` wiring, `STRUCTURE.md` updates, build,
+handles `sfpu_split_includes.h` wiring, `.claude/references/structure.yaml` updates, build,
 and per-op test runs centrally after the workers return.
 
 ## References
@@ -382,9 +382,9 @@ and per-op test runs centrally after the workers return.
   specializes (Strategy A for compute shims).
 - `/parallel-mock-implementation` — Workflow-tool dispatch pattern for
   batch shim authoring.
-- `STRUCTURE.md` — file-level index of `src/` + `include/` with top-level
+- `.claude/references/structure.yaml` — file-level index of `src/` + `include/` with top-level
   symbols. Grep first when triaging.
-- `STRUCTURE.md` — the authoritative index of what's currently shimmed
+- `.claude/references/structure.yaml` — the authoritative index of what's currently shimmed
   (every `include/jit_hw/api/compute/` file + its `<op>_tile` symbols).
 - See `/implement-mock` References for the broader project conventions
   (`CLAUDE.md`, `BUILD_GUIDE.md`).

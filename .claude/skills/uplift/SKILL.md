@@ -133,7 +133,7 @@ Fix principles:
   headers that reference the renamed symbols) so nothing dangles. Leave genuinely
   independent/older surfaces (e.g. a separate `experimental/` API with its own
   self-contained definitions) alone.
-- Keep `STRUCTURE.md` in sync when symbols are added/removed.
+- Keep `.claude/references/structure.yaml` in sync when symbols are added/removed.
 
 ## Step 5 — Wire the fix through the repo chain
 

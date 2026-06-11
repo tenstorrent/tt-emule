@@ -59,7 +59,7 @@ focused reference; start here and follow the links.
   tt-metal (UMD chip, runtime activation, JIT runner, guards).
 - [BUILD_GUIDE.md](BUILD_GUIDE.md) / [GETTING_STARTED.md](GETTING_STARTED.md) —
   build + test setup.
-- [STRUCTURE.md](STRUCTURE.md) — authoritative file-level index of `src/` +
+- [.claude/references/structure.yaml](.claude/references/structure.yaml) — authoritative file-level index of `src/` +
   `include/` and the top-level symbols in each.
 - [D2M_REGRESSION_REPORT.md](docs/historical_reports/D2M_REGRESSION_REPORT.md) — D2M failure analysis.
 
@@ -120,7 +120,7 @@ compiler), `dlopen`s it, and launches the per-core threads against
 `Core`, `L1Pool`, `CBSyncState`, `DstRegisterFile`, tile-counter/DFB types); the
 JIT kernel surface in `include/jit_hw/` (`api/compute/`, `api/dataflow/`,
 `api/tensor/`, `internal/`, `experimental/`); host glue in `src/`. For the
-authoritative file/symbol index see [STRUCTURE.md](STRUCTURE.md).
+authoritative file/symbol index see [.claude/references/structure.yaml](.claude/references/structure.yaml).
 
 ---
 
