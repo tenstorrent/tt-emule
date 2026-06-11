@@ -1478,7 +1478,7 @@ files:
 - path: include/jit_hw/api/dataflow/noc.h
   section: include/jit_hw/api/dataflow/
   summary: '`class Noc` (async_read/async_write/barriers/inline_dw_write methods); `enum class NocOptions`/`Noc::AddressType`; `struct NocOptVals`/`DataflowBufferArgs`; `operator|`/`has_flag` (NocOptions);
-    primary `noc_traits_t` template'
+    primary `noc_traits_t` template; per-NOC thread-local state `__emule_noc_cached_size[NUM_NOCS]`/`__emule_noc_cached_write_dst[NUM_NOCS]` (set_async_*_state cmd_buf-register model)'
   symbols:
   - {kind: class, name: Noc}
   - {kind: enum, name: NocOptions}
