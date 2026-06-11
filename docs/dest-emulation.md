@@ -2,12 +2,15 @@
 
 How tt-emule emulates the **DEST register file** — the compute engine's tile
 accumulator. Read this before debugging a compute-numerics bug, touching the
-acquire/pack lifecycle, or reasoning about DST capacity / `DEST_AUTO_LIMIT`.
+acquire/pack lifecycle, or reasoning about DST capacity / `DEST_AUTO_LIMIT` /
+the `DST_ACCUM_MODE` accumulation flag.
 
 On silicon, DEST is a ~64 KB register file the MATH engine writes and the PACK
-engine drains, holding up to 16 bf16 tiles (8 in fp32). Emule backs it with a
-plain `float` array and performs the nfaces↔row-major layout conversion at the
-pack/unpack boundary.
+engine drains, holding up to 16 bf16 tiles in the default mode and 8 in
+fp32-accumulate (`DST_ACCUM_MODE != 0`, equivalent to
+`ComputeConfig.fp32_dest_acc_en`). Emule backs it with a plain `float` array
+and performs the nfaces↔row-major layout conversion at the pack/unpack boundary;
+the accumulation flag governs which kernel-visible slot count is active (see §3).
 
 Companion doc: [tilize-untilize-pack.md](tilize-untilize-pack.md) (the full
 nfaces / pack-untilize pipeline this references), [cb-emulation.md](cb-emulation.md)

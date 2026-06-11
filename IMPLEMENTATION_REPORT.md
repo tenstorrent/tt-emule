@@ -48,8 +48,11 @@ focused reference; start here and follow the links.
   CSR emulation, full reference (incl. §8 feature-coverage table).
 - [QUASAR_MATMUL_REPORT.md](docs/QUASAR_MATMUL_REPORT.md) — Quasar matmul
   bring-up (point-in-time).
-- [riscv-intdiv-by-zero.md](docs/riscv-intdiv-by-zero.md) — Quasar RISC-V
-  integer divide-by-zero behavior.
+
+**Runtime semantics**
+- [riscv-intdiv-by-zero.md](docs/riscv-intdiv-by-zero.md) — RISC-V integer
+  divide-by-zero behavior emule honors (quotient = all-ones, remainder =
+  dividend); generic RISC-V semantics, not Quasar-specific.
 
 **Integration & build**
 - [metal-integration.md](docs/metal-integration.md) — how emule injects into

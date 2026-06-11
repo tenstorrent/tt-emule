@@ -73,8 +73,11 @@ The JIT compute/dataflow surface (`include/jit_hw/api/cb_api.h`) over the per-co
   `cv.wait_for` + a per-op deadlock diagnostic; `TT_EMULE_CB_TIMEOUT` sets the
   wait-front timeout.
 
-The standalone `tt_emule::CircularBuffer` (`include/tt_emule/circular_buffer.hpp`)
-wraps a `CBSyncState` with owned storage for non-JIT tests.
+A header-only `tt_emule::CircularBuffer` wrapper in
+`include/tt_emule/circular_buffer.hpp` still exists from the pre-integration era
+when emule shipped a standalone test harness; it owns its own storage around a
+`CBSyncState`. It is no longer exercised by the regression suite — the
+JIT-compiled path drives `Core::cb_sync_states_[]` directly.
 
 ---
 

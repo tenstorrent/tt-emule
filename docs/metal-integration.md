@@ -1,8 +1,8 @@
 # tt-emule ↔ tt-metal Integration
 
-How the standalone emulator is injected into tt-metal so that real `ttnn` / D2M
-workloads run on the host with no silicon. Read this before rebasing onto a new
-tt-metal pin, adding a guard, or debugging the JIT runner.
+How tt-emule is injected into tt-metal so that real `ttnn` / D2M workloads run
+on the host with no silicon. Read this before rebasing onto a new tt-metal pin,
+adding a guard, or debugging the JIT runner.
 
 For build/test mechanics see [BUILD_GUIDE.md](../BUILD_GUIDE.md); for the
 top-level map see [IMPLEMENTATION_REPORT.md](../IMPLEMENTATION_REPORT.md).
@@ -37,9 +37,7 @@ uint32_t l1_size_; uint64_t dram_bank_size_;
 
 - Builds a single `MAP_32BIT` `L1Pool` (slots = 2× the SoC Tensix count). Worker
   cores draw L1 from pool slots; DRAM cores use individual mmaps; pool exhaustion
-  falls back to individual `MAP_32BIT` mmaps. (Standalone tt-emule, without the
-  `TT_EMULE_USE_L1_POOL` gate, uses per-`Core` mmaps instead — see
-  [l1-emulation.md](l1-emulation.md).)
+  falls back to individual `MAP_32BIT` mmaps. See [l1-emulation.md](l1-emulation.md).
 - `get_core(tt_xy_pair)` lazy-creates a `Core` with the right role.
 - `read_from_device` / `write_to_device` delegate uniformly to
   `get_core(xy)->l1_ptr(offset)` + `memcpy`.

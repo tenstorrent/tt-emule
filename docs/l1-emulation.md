@@ -40,17 +40,22 @@ Consequences:
 `include/tt_emule/device.hpp` — `class Core` owns one core's memory:
 
 ```cpp
-static constexpr size_t L1_SIZE = 1024 * 1024;   // 1 MB (WORKER)
 static constexpr size_t MAX_CBS = 32;
 enum class CoreRole { WORKER, DRAM };
 
 uint8_t*  l1_      = nullptr;             // mmap base (host pointer)
 uint32_t  l1_base_ = 0;                   // l1_ truncated to 32 bits, for kernels
-size_t    l1_size_ = L1_SIZE;             // 1 MB (WORKER) or bank size (DRAM)
+size_t    l1_size_ = 0;                   // worker L1 / DRAM bank size, from SoC descriptor
 CoreRole  role_    = CoreRole::WORKER;
 CBSyncState     cb_sync_states_[MAX_CBS] = {};
 DstRegisterFile dst_;
 ```
+
+Integrated builds set `l1_size_` from `metal_SocDescriptor` at chip
+construction (`SWEmuleChip` sizes worker pool slots and individual DRAM
+mmaps from `l1_size` / `dram_bank_size`); the L1 size is arch-dependent
+(1.5 MB on wormhole_b0, distinct on blackhole / quasar — see
+[BUILD_GUIDE.md](../BUILD_GUIDE.md) for arch defaults).
 
 `mmap_region(size)` maps `MAP_PRIVATE | MAP_ANONYMOUS`, adding **`MAP_32BIT` for
 WORKER cores** so `l1_base_` fits in 32 bits. DRAM cores use a plain mmap (they
@@ -96,8 +101,11 @@ Translation helpers:
 ## 4. Allocation, semaphores, CBs
 
 - **Bump allocation.** `Core::l1_alloc(bytes)` is a simple bump allocator
-  returning an absolute 32-bit address; used by the Quasar DFB path. Worker
-  WH/BH L1 is otherwise addressed directly by truncated CB pointers.
+  returning an absolute 32-bit address. Live use is the **Quasar DFB
+  fallback path** in tt-metal's `emulated_program_runner.cpp` (when no
+  upstream `finalize_addr` is supplied for a DFB, the runner bumps a
+  fresh region out of the core's L1). Worker WH/BH L1 is otherwise
+  addressed directly by truncated CB pointers.
 - **Semaphores** live in the kernel-config region of L1 at
   `l1_base + EMULE_SEM_BASE + sem_id * EMULE_SEM_ALIGN` (`EMULE_SEM_ALIGN = 16`),
   where `EMULE_SEM_BASE` is a JIT define computed by the runner from the HAL
@@ -121,14 +129,19 @@ delegate uniformly to `get_core(xy)->l1_ptr(offset)` + `memcpy`.
 
 ## 6. What's intentionally simplified
 
-- No L1 capacity pressure / eviction / bank conflicts — the mmap is as large as
-  `L1_SIZE` and accesses are direct.
+- No L1 capacity pressure / eviction / bank conflicts — the mmap is as large
+  as the SoC-descriptor-derived `l1_size_` and accesses are direct.
 - No per-program re-zeroing (one-time `MAP_ANONYMOUS` zero-init; the Quasar DFB
   fallback bump allocator is the one exception — see
   [mem-zeros-handling.md](mem-zeros-handling.md)).
-- `MAP_32BIT` consumes the shared sub-4 GB address space; L1Pool consolidates
-  worker L1 into one allocation to bound this, but pool-exhaustion fallback cores
-  still compete for it.
+- **Sub-4 GB address-space pressure.** `MAP_32BIT` forces every worker L1
+  region below 4 GB, but that 4 GB host range is shared with the loader's
+  text/data, the heap, every thread's stack, and the JIT-compiled kernel
+  `.so` mappings. Each worker core mapped individually would compete with
+  those for a few megabytes at a time. `L1Pool` mitigates by reserving a
+  single contiguous 2-MB-aligned slot pool for all workers up front;
+  cores that overflow the pool fall back to individual `MAP_32BIT`
+  mappings and re-enter the competition.
 
 ---
 
