@@ -89,8 +89,10 @@ The host populates these thread-locals before each kernel invocation
 | `__emule_l1_padding_ranges` / `_count` | Packed padding regions (Padding Violation input) |
 | `__emule_sem_l1_range_start` / `_end` | Reserved Semaphore region bounds |
 | `__emule_cb_boundary_strict` | Gate for CB Boundary Violation |
-| `__emule_cb_reserved_pages[32]` | Per-CB write-window size; updated by `cb_reserve_back`/`cb_push_back` |
-| `__emule_cb_waited_pages[32]` | Per-CB read-window size; updated by `cb_wait_front`/`cb_pop_front` |
+| `__emule_cb_reserved_pages[32]` | Per-CB write-window size (CB Boundary input); updated by `cb_reserve_back`/`cb_push_back` |
+| `__emule_cb_waited_pages[32]` | Per-CB read-window size (CB Boundary input); updated by `cb_wait_front`/`cb_pop_front` |
+| `__emule_cb_reserve_dangling[32]` | Dirty-CB leak flag: set by `cb_reserve_back`, cleared by any `cb_push_back` (decoupled from the window count above) |
+| `__emule_cb_wait_dangling[32]` | Dirty-CB leak flag: set by `cb_wait_front`, cleared by any `cb_pop_front` |
 | `__emule_l1_resolved_ranges` / `_count` / `_capacity` | Object-intent log (kernel writes; runner reads after join) |
 | `__emule_pending_noc_reads` | Outstanding noc_async_read count; consumed by NoC Barrier Missing check in cb_pop_front |
 
@@ -119,23 +121,41 @@ address; the emule wrapper translates that into an ASAN-style abort so
 gtests can match on the abort message instead of catching the
 exception.
 
-**Fabric Access Violation** — Two sites in `emulated_program_runner.cpp`
-that resolve NOC coordinates to a Core*. If the lookup fails (no core
-allocated at that coordinate), abort. Catches programs that
-multicast/unicast to nonexistent endpoints.
+**Dirty CB (per-kernel exit)** — A CB is "dirty" when the kernel exits with a
+`cb_reserve_back` that **no** `cb_push_back` ever followed, or a `cb_wait_front`
+that **no** `cb_pop_front` ever followed — the producer/consumer claimed the
+handshake but never handed off (the consumer's matching `cb_wait_front` then hangs
+on silicon). At each kernel's exit the runner reads the per-kernel *trailing-dangling*
+flags `__emule_cb_reserve_dangling[cb]` (set by reserve, cleared by any push) and
+`__emule_cb_wait_dangling[cb]` (set by wait_front, cleared by any pop); a flag still
+set is the leak, and the reported page count is the window counter at exit.
 
-**Dirty CB (per-kernel exit)** — A CB is "flushed" when every
-`cb_reserve_back` was committed by a matching `cb_push_back` and every
-`cb_wait_front` was released by a matching `cb_pop_front`. At each
-kernel's exit the runner reads the per-kernel thread-local counters
-`__emule_cb_reserved_pages[cb]` (bumped by reserve, shrunk by push) and
-`__emule_cb_waited_pages[cb]` (set by wait_front, shrunk by pop); either
-holding a non-zero net unmatched count means the kernel reserved/waited
-without the matching push/pop and left the CB un-flushed (its write/read
-pointer desyncs on silicon). This is a per-kernel property, checked
-inside the kernel thread before the thread-locals are cleared — NOT a
-post-join occupancy scan. Leftover occupancy alone is fine: a producer
-that reserves+pushes but is never consumed ends occupied yet flushed.
+These flags are **decoupled** from the window counters
+`__emule_cb_reserved_pages`/`__emule_cb_waited_pages` (which the CB Boundary check
+still uses cumulatively) on purpose: on silicon `cb_reserve_back` is a
+non-cumulative free-space *wait* that creates no obligation to push exactly `n`, so
+a net `reserved − pushed` count false-positives on **lookahead / double-buffer
+producers** — the DRAM-sharded matmul in1 reader reserves 2 blocks of headroom but
+pushes 1 per iteration (covering in-flight reads the free-space count can't see),
+leaving a net residual of ≈ `num_blocks × block_tiles` that is pure headroom, not
+stranded data. Because such producers always push after their last reserve, the
+flag is clear and they are correctly not flagged. **Trade-off:** a
+`reserve;reserve;push` (one *intermediate* push forgotten) clears the flag and is
+missed here — it corrupts data in place and surfaces via the Object-Intent / OOB
+checks or a PCC mismatch instead. This is a per-kernel property, checked inside the
+kernel thread before the thread-locals are cleared — NOT a post-join occupancy
+scan. Leftover occupancy alone is fine: a producer that reserves+pushes but is
+never consumed ends occupied yet fully handed off (dangling flag clear).
+
+This check has a dedicated per-check opt-out on top of the master switch:
+setting `TT_METAL_EMULE_ASAN_SKIP_DIRTY_CB` (non-empty, not `0`) makes the
+runner's `sweep_per_kernel_dirty_cbs` return early, suppressing **only** the
+Dirty CB check while every other sanitizer stays active. Its purpose is to let
+a full regression run continue past a kernel with a known un-flushed-CB bug
+without giving up OOB / Padding / Object-Intent / CB-Boundary coverage. The
+gate helper is `dirty_cb_check_skipped()` in `host_sanitizers.hpp` (re-read
+every call, like the master switch); the `test_cb_leak.cpp` death tests
+`unsetenv` it so they still exercise the check when it is exported globally.
 
 ### Kernel-side checks (in `__emule_local_l1_to_ptr`)
 

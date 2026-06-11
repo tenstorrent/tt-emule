@@ -35,6 +35,35 @@ extern thread_local uint32_t __emule_cb_reserve_line[32];
 extern thread_local const char* __emule_cb_wait_file[32];
 extern thread_local uint32_t __emule_cb_wait_line[32];
 
+// CB write/read *window* page counters (defined in the runner). These track how
+// many pages are reserved ahead of / waited behind the FIFO pointer and are read
+// by the CB Boundary check (jit_kernel_stubs.hpp / dataflow_api.h) as the active
+// write/read window size. Declared here — not only in jit_kernel_stubs.hpp — so
+// cb_api.h is self-contained: stubs includes cb_api.h before its own
+// declarations, so the reserve/push/wait/pop bodies below would otherwise see
+// them undeclared. NOTE: these are the *window* counters, not the Dirty-CB
+// leak signal — see __emule_cb_reserve_dangling below.
+extern thread_local uint32_t __emule_cb_reserved_pages[32];
+extern thread_local uint32_t __emule_cb_waited_pages[32];
+
+// Dirty-CB leak signal (defined in the runner), decoupled from the window
+// counters above. `reserve_dangling[cb]` is set true by cb_reserve_back and
+// cleared by cb_push_back; `wait_dangling[cb]` is set by cb_wait_front and
+// cleared by cb_pop_front. At kernel exit the Dirty-CB sweep flags a CB only
+// when a flag is still set — i.e. a cb_reserve_back with NO following
+// cb_push_back (or a cb_wait_front with no following cb_pop_front).
+//
+// Why a flag and not the window count: on silicon cb_reserve_back is a
+// non-cumulative free-space *wait* — it claims nothing and creates no
+// obligation to push exactly n. Legitimate lookahead/double-buffer producers
+// (e.g. the DRAM-sharded matmul in1 reader) reserve more than they push every
+// iteration as headroom for in-flight reads, yet push every block they produce.
+// Their net "reserved − pushed" is non-zero at exit but nothing is stranded, so
+// the old cumulative count false-positived. A trailing dangling reserve (a
+// reserve that no push ever follows) is the faithful "forgot to hand off" signal.
+extern thread_local bool __emule_cb_reserve_dangling[32];
+extern thread_local bool __emule_cb_wait_dangling[32];
+
 // cb_addr_shift (16-byte fifo-pointer encoding) is defined in emule_cb_ptr.h.
 
 // Bitmask of CBs THIS thread consumes (set in cb_wait_front). cb_reserve_back
@@ -156,6 +185,10 @@ inline void cb_reserve_back(
     // Record the call site for the Dirty-CB check (see __emule_cb_reserve_file).
     __emule_cb_reserve_file[cb_id] = __site_file;
     __emule_cb_reserve_line[cb_id] = __site_line;
+    // A reserve is now outstanding; a following cb_push_back clears it. Set here
+    // (before the fast-path returns) so every reserve path is covered. See the
+    // __emule_cb_reserve_dangling rationale in the declarations above.
+    __emule_cb_reserve_dangling[cb_id] = true;
     // Always on: gating this would deadlock the CV wait below. See ASAN.md.
     if (n > cb.num_pages) {
         __emule_asan_panic(
@@ -201,6 +234,11 @@ inline void cb_reserve_back(
 }
 
 inline void cb_push_back(uint32_t cb_id, uint32_t n) {
+    // A push hands off the producer's data, clearing any outstanding reserve for
+    // the Dirty-CB leak signal (decoupled from the window count below). Any push
+    // clears it: a lookahead producer that reserves more than it pushes each
+    // iteration is correct on silicon as long as a push follows its last reserve.
+    __emule_cb_reserve_dangling[cb_id] = false;
     // Shrink the reserved window before the FIFO advance — keeps any concurrent
     // boundary check consistent.
     if (n <= __emule_cb_reserved_pages[cb_id]) {
@@ -247,6 +285,9 @@ inline void cb_wait_front(
     // Record the call site for the Dirty-CB check (see __emule_cb_wait_file).
     __emule_cb_wait_file[cb_id] = __site_file;
     __emule_cb_wait_line[cb_id] = __site_line;
+    // A wait is now outstanding; a following cb_pop_front clears it (consumer
+    // analog of the reserve/push dangling flag). See declarations above.
+    __emule_cb_wait_dangling[cb_id] = true;
     if (n > cb.num_pages) {
         fprintf(stderr, "EMULE BUG: cb_wait_front(cb_id=%u, n=%u) requests more than capacity "
                 "(num_pages=%u, page_size=%u) [phys (%u,%u) logical (%u,%u)]\n",
@@ -304,6 +345,9 @@ inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
                 "(%u outstanding) — missing noc_async_read_barrier()\n",
                 cb_id, __emule_pending_noc_reads);
     }
+    // A pop releases the consumer's claim, clearing any outstanding wait for the
+    // Dirty-CB leak signal (decoupled from the window count below).
+    __emule_cb_wait_dangling[cb_id] = false;
     // Saturate at 0; popping more than waited is suspect but mustn't underflow.
     if (n <= __emule_cb_waited_pages[cb_id]) {
         __emule_cb_waited_pages[cb_id] -= n;

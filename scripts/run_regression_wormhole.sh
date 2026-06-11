@@ -131,6 +131,8 @@ echo "========================================"
 echo "tt-metal: $TT_METAL_DIR"
 echo "build:    $BUILD_DIR"
 
+start_time=$(date +%s)
+
 JIT_CACHE_DIR="/tmp/tt_emule_jit_cache_$(id -u)"
 if [ -d "$JIT_CACHE_DIR" ]; then
     echo "Clearing JIT cache: $JIT_CACHE_DIR"
@@ -198,19 +200,21 @@ run_test "TensixL1Tile"     "$API_BIN" --gtest_filter="MeshDeviceFixture.TensixT
 echo ""
 echo "== Tier 3a: API Sanity / Violation Checks =="
 
-run_test "alignment_writes"       "$API_BIN" \
-    --gtest_filter="MeshDeviceFixture.NocRead_L1_Misaligned_SanityCheck:MeshDeviceFixture.NocWrite_L1_Misaligned_SanityCheck:MeshDeviceFixture.NocRead_DRAM_Misaligned_SanityCheck_WH:MeshDeviceFixture.NocWrite_DRAM_Misaligned_SanityCheck"
+# Filters use globs so positive controls + future additions are picked up
+# automatically — any change to an emule check should be validated by re-running
+# this block (see SANITIZER_CHECKS.md).
+run_test "alignment_writes"       "$API_BIN" --gtest_filter="MeshDeviceFixture.Noc*"
 run_test "cb_leak"                "$API_BIN" --gtest_filter="MeshDeviceFixture.Dirty_CB_*"
-run_test "cb_pages"               "$API_BIN" --gtest_filter="MeshDeviceFixture.CB_Reservation_Overflow_SanityCheck"
-run_test "fabric_allocation"      "$API_BIN" --gtest_filter="MeshDeviceFixture.Fabric_Access_Violation_SanityCheck"
-run_test "metadata_size"          "$API_BIN" --gtest_filter="MeshDeviceFixture.Metadata_CB_Tensor_Clash_SanityCheck"
-run_test "noc_without_barrier"    "$API_BIN" --gtest_filter="MeshDeviceFixture.NoC_Barrier_Missing_SanityCheck"
-run_test "padded_write"           "$API_BIN" --gtest_filter="MeshDeviceFixture.Tensor_Padding_Violation_SanityCheck"
-run_test "pointer_size"           "$API_BIN" --gtest_filter="MeshDeviceFixture.Local_L1_Alignment_SanityCheck"
-run_test "semaphore_write"        "$API_BIN" --gtest_filter="MeshDeviceFixture.Semaphore_Direct_Write_SanityCheck"
+run_test "cb_pages"               "$API_BIN" --gtest_filter="MeshDeviceFixture.CB_Reservation_*"
+run_test "host_alignment"         "$API_BIN" --gtest_filter="MeshDeviceFixture.Host_Alignment_*"
+run_test "metadata_size"          "$API_BIN" --gtest_filter="MeshDeviceFixture.Metadata_*"
+run_test "noc_without_barrier"    "$API_BIN" --gtest_filter="MeshDeviceFixture.NoC_Barrier_*"
+run_test "padded_write"           "$API_BIN" --gtest_filter="MeshDeviceFixture.Tensor_Padding_*"
+run_test "semaphore_write"        "$API_BIN" --gtest_filter="MeshDeviceFixture.Semaphore_*"
 run_test "tensor_bad_access"      "$API_BIN" --gtest_filter="MeshDeviceFixture.Host_UAF_*"
+run_test "object_intent"          "$API_BIN" --gtest_filter="MeshDeviceFixture.Object_Intent_*"
 run_test "write_beyond_res_pages" "$API_BIN" --gtest_filter="MeshDeviceFixture.CB_Boundary_*"
-run_test "write_outside_tensor"   "$API_BIN" --gtest_filter="MeshDeviceFixture.OOB_Tensor_Gap_*"
+run_test "write_outside_tensor"   "$API_BIN" --gtest_filter="MeshDeviceFixture.OOB_Tensor_*"
 
 # ===========================================================================
 # Tier 3k: Data Movement Tests (Phase 8)
@@ -284,9 +288,14 @@ run_test "ttnn_minmax_first_dim" "$TTNN_BIN" \
 run_test "ttnn_minmax_both_dims" "$TTNN_BIN" \
     --gtest_filter="MinMaxTensorBothDimsTests/MinMaxTensorBothDimsFixture.MinMaxTensorCorrectly/*"
 
+# ===========================================================================
+
+end_time=$(date +%s)
+elapsed=$(( end_time - start_time ))
+
 echo ""
-echo "========================================"
-echo " Results: $PASS passed, $FAIL failed, $SKIP skipped"
-echo "========================================"
+echo "================================================================================"
+echo " Results: $PASS passed, $FAIL failed, $SKIP skipped, ran in $elapsed seconds"
+echo "================================================================================"
 
 [ "$FAIL" -eq 0 ]
