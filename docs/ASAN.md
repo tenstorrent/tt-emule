@@ -119,11 +119,6 @@ address; the emule wrapper translates that into an ASAN-style abort so
 gtests can match on the abort message instead of catching the
 exception.
 
-**Fabric Access Violation** — Two sites in `emulated_program_runner.cpp`
-that resolve NOC coordinates to a Core*. If the lookup fails (no core
-allocated at that coordinate), abort. Catches programs that
-multicast/unicast to nonexistent endpoints.
-
 **Dirty CB (per-kernel exit)** — A CB is "flushed" when every
 `cb_reserve_back` was committed by a matching `cb_push_back` and every
 `cb_wait_front` was released by a matching `cb_pop_front`. At each
