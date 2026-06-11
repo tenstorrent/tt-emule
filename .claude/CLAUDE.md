@@ -1,11 +1,39 @@
-# tt-emule .claude/ — agent-context for emule mock-API work
+# tt-emule — Claude project context
 
-This `.claude/` directory provides skills, agents, and references
-tailored to **implementing faithful mock APIs in tt-emule**. The
-overall project context lives in `tt-emule/CLAUDE.md` (one level up):
-build conventions, regression rules, architecture defaults.
+This file is the entry-point context for any agent working on
+tt-emule. It defines the project rules **and** the in-`.claude/`
+orientation guide (skills, agents, references) for implementing
+faithful mock APIs.
 
-This file is the in-`.claude/` orientation guide.
+## Project rules (read first, override defaults)
+
+- Always try to reduce the API surface included in `jit_hw/` — prefer
+  the real tt-metal headers when possible.
+- tt-emule-backed software emulation always runs in **slow dispatch**
+  mode (`TT_METAL_SLOW_DISPATCH_MODE=1`).
+- The default architecture is **wormhole n150** unless specified
+  otherwise.
+- Compile with **clang-20** (the toolchain pinned by
+  `cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake`).
+- Always run the per-arch regression scripts after code changes and
+  log the **full** output. Run them **sequentially** (shared JIT
+  cache).
+- When fixing a failure in a mock API, the goal is **faithful to the
+  canonical silicon implementation**. Don't create parallel or
+  different code paths to work around bugs — if it works in silicon,
+  the mock must be functional and correct against it.
+- Consult `references/structure.yaml` (formerly `STRUCTURE.md`) for
+  the authoritative file/symbol index under `src/` and `include/`.
+  Keep it in sync when you add/remove/rename a file or a top-level
+  symbol (class/struct/enum/namespace/free function/macro).
+- `IMPLEMENTATION_REPORT.md` is the documentation entry point and
+  index; per-subsystem references live under `docs/`
+  (l1/dram/dest/cb/noc-emulation, metal-integration,
+  tilize-untilize-pack, cb-dataformat, mem-zeros-handling,
+  DFB/QUASAR). Read the relevant doc before changing a subsystem
+  and update it in the same change. Verify every claim against
+  actual code before writing it down — the docs must never assert
+  something the source doesn't do.
 
 ## When to use what
 
@@ -18,8 +46,8 @@ This file is the in-`.claude/` orientation guide.
 | A tt-metal pin bump turned the regression red (device-open crash, JIT-compile error, hang) | `/uplift` skill |
 | Parallelize a sweep of ≥4 similar mocks | `/parallel-mock-implementation` skill |
 | Map HW concept → existing emule strategy | `references/emule-mapping.md` |
-| Where in the pipeline to inject a change | `references/api-injection-points.md` |
-| Verify a mock is complete | `references/stub-checklist.md` |
+| Where in the pipeline to inject a change | [`docs/api-injection-points.md`](../docs/api-injection-points.md) |
+| Verify a mock is complete | `/stub-checklist` skill |
 | Deep arch question on Wormhole/Blackhole/Quasar | sage agents (launched by arch-lookup) |
 
 ## Skills
@@ -65,15 +93,19 @@ beyond the upstream tt-llk versions.
 
 ## References
 
-- `emule-mapping.md` — HW concept → emule simulation strategy catalog
-- `api-injection-points.md` — where in the pipeline emule intercepts
-- `stub-checklist.md` — pre-implementation through verification
+- `references/emule-mapping.md` — HW concept → emule simulation strategy catalog
+- [`../docs/api-injection-points.md`](../docs/api-injection-points.md) — where in the pipeline emule intercepts
+
+## Skills (additional)
+
+- `skills/stub-checklist` — pre-implementation through verification (invoke as `/stub-checklist`)
 
 ## Quick links to project-level context
 
-- `tt-emule/CLAUDE.md` — project conventions (clang-20, slow dispatch,
-  wormhole n150 default, always run regressions)
-- `BUILD_GUIDE.md` — build + test setup (`TT_METAL_DIR`, regression scripts)
+- [`BUILD_GUIDE.md`](../BUILD_GUIDE.md) — build + test setup
+  (`TT_METAL_DIR`, regression scripts)
+- [`IMPLEMENTATION_REPORT.md`](../IMPLEMENTATION_REPORT.md) — docs
+  index across the per-subsystem references under `docs/`.
 
 ## Source skills (upstream — for reference)
 

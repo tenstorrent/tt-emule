@@ -204,7 +204,7 @@ A fix can span tt-umd → tt-metal → tt-emule. Order and push mechanics matter
 - `/compute-llk-bringup` — for a single missing compute `<op>_tile` shim (the
   common Class-B fix when the drift is one op).
 - `/memory-debug` — for data-corruption residuals (Class-C, op math).
-- `references/api-injection-points.md` — where emule intercepts the pipeline
+- `docs/api-injection-points.md` — where emule intercepts the pipeline
   (helps choose the "right layer" in Step 4A).
 - `references/emule-mapping.md` — HW concept → emule strategy vocabulary.
 - `BUILD_GUIDE.md` — build/test setup, the targets to build for an oracle, and the

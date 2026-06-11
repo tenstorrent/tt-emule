@@ -61,8 +61,7 @@ focused reference; start here and follow the links.
   build + test setup.
 - [STRUCTURE.md](STRUCTURE.md) — authoritative file-level index of `src/` +
   `include/` and the top-level symbols in each.
-- [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md) — D2M failure analysis.
-- [docs/changelog.md](docs/changelog.md) — per-version history of this report.
+- [D2M_REGRESSION_REPORT.md](docs/historical_reports/D2M_REGRESSION_REPORT.md) — D2M failure analysis.
 
 ---
 
@@ -136,7 +135,7 @@ Authoritative pass/fail state lives outside this report so it cannot drift:
 - **ttnn pytest** — per-arch `scripts/run_ttnn_pytests_<arch>.sh` (CI matrix:
   wormhole/blackhole).
 - **D2M golden tests** — `run_d2m_regression.sh`; analysis in
-  [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md).
+  [D2M_REGRESSION_REPORT.md](docs/historical_reports/D2M_REGRESSION_REPORT.md).
 - **Quasar feature coverage** — [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) §8.
 
 ---
@@ -175,7 +174,3 @@ Authoritative pass/fail state lives outside this report so it cannot drift:
 surface in [metal-integration.md](docs/metal-integration.md). The main ongoing
 cost is keeping `jit_hw/` stubs aligned with tt-metal kernel APIs; guards fail
 loudly (not silently) when a new HW path needs covering.
-
----
-
-*Version history: [docs/changelog.md](docs/changelog.md).*

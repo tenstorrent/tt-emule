@@ -89,7 +89,7 @@
 
 ## Standalone Regression (tt-emule)
 
-**126 passed, 11 failed, 0 skipped** against `arminale/emule-metal-base` @ `c812fbb1cc` (baseline 2026-05-01). All 11 failures are DFB STRIDED wraparound (Tier 3b, ×4) + DFB Config Validation (Tier 3g, ×7) — see [docs/changelog.md](docs/changelog.md) for the per-version history.
+**126 passed, 11 failed, 0 skipped** against `arminale/emule-metal-base` @ `c812fbb1cc` (baseline 2026-05-01). All 11 failures are DFB STRIDED wraparound (Tier 3b, ×4) + DFB Config Validation (Tier 3g, ×7).
 
 ### Passing (85)
 

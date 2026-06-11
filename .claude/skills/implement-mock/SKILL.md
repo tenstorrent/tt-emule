@@ -181,8 +181,7 @@ These cause more harm than good — avoid:
   Step 2 strategies map onto
 - `.claude/references/emule-mapping.md` — HW concept → emule mock
   catalog (§§1–6 + out-of-scope table)
-- `.claude/references/api-injection-points.md` — where in the pipeline
-  emule injects
+- `docs/api-injection-points.md` — where in the pipeline emule injects
 - `CLAUDE.md` — project conventions (clang-20, slow dispatch, always run
   regressions)
 - `BUILD_GUIDE.md` — `TT_METAL_DIR`, regression scripts

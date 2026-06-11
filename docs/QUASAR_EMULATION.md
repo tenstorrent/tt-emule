@@ -263,7 +263,7 @@ The 11 failures are all in DFB tests that depend on follow-up fixes not yet merg
 - **Tier 3b STRIDED wraparound (4):** `DMTest1xDFB4Sx4S`, `DMTest1xDFB4Sx4S_IS`, `DMTest1xDFB2Sx4S`, `DMTest1xDFB2Sx4S_IS`
 - **Tier 3g DFB Config Validation (7):** `DMTest1xDFB1Sx4SConfig`, `DMTensixTest1xDFB4Sx1SConfig`, `DMTest1xDFB4Sx1SConfig`, `DMTest1xDFB4Sx4SConfig`, `DMTest1xDFB2Sx4SConfig`, `DMTest1xDFB4Sx2SConfig`, `DMTest1xDFB1Sx1BConfig`
 
-See [changelog.md](changelog.md) for the per-version history — these failures will resolve once the wraparound + DFB-config fixes upstream and the base pointer is bumped.
+These failures will resolve once the wraparound + DFB-config fixes upstream and the base pointer is bumped.
 
 ---
 

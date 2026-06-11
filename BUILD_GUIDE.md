@@ -392,7 +392,7 @@ export SYSTEM_DESC_PATH="$ROOT/tt-mlir/ttrt-artifacts/system_desc.ttsys"
 ./run_d2m_regression.sh --serial
 ```
 
-`--serial` runs test files one at a time to avoid memory contention. Full run takes ~70 minutes for 33 test files. The expected failure set is tracked per-op-family in [issue #6](https://github.com/tenstorrent/tt-emule/issues/6) — a "passed regression" means matching that allowlist, not zero failures. See [D2M_REGRESSION_REPORT.md](D2M_REGRESSION_REPORT.md) for the per-file breakdown.
+`--serial` runs test files one at a time to avoid memory contention. Full run takes ~70 minutes for 33 test files. The expected failure set is tracked per-op-family in [issue #6](https://github.com/tenstorrent/tt-emule/issues/6) — a "passed regression" means matching that allowlist, not zero failures. See [D2M_REGRESSION_REPORT.md](docs/historical_reports/D2M_REGRESSION_REPORT.md) for the per-file breakdown.
 
 ---
 
