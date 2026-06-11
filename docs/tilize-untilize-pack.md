@@ -28,46 +28,22 @@ unpack/pack stages also do nfaces ↔ row-major conversion. The LUTs are
 
 ## DST register file
 
-```cpp
-// include/jit_hw/api/compute/common.h
-static constexpr uint32_t __EMULE_DST_TILES      = 16;  // bf16 SyncFull
-static constexpr uint32_t __EMULE_DST_TILES_FP32 = 8;   // f32 SyncFull
-static constexpr uint32_t __EMULE_TILE_ELEMS     = 1024;
-static thread_local float __emule_dst[__EMULE_DST_TILES][__EMULE_TILE_ELEMS];
-```
-
-Silicon's Dst is a 64 KB register file with two banks of 32 KB. The
-addressable capacity (per DeepWiki tt-isa-documentation §4.7 and
-`tt_llk/common/tensor_shape.h:29`) is **identical on WH-B0 and Blackhole**:
-
-| Mode                 | bf16 / fp16 | fp32 accum |
-| -------------------- | ----------- | ---------- |
-| `SyncFull` (single bank, no MATH↔PACK pipelining)  | 16 tiles | 8 tiles |
-| `SyncHalf` (default; double-buffered)              | 8 tiles  | 4 tiles |
-
-`SyncHalf` is the production default — math writes one half while pack
-reads the other. emule allows the `SyncFull` ceiling as the upper bound
-so neither mode triggers a spurious bounds error. There is no
-"FULL_DEST = 32 tiles" hardware mode on either arch.
-
-DST slot bounds are enforced by `__emule_dst_check(slot, caller)` in
-common.h. Writes go through `__emule_dst_mark_dirty(slot)`.
+The fp32 row-major DST array, slot count (`__EMULE_DST_TILES = 16` /
+`__EMULE_DST_TILES_FP32 = 8`), `SyncFull`/`SyncHalf` capacity table,
+`__emule_dst_check` bounds enforcement, and fresh/dirty tracking are
+the subject of [dest-emulation.md](dest-emulation.md). This doc
+references DST without repeating those mechanics.
 
 ## CB metadata, page size, and data format
 
-The unpack/pack paths dispatch on three things looked up from
-`__emule_cbs[cb_id]`:
-
-- `cb_page_size(cb_id)` — bytes per CB page (= one tile's encoded size
-  for tile-shaped CBs).
-- `cb_data_format(cb_id)` — the real `tt::DataFormat` enum value,
-  threaded from the host via the `EMULE_CB_DATA_FORMATS` JIT define
-  ([cb-dataformat.md](cb-dataformat.md)). `255` = Invalid (CB
-  slot unconfigured); paths fall back to the page-size heuristic.
-- `cb_is_*_format(cb_id)` predicates: `_32bit_format` and
-  `_bfp8_b_format` use page-size heuristics (unambiguous buckets);
-  `_uint16_format` uses the real DataFormat (only way to distinguish
-  UInt16 from bf16 — both are 2048 B / tile).
+Format dispatch reads three things from `__emule_cbs[cb_id]`:
+`cb_page_size`, `cb_data_format` (the `tt::DataFormat` enum threaded
+through the `EMULE_CB_DATA_FORMATS` JIT define), and the
+`cb_is_*_format(cb_id)` predicates. The predicates are **enum-driven —
+there is no page-size fallback**. The full per-CB format model and the
+reasons page size can't substitute for the enum live in
+[cb-dataformat.md](cb-dataformat.md); the CB ring + sync state lives in
+[cb-emulation.md](cb-emulation.md).
 
 ## Unpack
 
@@ -77,17 +53,17 @@ from `CB[icb]` at index `itile`, applies the nfaces→row-major
 permutation, decodes to fp32, writes into `out` (a DST slot or
 `__emule_src_scratch`).
 
-Format dispatch (in order):
+Format dispatch (enum-driven, checked in order):
 
-1. **Bfp8_b** (`page_size == 1088`) — 64 face-row 8-bit exponents + 1024
-   mantissa bytes. Decoded via `__emule_bfp8::to_f32` per element.
-2. **32-bit** (`page_size > 2048`) — Float32 / Int32 / UInt32. Per-element
-   `memcpy` preserves INT32 bit patterns that would otherwise be flushed
-   to zero by x86 DAZ/FTZ on float assignment.
-3. **uint16** (`cb_data_format(icb) == UInt16`) — widens each uint16 to
-   int32 (zero-extended) and stores the bit pattern in the fp32 DST
-   slot. SFPU comparison ops read this back via `__emule_dst_load_i32`.
-4. **bf16** (default 2048-byte 16-bit) — `__emule_bf16::to_f32` per
+1. **Bfp8_b** (`cb_is_bfp8_b_format`) — 64 face-row 8-bit exponents +
+   1024 mantissa bytes. Decoded via `__emule_bfp8::to_f32` per element.
+2. **32-bit** (`cb_is_32bit_format`: Float32 / Int32 / UInt32 / Tf32 /
+   RawUInt32) — per-element `memcpy` preserves INT32 bit patterns that
+   would otherwise be flushed to zero by x86 DAZ/FTZ on float assignment.
+3. **uint16** (`cb_is_uint16_format`) — widens each uint16 to int32
+   (zero-extended) and stores the bit pattern in the fp32 DST slot.
+   SFPU comparison ops read this back via `__emule_dst_load_i32`.
+4. **bf16** (default 16-bit fallthrough) — `__emule_bf16::to_f32` per
    element.
 
 `copy_tile(icb, itile, idst)` is the public entry; it calls
@@ -301,9 +277,10 @@ adding or modifying a shim:
    distinguish bf16 from uint16 (both 2048-byte tiles), produces
    `elem_size = 1` for Bfp8_b (1088-byte tiles), and produces
    `elem_size = 0` for narrow-row tiles (page_size < 1024 → all rows
-   alias one byte). Replaced with explicit `cb_is_uint16_format` /
-   `cb_is_32bit_format` / bf16-fallback dispatch matching
-   `pack_dst_to_buf`.
+   alias one byte). Replaced with explicit enum-driven dispatch via
+   `cb_is_uint16_format` / `cb_is_32bit_format` / bf16 fallthrough
+   matching `pack_dst_to_buf` — see [cb-dataformat.md](cb-dataformat.md)
+   for why page-size proxies don't work.
 
 3. **Cross-stage state leakage.** `__llk_pack_is_untilize` and
    `__emule_l1_acc_enabled` are thread-global, so a kernel that does
