@@ -22,10 +22,12 @@ faithful mock APIs.
   canonical silicon implementation**. Don't create parallel or
   different code paths to work around bugs — if it works in silicon,
   the mock must be functional and correct against it.
-- Consult `references/structure.yaml` (formerly `STRUCTURE.md`) for
-  the authoritative file/symbol index under `src/` and `include/`.
-  Keep it in sync when you add/remove/rename a file or a top-level
-  symbol (class/struct/enum/namespace/free function/macro).
+- The authoritative `src/` + `include/` file/symbol index lives at
+  `references/structure.yaml` (replaces `STRUCTURE.md`). Query with
+  `scripts/find_symbol.py <name>` (flags: `--kind`, `--path-prefix`,
+  `--list-symbols`, `--summary`); plain `grep` works for casual
+  lookups. Keep it in sync when you add/remove/rename a file or
+  top-level symbol.
 - `IMPLEMENTATION_REPORT.md` is the documentation entry point and
   index; per-subsystem references live under `docs/`
   (l1/dram/dest/cb/noc-emulation, metal-integration,

@@ -363,7 +363,9 @@ verify before assuming.
    the failure. Each `rm -rf /tmp/tt_emule_jit_cache_$(id -u)` should be
    deliberate (e.g. after a shim edit), not a cargo-cult retry.
 3. **Don't duplicate shims** that `activations.h` or `compute_kernel_api.h`
-   already define. ODR conflicts result. Grep `.claude/references/structure.yaml` first.
+   already define. ODR conflicts result. Check first with
+   `scripts/find_symbol.py <op>_tile` (or plain grep of
+   `.claude/references/structure.yaml`).
 4. **Don't invent upstream signatures.** If upstream has no header, return
    STUCK or ask. Some activation-family ops are composed in-kernel and
    have no standalone API.
