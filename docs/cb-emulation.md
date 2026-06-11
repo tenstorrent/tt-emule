@@ -87,9 +87,9 @@ Tiles are read/written through the central format-aware helpers in
 `api/compute/common.h`: `__emule_compute::cb_{read,write}_ptr_at` give the raw
 slice; `__emule_unpack_cb_tile_to` (CB→DEST) and `pack_dst_to_buf` (DEST→CB)
 dispatch on the CB's data format (bf16 / fp32 / int32 / uint16 / Bfp8_b / Bfp4_b)
-via the **enum-driven** `cb_is_32bit_format` / `cb_is_bfp8_b_format` etc. (page
-size is only a fallback). The data-format and tile-size arrays reach the kernel as
-the `EMULE_CB_DATA_FORMATS` / `EMULE_TILE_SIZES` JIT defines, emitted per-program
+via the **enum-driven** `cb_is_32bit_format` / `cb_is_bfp8_b_format` etc. The
+pack/unpack predicates are **enum-only** (no page-size heuristic fallback); an
+`Invalid` format is a known-failure until the runner threads formats through.
 by `build_kernel_defines` from each CB's `data_format()` / `page_size()`. The
 format dispatch itself is documented in [cb-dataformat.md](cb-dataformat.md); the
 pack/unpack mechanics in [tilize-untilize-pack.md](tilize-untilize-pack.md).
