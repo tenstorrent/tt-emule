@@ -583,7 +583,8 @@ files:
   section: include/jit_hw/api/compute/
   summary: macros `PACK`/`MATH`/`UNPACK`/`ALWI`, `DST_ACCUM_MODE`; `namespace __emule_compute`, `ckernel`; `enum class EltwiseBinaryType`/`BroadcastType`/`ReluType`/`EltwiseBinaryReuseDestType`/`p_dim_stride_target`/`MathFidelity`;
     `TILE_WIDTH`/`TILE_HEIGHT`/`TILE_HW`/`FACE_WIDTH`/`FACE_HEIGHT`/`FACE_HW`/`TILE_C_DIM`; `pack_tile`/`pack_tile_block`, `copy_tile`/`copy_tile_init`, `add_tiles`/`sub_tiles`/`mul_tiles`, `binary_tiles_init`,
-    `binary_dest_reuse_tiles`, `__emule_dst_active_tiles`/`__emule_dst_check`/`__emule_dst_load_i32`/`__emule_dst_store_i32`; `namespace __emule_compute` `cb_page_size`/`cb_tile_elems`/`cb_is_32bit_format`/`cb_is_bfp8_b_format`/`cb_is_bfp4_b_format`/`cb_data_format`/`cb_is_uint16_format`/`pack_dst_to_buf`/`__emule_unpack_cb_tile_to`;
+    `binary_dest_reuse_tiles`, `__emule_cb_tile_rows`/`__emule_thin_broadcast_b1`/`__emule_eltwise_binary_tile`, `__emule_dst_active_tiles`/`__emule_dst_check`/`__emule_dst_load_i32`/`__emule_dst_store_i32`;
+    `namespace __emule_compute` `cb_page_size`/`cb_tile_elems`/`cb_is_32bit_format`/`cb_is_bfp8_b_format`/`cb_is_bfp4_b_format`/`cb_data_format`/`cb_is_uint16_format`/`pack_dst_to_buf`/`__emule_unpack_cb_tile_to`;
     no-op stubs `reconfig_data_format_srca`/`reconfig_data_format_srcb`/`pack_reconfig_data_format`/`llk_pack_relu_config`/`pack_set_relu_threshold`/`llk_pack_hw_configure`/`pack_init`/`pack_dest_init`/`pack_reconfig_l1_acc`/`pack_relu_config`
   symbols:
   - {kind: macro, name: PACK}
@@ -615,6 +616,9 @@ files:
   - {kind: function, name: mul_tiles}
   - {kind: function, name: binary_tiles_init}
   - {kind: function, name: binary_dest_reuse_tiles}
+  - {kind: function, name: __emule_cb_tile_rows}
+  - {kind: function, name: __emule_thin_broadcast_b1}
+  - {kind: function, name: __emule_eltwise_binary_tile}
   - {kind: function, name: __emule_dst_active_tiles}
   - {kind: function, name: __emule_dst_check}
   - {kind: function, name: __emule_dst_load_i32}
