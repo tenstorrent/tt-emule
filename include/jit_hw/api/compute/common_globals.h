@@ -6,6 +6,7 @@
 // Minimal DataFormat enum for JIT-compiled SFPU kernels.
 // Matches the real tt-metal enum values we need.
 #include <cstdint>
+#include "tt-metalium/circular_buffer_constants.h"  // NUM_CIRCULAR_BUFFERS (32 WH / 64 BH)
 
 enum class DataFormat : uint8_t {
     Float32   = 0,
@@ -33,10 +34,11 @@ enum class DataFormat : uint8_t {
 
 // PACK engine auto-advance: tracks the write offset within a reserve_back batch.
 // On real hardware the PACK engine auto-advances its L1 write pointer after each
-// pack_tile.  In emulation, cb_write_ptr is write_idx-based and only advances on
+// pack_tile.  In emulation, cb_write_ptr resolves the calling RISC's per-thread
+// CB write pointer (jit_hw/internal/emule_cb_ptr.h), which only advances on
 // push_back.  This counter emulates the hardware auto-advance: reset to 0 on
 // reserve_back, incremented by pack_tile.
-static thread_local uint32_t __emule_pack_offset[32] = {};
+static thread_local uint32_t __emule_pack_offset[NUM_CIRCULAR_BUFFERS] = {};
 
 // Per-DST-slot "fresh since acquire" flag.  Set true by tile_regs_acquire,
 // cleared by any op that writes meaningful values into the slot (copy_tile,

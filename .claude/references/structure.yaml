@@ -40,17 +40,13 @@ files:
   - {kind: enum, name: BufferType}
 - path: include/tt_emule/cb_sync_state.hpp
   section: include/tt_emule/
-  summary: '`struct CBSyncState`; `cb_sync_reserve`/`cb_sync_push`/`cb_sync_wait`/`cb_sync_pop`, `cb_sync_write_ptr`/`cb_sync_read_ptr`/`cb_sync_write_ptr_at`/`cb_sync_read_ptr_at`'
+  summary: '`struct CBSyncState` (shared geometry + `occupied` semaphore; per-RISC read/write pointers live in `jit_hw/internal/emule_cb_ptr.h`); semaphore-only `cb_sync_reserve`/`cb_sync_push`/`cb_sync_wait`/`cb_sync_pop`'
   symbols:
   - {kind: struct, name: CBSyncState}
   - {kind: function, name: cb_sync_reserve}
   - {kind: function, name: cb_sync_push}
   - {kind: function, name: cb_sync_wait}
   - {kind: function, name: cb_sync_pop}
-  - {kind: function, name: cb_sync_write_ptr}
-  - {kind: function, name: cb_sync_read_ptr}
-  - {kind: function, name: cb_sync_write_ptr_at}
-  - {kind: function, name: cb_sync_read_ptr_at}
 - path: include/tt_emule/circular_buffer.hpp
   section: include/tt_emule/
   summary: '`class CircularBuffer` (reserve_back/push_back/wait_front/pop_front/get_write_ptr/get_read_ptr)'
@@ -1584,15 +1580,29 @@ files:
   - {kind: macro, name: VALID}
 - path: include/jit_hw/internal/cb_interface.h
   section: include/jit_hw/internal/
-  summary: '`struct LocalCBInterface`, `struct RemoteSenderCBInterface`, `struct RemoteReceiverCBInterface`; `get_local_cb_interface`'
+  summary: '`struct CBInterface`; `get_local_cb_interface` (authoritative reference into the per-RISC `__emule_local_cb` register file in `emule_cb_ptr.h`, supports pointer write-back); `get_cb_tiles_received_ptr`/`get_cb_tiles_acked_ptr` (L1 tile-counter shims)'
   symbols:
-  - {kind: struct, name: LocalCBInterface}
-  - {kind: struct, name: RemoteSenderCBInterface}
-  - {kind: struct, name: RemoteReceiverCBInterface}
+  - {kind: struct, name: CBInterface}
   - {kind: function, name: get_local_cb_interface}
+  - {kind: function, name: get_cb_tiles_received_ptr}
+  - {kind: function, name: get_cb_tiles_acked_ptr}
 - path: include/jit_hw/internal/circular_buffer_interface.h
   section: include/jit_hw/internal/
   summary: forwarding shim → `jit_hw/internal/llk_state.h`
+- path: include/jit_hw/internal/emule_cb_ptr.h
+  section: include/jit_hw/internal/
+  summary: 'Per-RISC circular-buffer read/write pointers — the single source of truth (issue #139). `struct LocalCBInterface` + thread_local `__emule_local_cb[NUM_CIRCULAR_BUFFERS]` (mirrors silicon''s per-RISC CB register file); `cb_addr_shift`; addr/advance helpers `__emule_cb_wr_addr`/`__emule_cb_rd_addr`/`__emule_cb_advance_wr`/`__emule_cb_advance_rd`, `__emule_cb_view_init`, `__emule_cb_wrap`, `__emule_cb_base16`/`__emule_cb_span16`. Geometry comes from the shared `CBSyncState`; `occupied` there stays the cross-RISC semaphore.'
+  symbols:
+  - {kind: struct, name: LocalCBInterface}
+  - {kind: macro, name: cb_addr_shift}
+  - {kind: function, name: __emule_cb_view_init}
+  - {kind: function, name: __emule_cb_wr_addr}
+  - {kind: function, name: __emule_cb_rd_addr}
+  - {kind: function, name: __emule_cb_advance_wr}
+  - {kind: function, name: __emule_cb_advance_rd}
+  - {kind: function, name: __emule_cb_wrap}
+  - {kind: function, name: __emule_cb_base16}
+  - {kind: function, name: __emule_cb_span16}
 - path: include/jit_hw/internal/firmware_common.h
   section: include/jit_hw/internal/
   summary: '`WAYPOINT` macro; cache-op stubs'

@@ -151,7 +151,7 @@ for a stub.
 
 | Silicon | Emule |
 |---|---|
-| Producer-consumer ring; sync via in-L1 semaphores | `CBSyncState` struct: `base` + `page_size` + `num_pages` + `page_mask` + `write_idx` + `read_idx` + atomic `occupied` + mutex + 2 condvars. `cb_wait_front(cb, n)` blocks until `occupied >= n`; `cb_push_back(cb, n)` advances `write_idx`/`occupied` + notifies. See `docs/cb-emulation.md`. |
+| Producer-consumer ring; sync via in-L1 semaphores + per-RISC pointer registers | `CBSyncState` struct = **shared** `base` + `page_size` + `num_pages` + `page_mask` + atomic `occupied` + mutex + 2 condvars — geometry + the cross-RISC semaphore **only**; the read/write *pointers* are per-RISC (§4.2b). `cb_wait_front(cb, n)` blocks until `occupied >= n`; `cb_push_back(cb, n)` advances the calling RISC's pointer + bumps `occupied` + notifies. See `docs/cb-emulation.md`. |
 
 Owner: `tt-emule/include/tt_emule/cb_sync_state.hpp`; per-core array
 in `tt_emule::Core::cb_sync_states_[MAX_CBS]`.
@@ -164,7 +164,19 @@ within a single core.
 
 `__emule_compute::cb_read_ptr_at(cb_id, tile_offset)` and
 `cb_write_ptr_at(cb_id, tile_offset)` — return raw `uint8_t*` into
-Core's L1.
+Core's L1, resolved via the calling RISC's per-RISC pointer (§4.2b),
+the same pointer the dataflow `get_{write,read}_ptr` use.
+
+### 4.2b Per-RISC CB read/write pointers
+
+| Silicon | Emule |
+|---|---|
+| Each RISC has its own per-CB read/write pointer **register** | `thread_local LocalCBInterface __emule_local_cb[NUM_CIRCULAR_BUFFERS]` in `include/jit_hw/internal/emule_cb_ptr.h` — each kernel thread (= RISC) owns its `fifo_{wr,rd}_ptr`. `__emule_cb_{wr,rd}_addr` / `__emule_cb_advance_{wr,rd}` read/advance it; geometry + wrap come from the shared `CBSyncState`. `get_local_cb_interface` returns this storage (pointer write-back). |
+
+This split (per-RISC pointers + shared `occupied` semaphore) is the faithful
+silicon model and fixes the `pad_rm_sharded_stickwise` race (issue #139), where a
+shared write index let the writer corrupt the reader's shard base. See
+`docs/cb-emulation.md` §2b.
 
 ### 4.3 Tile format dispatch
 
