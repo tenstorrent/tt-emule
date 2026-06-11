@@ -22,7 +22,7 @@ disagree with a row here).
 
 | Silicon | Emule | Owner |
 |---|---|---|
-| 1.5 MB per Tensix core, 32-bit firmware addresses, RISC dereferences directly | Per-core `mmap(MAP_PRIVATE\|MAP_ANONYMOUS\|MAP_32BIT)` of `Core::l1_size()` bytes. 2-MB-aligned slot. Worker cores get MAP_32BIT (low 4GB) so the truncated host pointer is itself a valid host pointer. | `tt_emule::Core` (`tt-emule/include/tt_emule/device.hpp`); `L1Pool` (`tt-emule/include/tt_emule/l1_pool.hpp`) |
+| Per-Tensix scratchpad SRAM (size set per arch via the SoC descriptor — see `metal_SocDescriptor`), 32-bit firmware addresses, RISC dereferences directly | Per-core `mmap(MAP_PRIVATE\|MAP_ANONYMOUS\|MAP_32BIT)` of `Core::l1_size()` bytes. 2-MB-aligned slot. Worker cores get MAP_32BIT (low 4GB) so the truncated host pointer is itself a valid host pointer. | `tt_emule::Core` (`tt-emule/include/tt_emule/device.hpp`); `L1Pool` (`tt-emule/include/tt_emule/l1_pool.hpp`) |
 
 **Key conversion**: `__emule_local_l1_to_ptr(uint32_t l1_addr)` —
 returns `__emule_bridge_l1 + l1_addr` for firmware offsets, or casts
@@ -138,15 +138,10 @@ Owner files:
 |---|---|
 | `sfpi::vFloat`, `v_if(cond) {...}`, `sfpi::dst_reg[k]`, `sfpi::reinterpret` — SIMD on SFPU | Modeled as a 32-lane SIMD type **executed scalar-per-lane** (`sfpi.h`), not bit-exact to the silicon SFPU. Usable for simple sfpi bodies; deep/complex sfpi chains are still often cleaner to semantic-rewrite (Strategy C). |
 
-Owner: `tt-emule/include/jit_hw/sfpi.h`.
-
-### 3.6 Cross-RISC synchronization
-
-| Silicon | Emule |
-|---|---|
-| `unified_kernels::sync_riscs_enter/exit` + `invalidate_l1_cache` — multi-RISC barrier with explicit L1 cache invalidate | **No-op under `__EMULE_JIT_MODE`** — emule's CBSyncState (mutex+condvar) already serializes consumer-producer; no L1 cache to invalidate |
-
-Gated in `mcast/op.hpp` post-mcast sync block.
+Owner: `tt-emule/include/jit_hw/sfpi.h`. More detailed SFPI modeling is
+forthcoming — if you hit a complex SFPI chain that doesn't have a clean
+reformulation, ping the emule team for context/options before reaching
+for a stub.
 
 ---
 
@@ -174,14 +169,16 @@ Core's L1.
 ### 4.3 Tile format dispatch
 
 `__emule_compute::cb_is_32bit_format(cb_id)` is **enum-driven**: it reads the
-CB's real `DataFormat` (from the `EMULE_CB_DATA_FORMATS` JIT define) and only
-falls back to the `page_size > 2048` heuristic when the format is `Invalid`
-(standalone builds). Sibling predicates: `cb_is_bfp8_b_format` /
-`cb_is_bfp4_b_format` / `cb_is_uint16_format`. The page-size heuristic alone is
-**wrong** for small-page int32/uint32, thin tiles, and the bf16-vs-uint16
-ambiguity (both 2048 B) — always use the enum predicate when adding a
-format-aware path. Drives `add_tiles`/`mul_tiles`/`pack_tile`. See
-`docs/cb-dataformat.md` and `docs/cb-emulation.md`.
+CB's real `DataFormat` from the `EMULE_CB_DATA_FORMATS` JIT define. There is
+**no** page-size fallback — every integrated build supplies a real
+`DataFormat`. Sibling predicates: `cb_is_bfp8_b_format` /
+`cb_is_bfp4_b_format` / `cb_is_uint16_format`. Drives
+`add_tiles`/`mul_tiles`/`pack_tile`.
+
+**Never** infer a data format from `page_size`: small-page int32/uint32,
+thin tiles, and the bf16-vs-uint16 ambiguity (both 2048 B) all break the
+heuristic. See `docs/cb-dataformat.md`, `docs/cb-emulation.md`, and
+`docs/noc-emulation.md`.
 
 ---
 
@@ -226,28 +223,14 @@ edits to consumer op headers invalidate cached `.so`s.
 
 ---
 
-## 7. The three strategies
+## 7. Mock-implementation strategies
 
-When implementing a mock, pick from:
-
-### A. Stub in `jit_hw/`
-
-Default for new compute primitives, dataflow helpers, generic API
-surface. New file at `tt-emule/include/jit_hw/api/{compute, dataflow,
-tensor}/<name>.h`. No `__EMULE_JIT_MODE` guard needed (jit_hw is
-already inside `-I` ahead of tt-metal's hw/inc).
-
-### B. Per-op `#ifdef __EMULE_JIT_MODE` patch in a consumer's op header
-
-For per-op silicon-specific patterns that can't be generically stubbed
-in `jit_hw/`. Most common: constexpr L1 firmware address cast routed
-through `__emule_local_l1_to_ptr`.
-
-### C. Semantic rewrite under `__EMULE_JIT_MODE`
-
-For deep LLK/sfpi chains. Gate off the entire silicon include block
-+ operator() body, reimplement directly against CB + DST math.
-Validated 4× (RMSNorm, clamped_silu, Mcast, eltwise_mul).
+The A/B/C strategy taxonomy — where in the stack a mock sits, mapped to
+the layer-1 / 1.5 / 2 / 3 vocabulary from
+[`docs/kernel-api-layers.md`](../../docs/kernel-api-layers.md) — lives
+in the `/implement-mock` skill. See
+[`.claude/skills/implement-mock/SKILL.md`](../skills/implement-mock/SKILL.md)
+for the catalog and decision rules.
 
 ---
 
@@ -259,7 +242,6 @@ Validated 4× (RMSNorm, clamped_silu, Mcast, eltwise_mul).
 | Bit-exact sfpi:: SIMD math | `sfpi.h` runs scalar-per-lane (see §3.5) — functional but not silicon-bit-exact. |
 | Ethernet / socket / D2D / H2D | Same status as fabric. |
 | Quasar architecture | Dedicated regression coverage exists for supported Quasar DFB/compute/semaphore/atomics paths (`TT_EMULE_ARCH=quasar`, `quasar_Q1.yaml`); other Quasar-specific APIs may still need targeted mocks. |
-| topk multi-core dataflow | `topk` blocks on a `VALID`/`INVALID` NoC-semaphore enum gap in `reader_final_topk`/`writer_local_topk` — tracked in issue #137. (Compute primitives `matmul_tiles`/`matmul_block` and the `{deepseek,glm,kimi}_moe_gate` shims ARE implemented — no longer out of scope.) |
 | Mock cluster DRAM bank shape | "No DRAM bank exists for core 7-0" issues when bank topology doesn't match silicon. |
 
 ---
