@@ -153,7 +153,11 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
             else
                 acc += src[i];
         }
-        float result = acc * scaler;
+        // Silicon's single-core HW reduce uses REDUCE_SCALAR, which applies the
+        // scaler TWICE internally (once per dimension); the host pre-compensates
+        // with sqrt(scaler) (reduce_op_single_core_hw_program_factory.cpp:48). So
+        // square it here to match — applying it once over-counts by 1/sqrt(N).
+        float result = acc * scaler * scaler;
         if constexpr (reduce_type == PoolType::MAX) {
             __emule_dst[idst][0] = fresh ? result : std::max(__emule_dst[idst][0], result);
         } else {

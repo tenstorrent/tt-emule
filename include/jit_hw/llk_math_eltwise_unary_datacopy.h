@@ -14,28 +14,42 @@ using ckernel::BroadcastType;
 inline void __llk_tilize_datacopy(uint32_t dst_idx) {
     uint32_t cb = __llk_unpack_src_cb;
     uint32_t ps = __emule_compute::cb_page_size(cb);
-    uint32_t elem_size = ps / 1024;  // 2 for bf16, 4 for f32
     uint32_t tile_col = __llk_unpack_current_tile;
     uint32_t block_c = __llk_unpack_block_c;
+
+    // Element size and conversion are format-driven, not page-size-derived:
+    // ps/1024 underflows to 0 for stick-sized CBs and can't tell uint16 from bf16.
+    const bool is_32bit = __emule_compute::cb_is_32bit_format(cb);
+    const bool is_uint16 = __emule_compute::cb_is_uint16_format(cb);
+    const uint32_t elem_size = is_32bit ? 4 : 2;
 
     uint8_t* base = __emule_compute::cb_read_ptr_at(cb, 0);
     uint32_t tile_row_offset = __llk_unpack_start_tile_idx * ps;
     uint32_t tile_col_offset = tile_col * 32 * elem_size;
     uint32_t row_stride = block_c * 32 * elem_size;
 
-    if (elem_size == 2) {  // bfloat16
-        for (uint32_t r = 0; r < 32; r++) {
-            uint16_t* src = reinterpret_cast<uint16_t*>(
-                base + tile_row_offset + r * row_stride + tile_col_offset);
-            for (uint32_t c = 0; c < 32; c++)
-                __emule_dst[dst_idx][r * 32 + c] = __emule_bf16::to_f32(src[c]);
-        }
-    } else {  // float32 / int32: use memcpy to preserve exact bit patterns
+    if (is_32bit) {  // float32 / int32 / uint32: memcpy to preserve exact bit patterns
         for (uint32_t r = 0; r < 32; r++) {
             uint32_t* src = reinterpret_cast<uint32_t*>(
                 base + tile_row_offset + r * row_stride + tile_col_offset);
             for (uint32_t c = 0; c < 32; c++)
                 std::memcpy(&__emule_dst[dst_idx][r * 32 + c], &src[c], sizeof(uint32_t));
+        }
+    } else if (is_uint16) {  // widen uint16 → int32 bit pattern (mirror __emule_unpack_cb_tile_to)
+        for (uint32_t r = 0; r < 32; r++) {
+            uint16_t* src = reinterpret_cast<uint16_t*>(
+                base + tile_row_offset + r * row_stride + tile_col_offset);
+            for (uint32_t c = 0; c < 32; c++) {
+                int32_t v = static_cast<int32_t>(src[c]);
+                std::memcpy(&__emule_dst[dst_idx][r * 32 + c], &v, sizeof(uint32_t));
+            }
+        }
+    } else {  // bfloat16
+        for (uint32_t r = 0; r < 32; r++) {
+            uint16_t* src = reinterpret_cast<uint16_t*>(
+                base + tile_row_offset + r * row_stride + tile_col_offset);
+            for (uint32_t c = 0; c < 32; c++)
+                __emule_dst[dst_idx][r * 32 + c] = __emule_bf16::to_f32(src[c]);
         }
     }
     __llk_unpack_current_tile++;

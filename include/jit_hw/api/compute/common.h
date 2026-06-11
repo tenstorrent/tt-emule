@@ -147,6 +147,18 @@ static constexpr uint32_t __EMULE_TILE_ELEMS = 1024;
 static constexpr uint32_t __EMULE_DST_BYTES = __EMULE_TILE_ELEMS * sizeof(float);
 static thread_local float __emule_dst[__EMULE_DST_TILES][__EMULE_TILE_ELEMS];
 static thread_local bool __emule_l1_acc_enabled = false;
+// Math-side DST accumulate — silicon's dest_accum_en bit (the 2nd operand of
+// the ELWADD / ELWSUB / ELWMUL / DOTPV opcode, bit 21 of the FPU instruction
+// word; see ckernel_ops.h:155 `TT_OP_ELWADD(clear_dvalid, dest_accum_en, ...)`).
+// Programmed via _llk_math_eltwise_binary_init_'s acc_to_dest arg, which flows
+// straight into the opcode immediate — it is NOT a CFG/THCON register.
+// When true, add/sub/mul_tiles compute DST = DST + (in0 OP in1) instead of
+// DST = in0 OP in1 (e.g. fast_reduce_nc sums input tiles into one DST slot).
+//
+// Distinct from __emule_l1_acc_enabled above: that one models the pack-side
+// Pack_L1_Acc THCON CFG bit (L1 += DST at packer Stage 5). Different RISCs,
+// different accumulators, different LHS — composable, not interchangeable.
+static thread_local bool __emule_dest_accum_en = false;
 
 // Pack-fused ReLU state — silicon STACC_RELU is a single packer CFG reg, so
 // thread-global like __emule_l1_acc_enabled.  `llk_pack_relu_config(ReluType)`
@@ -336,9 +348,21 @@ inline uint32_t cb_tile_elems(uint32_t cb_id) {
 // Bfp8_b (~1088B) and Bfp4_b (~576B) both fall in the same sub-2048 page range.
 inline uint8_t cb_data_format(uint32_t cb_id) { return ::unpack_src_format[cb_id]; }
 
-// Is this CB using a 32-bit data format (INT32, Float32)?
-// Heuristic: bf16 tiles = 2048 bytes (1024 × 2), 32-bit tiles > 2048.
+// Is this CB using a 32-bit data format (Float32 / Int32 / UInt32 / Tf32)?
+// Enum-driven from the real DataFormat — the page-size heuristic (>2048) only
+// holds for full 32×32 tiles, so it misclassifies stick-sized CBs (e.g. the
+// row-major permute path's 128-byte cb_in/cb_out) and processes int32 as bf16.
+// Falls back to the page-size heuristic only when the format is unset (Invalid,
+// e.g. standalone tt_emule_lib builds with no EMULE_CB_DATA_FORMATS define).
 inline bool cb_is_32bit_format(uint32_t cb_id) {
+    const uint8_t fmt = cb_data_format(cb_id);
+    if (fmt != static_cast<uint8_t>(DataFormat::Invalid)) {
+        return fmt == static_cast<uint8_t>(DataFormat::Float32)
+            || fmt == static_cast<uint8_t>(DataFormat::Int32)
+            || fmt == static_cast<uint8_t>(DataFormat::UInt32)
+            || fmt == static_cast<uint8_t>(DataFormat::Tf32)
+            || fmt == static_cast<uint8_t>(DataFormat::RawUInt32);
+    }
     return __emule_cbs[cb_id].page_size > 2048;
 }
 
@@ -614,9 +638,10 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
 
 namespace ckernel {
 
-// binary_op_init_common — no-op (hardware pipeline init)
-ALWI void binary_op_init_common(uint32_t, uint32_t, uint32_t) {}
-ALWI void binary_op_init_common(uint32_t, uint32_t, uint32_t, uint32_t) {}
+// binary_op_init_common — resets the binary accumulate-to-DST mode so a stale
+// thread_local flag from a prior kernel can't leak into the next one.
+ALWI void binary_op_init_common(uint32_t, uint32_t, uint32_t) { __emule_dest_accum_en = false; }
+ALWI void binary_op_init_common(uint32_t, uint32_t, uint32_t, uint32_t) { __emule_dest_accum_en = false; }
 
 // binary_tiles_init — no-op (per-op hardware init)
 template<bool FullInit = true, EltwiseBinaryType BinaryType = EltwiseBinaryType::ELWADD>
@@ -637,8 +662,24 @@ ALWI void mul_tiles_init_f() {}
 // [1, W] mask tile. For row-major position i = r*32 + c, we return buf1[c].
 //
 // Returns true if icb1 is a thin-tile broadcast (page_size mismatch).
+// A thin-tile broadcast operand has fewer ROWS than operand 0 (e.g. a [1,W]
+// mask). Compare row counts, not raw page sizes: an fp32 full tile (4096B) and
+// a bf16 full tile (2048B) are both 32-row tiles — the page gap is dtype width,
+// not a broadcast. Comparing raw pages misclassified the fp32+bf16-zero operands
+// of fast_reduce_nc's fp32-intermediate stage as a broadcast.
+inline uint32_t __emule_cb_tile_rows(uint32_t cb) {
+    // Block-float tiles (Bfp8_b 1088B / Bfp4_b 576B) are always full 32-row tiles;
+    // their page size doesn't encode rows, so the bf16/fp32 formula under-counts
+    // (17 / 9) and would misclassify them as a thin broadcast. The main add/sub/mul
+    // path decodes block-float via __emule_unpack_cb_tile_to; only the bf16/fp32-only
+    // __emule_eltwise_binary_tile broadcast helper would mis-read them.
+    if (__emule_compute::cb_is_bfp8_b_format(cb) || __emule_compute::cb_is_bfp4_b_format(cb))
+        return 32u;
+    const uint32_t elem = __emule_compute::cb_is_32bit_format(cb) ? 4u : 2u;
+    return __emule_nfaces::tile_rows_from_pagesize(__emule_compute::cb_page_size(cb), elem);
+}
 inline bool __emule_thin_broadcast_b1(uint32_t icb0, uint32_t icb1) {
-    return __emule_compute::cb_page_size(icb1) < __emule_compute::cb_page_size(icb0);
+    return __emule_cb_tile_rows(icb1) < __emule_cb_tile_rows(icb0);
 }
 
 // Tile-shape-aware binary-op helper. The {add,sub,mul}_tiles primitives all
@@ -722,7 +763,10 @@ ALWI void add_tiles(uint32_t icb0, uint32_t icb1,
     float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
     __emule_unpack_cb_tile_to(icb0, itile0, a);
     __emule_unpack_cb_tile_to(icb1, itile1, b);
-    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] + b[i];
+    if (__emule_dest_accum_en)
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] += a[i] + b[i];
+    else
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] + b[i];
 }
 
 ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
@@ -736,7 +780,10 @@ ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
     float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
     __emule_unpack_cb_tile_to(icb0, itile0, a);
     __emule_unpack_cb_tile_to(icb1, itile1, b);
-    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] - b[i];
+    if (__emule_dest_accum_en)
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] += a[i] - b[i];
+    else
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] - b[i];
 }
 
 ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
@@ -750,7 +797,10 @@ ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
     float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
     __emule_unpack_cb_tile_to(icb0, itile0, a);
     __emule_unpack_cb_tile_to(icb1, itile1, b);
-    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] * b[i];
+    if (__emule_dest_accum_en)
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] += a[i] * b[i];
+    else
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] * b[i];
 }
 
 // pack_tile: write DST[idst] → CB[ocb] write slot.

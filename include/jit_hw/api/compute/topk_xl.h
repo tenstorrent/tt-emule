@@ -111,9 +111,9 @@ ALWI void topk_xl_copy_tile(
     using namespace __emule_topk_xl;
     constexpr uint32_t SEQ_TILES = tiles_per_seq_fused<K>();
 
-    // Determine source format from CB page size.
-    const uint32_t page_sz = __emule_compute::cb_page_size(in_cb_id);
-    const bool is_32bit = (page_sz >= 4096);
+    // Source format is enum-driven (cb_is_32bit_format), not page-size-derived:
+    // a small-page int32/uint32 CB or a thin fp32 tile is <4096B yet still 32-bit.
+    const bool is_32bit = __emule_compute::cb_is_32bit_format(in_cb_id);
 
     uint32_t copied = 0;
     for (uint32_t t = 0; t < SEQ_TILES; ++t) {

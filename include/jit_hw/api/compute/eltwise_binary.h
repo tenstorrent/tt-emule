@@ -18,16 +18,17 @@
 namespace ckernel {
 
 // Per-op init stubs.  On real hardware these reconfigure the math/unpack
-// pipelines; in emulation they are no-ops.
+// pipelines; in emulation the only observable effect is the accumulate-into-DST
+// mode (acc_to_dest), which the following *_tiles calls honour (see common.h).
 ALWI void add_tiles_init(uint32_t /*icb0*/ = 0, uint32_t /*icb1*/ = 0,
-                         bool /*acc_to_dest*/ = false) {}
+                         bool acc_to_dest = false) { __emule_dest_accum_en = acc_to_dest; }
 
 ALWI void sub_tiles_init(uint32_t /*icb0*/ = 0, uint32_t /*icb1*/ = 0,
-                         bool /*acc_to_dest*/ = false) {}
+                         bool acc_to_dest = false) { __emule_dest_accum_en = acc_to_dest; }
 
 ALWI void mul_tiles_init(uint32_t /*icb0*/ = 0, uint32_t /*icb1*/ = 0,
-                         bool /*acc_to_dest*/ = false) {}
+                         bool acc_to_dest = false) { __emule_dest_accum_en = acc_to_dest; }
 
-ALWI void mul_tiles_init(uint32_t /*icb0*/, uint32_t /*icb1*/, uint32_t /*acc_to_dest*/) {}
+ALWI void mul_tiles_init(uint32_t /*icb0*/, uint32_t /*icb1*/, uint32_t acc_to_dest) { __emule_dest_accum_en = (acc_to_dest != 0); }
 
 } // namespace ckernel
