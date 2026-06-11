@@ -1,10 +1,10 @@
 ---
-name: stub-checklist
+name: verify-mock
 description: Verification checklist to walk before declaring a tt-emule mock complete. Use after implementing a stub (typically at the end of /implement-mock or /compute-llk-bringup) to catch the recurring failure modes — signature drift, no-op math, missing format dispatch, JIT-cache staleness, regression baseline drift.
 user_invocable: true
 ---
 
-# /stub-checklist — Verify your mock before declaring done
+# /verify-mock — Verify your mock before declaring done
 
 You've implemented a mock for a silicon API in tt-emule. Before
 declaring it complete, walk this checklist. Skipping any step is how

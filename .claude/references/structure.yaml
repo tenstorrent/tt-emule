@@ -1712,4 +1712,30 @@ files:
 - path: include/jit_hw/tt-metalium/experimental/fabric/fabric_edm_types.hpp
   section: include/jit_hw/tt-metalium/experimental/fabric/
   summary: stub of silicon EDM (Ethernet Data Mover) packet types + routing surface (fabric out of scope)
+- path: include/jit_hw/tt_metal/fabric/hw/inc/api_common.h
+  section: include/jit_hw/tt_metal/fabric/hw/inc/
+- path: include/jit_hw/tt_metal/fabric/hw/inc/noc_addr.h
+  section: include/jit_hw/tt_metal/fabric/hw/inc/
+- path: include/jit_hw/tt_metal/fabric/hw/inc/packet_header_pool.h
+  section: include/jit_hw/tt_metal/fabric/hw/inc/
+- path: include/jit_hw/tt_metal/fabric/hw/inc/tt_fabric_api.h
+  section: include/jit_hw/tt_metal/fabric/hw/inc/
+- path: include/jit_hw/tt_metal/fabric/hw/inc/edm_fabric/edm_fabric_utils.hpp
+  section: include/jit_hw/tt_metal/fabric/hw/inc/
+- path: include/jit_hw/tt_metal/fabric/hw/inc/edm_fabric/edm_fabric_worker_adapters.hpp
+  section: include/jit_hw/tt_metal/fabric/hw/inc/
+- path: include/jit_hw/tt_metal/fabric/hw/inc/edm_fabric/fabric_connection_interface.hpp
+  section: include/jit_hw/tt_metal/fabric/hw/inc/
+- path: include/jit_hw/tt_metal/fabric/hw/inc/edm_fabric/fabric_connection_manager.hpp
+  section: include/jit_hw/tt_metal/fabric/hw/inc/
+- path: include/jit_hw/tt_metal/fabric/hw/inc/edm_fabric/fabric_edm_packet_header_validate.hpp
+  section: include/jit_hw/tt_metal/fabric/hw/inc/
+- path: include/jit_hw/tt_metal/fabric/hw/inc/edm_fabric/fabric_stream_regs.hpp
+  section: include/jit_hw/tt_metal/fabric/hw/inc/
+- path: include/jit_hw/tt_metal/fabric/hw/inc/edm_fabric/routing_plane_connection_manager.hpp
+  section: include/jit_hw/tt_metal/fabric/hw/inc/
+- path: include/jit_hw/tt_metal/fabric/hw/inc/linear/api.h
+  section: include/jit_hw/tt_metal/fabric/hw/inc/
+- path: include/jit_hw/tt_metal/fabric/hw/inc/mesh/api.h
+  section: include/jit_hw/tt_metal/fabric/hw/inc/
 

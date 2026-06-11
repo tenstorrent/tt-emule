@@ -47,7 +47,7 @@ faithful mock APIs.
 | Parallelize a sweep of ≥4 similar mocks | `/parallel-mock-implementation` skill |
 | Map HW concept → existing emule strategy | `references/emule-mapping.md` |
 | Where in the pipeline to inject a change | [`docs/api-injection-points.md`](../docs/api-injection-points.md) |
-| Verify a mock is complete | `/stub-checklist` skill |
+| Verify a mock is complete | `/verify-mock` skill |
 | Deep arch question on Wormhole/Blackhole/Quasar | sage agents (launched by arch-lookup) |
 
 ## Skills
@@ -98,7 +98,7 @@ beyond the upstream tt-llk versions.
 
 ## Skills (additional)
 
-- `skills/stub-checklist` — pre-implementation through verification (invoke as `/stub-checklist`)
+- `skills/verify-mock` — pre-implementation through verification (invoke as `/verify-mock`)
 
 ## Quick links to project-level context
 
