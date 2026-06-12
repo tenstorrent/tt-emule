@@ -315,21 +315,23 @@ inline uint32_t get_absolute_logical_x() { return __emule_logical_x; }
 inline uint32_t get_absolute_logical_y() { return __emule_logical_y; }
 #endif
 
-// ---- CB helpers (read/write via shared CBSyncState) ----
+// ---- CB helpers (read/write via the calling thread's per-RISC CB pointer) ----
+// These resolve through __emule_cb_{wr,rd}_addr (jit_hw/internal/emule_cb_ptr.h),
+// the same per-RISC pointer the dataflow get_write_ptr/get_read_ptr use, so the
+// compute pack/unpack path and the dataflow path never diverge (the #139 fix).
 
 namespace __emule_compute {
 
 inline uint8_t* cb_read_ptr_at(uint32_t cb_id, uint32_t tile_offset) {
-    return const_cast<uint8_t*>(
-        tt_emule::cb_sync_read_ptr_at(__emule_cbs[cb_id], tile_offset));
+    return __emule_cb_rd_addr(cb_id, tile_offset);
 }
 
 inline uint8_t* cb_write_ptr(uint32_t cb_id) {
-    return tt_emule::cb_sync_write_ptr(__emule_cbs[cb_id]);
+    return __emule_cb_wr_addr(cb_id);
 }
 
 inline uint8_t* cb_write_ptr_at(uint32_t cb_id, uint32_t tile_offset) {
-    return tt_emule::cb_sync_write_ptr_at(__emule_cbs[cb_id], tile_offset);
+    return __emule_cb_wr_addr(cb_id, tile_offset);
 }
 
 inline uint32_t cb_page_size(uint32_t cb_id) {

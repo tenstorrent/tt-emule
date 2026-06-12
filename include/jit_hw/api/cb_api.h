@@ -10,6 +10,7 @@
 #include "jit_hw/emule_dfb_state.h"
 #include "jit_hw/api/compute/common_globals.h"
 #include "jit_hw/emule_wait.h"
+#include "jit_hw/internal/emule_cb_ptr.h"   // per-RISC CB pointers + cb_addr_shift
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -21,12 +22,7 @@ extern thread_local uint8_t my_y[2];
 extern thread_local uint32_t __emule_logical_x;
 extern thread_local uint32_t __emule_logical_y;
 
-// ---- cb_addr_shift ----
-// Silicon convention: addresses stored in 16-byte units (matches fifo_rd_ptr
-// encoding in LocalCBInterface). the cb_reconfig kernel reads
-// cb_config[] entries and right-shifts by this constant to get the encoded
-// pointer form.
-inline constexpr uint32_t cb_addr_shift = 4;
+// cb_addr_shift (16-byte fifo-pointer encoding) is defined in emule_cb_ptr.h.
 
 // ---- Constexpr tile metadata arrays (populated by JIT defines) ----
 // EMULE_TILE_SIZES is defined by the JIT compiler as a comma-separated list of
@@ -80,6 +76,13 @@ constexpr uint8_t unpack_num_faces_c_dim[32] = {
     2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
 };
 
+// ---- Per-RISC CB pointers ----
+// The per-thread read/write pointers (the single source of truth that fixes the
+// #139 race) live in jit_hw/internal/emule_cb_ptr.h (__emule_local_cb). This
+// file's cb_push_back/cb_pop_front advance them via __emule_cb_advance_wr/rd and
+// get_write_ptr/get_read_ptr read them via __emule_cb_wr_addr/__emule_cb_rd_addr.
+// CBSyncState here owns only the shared occupied semaphore.
+
 // ---- Circular Buffer sync operations ----
 
 // CB timeout: large matmuls (e.g. 2048x2048x2048 f32) can keep a thread busy
@@ -123,6 +126,9 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
 }
 
 inline void cb_push_back(uint32_t cb_id, uint32_t n) {
+    // Advance this thread's own write pointer (mirrors the per-RISC write ptr on
+    // silicon), then bump the shared occupied semaphore.
+    __emule_cb_advance_wr(cb_id, n);
     tt_emule::cb_sync_push(__emule_cbs[cb_id], n);
     // Bridge CB→DFB: update tile counters so DM's dfb_wait_front sees compute's output.
     // cb.mu already released; now safe to acquire tc.mu (consistent lock ordering).
@@ -174,6 +180,9 @@ inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
 }
 
 inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
+    // Advance this thread's own read pointer (mirrors the per-RISC read ptr on
+    // silicon), then drop the shared occupied semaphore.
+    __emule_cb_advance_rd(cb_id, n);
     tt_emule::cb_sync_pop(__emule_cbs[cb_id], n);
     // Bridge CB→DFB: update tile counter acked so DM's dfb_reserve_back sees freed space.
     if (__emule_dfbs && __emule_tc_array && __emule_dfbs[cb_id].active) {
@@ -197,14 +206,15 @@ inline void cb_pop_front(uint32_t cb_id, int32_t n)    { cb_pop_front(cb_id, sta
 // ---- Pointer accessors ----
 
 // Return uint32_t (truncated host pointer). CB memory is mmap'd below 4 GB.
+// Reads the calling thread's own per-RISC write/read pointer (emule_cb_ptr.h),
+// so concurrent reader and writer threads each see their own view — matching
+// silicon's per-RISC write/read pointer registers (the #139 fix).
 inline uint32_t get_write_ptr(uint32_t cb_id) {
-    uint8_t* ptr = tt_emule::cb_sync_write_ptr(__emule_cbs[cb_id]);
-    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr));
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_cb_wr_addr(cb_id)));
 }
 
 inline uint32_t get_read_ptr(uint32_t cb_id) {
-    uint8_t* ptr = tt_emule::cb_sync_read_ptr(__emule_cbs[cb_id]);
-    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr));
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_cb_rd_addr(cb_id)));
 }
 
 // get_tile_size — return page size (bytes) for a CB.
