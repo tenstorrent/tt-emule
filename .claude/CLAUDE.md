@@ -22,6 +22,14 @@ faithful mock APIs.
   canonical silicon implementation**. Don't create parallel or
   different code paths to work around bugs — if it works in silicon,
   the mock must be functional and correct against it.
+- Be **skeptical of automated PR review comments** (e.g. GitHub
+  Copilot's reviewer). Judge each suggestion against these rules
+  before acting — don't apply it reflexively. Decline, with a reasoned
+  reply that cites the code, when a suggestion would add a defensive
+  or divergent code path, mask a caller bug instead of surfacing it,
+  or otherwise contradict the faithful-to-silicon / single-code-path
+  rules above. Prefer a no-op `ASSERT` that documents a contract over
+  a silent clamp.
 - The authoritative `src/` + `include/` file/symbol index lives at
   `references/structure.yaml` (replaces `STRUCTURE.md`). Query with
   `scripts/find_symbol.py <name>` (flags: `--kind`, `--path-prefix`,
