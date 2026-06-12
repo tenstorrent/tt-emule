@@ -25,14 +25,14 @@ inline void pack_untilize_init(uint32_t cb_out = 0) {}
 inline void pack_untilize_init_short(uint32_t cb_out = 0) {}
 inline void pack_untilize_uninit(uint32_t cb_out = 0) {}
 
-// D2M emits pack_untilize_init<cols_per_dst_pass, total_col_tiles>(icb, ocb)
-template <uint32_t cols_per_dst_pass, uint32_t total_col_tiles>
-inline void pack_untilize_init(uint32_t /*icb*/, uint32_t /*ocb*/) {}
-
-// Single-template-arg variant used by sparse_gather_streaming.
-// Matches upstream pack_untilize.h:150's default form where total_col_tiles
-// defaults to cols_per_dst_pass.
-template <uint32_t block_ct_dim>
+// Upstream signature (tt_metal/hw/inc/api/compute/pack_untilize.h:164) is a
+// single template with BOTH params defaulted (full_ct_dim defaults to
+// block_ct_dim), so one overload covers every call form:
+//   pack_untilize_init<A,B>(icb, ocb)  — D2M-generated kernels
+//   pack_untilize_init<A>(icb, ocb)    — sparse_gather_streaming
+//   pack_untilize_init(icb, ocb)       — convert_to_hwc (bare, both default)
+// emule models init as a no-op (no UNPACK/MATH/PACK pipeline state).
+template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim>
 inline void pack_untilize_init(uint32_t /*icb*/, uint32_t /*ocb*/) {}
 
 // Skip-BH-DEST-remap variant — emule has no DEST remap state, so this is the

@@ -137,6 +137,19 @@ each other:
 supplied lower-32 (or use the explicit `src_noc_addr` arg directly for the
 plain one-packet `_with_state`), then route through the resolver.
 
+The **device-2.0 `class Noc`** exposes the same pattern via its
+`set_async_read_state`/`async_read_with_state` and
+`set_async_write_state`/`async_write_with_state` methods, backed by
+`__emule_noc_cached_size[NUM_NOCS]` (transfer size — shared by the read- and
+write-state pairs) and `__emule_noc_cached_write_dst[NUM_NOCS]` (resolved write
+destination). These are deliberately per-NOC **globals**, not `Noc` instance
+members: the upstream wrapper helpers (`experimental::set_read_state` /
+`read_with_state` in `experimental_device_api.hpp`) take `Noc` **by value**, so
+state stored on the instance set in `set_state` would be lost before the paired
+`with_state` reads it. Modeling it as global per-NOC state mirrors silicon,
+where this lives in per-NOC cmd-buf registers that outlive any `Noc` handle
+copy.
+
 ### 3.4 TRID variants
 
 `*_with_trid` is silicon's per-transaction tag for fine-grained barrier
@@ -339,6 +352,8 @@ Per-NOC TLS / globals in emule today:
 | `__emule_write_one_packet_state_dst` | `uint64_t[2]` | `noc & 1` | `noc_async_write_one_packet_{set,with}_state` |
 | `__emule_write_one_packet_state_size` | `uint32_t[2]` | `noc & 1` | same |
 | `__emule_dw_st` | `__emule_dw_state[2]` | `noc & 1` | `noc_inline_dw_write_{set,with}_state` |
+| `__emule_noc_cached_size` | `uint32_t[NUM_NOCS]` | `noc_id_` | `Noc::{set_async_read_state, async_read_with_state, set_async_write_state, async_write_with_state}` transfer size |
+| `__emule_noc_cached_write_dst` | `uintptr_t[NUM_NOCS]` | `noc_id_` | `Noc::{set_async_write_state, async_write_with_state}` resolved dst |
 
 Outstanding single-shared state that should eventually be per-NOC:
 
