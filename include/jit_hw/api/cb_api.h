@@ -60,15 +60,29 @@ constexpr uint8_t pack_dst_format[32] = {
 constexpr uint8_t unpack_dst_format[32] = {};  // DST-side (fp32) stub
 constexpr uint8_t pack_src_format[32]   = {};  // DST-side (fp32) stub
 
-// Standard 32×32 tiles: 2 faces in each dimension
+// Per-CB tile height/width (elements). Populated by the JIT compiler from each
+// CB's host-side Tile spec (CircularBufferConfig::tiles()[idx]->get_height()/
+// get_width()) via the EMULE_TILE_R_DIM / EMULE_TILE_C_DIM defines — the analog
+// of EMULE_TILE_SIZES. Thin tiles (e.g. Tile([1,16])) report their true active
+// region so reduce_tile bounds its iteration instead of assuming 32×32. The
+// fallback below is the standard full 32×32 tile (used by the standalone JIT
+// path, which doesn't emit these defines).
+#ifdef EMULE_TILE_R_DIM
+constexpr uint8_t unpack_tile_r_dim[32] = { EMULE_TILE_R_DIM };
+#else
 constexpr uint8_t unpack_tile_r_dim[32] = {
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
 };
+#endif
+#ifdef EMULE_TILE_C_DIM
+constexpr uint8_t unpack_tile_c_dim[32] = { EMULE_TILE_C_DIM };
+#else
 constexpr uint8_t unpack_tile_c_dim[32] = {
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
 };
+#endif
 constexpr uint8_t unpack_num_faces_r_dim[32] = {
     2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
 };
@@ -227,6 +241,15 @@ constexpr inline uint32_t get_tile_size(uint32_t cb_id) {
 constexpr inline uint32_t get_tile_hw(uint32_t cb_id) {
     return static_cast<uint32_t>(unpack_tile_r_dim[cb_id]) *
            static_cast<uint32_t>(unpack_tile_c_dim[cb_id]);
+}
+
+// get_tile_r_dim / get_tile_c_dim — return the CB tile's active height / width
+// (rows / columns, in elements). 32 for a full tile; smaller for thin tiles.
+constexpr inline uint32_t get_tile_r_dim(uint32_t cb_id) {
+    return static_cast<uint32_t>(unpack_tile_r_dim[cb_id]);
+}
+constexpr inline uint32_t get_tile_c_dim(uint32_t cb_id) {
+    return static_cast<uint32_t>(unpack_tile_c_dim[cb_id]);
 }
 
 // get_tile_num_faces — return number of faces per tile.
