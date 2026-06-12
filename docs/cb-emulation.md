@@ -75,13 +75,6 @@ silicon's `LocalCBInterface` register file. `__emule_cb_{wr,rd}_addr(cb, off)` a
 `CBSyncState`). `thread_local` zero-initialises per launch, mirroring silicon's
 per-RISC register reset at kernel start.
 
-This is the fix for **issue #139**: when the read/write indices lived in the
-shared `CBSyncState`, the row-major sharded pad path had the reader and writer
-both call `get_write_ptr()` on the output-shard CB at startup, and the writer's
-`cb_push_back` advanced the shared index before the reader read it → wrong shard
-base → corrupted output. Per-RISC pointers + a shared `occupied` semaphore is the
-same split silicon uses, and it removes the race.
-
 ---
 
 ## 3. Kernel-facing API
