@@ -133,7 +133,7 @@ Fix principles:
   headers that reference the renamed symbols) so nothing dangles. Leave genuinely
   independent/older surfaces (e.g. a separate `experimental/` API with its own
   self-contained definitions) alone.
-- Keep `STRUCTURE.md` in sync when symbols are added/removed.
+- Keep `.claude/references/structure.yaml` in sync when symbols are added/removed.
 
 ## Step 5 — Wire the fix through the repo chain
 
@@ -204,7 +204,7 @@ A fix can span tt-umd → tt-metal → tt-emule. Order and push mechanics matter
 - `/compute-llk-bringup` — for a single missing compute `<op>_tile` shim (the
   common Class-B fix when the drift is one op).
 - `/memory-debug` — for data-corruption residuals (Class-C, op math).
-- `references/api-injection-points.md` — where emule intercepts the pipeline
+- `docs/api-injection-points.md` — where emule intercepts the pipeline
   (helps choose the "right layer" in Step 4A).
 - `references/emule-mapping.md` — HW concept → emule strategy vocabulary.
 - `BUILD_GUIDE.md` — build/test setup, the targets to build for an oracle, and the

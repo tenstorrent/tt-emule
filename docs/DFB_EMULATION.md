@@ -436,7 +436,7 @@ The standalone path (via `DataflowBuffer` and `TileCounterArray`) uses `wait` wi
 
 Hardware `finish()` has two behaviors: DM waits for `posted == acked` (drain), while TRISC waits for `posted == 0` (all slots empty from the start). The emulation implements the DM variant only.
 
-**TODO: No test exercises TRISC `finish()` in isolation.** See `docs/TEST_COVERAGE_TODO.md`.
+**TODO: No test exercises TRISC `finish()` in isolation.**
 
 ### 8.2 `BindDataflowBufferToProducerConsumerKernels` not wired in standalone path
 
@@ -454,7 +454,7 @@ The 4 MB L1 is shared between all 12 cores in a Neo (8 DM processors + 4 compute
 
 The JIT path (`dfb_api.h`) wraps all blocking waits with `wait_for` and a configurable timeout (default 120s, `TT_EMULE_DFB_TIMEOUT`). The standalone path (`DataflowBuffer` via `TileCounterArray`) uses `wait` without any timeout, so hung standalone tests block indefinitely.
 
-**TODO: No test exercises standalone path timeout behavior.** See `docs/TEST_COVERAGE_TODO.md`.
+**TODO: No test exercises standalone path timeout behavior.**
 
 ---
 

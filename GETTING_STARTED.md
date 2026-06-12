@@ -75,7 +75,9 @@ bash scripts/run_regression_blackhole.sh
 bash scripts/run_regression_quasar.sh
 ```
 
-Baseline: wormhole **30/9**, blackhole **19/0**, quasar **105/9** — failures match `.github/known-failures-{arch}.txt`.
+Baseline (passed/failed): wormhole **~30/0**, blackhole **~19/0**, quasar **~105/9**.
+Wormhole and Blackhole are zero-tolerance (no allowlist — any failure is a
+regression); Quasar's failures must match `.github/known-failures-quasar.txt`.
 
 Quick sanity check that ttnn pytest works against the same build (no second toolchain needed):
 

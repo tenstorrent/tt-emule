@@ -143,7 +143,7 @@ All compute ops that read from CBs (`copy_tile`, `add_tiles`, `sub_tiles`, `mul_
 
 **Test evidence:** `test_matmul_X_tile.cpp:TensixMatmulBlock, TensixMatmulBlockInitShort` — nfaces layout conversion is required for matmul PCC to pass with non-trivial input data.
 
-**TODO: No dedicated UNPACK-only test exists.** See `docs/TEST_COVERAGE_TODO.md`.
+**TODO: No dedicated UNPACK-only test exists.**
 
 ### 5.3 PACK Engine (DST → L1)
 
@@ -263,7 +263,7 @@ The 11 failures are all in DFB tests that depend on follow-up fixes not yet merg
 - **Tier 3b STRIDED wraparound (4):** `DMTest1xDFB4Sx4S`, `DMTest1xDFB4Sx4S_IS`, `DMTest1xDFB2Sx4S`, `DMTest1xDFB2Sx4S_IS`
 - **Tier 3g DFB Config Validation (7):** `DMTest1xDFB1Sx4SConfig`, `DMTensixTest1xDFB4Sx1SConfig`, `DMTest1xDFB4Sx1SConfig`, `DMTest1xDFB4Sx4SConfig`, `DMTest1xDFB2Sx4SConfig`, `DMTest1xDFB4Sx2SConfig`, `DMTest1xDFB1Sx1BConfig`
 
-See `IMPLEMENTATION_REPORT.md` § "Changes from v11 to v12" for context — these failures will resolve once the wraparound + DFB-config fixes upstream and the base pointer is bumped.
+These failures will resolve once the wraparound + DFB-config fixes upstream and the base pointer is bumped.
 
 ---
 

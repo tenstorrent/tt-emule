@@ -21,3 +21,12 @@ MeshDeviceFixture.DMTest1xDFB2Sx4SConfig
 MeshDeviceFixture.DMTest1xDFB4Sx1SConfig
 MeshDeviceFixture.DMTest1xDFB4Sx2SConfig
 MeshDeviceFixture.DMTest1xDFB4Sx4SConfig
+
+# Quasar matmul block tests use DataflowBuffers, but `build_kernel_defines`
+# in tt-metal's emulated_program_runner.cpp only emits EMULE_CB_DATA_FORMATS
+# from `circular_buffers_on_core` — DFB slots stay `Invalid`. With the
+# page-size heuristic gone (PR #140), `pack_tile` falls into the bf16 branch
+# when fp32_dest_acc_en=true, corrupting output. Unblock by extending the
+# runner to also emit DFB formats.
+MeshDispatchFixture.TensixMatmulBlock
+MeshDispatchFixture.TensixMatmulBlockInitShort

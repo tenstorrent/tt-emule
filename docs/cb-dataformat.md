@@ -35,33 +35,36 @@ emule reproduces the *same compile-time mechanism* (not a runtime field):
 | kernel: `constexpr unpack_src_format[32]` | `include/jit_hw/api/cb_api.h`: `constexpr uint8_t unpack_src_format[32] = { EMULE_CB_DATA_FORMATS }` (and `pack_dst_format[32]`) |
 | `get_dataformat(op) = unpack_src_format[op]` | `cb_api.h::get_dataformat(cb)` returns `unpack_src_format[cb]` |
 
-`255` (`tt::DataFormat::Invalid`) marks unconfigured CB slots — mirroring the host's
-`std::optional<DataFormat>` empty state. For an `Invalid` slot (e.g. DFB bridges, or the
-host-only tilize unit test that does not emit the define) emule falls back to the legacy
-`page_size` heuristic, so nothing regresses.
+`255` (`tt::DataFormat::Invalid`) marks unconfigured slots — the host's
+`std::optional<DataFormat>` empty state. Every integrated build populates a real format for
+each active CB; `Invalid` should never reach a running kernel. DFB-only programs that haven't
+threaded format yet (Quasar matmul tests `QuasarMatmulBlock` / `QuasarMatmulBlockInitShort`)
+are tracked as known failures until the runner-side DFB format emission lands.
 
-## Why a format (not just page_size) is needed
+## Never use page_size as a format proxy
 
-emule's pack/unpack in `include/jit_hw/api/compute/common.h` historically inferred format
-from `page_size` alone:
+`page_size` cannot identify a CB's data format. Every dispatch in
+`include/jit_hw/api/compute/common.h` (`cb_is_32bit_format`, `cb_is_bfp8_b_format`,
+`cb_is_bfp4_b_format`, `cb_is_uint16_format`) reads `unpack_src_format[cb]` directly — **there
+is no `page_size > 2048` (or similar) fallback**. Adding one back would silently corrupt:
 
-- `page_size > 2048` → 32-bit (Float32 / Int32 / UInt32)
-- `0 < page_size < 2048` → `Bfp8_b` (1088 B)
-- `page_size == 2048` → 16-bit
+- `page_size == 2048` collides on `bf16` *and* `UInt16` — a `UInt16` comparison result
+  (integer `0`/`1`) ran through `bf16::from_f32` was the root cause of issue #75 before the
+  enum-driven dispatch landed.
+- `page_size < 2048` collides on `Bfp8_b` (~1088 B) *and* `Bfp4_b` (~576 B) — both
+  block-float with totally different decoders.
+- `page_size > 2048` covers `Float32`, `Int32`, `UInt32`, `Tf32`, `RawUInt32`, plus thin-tile
+  variants whose page sizes drift below the bucket boundary.
 
-The `page_size == 2048` bucket is **ambiguous**: `bf16` and `UInt16` are both 2048 B. With
-only page_size, a `UInt16` comparison result (integer `0`/`1`) was run through
-`bf16::from_f32` and corrupted (issue #75: comparison ops with `uint16` output). The real
-per-CB format resolves exactly that ambiguity:
+The rule, in one line: **the `EMULE_CB_DATA_FORMATS` enum is the only source of truth.** If
+a new format-aware path is needed, extend `cb_is_*_format` predicates against the enum; do
+not introduce a page-size shortcut.
 
-- `pack_dst_to_buf(buf, dst, ocb)`: if `cb_is_uint16_format(ocb)` → write the low 16 bits of
-  the DST int32 bit pattern (no float conversion); else bf16. (Packer uses the **output** CB
-  format — `pack_dst_format`.)
-- `__emule_unpack_cb_tile_to(icb, …)`: if `cb_is_uint16_format(icb)` → widen each `uint16` →
-  `int32` bit pattern into the fp32 DST slot; else bf16. (Unpacker uses the **input** CB
-  format — `unpack_src_format`.)
+Concrete dispatch sites today:
 
-The unambiguous 32-bit / `Bfp8_b` buckets stay on the reliable `page_size` dispatch.
+- `pack_dst_to_buf(buf, dst, ocb)`: format read from the **output** CB's `pack_dst_format`.
+- `__emule_unpack_cb_tile_to(icb, …)`: format read from the **input** CB's
+  `unpack_src_format`.
 
 ## Silicon ↔ emule mapping
 
@@ -70,7 +73,7 @@ The unambiguous 32-bit / `Bfp8_b` buckets stay on the reliable `page_size` dispa
 | Format source | compile-time `unpack_src_format[]`/`pack_dst_format[]` in `chlkc_descriptors.h` | compile-time arrays in `cb_api.h` from `EMULE_CB_DATA_FORMATS` |
 | Where set | host `CircularBufferConfig` → genfiles | host `cb_impl->data_format(idx)` → runner define |
 | In L1 CB config? | no | no |
-| Unset slot | `std::optional` empty | `255` = `Invalid` (page_size fallback) |
+| Unset slot | `std::optional` empty | `255` = `Invalid` (should never appear in integrated builds) |
 
 ## Verification
 
@@ -78,4 +81,4 @@ The unambiguous 32-bit / `Bfp8_b` buckets stay on the reliable `page_size` dispa
 with `uint16`/`uint32` output) goes fully green; `test_relational` / `test_binary_comp_fp32` /
 `test_unary` comparison and the sharded `col_major` bcast pass, on both WH (N150) and BH
 (P100). No regression on the other format-dispatch consumers (matmul / reduce / tilize /
-Bfp8) — those remain on the page_size path for the unambiguous buckets.
+Bfp8).
