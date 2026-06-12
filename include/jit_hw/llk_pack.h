@@ -194,3 +194,29 @@ inline void llk_pack_init(uint32_t /*ocb*/) {}
 
 // Pack-side dest sync stubs.
 // llk_packer_wait_for_math_done lives in llk_sync_stubs.h.
+
+// ---- llk_pack_rows_* : kernel-author API `pack_rows_to_addr` (idst,l1_addr)
+// silicon writes DST rows directly to an absolute L1 address. Emule shadow:
+// translate l1_addr to a host ptr via __emule_local_l1_to_ptr and bf16-pack
+// DST row-major bytes to that address. `num_rows` (passed to _init) selects
+// how many top rows of the DST tile are valid.
+static thread_local uint32_t __emule_pack_rows_num = 32;
+inline void llk_pack_rows_init(uint32_t num_rows) {
+    // Silicon packs the top 0..32 rows of the DST tile; the pack loop below is
+    // already bounded by __EMULE_TILE_ELEMS. Document the contract (no-op
+    // ASSERT in JIT mode) rather than silently clamping a caller bug.
+    ASSERT(num_rows <= 32);
+    __emule_pack_rows_num = num_rows;
+}
+inline void llk_pack_rows_uninit() { __emule_pack_rows_num = 32; }
+inline void _llk_pack_rows_(uint32_t idst, uint32_t l1_addr) {
+    // bf16 default output. Layer-1 shadow: write `num_rows × 32` bf16 elements
+    // from DST row-major into the target L1 region.
+    __emule_dst_check(idst, "_llk_pack_rows_");
+    uint8_t* dst_ptr = __emule_local_l1_to_ptr(l1_addr);
+    uint16_t* bf = reinterpret_cast<uint16_t*>(dst_ptr);
+    const uint32_t n = __emule_pack_rows_num * 32u;
+    for (uint32_t i = 0; i < n && i < __EMULE_TILE_ELEMS; ++i) {
+        bf[i] = __emule_bf16::from_f32(__emule_apply_pack_relu(__emule_dst[idst][i]));
+    }
+}
