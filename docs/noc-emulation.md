@@ -127,9 +127,8 @@ The channel is resolved from the core's **UMD LOGICAL coordinate** (`x =
 channel`), consistently on both sides: the host path
 (`SWEmuleChip::write_to_device` → `get_dram_channel_for_core`) and the kernel
 core-map build (`emulated_program_runner.cpp`, translating each preferred-worker
-coord TRANSLATED→LOGICAL). Keying by the metal dram-view index instead would
-split one physical channel across several mmaps, so a host / NOC 0 write and a
-NOC 1 read would land on different memory. Implementation:
+coord TRANSLATED→LOGICAL) — keyed by physical channel (not the metal view
+index) so every view of a channel shares one backing. Implementation:
 `SWEmuleChip::get_dram_channel_backing(channel)` in `device/chip/sw_emule_chip.cpp`
 (umd); the per-NOC bank tables that feed kernel-side DRAM resolution are
 described in §8.3.
@@ -143,11 +142,11 @@ described in §8.3.
 ```cpp
 template <uint32_t max_page_size, bool enable_noc_tracing = true>
 void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
-                    uint32_t size, uint8_t noc = 0, uint32_t vc = NOC_UNICAST_WRITE_VC);
+                    uint32_t size, uint8_t noc = noc_index, uint32_t vc = NOC_UNICAST_WRITE_VC);
 
 template <uint32_t max_page_size, bool enable_noc_tracing = true, bool posted = false>
 void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
-                     uint32_t size, uint8_t noc = 0, uint32_t vc = NOC_UNICAST_WRITE_VC);
+                     uint32_t size, uint8_t noc = noc_index, uint32_t vc = NOC_UNICAST_WRITE_VC);
 ```
 
 Both resolve the noc address via `__emule_resolve_noc_addr`, then `memcpy(size)`.
@@ -225,12 +224,12 @@ receive the packet too (silicon's `NOC_CMD_BRCST_SRC_INCLUDE` flag).
 template <uint32_t max_page_size = NOC_MAX_BURST_SIZE + 1>
 void noc_async_write_multicast(uint32_t src, uint64_t dst, uint32_t size,
                                uint32_t num_dests, bool linked = false,
-                               uint8_t noc = 0, uint8_t vc = NOC_MULTICAST_WRITE_VC);
+                               uint8_t noc = noc_index, uint8_t vc = NOC_MULTICAST_WRITE_VC);
 // include_self = false
 
 void noc_async_write_multicast_loopback_src(uint32_t src, uint64_t dst,
                                             uint32_t size, uint32_t num_dests,
-                                            bool linked = false, uint8_t noc = 0);
+                                            bool linked = false, uint8_t noc = noc_index);
 // include_self = true (silicon: NOC_CMD_BRCST_SRC_INCLUDE)
 
 template <bool enable_noc_tracing = true>
@@ -364,8 +363,8 @@ kernel.
 | Symbol | Defined in | Used by |
 |---|---|---|
 | `__emule_resolve_noc_addr` | `emulated_program_runner.cpp` | Every read/write that needs core-map lookup |
-| `__emule_local_l1_ptr` | `emulated_program_runner.cpp` | `AllocatorBank<L1>` (legacy direct path; now goes through resolver) |
-| `__emule_dram_ptr` | `emulated_program_runner.cpp` | (legacy DRAM single-bank path; now unused since bank-aware path lands) |
+| `__emule_local_l1_ptr` | `emulated_program_runner.cpp` | local-core L1 fast path (not on the resolver path) |
+| `__emule_dram_ptr` | `emulated_program_runner.cpp` | DRAM-offset fast path (not on the resolver path) |
 | `__emule_multicast_write` | `emulated_program_runner.cpp` | Every multicast write / semaphore set_multicast |
 
 ### 8.2 Thread-local state
@@ -413,18 +412,16 @@ Per-NOC TLS / globals in emule today:
 `constexpr uint8_t noc_index = NOC_INDEX; noc_mode = NOC_MODE;` in
 `jit_kernel_stubs.hpp`, mirroring the firmware `dataflow_api_common.h`
 `KERNEL_BUILD` formula. The host emits `NOC_INDEX` / `NOC_MODE` per kernel
-(BRISC→NOC 0, NCRISC→NOC 1; `DM_DEDICATED_NOC` default), and emule's `#ifndef`
+(BRISC→NOC 0, NCRISC→NOC 1; `DM_DEDICATED_NOC` default); emule's `#ifndef`
 fallbacks (`NOC_INDEX→0`, `NOC_MODE→DM_DEDICATED_NOC`) cover the compute
-wrappers that omit them. Neither is hardcoded to 0 — an earlier `noc_index = 0`
-hardcode masked the bank-table bug below.
+wrappers that omit them. The dataflow API signatures default `noc = noc_index`
+(mirroring silicon), so a call that omits the arg uses the kernel's own NOC.
 
 The per-NOC bank tables (`dram_bank_to_noc_xy` / `l1_bank_to_noc_xy`) are
-declared `extern [2][NUM_*_BANKS]` on the kernel side and must be laid out by the
-runner with the **actual-count stride** (`tbl[noc*num_banks + bank]`, where
-`num_banks` is the real per-arch count, not a padded `MAX_NUM_BANKS`). Row 0
-(`noc=0`) sits at offset 0 in any layout, so a stride mismatch only corrupts the
-`noc=1` row — every NCRISC bank access then reads stale coords, resolving to the
-wrong core/backing.
+declared `extern [2][NUM_*_BANKS]` on the kernel side; the runner lays them out
+with the matching **actual-count stride** (`tbl[noc*num_banks + bank]`, where
+`num_banks` is the real per-arch count, not a padded `MAX_NUM_BANKS`) so the
+`noc=1` row resolves to the right per-NOC coords.
 
 ---
 
@@ -455,23 +452,16 @@ These are NOT drift — emule deliberately collapses them:
 
 ---
 
-## 10. Known drift / follow-ups
+## 10. Known drift
 
-Drift the audit chose to defer. Each is documented in a follow-up issue;
-none affect correctness for the current single-chip, non-eth-fabric,
-TENSIX-only emule scope.
+Divergences from silicon that don't affect correctness for the current
+single-chip, non-eth-fabric, TENSIX-only emule scope:
 
-- API signature defaults use `noc = 0` where silicon defaults to `noc = noc_index`.
-  With faithful `noc_index`, a NCRISC kernel that omits the arg selects NOC 1 on
-  silicon vs NOC 0 in emule — but both resolve to the same backing (per-channel
-  DRAM aliasing; `my_x[1]==my_x[0]`), so results are unchanged.
 - `ProgrammableCoreType` per-core-type L1 base selection (eth-fabric not
   modeled in emule).
 - `Noc::inline_dw_write` `INLINE_REG` stream-register dispatch.
 - `noc_traits_t<UnicastEndpoint>::src/dst_addr<LOCAL_L1>` does a resolve+truncate
   through L1Pool's mask (same final pointer either way).
-
-See the linked follow-up issue for full triage and severity ratings.
 
 ---
 

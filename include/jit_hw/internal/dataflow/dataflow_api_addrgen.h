@@ -112,7 +112,7 @@ inline uint32_t get_bank_index(uint32_t id, uint32_t bank_offset_index) {
 }
 
 template <bool DRAM>
-inline uint32_t get_noc_xy(uint32_t bank_index, uint8_t noc = 0) {
+inline uint32_t get_noc_xy(uint32_t bank_index, uint8_t noc = noc_index) {
     if constexpr (DRAM) {
         return dram_bank_to_noc_xy[noc][bank_index];
     } else {
@@ -176,7 +176,7 @@ struct InterleavedAddrGen {
                interleaved_addr_gen::get_bank_offset<DRAM>(bank_index);
     }
 
-    inline uint64_t get_noc_addr(const uint32_t id, const uint32_t offset = 0, uint8_t noc = 0) const {
+    inline uint64_t get_noc_addr(const uint32_t id, const uint32_t offset = 0, uint8_t noc = noc_index) const {
         uint32_t bank_offset_index = interleaved_addr_gen::get_bank_offset_index<DRAM>(id);
         uint32_t bank_index = interleaved_addr_gen::get_bank_index<DRAM>(id, bank_offset_index);
         uint32_t addr = this->get_addr(id, bank_offset_index, bank_index, offset);
@@ -192,7 +192,7 @@ struct InterleavedPow2AddrGen {
     const uint32_t bank_base_address;
     const uint32_t log_base_2_of_page_size;
 
-    inline uint64_t get_noc_addr(const uint32_t id, const uint32_t offset = 0, uint8_t noc = 0) const {
+    inline uint64_t get_noc_addr(const uint32_t id, const uint32_t offset = 0, uint8_t noc = noc_index) const {
         uint32_t bank_offset_index = interleaved_addr_gen::get_bank_offset_index<DRAM>(id);
         uint32_t bank_index = interleaved_addr_gen::get_bank_index<DRAM>(id, bank_offset_index);
         uint32_t page_size = 1u << log_base_2_of_page_size;
@@ -215,7 +215,7 @@ struct InterleavedPow2AddrGenFast {
     uint32_t bank_base_address;
     const uint32_t log_base_2_of_page_size;
 
-    inline uint64_t get_noc_addr(const uint32_t id, const uint32_t offset = 0, uint8_t noc = 0) const {
+    inline uint64_t get_noc_addr(const uint32_t id, const uint32_t offset = 0, uint8_t noc = noc_index) const {
         uint32_t bank_offset_index = interleaved_addr_gen::get_bank_offset_index<DRAM>(id);
         uint32_t bank_index = interleaved_addr_gen::get_bank_index<DRAM>(id, bank_offset_index);
         uint32_t page_size = 1u << log_base_2_of_page_size;
@@ -235,7 +235,7 @@ struct InterleavedAddrGenFast {
     uint32_t page_size;
     DataFormat data_format;  // unused in emulation; matches upstream tag for kernel-side .data_format = get_dataformat(...) initializers
 
-    inline uint64_t get_noc_addr(const uint32_t id, const uint32_t offset = 0, uint8_t noc = 0) const {
+    inline uint64_t get_noc_addr(const uint32_t id, const uint32_t offset = 0, uint8_t noc = noc_index) const {
         uint32_t bank_offset_index = interleaved_addr_gen::get_bank_offset_index<DRAM>(id);
         uint32_t bank_index = interleaved_addr_gen::get_bank_index<DRAM>(id, bank_offset_index);
         uint32_t aligned = align_power_of_2(page_size, interleaved_addr_gen::get_allocator_alignment<DRAM>());

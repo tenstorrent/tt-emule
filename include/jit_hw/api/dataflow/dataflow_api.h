@@ -160,7 +160,7 @@ inline uint32_t get_absolute_logical_y() { return __emule_logical_y; }
 // ---- NOC address encoding (matches real firmware) ----
 // Unicast: y in bits [47:42], x in bits [41:36], addr in bits [35:0]
 // NOC_XY_ADDR(x, y, addr) = (y << 42) | (x << 36) | addr
-inline uint64_t get_noc_addr(uint32_t noc_x, uint32_t noc_y, uint32_t addr, uint8_t noc = 0) {
+inline uint64_t get_noc_addr(uint32_t noc_x, uint32_t noc_y, uint32_t addr, uint8_t noc = noc_index) {
     uint32_t l1_off = __emule_addr_to_offset(addr);
     return (uint64_t(noc_y & 0x3F) << (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) |
            (uint64_t(noc_x & 0x3F) << NOC_ADDR_LOCAL_BITS) |
@@ -168,7 +168,7 @@ inline uint64_t get_noc_addr(uint32_t noc_x, uint32_t noc_y, uint32_t addr, uint
 }
 
 // Overload: get NOC address for local core's L1 address
-inline uint64_t get_noc_addr(uint32_t addr, uint8_t noc = 0) {
+inline uint64_t get_noc_addr(uint32_t addr, uint8_t noc = noc_index) {
     return get_noc_addr(my_x[noc], my_y[noc], addr, noc);
 }
 
@@ -177,7 +177,7 @@ inline uint64_t get_noc_addr(uint32_t addr, uint8_t noc = 0) {
 inline uint64_t get_noc_multicast_addr(
     uint32_t x_start, uint32_t y_start,
     uint32_t x_end, uint32_t y_end,
-    uint32_t addr, uint8_t noc = 0) {
+    uint32_t addr, uint8_t noc = noc_index) {
     uint32_t l1_off = __emule_addr_to_offset(addr);
     return (uint64_t(x_start & 0x3F) << (NOC_ADDR_LOCAL_BITS + 2 * NOC_ADDR_NODE_ID_BITS)) |
            (uint64_t(y_start & 0x3F) << (NOC_ADDR_LOCAL_BITS + 3 * NOC_ADDR_NODE_ID_BITS)) |
@@ -201,7 +201,7 @@ inline constexpr bool has_get_noc_addr_v<
 template <typename AddrGen,
           typename = std::enable_if_t<has_get_noc_addr_v<AddrGen>>>
 inline uint64_t get_noc_addr(uint32_t page_id, const AddrGen& accessor,
-                             uint32_t offset = 0, uint8_t noc = 0) {
+                             uint32_t offset = 0, uint8_t noc = noc_index) {
     return accessor.get_noc_addr(page_id, offset, noc);
 }
 
@@ -231,7 +231,7 @@ template<typename AddrGen>
 FORCE_INLINE void noc_async_read_page(
         uint32_t id, const AddrGen& addrgen,
         uint32_t dst_local_l1_addr,
-        uint32_t offset = 0, uint8_t noc = 0) {
+        uint32_t offset = 0, uint8_t noc = noc_index) {
     uint32_t page_size;
     if constexpr (has_get_aligned_page_size_v<AddrGen>) {
         page_size = addrgen.get_aligned_page_size();
@@ -261,7 +261,7 @@ template<typename AddrGen, bool enable_noc_tracing = true, bool posted = false>
 FORCE_INLINE void noc_async_write_page(
         uint32_t id, const AddrGen& addrgen,
         uint32_t src_local_l1_addr,
-        uint32_t size = 0, uint32_t offset = 0, uint8_t noc = 0) {
+        uint32_t size = 0, uint32_t offset = 0, uint8_t noc = noc_index) {
     uint32_t page_size;
     if constexpr (has_get_aligned_page_size_v<AddrGen>) {
         page_size = addrgen.get_aligned_page_size();
@@ -289,7 +289,7 @@ template<typename AddrGen>
 FORCE_INLINE void noc_async_read_tile(
         uint32_t id, const AddrGen& addrgen,
         uint32_t dst_local_l1_addr,
-        uint32_t offset = 0, uint8_t noc = 0) {
+        uint32_t offset = 0, uint8_t noc = noc_index) {
     noc_async_read_page(id, addrgen, dst_local_l1_addr, offset, noc);
 }
 
@@ -298,14 +298,14 @@ template<typename AddrGen>
 FORCE_INLINE void noc_async_write_tile(
         uint32_t id, const AddrGen& addrgen,
         uint32_t src_local_l1_addr,
-        uint32_t size = 0, uint32_t offset = 0, uint8_t noc = 0) {
+        uint32_t size = 0, uint32_t offset = 0, uint8_t noc = noc_index) {
     noc_async_write_page(id, addrgen, src_local_l1_addr, size, offset, noc);
 }
 
 // ---- Raw NOC read/write ----
 
 inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
-                           uint32_t size, uint8_t noc = 0, uint32_t vc = 0) {
+                           uint32_t size, uint8_t noc = noc_index, uint32_t vc = 0) {
     // NOC addresses are already properly constructed by get_noc_addr() or
     // get_noc_addr_from_bank_id() — no fixup needed here.  Applying
     // __emule_fixup_noc_addr would destroy DRAM bank offsets (> 2MB).
@@ -331,7 +331,7 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
 }
 
 inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
-                            uint32_t size, uint8_t noc = 0, uint32_t vc = 0) {
+                            uint32_t size, uint8_t noc = noc_index, uint32_t vc = 0) {
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     uint8_t* dst = __emule_resolve_noc_addr(dst_noc_addr);
     // Guard BOTH ends. The src L1 resolve can legitimately fail when the
@@ -363,11 +363,11 @@ inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
 // (used by tt::data_movement::common::enhanced_noc_async_{read,write} +
 // tt_memmove<>, which select the variant via `max_transfer_size` template arg).
 inline void noc_async_read_one_packet(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
-                                      uint32_t size, uint8_t noc = 0) {
+                                      uint32_t size, uint8_t noc = noc_index) {
     noc_async_read(src_noc_addr, dst_local_l1_addr, size, noc);
 }
 inline void noc_async_write_one_packet(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
-                                       uint32_t size, uint8_t noc = 0) {
+                                       uint32_t size, uint8_t noc = noc_index) {
     noc_async_write(src_local_l1_addr, dst_noc_addr, size, noc);
 }
 
@@ -396,7 +396,7 @@ template <bool inc_num_issued = true, bool use_vc = false>
 inline void noc_async_read_one_packet_with_state(uint64_t src_noc_addr,
                                                  uint32_t dst_local_l1_addr,
                                                  uint32_t /*vc*/ = 0,
-                                                 uint8_t noc = 0) {
+                                                 uint8_t noc = noc_index) {
     // Silicon's with_state updates only NOC_TARG_ADDR_LO (the source L1 offset)
     // and reuses the coords programmed by set_state. The arg is an offset, not a
     // full addr — OR in the saved base's upper coords (mirrors noc_async_read_with_state).
@@ -417,7 +417,7 @@ inline thread_local uint32_t __emule_write_one_packet_state_size[2] = {0, 0};
 template <bool posted = false>
 inline void noc_async_write_one_packet_set_state(uint64_t dst_noc_addr,
                                                  uint32_t size,
-                                                 uint8_t noc = 0,
+                                                 uint8_t noc = noc_index,
                                                  uint8_t /*vc*/ = 0) {
     __emule_write_one_packet_state_dst[noc & 1] = dst_noc_addr;
     __emule_write_one_packet_state_size[noc & 1] = size;
@@ -425,7 +425,7 @@ inline void noc_async_write_one_packet_set_state(uint64_t dst_noc_addr,
 template <bool posted = false>
 inline void noc_async_write_one_packet_with_state(uint32_t src_local_l1_addr,
                                                   uint32_t dst_local_l1_addr,
-                                                  uint8_t noc = 0) {
+                                                  uint8_t noc = noc_index) {
     // Silicon's with_state updates NOC_RET_ADDR_LO (the dest L1 offset) per call
     // and reuses the dest coords programmed by set_state. The 2nd arg is an offset,
     // not a full addr — OR in the saved base's upper coords (symmetric to the read).
@@ -440,12 +440,12 @@ inline void noc_async_write_one_packet_with_state(uint32_t src_local_l1_addr,
 // pass explicit args still compile.
 template <uint32_t max_page_size, bool enable_noc_tracing = true>
 inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr, uint32_t size,
-                           uint8_t noc = 0, uint32_t vc = NOC_UNICAST_WRITE_VC) {
+                           uint8_t noc = noc_index, uint32_t vc = NOC_UNICAST_WRITE_VC) {
     noc_async_read(src_noc_addr, dst_local_l1_addr, size, noc, vc);
 }
 template <uint32_t max_page_size, bool enable_noc_tracing = true, bool posted = false>
 inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr, uint32_t size,
-                            uint8_t noc = 0, uint32_t vc = NOC_UNICAST_WRITE_VC) {
+                            uint8_t noc = noc_index, uint32_t vc = NOC_UNICAST_WRITE_VC) {
     noc_async_write(src_local_l1_addr, dst_noc_addr, size, noc, vc);
 }
 
@@ -457,7 +457,7 @@ inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr, u
 template <uint32_t max_page_size = NOC_MAX_BURST_SIZE + 1>
 inline void noc_async_write_multicast(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
-    uint32_t size, uint32_t num_dests, bool linked = false, uint8_t noc = 0,
+    uint32_t size, uint32_t num_dests, bool linked = false, uint8_t noc = noc_index,
     uint8_t /*vc*/ = NOC_MULTICAST_WRITE_VC) {
     if (__emule_debug_multicast()) {
         uint32_t x_end   = (dst_mcast_noc_addr >> NOC_ADDR_LOCAL_BITS) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
@@ -501,7 +501,7 @@ inline void noc_async_write_multicast_loopback_src(
 template <bool enable_noc_tracing = true>
 inline void noc_async_write_multicast_one_packet(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
-    uint32_t size, uint32_t num_dests, bool linked = false, uint8_t noc = 0) {
+    uint32_t size, uint32_t num_dests, bool linked = false, uint8_t noc = noc_index) {
     noc_async_write_multicast(src_local_l1_addr, dst_mcast_noc_addr, size,
                               num_dests, linked, noc);
 }
@@ -526,10 +526,10 @@ inline void __emule_model_first_read_latency() {
     }
 }
 
-inline void noc_async_read_barrier(uint8_t noc = 0) { __emule_model_first_read_latency(); }
-inline void noc_async_write_barrier(uint8_t noc = 0) {}
-inline void noc_async_writes_flushed(uint8_t noc = 0) {}
-inline void noc_async_posted_writes_flushed(uint8_t noc = 0) {}
+inline void noc_async_read_barrier(uint8_t noc = noc_index) { __emule_model_first_read_latency(); }
+inline void noc_async_write_barrier(uint8_t noc = noc_index) {}
+inline void noc_async_writes_flushed(uint8_t noc = noc_index) {}
+inline void noc_async_posted_writes_flushed(uint8_t noc = noc_index) {}
 // TRID family: silicon overlaps multiple async NOC reads/writes on the same
 // NOC by tagging each with a transaction id, then polling per-tag completion.
 // Emule executes every NOC op inline before returning, so:
@@ -540,20 +540,20 @@ inline void noc_async_posted_writes_flushed(uint8_t noc = 0) {}
 // its only call sites are experimental kernels (ccl/deepseek/prefetcher) not
 // in the routine bring-up regression scope, and adding it would also require
 // noc_async_read_one_packet_set_state / _with_state which are a separate gap.
-inline void noc_async_read_barrier_with_trid(uint32_t trid, uint8_t noc = 0) {
+inline void noc_async_read_barrier_with_trid(uint32_t trid, uint8_t noc = noc_index) {
     __emule_model_first_read_latency();
 }
-inline void noc_async_write_barrier_with_trid(uint32_t trid, uint8_t noc = 0) {}
-inline void noc_async_write_flushed_with_trid(uint32_t trid, uint8_t noc = 0) {}
+inline void noc_async_write_barrier_with_trid(uint32_t trid, uint8_t noc = noc_index) {}
+inline void noc_async_write_flushed_with_trid(uint32_t trid, uint8_t noc = noc_index) {}
 // noc_async_read_set_trid lives further down in the trid / shard-state cluster
 // with shard-addr-base state tracking that dsa_indexer / dram_streaming_matmul
 // rely on. Only the write-side counterpart is here.
-inline void noc_async_write_set_trid(uint32_t trid = 0, uint8_t noc = 0) {}
+inline void noc_async_write_set_trid(uint32_t trid = 0, uint8_t noc = noc_index) {}
 inline bool ncrisc_noc_read_with_transaction_id_flushed(uint32_t noc, uint32_t trid) { return true; }
 inline bool ncrisc_noc_nonposted_write_with_transaction_id_sent(uint32_t noc, uint32_t trid) { return true; }
 inline bool ncrisc_noc_nonposted_write_with_transaction_id_flushed(uint32_t noc, uint32_t trid) { return true; }
-inline void noc_async_atomic_barrier(uint8_t noc = 0) {}
-inline void noc_async_full_barrier(uint8_t noc = 0) {}
+inline void noc_async_atomic_barrier(uint8_t noc = noc_index) {}
+inline void noc_async_full_barrier(uint8_t noc = noc_index) {}
 
 // ---- noc_async_write_one_packet ----
 // Silicon: single-packet (size <= NOC_MAX_BURST_SIZE) write helper used by
@@ -565,7 +565,7 @@ FORCE_INLINE void noc_async_write_one_packet(
     uint32_t src_local_l1_addr,
     uint64_t dst_noc_addr,
     uint32_t size,
-    uint8_t noc = 0,
+    uint8_t noc = noc_index,
     uint32_t vc = NOC_UNICAST_WRITE_VC) {
     (void)noc;
     (void)vc;
@@ -588,7 +588,7 @@ FORCE_INLINE void noc_async_write_one_packet_with_trid(
     uint64_t dst_noc_addr,
     uint32_t size,
     uint32_t /*trid*/,
-    uint8_t noc = 0,
+    uint8_t noc = noc_index,
     uint32_t vc = NOC_UNICAST_WRITE_VC) {
     noc_async_write_one_packet<enable_noc_tracing, posted>(src_local_l1_addr, dst_noc_addr, size, noc, vc);
 }
@@ -598,7 +598,7 @@ FORCE_INLINE void noc_async_write_one_packet_with_trid_with_state(
     uint64_t dst_noc_addr,
     uint32_t size,
     uint32_t /*trid*/,
-    uint8_t noc = 0,
+    uint8_t noc = noc_index,
     uint32_t vc = NOC_UNICAST_WRITE_VC) {
     noc_async_write_one_packet<enable_noc_tracing, posted>(src_local_l1_addr, dst_noc_addr, size, noc, vc);
 }
@@ -614,7 +614,7 @@ FORCE_INLINE void noc_async_write_one_packet_with_trid_with_state(
 
 template <bool inline_src = true>
 FORCE_INLINE void noc_async_read_one_packet_set_state(
-    uint64_t src_noc_addr, uint32_t size, uint32_t vc = 0, uint8_t noc = 0) {
+    uint64_t src_noc_addr, uint32_t size, uint32_t vc = 0, uint8_t noc = noc_index) {
     __emule_noc_trid_state::shard_noc_addr_base[noc & 1] = src_noc_addr;
     __emule_noc_trid_state::shard_size[noc & 1] = size;
     __emule_noc_trid_state::shard_vc[noc & 1] = vc;
@@ -638,7 +638,7 @@ FORCE_INLINE void noc_async_read_one_packet_with_state_with_trid(
     uint32_t shard_offset,
     uint32_t dst_l1_addr,
     uint32_t /*trid*/,
-    uint8_t noc = 0) {
+    uint8_t noc = noc_index) {
     // shard_base_l1 + shard_offset is the L1 address on the source core.
     // In emule it may be a firmware-style L1 offset or a truncated host
     // pointer (from l1_alloc / CB APIs); __emule_addr_to_offset canonicalizes
@@ -659,13 +659,13 @@ FORCE_INLINE void noc_async_read_one_packet_with_state_with_trid(
 // with_state provides local L1 src + size; inc_num_issued manually bumps the
 // counter. Emule: store src in the per-NOC shard cache for the upper-coord
 // reconstruction; counter is no-op (no in-flight transactions).
-inline void noc_async_read_set_state(uint64_t src_noc_addr, uint8_t noc = 0) {
+inline void noc_async_read_set_state(uint64_t src_noc_addr, uint8_t noc = noc_index) {
     __emule_noc_trid_state::shard_noc_addr_base[noc & 1] = src_noc_addr;
 }
 template <bool inc_num_issued = true>
 inline void noc_async_read_with_state(
     uint32_t src_local_l1_addr, uint32_t dst_local_l1_addr, uint32_t size,
-    uint8_t noc = 0) {
+    uint8_t noc = noc_index) {
     // Canonicalize src — it can be either a firmware-style L1 offset or a
     // truncated host pointer in emule; __emule_addr_to_offset normalizes both
     // to a proper L1 offset so the OR with cached upper coords is well-formed.
@@ -792,11 +792,11 @@ inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32
 // and a templated `<bool posted>` form used by distributed_topk's posted-write
 // semaphore handshake. Both run the same atomic_fetch_add against the resolved
 // remote L1 slot — `posted` is a NOC tracing flag with no emule-side meaning.
-inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc = 0,
+inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc = noc_index,
                              uint8_t vc = NOC_UNICAST_WRITE_VC);
 
 template <bool posted>
-FORCE_INLINE void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc = 0,
+FORCE_INLINE void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc = noc_index,
                                     uint8_t vc = NOC_UNICAST_WRITE_VC) {
     noc_semaphore_inc(noc_addr, incr, noc, vc);
 }
@@ -827,14 +827,14 @@ inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc,
 // uses write_reg_cmd_buf for this (separate cmd buffer from the data path);
 // in emule the resolver+memcpy is identical to noc_async_write of 4 bytes.
 inline void noc_semaphore_set_remote(
-    uint32_t src_local_l1_addr, uint64_t dst_noc_addr, uint8_t noc = 0) {
+    uint32_t src_local_l1_addr, uint64_t dst_noc_addr, uint8_t noc = noc_index) {
     noc_async_write(src_local_l1_addr, dst_noc_addr, sizeof(uint32_t), noc);
 }
 
 // Multicast a semaphore value to multiple cores.
 inline void noc_semaphore_set_multicast(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
-    uint32_t num_dests, bool linked = false, uint8_t noc = 0) {
+    uint32_t num_dests, bool linked = false, uint8_t noc = noc_index) {
     if (__emule_debug_multicast()) {
         uint32_t x_end   = (dst_mcast_noc_addr >> NOC_ADDR_LOCAL_BITS) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
         uint32_t y_end   = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
@@ -931,7 +931,7 @@ inline void noc_semaphore_inc_multicast(
 inline uint64_t get_dram_noc_addr(
     const uint32_t id, const uint32_t page_size,
     const uint32_t bank_base_address,
-    const uint32_t offset = 0, uint8_t noc = 0) {
+    const uint32_t offset = 0, uint8_t noc = noc_index) {
     uint32_t bank_offset_index = interleaved_addr_gen::get_bank_offset_index<true>(id);
     uint32_t bank_index = interleaved_addr_gen::get_bank_index<true>(id, bank_offset_index);
     uint32_t aligned = align_power_of_2(page_size, interleaved_addr_gen::get_allocator_alignment<true>());
@@ -944,7 +944,7 @@ inline uint64_t get_dram_noc_addr(
 inline uint64_t get_l1_noc_addr(
     const uint32_t id, const uint32_t page_size,
     const uint32_t bank_base_address,
-    const uint32_t offset = 0, uint8_t noc = 0) {
+    const uint32_t offset = 0, uint8_t noc = noc_index) {
     uint32_t bank_offset_index = interleaved_addr_gen::get_bank_offset_index<false>(id);
     uint32_t bank_index = interleaved_addr_gen::get_bank_index<false>(id, bank_offset_index);
     uint32_t aligned = align_power_of_2(page_size, interleaved_addr_gen::get_allocator_alignment<false>());
