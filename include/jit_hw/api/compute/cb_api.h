@@ -26,6 +26,11 @@
 #include "jit_hw/api/compute/common.h"
 #include "jit_hw/api/cb_api.h"
 
+// In namespace ckernel to match upstream api/compute/cb_api.h, so both bare
+// calls (via `using namespace ckernel;` in common.h) and ckernel::-qualified
+// callers resolve.
+namespace ckernel {
+
 // get_tile_address — silicon returns the byte L1 address of a CB tile (via
 // UNPACK→MATH/PACK mailbox sync) so callers can `reinterpret_cast<To*>` it and
 // read tile data directly. Used by the normalization kernel_util
@@ -49,3 +54,5 @@ ALWI uint32_t get_tile_address(uint32_t cb_id, uint32_t tile_index) {
 ALWI uint32_t read_tile_value(uint32_t cb_id, uint32_t tile_index, uint32_t element_offset) {
     return reinterpret_cast<uint32_t*>(__emule_compute::cb_read_ptr_at(cb_id, tile_index))[element_offset];
 }
+
+}  // namespace ckernel

@@ -386,7 +386,7 @@ run_pytest "pca_test_per_core_allocation" "$PCA_TEST_DIR/test_per_core_allocatio
 run_pytest "tensor_dir_all" "$TENSOR_TEST_DIR" -m "not disable_fast_runtime_mode"
 
 # ---- data_movement explicit function targets (issue #72) ----
-# 8 of 15 listed targets pass cleanly under emule. Remaining 7:
+# 10 of 15 listed targets pass cleanly under emule. Remaining 5:
 #   - test_run_tilize_with_val_padding_test: collection fails (needs IPython)
 #   - test_pad: silicon-side @pytest.mark.skip (ttnn.pad row_major PCC error)
 #   - test_tiled_concat, test_tosa_scatter_normal,
