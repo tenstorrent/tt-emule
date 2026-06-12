@@ -44,8 +44,21 @@ For each target op:
 ## Step 1 — Triage
 
 Before writing anything, check whether the op is already covered. Many "missing"
-ops are in shared shims. **`.claude/references/structure.yaml` is the canonical file-level index**
-— grep it for the op name to see whether a file already defines `<op>_tile`.
+ops are in shared shims. The fastest check is the early-detect probe:
+
+```bash
+python3 scripts/find_symbol.py --supports <op>_tile
+#   <op>_tile  tile  layer1      include/jit_hw/api/compute/...   → already shimmed, STOP
+#   <op>_tile  tile  needs_stub  -                               → genuinely missing, bring it up
+```
+
+`--supports` reads the canonical **`.claude/references/structure.yaml`** index
+(regenerated + check-gated by `scripts/gen_structure.py` — so it can't drift) and
+tells you both whether the symbol exists *and* the verdict a kernel using it
+lands at. Plain `scripts/find_symbol.py <op>_tile` (or a grep of the index) also
+works to see which file defines it. For the wider "what should we bring up
+next?" worklist, `scripts/classify_kernels.py` rolls every kernel up to
+`layer1` / `needs_stub` / `ruled_out`.
 
 Common shared homes (not exhaustive):
 
@@ -165,7 +178,11 @@ include path resolves the emule version automatically when the kernel does
 `#include "api/compute/<name>.h"`.
 
 Per the project rule in `CLAUDE.md`: when you add a source file or a
-top-level symbol, update its entry in `.claude/references/structure.yaml` in the same change.
+top-level symbol, refresh the index in the same change with
+`python3 scripts/gen_structure.py --write` (don't hand-edit `symbols` — the
+pre-commit hook / CI `--check` will fail if the index is stale). A brand-new
+file also needs a one-line `summary` (the generator inserts a `TODO:` sentinel
+until you write one).
 
 ## Step 6 — Build + test
 
@@ -364,8 +381,8 @@ verify before assuming.
    deliberate (e.g. after a shim edit), not a cargo-cult retry.
 3. **Don't duplicate shims** that `activations.h` or `compute_kernel_api.h`
    already define. ODR conflicts result. Check first with
-   `scripts/find_symbol.py <op>_tile` (or plain grep of
-   `.claude/references/structure.yaml`).
+   `scripts/find_symbol.py --supports <op>_tile` (`layer1` + a path = already
+   shimmed) or plain grep of `.claude/references/structure.yaml`.
 4. **Don't invent upstream signatures.** If upstream has no header, return
    STUCK or ask. Some activation-family ops are composed in-kernel and
    have no standalone API.
@@ -375,7 +392,8 @@ verify before assuming.
 
 For sweeps that bring up ≥4 shims at once, dispatch one sub-agent per
 shim via `/parallel-mock-implementation`. The orchestrator (you)
-handles `sfpu_split_includes.h` wiring, `.claude/references/structure.yaml` updates, build,
+handles `sfpu_split_includes.h` wiring, refreshing the index
+(`python3 scripts/gen_structure.py --write` — don't hand-edit `symbols`), build,
 and per-op test runs centrally after the workers return.
 
 ## References

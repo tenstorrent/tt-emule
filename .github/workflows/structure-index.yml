@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Structure-index gate — fails if `.claude/references/structure.yaml` is stale
+# vs the src/ + include/ tree. The index is the source of truth for "what does
+# emule provide?" (queried by scripts/find_symbol.py, consumed by
+# scripts/classify_kernels.py), so it must track the code. Regenerate with
+# `python3 scripts/gen_structure.py --write`.
+
+name: Structure Index
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  merge_group:
+
+concurrency:
+  group: structure-index-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install PyYAML
+        run: pip install PyYAML
+      - name: structure.yaml is in sync
+        run: python3 scripts/gen_structure.py --check
