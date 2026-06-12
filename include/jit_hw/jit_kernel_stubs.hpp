@@ -59,6 +59,16 @@ inline void tensix_sync() {}
 #include "emule_asan.h"
 #include "tools/profiler/kernel_profiler.hpp"
 
+// CB-interface surface. Silicon kernels (and consumer kernel-lib templates
+// that wrap `reconfig_cbs_for_mask`) reference `cb_addr_shift`,
+// `LocalCBInterface`, `get_local_cb_interface`, `get_cb_tiles_received_ptr`,
+// and `get_cb_tiles_acked_ptr` directly. On silicon these come transitively
+// via the per-RISC firmware include chain. Under emule the JIT wrapper has
+// no such chain — pull the symbols in here so every JIT TU resolves them
+// regardless of `COMPILE_FOR_*` defines (which emule's runner does not set).
+#include "api/cb_api.h"
+#include "internal/cb_interface.h"
+
 // `firmware_common.h` provides invalidate_l1_cache / flush_l1_cache /
 // WAYPOINT — needed by dataflow kernels via `experimental::semaphore_wait`.
 // Pull it in here so every JIT kernel sees it. The heavier LLK surface

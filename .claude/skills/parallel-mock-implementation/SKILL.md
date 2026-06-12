@@ -19,7 +19,7 @@ the work-list is large enough to amortize the dispatch overhead.
 Don't use it for:
 - Single-file work — call the worker prompt directly inline.
 - Cross-cutting wiring that touches a shared file (e.g. one
-  `sfpu_split_includes.h`, one `STRUCTURE.md`). The orchestrator
+  `sfpu_split_includes.h`, one `.claude/references/structure.yaml`). The orchestrator
   handles those centrally after workers return.
 
 ## Worker prompt skeleton
@@ -99,7 +99,7 @@ After the workers return, the orchestrator (you) handles centrally:
 1. Visual diff each new file.
 2. Wire any shared aggregator/registration file (e.g. for compute LLK
    shims: `SFPU_OP_*_INCLUDE` branches in `sfpu_split_includes.h`).
-3. Update `STRUCTURE.md` with one line per new file (per `CLAUDE.md`
+3. Update `.claude/references/structure.yaml` with one line per new file (per `CLAUDE.md`
    project rule).
 4. Build.
 5. Run targeted tests for each new mock — this loop can itself

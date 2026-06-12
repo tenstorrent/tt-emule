@@ -25,3 +25,17 @@
 
 #include "jit_hw/api/compute/common.h"
 #include "jit_hw/api/cb_api.h"
+
+// get_tile_address — silicon returns the byte L1 address of a CB tile (via
+// UNPACK→MATH/PACK mailbox sync) so callers can `reinterpret_cast<To*>` it and
+// read tile data directly. Used by the normalization kernel_util
+// (`ttnn/.../normalization/kernel_util/compute/memory.h::get_pointer_to_cb_data`,
+// e.g. the layernorm-welford reciprocal LUT). emule runs UNPACK/MATH/PACK on one
+// thread, so no mailbox is needed: return the CB tile's host pointer truncated to
+// a uint32_t L1 address. emule L1 is mmap'd below 4 GB, so the value round-trips
+// through `reinterpret_cast<To*>` (same idiom as get_semaphore /
+// __emule_local_l1_to_ptr in jit_kernel_stubs.hpp).
+ALWI uint32_t get_tile_address(uint32_t cb_id, uint32_t tile_index) {
+    uint8_t* ptr = __emule_compute::cb_read_ptr_at(cb_id, tile_index);
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr));
+}

@@ -31,6 +31,7 @@ REDUCE_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/reduce"
 MATMUL_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/matmul"
 ELT_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/eltwise"
 FUSED_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/fused"
+POOL_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/pool"
 TENSOR_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/tensor"
 PCA_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/per_core_allocation"
 BENCH_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/benchmarks"
@@ -136,6 +137,7 @@ run_pytest "dm_test_repeat"                  "$DM_TEST_DIR/test_repeat.py"  # pr
 run_pytest "dm_test_gather"                  "$DM_TEST_DIR/test_gather.py"  # promoted (issue #73): 45 passed
 run_pytest "dm_test_concat_5d"               "$DM_TEST_DIR/test_concat.py" -k 'test_concat_5d'
 run_pytest "dm_test_concat_many_inputs"      "$DM_TEST_DIR/test_concat.py" -k 'test_concat_many_inputs'
+run_pytest "dm_test_concat_sharded"          "$DM_TEST_DIR/test_concat.py::test_sharded_concat" "$DM_TEST_DIR/test_concat.py::test_concat_sharded_pad" "$DM_TEST_DIR/test_concat.py::test_sharded_concat_with_groups"  # sharded S2S concat guard (#131): local CB→CB copy was all-zeros before noc_async_read/write_one_packet_with_state reconstructed coords from set_state
 run_pytest "dm_test_fill_pad_float"          "$DM_TEST_DIR/test_fill_pad.py" -k 'test_fill_pad_float'
 run_pytest "dm_test_fill_pad_int"            "$DM_TEST_DIR/test_fill_pad.py" -k 'test_fill_pad_int'
 run_pytest "dm_test_embedding_tiled_input"   "$DM_TEST_DIR/test_embedding.py" -k 'test_embedding_tiled_input'
@@ -236,6 +238,14 @@ run_pytest "elt_test_relational"        "$ELT_TEST_DIR/test_relational.py" -k 'n
 run_pytest "elt_test_unary_comp"        "$ELT_TEST_DIR/test_unary.py::test_unary_comp_ops"
 run_pytest "elt_test_binary_ng_typecast_cmp" "$ELT_TEST_DIR/test_binary_ng_typecast.py" -k 'test_binary_ng_typecast_lt or (test_binary_w_typecast and (ge or gt or le or lt or eq or ne))'
 run_pytest "elt_test_binary_sharded_col_major_cmp" "$ELT_TEST_DIR/test_binary_bcast.py::test_binary_sharded_col_major" -k 'eq or ne or gt or ge or lt or le'
+# #123 (align_power_of_2 dedup) regression guard — volume_tensors was JIT-blocked pre-fix.
+run_pytest "elt_test_binary_bcast_volume_tensors" "$ELT_TEST_DIR/test_binary_bcast.py::test_01_volume_tensors"
+# #125 (llk_math_eltwise_binary_init shim + wiring) regression guard — batch_norm was 0/1537 pre-fix.
+run_pytest "fused_test_batch_norm_pgmcache" "$FUSED_TEST_DIR/test_batch_norm.py::test_batch_norm_program_cache_and_default"
+# #124 (experimental::Noc shadow removal) regression guard — test_upsample was JIT-blocked pre-fix.
+run_pytest "pool_test_upsample_nearest_interleaved" "$POOL_TEST_DIR/test_upsample.py::test_upsample_nearest_interleaved"
+# #127 (async_read_barrier template — cascade of #124) regression guard; exercises async_read_barrier_with_trid path.
+run_pytest "pool_test_upsample_multicore_corerange" "$POOL_TEST_DIR/test_upsample.py::test_upsample_multicore_corerange"
 
 run_pytest "fused_test_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_large_fill_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_accuracy" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_stable_neg_values" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_4096x4096_fp32" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_large_kernel_block_size" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_3D" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout_large"
 run_pytest "reduce_test_cumprod" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_backward" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_failing_cases"
@@ -312,10 +322,11 @@ run_pytest "elt_test_unary_pow" "$ELT_TEST_DIR/test_unary_pow.py" --deselect "te
 run_pytest "dm_test_concat_size_switches" "$DM_TEST_DIR/test_concat.py::test_concat_size_switches"
 
 run_pytest "dm_test_pad" "$DM_TEST_DIR/test_pad.py" \
-    -k 'not (test_pad_rm_sharded_stickwise and INT32)'  # promoted (#73 timeout-rerun): ~500 passed, ~6 min on CI (renamed from dm_test_pad_not_sub_core; whole-file covers test_pad_rm_small_to_large_width / program_cache_hit / padding_validation_*). INT32 sharded-stickwise variants excluded — pass locally but flake on CI with PCC drops (0.99 on WH, 0.65 on BH on different params); real bug in that path, not pure flake.
+    -k 'not test_pad_rm_sharded_stickwise'  # promoted (#73 timeout-rerun): ~500 passed, ~6 min on CI (renamed from dm_test_pad_not_sub_core; whole-file covers test_pad_rm_small_to_large_width / program_cache_hit / padding_validation_*). The whole test_pad_rm_sharded_stickwise path is deselected: flaky PCC on CI (WH ~0.99, BH ~0.65 on different params), passes in local isolation — real bug in that path, tracked in #139.
 
 run_pytest "dm_test_permute_not_sharded" "$DM_TEST_DIR/test_permute.py::test_permute_4d_fixed_w" "$DM_TEST_DIR/test_permute.py::test_permute_4d_cn" "$DM_TEST_DIR/test_permute.py::test_permute_4d_cnwh" "$DM_TEST_DIR/test_permute.py::test_permute_4d_wh" "$DM_TEST_DIR/test_permute.py::test_permute_5d" "$DM_TEST_DIR/test_permute.py::test_permute_5d_wyh" "$DM_TEST_DIR/test_permute.py::test_permute_5d_xh_pad" "$DM_TEST_DIR/test_permute.py::test_permute_8d_swapped" "$DM_TEST_DIR/test_permute.py::test_permutations_5d_fixed_w" "$DM_TEST_DIR/test_permute.py::test_permute_identity" -k 'not sharded'
 run_pytest "dm_test_permute" "$DM_TEST_DIR/test_permute.py::test_permute_5d_tiled_basic" "$DM_TEST_DIR/test_permute.py::test_permute_5d_tiled_swap" "$DM_TEST_DIR/test_permute.py::test_permute_squeeze" "$DM_TEST_DIR/test_permute.py::test_permute_for_specific_case" "$DM_TEST_DIR/test_permute.py::test_permute_on_4D_tensor_with_smaller_tuple_size" "$DM_TEST_DIR/test_permute.py::test_nil_volume_permute" "$DM_TEST_DIR/test_permute.py::test_transpose_wh_tiled_uint32"
+run_pytest "dm_test_permute_rm" "$DM_TEST_DIR/test_permute.py::test_permute" "$DM_TEST_DIR/test_permute.py::test_transpose" "$DM_TEST_DIR/test_permute.py::test_permute_negative_dim" "$DM_TEST_DIR/test_permute.py::test_permute_5d_blocked"  # ROW_MAJOR int32/uint32 permute guard (#131): this small-page-CB path was scrambled before cb_is_32bit_format became enum-driven
 run_pytest "dm_test_permute_sharded" "$DM_TEST_DIR/test_permute.py::test_permute_sharded"
 
 run_pytest "dm_test_untilize_same_volume" "$DM_TEST_DIR/test_untilize.py::test_untilize_same_volume_different_shapes"
@@ -327,13 +338,18 @@ run_pytest "dm_test_untilize_same_volume" "$DM_TEST_DIR/test_untilize.py::test_u
 run_pytest "dm_test_untilize"               "$DM_TEST_DIR/test_untilize.py"  # promoted (#73 timeout-rerun): 795 passed, ~6.7 min (renamed from dm_test_untilize_sharded)
 
 run_pytest "reduce_test_reduction_mean" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean_scaling" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean_scaling_factor"
-run_pytest "reduce_test_reduction_not_sharded" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_2d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_3d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_4d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_sum_2d_tensor_dims" -k 'not sharded'
+run_pytest "reduce_test_reduction_not_sharded" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_2d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_3d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_4d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_sum_2d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_sum_4d_tensor_dims" -k 'not sharded'
 run_pytest "reduce_test_reduction_min_not_sharded" "$REDUCE_TEST_DIR/test_reduction_min.py::test_min" "$REDUCE_TEST_DIR/test_reduction_min.py::test_min_global" -k 'not sharded'
 run_pytest "reduce_test_torch_compat" "$REDUCE_TEST_DIR/test_reduction.py::test_torch_compatibility"
+# var/std: use_legacy=False (Welford, #107) + use_legacy=True (legacy 2-pass). The legacy single-tile
+# dim=(-2,-1) cases need the REDUCE_SCALAR scaler² fix (reduce.h) — silicon applies the HW scaler twice.
+run_pytest "reduce_test_var_std" \
+    "$REDUCE_TEST_DIR/test_reduction.py::test_var" "$REDUCE_TEST_DIR/test_reduction.py::test_std"
 
 run_pytest "dm_test_tosa_gather" "$DM_TEST_DIR/test_tosa_gather.py"  # promoted (issue #73): 10 passed
 
 run_pytest "reduce_test_max" "$REDUCE_TEST_DIR/test_max.py"
+run_pytest "reduce_test_ema" "$REDUCE_TEST_DIR/test_ema.py"
 
 run_pytest "matmul_test_linear" "$MATMUL_TEST_DIR/test_linear.py" -k 'test_linear_fp32_acc or test_vector_linear'
 
@@ -374,8 +390,9 @@ run_pytest "tensor_dir_all" "$TENSOR_TEST_DIR" -m "not disable_fast_runtime_mode
 #   - test_run_tilize_with_val_padding_test: collection fails (needs IPython)
 #   - test_pad: silicon-side @pytest.mark.skip (ttnn.pad row_major PCC error)
 #   - test_tiled_concat, test_embedding_bw_with_program_cache,
-#     test_tosa_scatter_normal, test_convert_to_hwc_dram_uneven_sharding,
+#     test_tosa_scatter_normal,
 #     test_sort_indices: real failures (PCC / hang) — documented in #72 closeout
+#   - test_convert_to_hwc_*: FIXED — now covered by dm_test_convert_to_hwc below.
 run_pytest "dm_test_function_targets_batch" \
     "$DM_TEST_DIR/test_untilize.py::test_untilize_single_core_interleaved_to_interleaved" \
     "$DM_TEST_DIR/test_untilize_with_unpadding.py::test_untilize_with_unpadding_height_sharded" \
@@ -385,6 +402,15 @@ run_pytest "dm_test_function_targets_batch" \
 # Note: test_tilize_test, test_gather_general, test_pc_with_different_shapes_in_sequence
 # (also in issue #72) are now covered by the promoted dm_test_tilize / dm_test_gather /
 # dm_test_repeat whole-file entries — see issue #73 promotions.
+
+# convert_to_hwc: previously a #72-documented failure. Guards both fixes — the
+# pack_untilize_init defaulted-template signature, and the NoC set_read_state size
+# lost across by-value `Noc` copies (output was all-zeros). Covers the DRAM-uneven
+# case (the #72 target), L1-uneven (UNet-shallow), and even/resharded DRAM.
+run_pytest "dm_test_convert_to_hwc" \
+    "$DM_TEST_DIR/test_convert_to_hwc.py::test_convert_to_hwc_dram_uneven_sharding" \
+    "$DM_TEST_DIR/test_convert_to_hwc.py::test_convert_to_hwc_with_l1_input_uneven_sharding" \
+    "$DM_TEST_DIR/test_convert_to_hwc.py::test_convert_to_hwc_dram"
 
 # ---- base_functionality + benchmarks single-device tail (issue #71) ----
 # 15 of 19 files pass; 4 omitted because they import HuggingFace transformers

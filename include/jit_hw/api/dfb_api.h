@@ -8,6 +8,7 @@
 
 #include "jit_hw/emule_dfb_state.h"
 #include "jit_hw/emule_cb_state.h"
+#include "jit_hw/internal/emule_cb_ptr.h"   // per-RISC CB pointers (advance helpers)
 #include "jit_hw/api/compute/common_globals.h"
 #include "tt_emule/tile_counter.hpp"
 #include "jit_hw/emule_wait.h"
@@ -73,9 +74,12 @@ inline void dfb_push_back(uint32_t dfb_id, uint16_t n) {
     __emule_dfb_check_id(dfb_id, "dfb_push_back");
     auto& iface = __emule_dfbs[dfb_id];
     if (!iface.active) return;
-    // Bridge DFB→CB: update CB occupied so compute's cb_wait_front sees pushed tiles.
-    // Acquire cb.mu before tc.mu to maintain consistent lock ordering.
+    // Bridge DFB→CB: bump the occupied semaphore so compute's cb_wait_front sees
+    // the pushed tiles, and advance THIS thread's per-RISC CB write pointer so a
+    // consumer reading DFB tiles via cb_read_ptr_at / get_read_ptr (e.g. reduce)
+    // tracks the producer's progress (mirrors the old shared-write_idx coupling).
     if (__emule_cbs && __emule_cbs[dfb_id].num_pages > 0) {
+        __emule_cb_advance_wr(dfb_id, n);
         tt_emule::cb_sync_push(__emule_cbs[dfb_id], n);
     }
     if (iface.broadcast_tc) {
@@ -119,9 +123,13 @@ inline void dfb_pop_front(uint32_t dfb_id, uint16_t n) {
     __emule_dfb_check_id(dfb_id, "dfb_pop_front");
     auto& iface = __emule_dfbs[dfb_id];
     if (!iface.active) return;
-    // Bridge DFB→CB: update CB occupied so compute's cb_reserve_back sees freed space.
-    // Acquire cb.mu before tc.mu to maintain consistent lock ordering.
+    // Bridge DFB→CB: drop the occupied semaphore so compute's cb_reserve_back
+    // sees freed space, and advance THIS thread's per-RISC CB read pointer so a
+    // consumer reading DFB tiles via cb_read_ptr_at / get_read_ptr (e.g. reduce's
+    // WaitAndPopPerTile) advances to the next tile (mirrors the old shared
+    // read_idx coupling).
     if (__emule_cbs && __emule_cbs[dfb_id].num_pages > 0) {
+        __emule_cb_advance_rd(dfb_id, n);
         tt_emule::cb_sync_pop(__emule_cbs[dfb_id], n);
     }
     auto& slot = iface.tc_slots[iface.tc_idx];

@@ -30,20 +30,29 @@ carefully — they may already point at the right strategy.
 
 ## Step 2 — Pick a strategy
 
-Three mock-implementation patterns are catalogued in
-`.claude/references/emule-mapping.md`. Pick one based on the HW spec
-from step 1:
+A mock sits at one of three rungs of the kernel API stack (see
+[`docs/kernel-api-layers.md`](../../../docs/kernel-api-layers.md) for
+the layer-1 / 1.5 / 2 / 3 vocabulary). Pick the strategy that matches
+the layer the silicon API bottoms out at:
+
+| Strategy | Kernel-API layer | When |
+|---|---|---|
+| **A — stub in `include/jit_hw/`** | layer-1 (PoR tile-op) | The silicon API is generic enough that one emule-side body works for every kernel that calls it. |
+| **B — per-op `#ifdef __EMULE_JIT_MODE` patch in the consumer's op header** | layer-1.5 / layer-2 mix | The API can't be generically stubbed (takes a constexpr L1 firmware address, calls a small set of LLKs) but the consuming op can route through an emule-friendly equivalent. |
+| **C — semantic rewrite under `__EMULE_JIT_MODE`** | layer-2 / layer-3 reframing | The op's TRISC body is deeply LLK / sfpi / `TTI_*`-bound (>5 LLK template errors on first compile). Re-express the op at a higher layer rather than stub every header below it. |
 
 ### Strategy A — stub in `include/jit_hw/`
-Use when the silicon API is generic enough that a single emule-side
-implementation works for any kernel that calls it. Example:
-`noc_async_write`, `mul_tiles`, `recip_tile`, `pack_tile`.
+Default for layer-1 lifts: new compute primitives, dataflow helpers,
+generic API surface. Example: `noc_async_write`, `mul_tiles`,
+`recip_tile`, `pack_tile`.
 
 - Add the function to the appropriate header under `jit_hw/`
 - If it operates on DST: use `__emule_dst[idst][i]` row-major float32
 - If it operates on a CB tile: use `__emule_compute::cb_read_ptr_at` /
   `cb_write_ptr_at` + `__emule_nfaces::rowmajor_to_nfaces[]` permute
 - If it's pipeline state (UNPACK/MATH/PACK config): no-op stub
+- No `__EMULE_JIT_MODE` guard needed (`jit_hw/` is inside `-I` ahead
+  of tt-metal's `hw/inc`)
 
 **For LLK compute shims** (functions like `<op>_tile` /
 `<op>_tile_init` under `include/jit_hw/api/compute/`), use
@@ -51,35 +60,28 @@ implementation works for any kernel that calls it. Example:
 shim-pattern catalog, `sfpu_split_includes.h` wiring, op→test-file
 mapping, polynomial-port recipe, and PCC triage flow for that scope.
 
-### Strategy B — per-op `#ifdef __EMULE_JIT_MODE` patch in a consumer op header
-Use when the silicon API can't be mocked in a generic way (e.g.,
-takes a constexpr L1 firmware address) but the OP can route through
-an emule-friendly equivalent.
-
-- Edit the op.hpp (or equivalent consumer header) directly under
-  `__EMULE_JIT_MODE`
-- Most common shape:
-  ```cpp
-  volatile tt_l1_ptr T* p =
-  #ifdef __EMULE_JIT_MODE
-      reinterpret_cast<volatile tt_l1_ptr T*>(__emule_local_l1_to_ptr(L1_ADDR));
-  #else
-      reinterpret_cast<volatile tt_l1_ptr T*>(L1_ADDR);
-  #endif
-  ```
+### Strategy B — per-op `#ifdef __EMULE_JIT_MODE` patch
+Edit the consumer's `op.hpp` (or equivalent header) directly under
+`__EMULE_JIT_MODE`. Most common shape (constexpr L1 firmware address
+cast routed through `__emule_local_l1_to_ptr`):
+```cpp
+volatile tt_l1_ptr T* p =
+#ifdef __EMULE_JIT_MODE
+    reinterpret_cast<volatile tt_l1_ptr T*>(__emule_local_l1_to_ptr(L1_ADDR));
+#else
+    reinterpret_cast<volatile tt_l1_ptr T*>(L1_ADDR);
+#endif
+```
 
 ### Strategy C — semantic rewrite under `__EMULE_JIT_MODE`
-Use when the silicon TRISC body is deeply LLK/sfpi-bound and
-stubbing every LLK header is infeasible (>5 LLK template errors on
-first compile is the heuristic).
-
-- Gate off the entire silicon `#include` block AND the operator()
+- Gate off the entire silicon `#include` block AND the `operator()`
   body under `#ifdef __EMULE_JIT_MODE`
 - Reimplement the op directly with CB read/write + `__emule_dst[]` math
+- Validated 4× to date: RMSNorm, clamped_silu, Mcast, eltwise_mul
 
-If unsure which strategy, default to A (stub in jit_hw) if generic, B
-(per-op patch) if a single op uses it, C (semantic rewrite) if LLK chain
-is too deep.
+If unsure: default to A (stub in `jit_hw/`) if generic, B (per-op
+patch) if a single op uses it, C (semantic rewrite) if the LLK / sfpi
+chain is too deep.
 
 ## Step 3 — Wire it in
 
@@ -111,7 +113,9 @@ Pass bar:
 - **tt-metal regression**: totals must match the last known good
   baseline (no previously-passing test now failing):
   ```bash
-  TT_METAL_DIR=<tt-metal-checkout> bash run_regression.sh
+  # default arch is wormhole n150; use the per-arch script (also
+  # run_regression_blackhole.sh / run_regression_quasar.sh as needed)
+  TT_METAL_DIR=<tt-metal-checkout> bash scripts/run_regression_wormhole.sh 2>&1 | tee regression-wormhole.log
   ```
 
 If any of the above slips, see "Recovery" below.
@@ -173,9 +177,11 @@ These cause more harm than good — avoid:
 
 ## Related references
 
-- `.claude/references/emule-mapping.md` — HW → emule simulation strategies
-- `.claude/references/api-injection-points.md` — where in the pipeline
-  emule injects
+- `docs/kernel-api-layers.md` — layer-1 / 1.5 / 2 / 3 vocabulary the
+  Step 2 strategies map onto
+- `.claude/references/emule-mapping.md` — HW concept → emule mock
+  catalog (§§1–6 + out-of-scope table)
+- `docs/api-injection-points.md` — where in the pipeline emule injects
 - `CLAUDE.md` — project conventions (clang-20, slow dispatch, always run
   regressions)
 - `BUILD_GUIDE.md` — `TT_METAL_DIR`, regression scripts

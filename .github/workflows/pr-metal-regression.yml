@@ -9,31 +9,88 @@
 
 name: PR Metal Regression
 
+# NOTE: no `paths`/`paths-ignore` filter here. A path filter at the workflow
+# level cannot express "all changed files are docs" — `paths-ignore` skips only
+# when EVERY file matches, while a sibling `paths` workflow would fire whenever
+# ANY file matches, so a mixed code+docs PR would trip both and an instant
+# docs-gate success could satisfy the required check before the real regression
+# finished. Instead this workflow ALWAYS runs and the `changes` job below
+# decides — at runtime, over the full changed-file set — whether the heavy build
+# /test/ttnn jobs run. Either way the single `all-passed` check always reports,
+# so docs-only PRs pass instantly and code PRs get the real result. This also
+# sidesteps the merge-queue footgun where a path-skipped required check leaves
+# the queue waiting forever.
 on:
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE*'
-      - 'NOTICE'
-      - '.github/CODEOWNERS'
   push:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE*'
-      - 'NOTICE'
-      - '.github/CODEOWNERS'
+  merge_group:
 
 concurrency:
   group: pr-regression-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Decide whether the PR/push touches anything that can affect regression.
+  # `code == 'false'` only when EVERY changed file is docs/agent-config/license
+  # (the set the old `paths-ignore` used). merge_group and unknown bases always
+  # run the full suite. The heavy jobs below gate on this output, so docs-only
+  # changes skip the build but `all-passed` still reports success.
+  changes:
+    name: Detect non-docs changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout (full history for base diff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Classify changed files
+        id: filter
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # The merge queue verifies the real merge result — always run full.
+          if [ "$EVENT" = "merge_group" ]; then
+            echo "merge_group → full suite"
+            echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$EVENT" = "pull_request" ]; then
+            base="$PR_BASE"; head="$PR_HEAD"
+          else
+            base="$PUSH_BEFORE"; head="$PUSH_AFTER"
+          fi
+          # New branch / unknown base (all-zero SHA) → can't diff, run full.
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            echo "no usable base SHA → full suite"
+            echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "$base" 2>/dev/null || true
+          changed=$(git diff --name-only "$base" "$head")
+          echo "Changed files:"; printf '  %s\n' $changed
+          code=false
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              *.md|docs/*|.claude/*|LICENSE*|NOTICE|.github/CODEOWNERS) ;;
+              *) code=true ;;
+            esac
+          done <<< "$changed"
+          echo "Result: code=$code (true → run regression)"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build tt-metal against PR's tt-emule
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: tt-ubuntu-2204-large-stable
     timeout-minutes: 180
     container:
@@ -111,7 +168,8 @@ jobs:
 
   test:
     name: Run regression (${{ matrix.arch }})
-    needs: build
+    needs: [changes, build]
+    if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 60
     container:
@@ -206,7 +264,8 @@ jobs:
 
   ttnn-pytest:
     name: TTNN Pytests (${{ matrix.arch }}, shard ${{ matrix.shard }}/5)
-    needs: build
+    needs: [changes, build]
+    if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 90
     container:
@@ -268,3 +327,34 @@ jobs:
             ${{ runner.temp }}/ttnn-junit-xml/*.xml
           retention-days: 30
           if-no-files-found: warn
+
+  # Aggregator gate: a single, statically-named check that succeeds only when
+  # every matrix leg above succeeds. Branch protection requires THIS check
+  # (instead of the 13 dynamically-named build/test/ttnn-pytest checks), so the
+  # required-checks list stays stable as the matrix changes. Because this
+  # workflow always runs, this check always reports: on a docs-only change the
+  # heavy jobs are 'skipped' (not 'failure') and the gate passes immediately;
+  # on a code change it reflects the real regression result.
+  all-passed:
+    name: All checks passed
+    # Run even when a dependency failed/was skipped, so the gate always reports.
+    if: ${{ always() }}
+    needs: [changes, build, test, ttnn-pytest]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job did not succeed
+        # needs.<matrix-job>.result is the aggregate over all legs: success only
+        # if every leg succeeded. We fail on failure/cancelled and treat
+        # success/skipped as OK: a failed `build` trips this via its own
+        # 'failure', and docs-only runs leave build/test/ttnn 'skipped' (OK).
+        # `changes` failing (detection error) also trips the gate — fail closed.
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "One or more required jobs did not succeed:"
+          echo "  changes:     ${{ needs.changes.result }}"
+          echo "  build:       ${{ needs.build.result }}"
+          echo "  test:        ${{ needs.test.result }}"
+          echo "  ttnn-pytest: ${{ needs.ttnn-pytest.result }}"
+          exit 1
+      - name: All required jobs passed
+        run: echo "All required jobs passed."

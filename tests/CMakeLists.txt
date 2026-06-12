@@ -4,3 +4,4 @@
 
 add_subdirectory(tilize)
 add_subdirectory(dram)
+add_subdirectory(cb_ptr)

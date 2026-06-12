@@ -45,7 +45,11 @@ tt-emule provides two things:
 - Actual async NOC (all DMA is synchronous `memcpy`)
 - Ethernet/dispatch fabric, UMD, or Metal dispatch layers
 - NOC stream overlay registers (`noc_overlay_parameters.h`)
-- Real tile layout conversions (`tilize_block`/`untilize_block` are identity copies)
+- Hardware timing of tile layout conversions (nfaces↔row-major is done in
+  software at the pack/unpack boundary, not by UNPACK/PACK engines)
+
+For the architecture overview and the full documentation index, see
+**[IMPLEMENTATION_REPORT.md](IMPLEMENTATION_REPORT.md)**.
 
 ---
 
@@ -98,14 +102,13 @@ tt-emule/
 
 tt-emule integrates into tt-metal and is not built standalone. See **[GETTING_STARTED.md](GETTING_STARTED.md)** for the full setup — clone, submodule init, and build commands. See **[BUILD_GUIDE.md](BUILD_GUIDE.md)** for the detailed phase-by-phase walkthrough including the D2M (tt-mlir) build.
 
-**Quick reference — C++ regression build** (clang-20 + libc++):
+**Quick reference — C++ regression build** (clang-20 + libstdc++; run from the
+tt-metal source root):
 
 ```bash
 export ROOT=$HOME/work   # parent of tt-metal and tt-emule checkouts
 cmake -S . -B build_emule -G Ninja \
-    -DCMAKE_TOOLCHAIN_FILE=$ROOT/tt-metal/cmake/x86_64-linux-clang-20-libcpp-toolchain.cmake \
-    -DCMAKE_AR=/usr/bin/llvm-ar-20 \
-    -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-20 \
+    -DCMAKE_TOOLCHAIN_FILE=$ROOT/tt-metal/cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake \
     -DCMAKE_BUILD_TYPE=Release \
     -DTT_METAL_USE_EMULE=ON \
     -DTT_EMULE_PATH=$ROOT/tt-emule \
@@ -113,11 +116,16 @@ cmake -S . -B build_emule -G Ninja \
     -DTT_METAL_BUILD_TESTS=ON \
     -DTTNN_BUILD_TESTS=ON \
     -DENABLE_TRACY=OFF \
+    -DENABLE_DISTRIBUTED=ON \
     -DCMAKE_INSTALL_PREFIX=$ROOT/tt-metal/build_emule
 cmake --build build_emule -j$(nproc)
 ```
 
-**Prerequisites**: clang-20, libc++-20-dev, libc++abi-20-dev, CMake ≥ 3.24, Ninja ≥ 1.10.
+The libstdc++ toolchain (not libc++) is required so the one `libtt_metal.so`
+works for both C++ regression and the Python / tt-mlir D2M path — see
+[BUILD_GUIDE.md](BUILD_GUIDE.md) for the rationale and full walkthrough.
+
+**Prerequisites**: clang-20, libstdc++ (gcc-13+), CMake ≥ 3.24, Ninja ≥ 1.10.
 
 ---
 
@@ -258,7 +266,7 @@ Optional debug/perf knobs (all default off / auto):
 - **Real RISC-V ISA**: no cycle-accurate timing; all threads run on host CPU
 - **NOC stream overlay**: `noc_overlay_parameters.h` / `stream_io_map.h` not stubbed; tests that use stream registers will fail JIT compilation
 - **Inline L1 pointer dereference**: kernels that dereference raw L1 offsets as host pointers (not going through the NOC API) will segfault
-- **Tilize/untilize**: identity copies; real 32×32 row-major ↔ tile-major conversion not implemented
+- **No timing/perf model**: NOC is synchronous `memcpy`, no latency/bandwidth/contention; a test green here can still fail on silicon
 
 ---
 
