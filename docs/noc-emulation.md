@@ -111,6 +111,29 @@ Two host-mmap layouts:
 The address encoding is the same in both modes; only the conversion in
 `__emule_addr_to_offset` / `__emule_local_l1_to_ptr` differs.
 
+### 2.4 DRAM channel backing
+
+DRAM is backed by **one host mmap per physical DRAM channel** — 6 on Wormhole
+N150, 8 on Blackhole P100 (the outer dimension of the SoC descriptor's `dram:`
+array). Every NOC endpoint that fronts a channel aliases onto that single
+backing: the channel's subchannel cores (the inner `dram:` array), both
+NOC0/NOC1 preferred-worker coords, and the multiple metal `dram_views` that map
+to one physical channel (WH exposes 12 views over 6 channels — two views per
+channel, distinguished only by `bank_to_dram_offset`). This mirrors silicon:
+one physical channel addressed through many coords/views, so a write via any
+endpoint is visible via any other (and a NOC 1 read sees a NOC 0 / host write).
+
+The channel is resolved from the core's **UMD LOGICAL coordinate** (`x =
+channel`), consistently on both sides: the host path
+(`SWEmuleChip::write_to_device` → `get_dram_channel_for_core`) and the kernel
+core-map build (`emulated_program_runner.cpp`, translating each preferred-worker
+coord TRANSLATED→LOGICAL). Keying by the metal dram-view index instead would
+split one physical channel across several mmaps, so a host / NOC 0 write and a
+NOC 1 read would land on different memory. Implementation:
+`SWEmuleChip::get_dram_channel_backing(channel)` in `device/chip/sw_emule_chip.cpp`
+(umd). See `docs/noc-mode-divergence.md` for the companion per-NOC bank-table
+stride fix.
+
 ---
 
 ## 3. Async read / write surface
