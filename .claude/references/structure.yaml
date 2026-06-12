@@ -312,10 +312,13 @@ files:
   - {kind: function, name: llk_math_sfpu_deepseek_moe_gate_topk_init}
 - path: include/jit_hw/llk_pack.h
   section: include/jit_hw/
-  summary: '`__llk_pack_tiled`, `__llk_pack_untilize`'
+  summary: '`__llk_pack_tiled`, `__llk_pack_untilize`; `llk_pack_rows_init`/`llk_pack_rows_uninit`/`_llk_pack_rows_` Layer-1 shadows for `pack_rows_to_addr.h`'
   symbols:
   - {kind: function, name: __llk_pack_tiled}
   - {kind: function, name: __llk_pack_untilize}
+  - {kind: function, name: llk_pack_rows_init}
+  - {kind: function, name: llk_pack_rows_uninit}
+  - {kind: function, name: _llk_pack_rows_}
 - path: include/jit_hw/llk_sync_stubs.h
   section: include/jit_hw/
   summary: '`llk_wait_tiles`/`llk_pop_tiles`/`llk_push_tiles`/`llk_wait_for_free_tiles`; `namespace p_stall`, `semaphore`'
