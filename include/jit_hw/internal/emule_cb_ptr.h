@@ -159,3 +159,20 @@ inline void __emule_cb_advance_rd(uint32_t cb_id, uint32_t n) {
         v.fifo_rd_ptr + n * (__emule_cbs[cb_id].page_size >> cb_addr_shift),
         __emule_cb_base16(cb_id), __emule_cb_span16(cb_id));
 }
+
+// Page index [0, num_pages) of this thread's write/read pointer. Reconstructs
+// the pre-#139 CBSyncState write_idx/read_idx (page units) from the 16-byte-
+// encoded per-RISC fifo pointer, for the CB Boundary sanitizer (check #7). The
+// pointers are advanced by cb_push_back/cb_pop_front (not reserve/wait), so this
+// is the start of the active reserve/wait window — matching the old semantics.
+inline uint32_t __emule_cb_wr_page(uint32_t cb_id) {
+    __emule_cb_view_init(cb_id);
+    const uint32_t pg16 = __emule_cbs[cb_id].page_size >> cb_addr_shift;
+    return pg16 ? ((__emule_local_cb[cb_id].fifo_wr_ptr - __emule_cb_base16(cb_id)) / pg16) : 0;
+}
+
+inline uint32_t __emule_cb_rd_page(uint32_t cb_id) {
+    __emule_cb_view_init(cb_id);
+    const uint32_t pg16 = __emule_cbs[cb_id].page_size >> cb_addr_shift;
+    return pg16 ? ((__emule_local_cb[cb_id].fifo_rd_ptr - __emule_cb_base16(cb_id)) / pg16) : 0;
+}

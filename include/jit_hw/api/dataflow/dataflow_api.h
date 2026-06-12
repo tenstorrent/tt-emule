@@ -126,8 +126,12 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
             if (l1_addr < cb_start || l1_addr >= cb_start + cb_size) continue;
             if (__emule_cb_boundary_strict) {
                 uint32_t access_page = (l1_addr - cb_start) / cb.page_size;
-                uint32_t write_dist = (access_page + cb.num_pages - cb.write_idx) % cb.num_pages;
-                uint32_t read_dist  = (access_page + cb.num_pages - cb.read_idx)  % cb.num_pages;
+                // #139: write/read pointers are now per-RISC (emule_cb_ptr.h),
+                // no longer CBSyncState fields. Reconstruct the page indices.
+                uint32_t write_idx = __emule_cb_wr_page(cb_id);
+                uint32_t read_idx  = __emule_cb_rd_page(cb_id);
+                uint32_t write_dist = (access_page + cb.num_pages - write_idx) % cb.num_pages;
+                uint32_t read_dist  = (access_page + cb.num_pages - read_idx)  % cb.num_pages;
                 uint32_t reserved = __emule_cb_reserved_pages[cb_id];
                 uint32_t waited   = __emule_cb_waited_pages[cb_id];
                 // Only meaningful when the kernel holds an ACTIVE reservation/wait
@@ -145,8 +149,8 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
                             "Read window: read_idx=%u, %u page(s) waited.\n",
                             cb_id, l1_addr, l1_addr - cb_start, cb_size,
                             access_page, cb.num_pages,
-                            cb.write_idx, reserved,
-                            cb.read_idx, waited);
+                            write_idx, reserved,
+                            read_idx, waited);
                 }
             }
             uint32_t l1_base_cb = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));

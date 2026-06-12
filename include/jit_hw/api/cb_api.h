@@ -35,6 +35,13 @@ extern thread_local uint32_t __emule_cb_reserve_line[32];
 extern thread_local const char* __emule_cb_wait_file[32];
 extern thread_local uint32_t __emule_cb_wait_line[32];
 
+// Dirty-CB net-unmatched page counters (defined in kernel_runner.cpp / the
+// runner). Declared here — not only in jit_kernel_stubs.hpp — so cb_api.h is
+// self-contained: stubs includes cb_api.h before its own declarations, so the
+// reserve/push/wait/pop bodies below would otherwise see them undeclared.
+extern thread_local uint32_t __emule_cb_reserved_pages[32];
+extern thread_local uint32_t __emule_cb_waited_pages[32];
+
 // cb_addr_shift (16-byte fifo-pointer encoding) is defined in emule_cb_ptr.h.
 
 // ---- Constexpr tile metadata arrays (populated by JIT defines) ----
