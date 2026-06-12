@@ -131,8 +131,8 @@ coord TRANSLATED→LOGICAL). Keying by the metal dram-view index instead would
 split one physical channel across several mmaps, so a host / NOC 0 write and a
 NOC 1 read would land on different memory. Implementation:
 `SWEmuleChip::get_dram_channel_backing(channel)` in `device/chip/sw_emule_chip.cpp`
-(umd). See `docs/noc-mode-divergence.md` for the companion per-NOC bank-table
-stride fix.
+(umd); the per-NOC bank tables that feed kernel-side DRAM resolution are
+described in §8.3.
 
 ---
 
@@ -379,7 +379,9 @@ Set by the program runner per emulated core, read by the JIT kernel:
 | `my_x[2]`, `my_y[2]` | `uint8_t` | program runner per-core | `get_noc_addr(addr, noc)` 2-arg overload |
 | `__emule_cbs` | `__emule_cb_state*` | program runner per-program | every CB API |
 | `__emule_dfbs` | `__emule_dfb_iface*` | program runner per-program (Quasar) | every DFB API |
-| `noc_index` | `uint8_t` (constexpr 0) | `jit_kernel_stubs.hpp` | default noc arg |
+
+(`noc_index` / `noc_mode` are not TLS — they're per-kernel compile-time constants
+from host-emitted JIT defines; see §8.3.)
 
 ### 8.3 Per-NOC state
 
@@ -407,10 +409,22 @@ Per-NOC TLS / globals in emule today:
 | `__emule_noc_cached_size` | `uint32_t[NUM_NOCS]` | `noc_id_` | `Noc::{set_async_read_state, async_read_with_state, set_async_write_state, async_write_with_state}` transfer size |
 | `__emule_noc_cached_write_dst` | `uintptr_t[NUM_NOCS]` | `noc_id_` | `Noc::{set_async_write_state, async_write_with_state}` resolved dst |
 
-Outstanding single-shared state that should eventually be per-NOC:
+`noc_index` and `noc_mode` are **faithful per-kernel** compile-time constants —
+`constexpr uint8_t noc_index = NOC_INDEX; noc_mode = NOC_MODE;` in
+`jit_kernel_stubs.hpp`, mirroring the firmware `dataflow_api_common.h`
+`KERNEL_BUILD` formula. The host emits `NOC_INDEX` / `NOC_MODE` per kernel
+(BRISC→NOC 0, NCRISC→NOC 1; `DM_DEDICATED_NOC` default), and emule's `#ifndef`
+fallbacks (`NOC_INDEX→0`, `NOC_MODE→DM_DEDICATED_NOC`) cover the compute
+wrappers that omit them. Neither is hardcoded to 0 — an earlier `noc_index = 0`
+hardcode masked the bank-table bug below.
 
-- `noc_index` — currently `constexpr 0`. Making it a runtime per-thread
-  value is a separate follow-up (needs program runner support).
+The per-NOC bank tables (`dram_bank_to_noc_xy` / `l1_bank_to_noc_xy`) are
+declared `extern [2][NUM_*_BANKS]` on the kernel side and must be laid out by the
+runner with the **actual-count stride** (`tbl[noc*num_banks + bank]`, where
+`num_banks` is the real per-arch count, not a padded `MAX_NUM_BANKS`). Row 0
+(`noc=0`) sits at offset 0 in any layout, so a stride mismatch only corrupts the
+`noc=1` row — every NCRISC bank access then reads stale coords, resolving to the
+wrong core/backing.
 
 ---
 
@@ -447,8 +461,10 @@ Drift the audit chose to defer. Each is documented in a follow-up issue;
 none affect correctness for the current single-chip, non-eth-fabric,
 TENSIX-only emule scope.
 
-- `noc = 0` default mismatches vs silicon's `noc = noc_index`. Same value at
-  runtime in emule's single-NOC model.
+- API signature defaults use `noc = 0` where silicon defaults to `noc = noc_index`.
+  With faithful `noc_index`, a NCRISC kernel that omits the arg selects NOC 1 on
+  silicon vs NOC 0 in emule — but both resolve to the same backing (per-channel
+  DRAM aliasing; `my_x[1]==my_x[0]`), so results are unchanged.
 - `ProgrammableCoreType` per-core-type L1 base selection (eth-fabric not
   modeled in emule).
 - `Noc::inline_dw_write` `INLINE_REG` stream-register dispatch.
