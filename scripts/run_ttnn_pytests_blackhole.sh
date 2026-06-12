@@ -394,8 +394,8 @@ run_pytest "tensor_dir_all" "$TENSOR_TEST_DIR" -m "not disable_fast_runtime_mode
 #   - test_run_tilize_with_val_padding_test: collection fails (needs IPython)
 #   - test_pad: silicon-side @pytest.mark.skip (ttnn.pad row_major PCC error)
 #   - test_tiled_concat, test_tosa_scatter_normal,
-#     test_convert_to_hwc_dram_uneven_sharding,
 #     test_sort_indices: real failures (PCC / hang) — documented in #72 closeout
+#   - test_convert_to_hwc_*: FIXED — now covered by dm_test_convert_to_hwc below.
 run_pytest "dm_test_function_targets_batch" \
     "$DM_TEST_DIR/test_untilize.py::test_untilize_single_core_interleaved_to_interleaved" \
     "$DM_TEST_DIR/test_untilize_with_unpadding.py::test_untilize_with_unpadding_height_sharded" \
@@ -408,6 +408,15 @@ run_pytest "dm_test_backward_embedding" "$DM_TEST_DIR/test_backward_embedding.py
 # Note: test_tilize_test, test_gather_general, test_pc_with_different_shapes_in_sequence
 # (also in issue #72) are now covered by the promoted dm_test_tilize / dm_test_gather /
 # dm_test_repeat whole-file entries — see issue #73 promotions.
+
+# convert_to_hwc: previously a #72-documented failure. Guards both fixes — the
+# pack_untilize_init defaulted-template signature, and the NoC set_read_state size
+# lost across by-value `Noc` copies (output was all-zeros). Covers the DRAM-uneven
+# case (the #72 target), L1-uneven (UNet-shallow), and even/resharded DRAM.
+run_pytest "dm_test_convert_to_hwc" \
+    "$DM_TEST_DIR/test_convert_to_hwc.py::test_convert_to_hwc_dram_uneven_sharding" \
+    "$DM_TEST_DIR/test_convert_to_hwc.py::test_convert_to_hwc_with_l1_input_uneven_sharding" \
+    "$DM_TEST_DIR/test_convert_to_hwc.py::test_convert_to_hwc_dram"
 
 # ---- base_functionality + benchmarks single-device tail (issue #71) ----
 # 15 of 19 files pass; 4 omitted because they import HuggingFace transformers
