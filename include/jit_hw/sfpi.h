@@ -143,12 +143,43 @@ public:
     vUInt& operator=(const vUInt& o);
 };
 
+// ---- Fidelity knob: centralized SFPU result finalization ----
+//
+// Default is OFF — coverage-first, plain IEEE FP32, byte-identical baseline.
+// Define EMULE_SFPU_BITEXACT to apply Blackhole SFPU numeric semantics on every
+// vFloat ALU result (per tt-isa-documentation SFPMAD): denormal outputs flushed
+// to sign-preserved zero, and any NaN canonicalized to 0x7fc00000. This single
+// chokepoint is where the partially-fused FMA (a*b+c kept above FP32 then a
+// single round-to-nearest-even — a port of the ISA Miscellaneous/FMA/fma.c)
+// drops in later, so ops never change. Compiles to identity when the macro is
+// unset (zero overhead, no baseline drift).
+inline float __emule_sfpu_finalize(float x) {
+#if defined(EMULE_SFPU_BITEXACT)
+    uint32_t b; std::memcpy(&b, &x, 4);
+    const uint32_t exp = (b >> 23) & 0xFFu, man = b & 0x7FFFFFu;
+    if (exp == 0xFFu && man) { b = 0x7FC00000u; std::memcpy(&x, &b, 4); }       // NaN -> canonical
+    else if (exp == 0u && man) { b &= 0x80000000u; std::memcpy(&x, &b, 4); }    // denormal -> signed 0
+#endif
+    return x;
+}
+
+// Partially-fused multiply-add (single rounding), matching SFPMAD's contract.
+// C++ operator chains (a*b + c) round twice; ops that need the fused result
+// call this explicitly. Provided as the faithful primitive + the place the
+// bit-exact FMA model lands. (Internal name to avoid clashing with platform
+// `mad` identifiers; the real sfpi exposes SFPMAD via operators/builtins.)
+inline vFloat __emule_sfpu_mad(const vFloat& a, const vFloat& b, const vFloat& c) {
+    vFloat r;
+    for (uint32_t i = 0; i < 32; ++i) r.v[i] = __emule_sfpu_finalize(std::fmaf(a.v[i], b.v[i], c.v[i]));
+    return r;
+}
+
 // ---- Arithmetic and comparison ops ----
 
-inline vFloat operator+(const vFloat& a, const vFloat& b) { vFloat r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] + b.v[i]; return r; }
-inline vFloat operator-(const vFloat& a, const vFloat& b) { vFloat r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] - b.v[i]; return r; }
-inline vFloat operator*(const vFloat& a, const vFloat& b) { vFloat r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] * b.v[i]; return r; }
-inline vFloat operator/(const vFloat& a, const vFloat& b) { vFloat r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] / b.v[i]; return r; }
+inline vFloat operator+(const vFloat& a, const vFloat& b) { vFloat r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = __emule_sfpu_finalize(a.v[i] + b.v[i]); return r; }
+inline vFloat operator-(const vFloat& a, const vFloat& b) { vFloat r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = __emule_sfpu_finalize(a.v[i] - b.v[i]); return r; }
+inline vFloat operator*(const vFloat& a, const vFloat& b) { vFloat r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = __emule_sfpu_finalize(a.v[i] * b.v[i]); return r; }
+inline vFloat operator/(const vFloat& a, const vFloat& b) { vFloat r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = __emule_sfpu_finalize(a.v[i] / b.v[i]); return r; }
 inline vFloat operator-(const vFloat& a) { vFloat r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = -a.v[i]; return r; }
 
 inline vInt operator+(const vInt& a, const vInt& b) { vInt r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] + b.v[i]; return r; }
@@ -268,12 +299,17 @@ public:
         return r;
     }
 
-    // Store with active-lane mask.
+    // Store with active-lane mask. The SFPSTORE boundary is a fidelity
+    // chokepoint: under EMULE_SFPU_BITEXACT each stored lane is finalized
+    // (denormal flush + NaN canonicalize). DEST-format mantissa truncation
+    // (bf16/fp16 on store) is the future upgrade that hangs here — emule's DST
+    // is fp32 today and deep ops convert<vFloat16b> before store, so it is not
+    // yet wired. Identity when the macro is unset (byte-identical baseline).
     DstRegLane& operator=(const vFloat& x) {
         float* base = __emule_sfpi_active_dst();
         for (uint32_t i = 0; i < 32; ++i) {
             if (__emule_sfpi_mask[i]) {
-                base[__emule_sfpi_cursor + lane_offset_ * 32 + i] = x.v[i];
+                base[__emule_sfpi_cursor + lane_offset_ * 32 + i] = __emule_sfpu_finalize(x.v[i]);
             }
         }
         return *this;

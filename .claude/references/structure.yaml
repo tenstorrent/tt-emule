@@ -554,6 +554,8 @@ files:
   - {kind: class, name: vFloat}
   - {kind: class, name: vInt}
   - {kind: class, name: vUInt}
+  - {kind: function, name: __emule_sfpu_finalize}
+  - {kind: function, name: __emule_sfpu_mad}
   - {kind: struct, name: vCond}
   - {kind: function, name: v_and}
   - {kind: function, name: v_or}

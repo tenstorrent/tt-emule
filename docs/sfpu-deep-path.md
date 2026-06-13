@@ -47,6 +47,23 @@ Load-bearing semantics (validated against silicon behavior):
 - Field ops: `exexp`/`setexp`/`addexp`, `sFloat16a`/`sFloat16b` + `convert<vFloat16b>`
   (bf16 narrowing on the store boundary).
 
+## Fidelity knobs (`EMULE_SFPU_BITEXACT`, opt-in)
+
+Numeric fidelity is centralized in one chokepoint, `__emule_sfpu_finalize(float)`,
+applied to every `vFloat` ALU result and at the `dst_reg` store boundary.
+**Default = OFF**: `finalize` is the identity, so the deep path is plain IEEE
+FP32 and the baseline stays byte-identical (zero overhead — it inlines away).
+
+Define `EMULE_SFPU_BITEXACT` to apply Blackhole SFPU semantics (per
+tt-isa-documentation `SFPMAD`): denormal results flushed to sign-preserved zero,
+and any NaN canonicalized to `0x7fc00000`. The partially-fused FMA (`a*b+c` kept
+above FP32 then a single round-to-nearest-even — a port of the ISA
+`Miscellaneous/FMA/fma.c`) is the future drop-in at this same chokepoint, so ops
+never change. `__emule_sfpu_mad(a,b,c)` is the fused primitive (`std::fmaf`,
+single rounding). DEST-format mantissa truncation on bf16/fp16 store also hangs
+at the store chokepoint (not yet wired — emule's DST is fp32 and deep ops
+`convert<vFloat16b>` before store).
+
 ## Engaging the deep path
 
 Default = layer-1 shadow (byte-identical baseline). To promote a shadowed op,
