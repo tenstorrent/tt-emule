@@ -532,6 +532,7 @@ files:
   section: include/jit_hw/
   summary: '`namespace sfpi`; `enum class RoundMode`/`LRegs`; TLS `__emule_sfpi_dst_base`/`__emule_sfpi_cursor`; `SFPSHFT2_*` constants (SFPU vector-API shim)'
   symbols:
+  - {kind: macro, name: sfpi_inline}
   - {kind: global, name: __EMULE_SFPI_LANES}
   - {kind: global, name: __EMULE_SFPI_TILE_ELEMS}
   - {kind: global, name: __emule_sfpi_dst_base}
@@ -576,6 +577,20 @@ files:
   - {kind: function, name: float_to_fp16a}
   - {kind: function, name: setsgn}
   - {kind: struct, name: Converter}
+  - {kind: enum, name: ExponentMode}
+  - {kind: function, name: exexp}
+  - {kind: function, name: setexp}
+  - {kind: function, name: addexp}
+  - {kind: function, name: int32_to_float}
+  - {kind: class, name: sFloat16b}
+  - {kind: class, name: sFloat16a}
+  - {kind: class, name: vFloat16b}
+  - {kind: function, name: convert}
+  - {kind: global, name: __emule_prgm_creg}
+  - {kind: class, name: __vCRegFloat}
+  - {kind: class, name: __vCRegInt}
+  - {kind: global, name: vConstFloatPrgm0}
+  - {kind: global, name: vConstIntPrgm0}
   - {kind: macro, name: v_if}
   - {kind: macro, name: v_elseif}
   - {kind: macro, name: v_else}
@@ -1590,6 +1605,9 @@ files:
   - {kind: function, name: nez_tile_int32}
   - {kind: function, name: nez_tile_uint16}
   - {kind: function, name: nez_tile_uint32}
+- path: include/jit_hw/api/compute/eltwise_unary/deep_sfpu_registry.h
+  section: include/jit_hw/api/compute/eltwise_unary/
+  summary: Deep-SFPU per-op override policy doc; define EMULE_DEEP_SFPU_<OP> to promote a shadowed op to the real-silicon deep path (default = layer-1 shadow).
 - path: include/jit_hw/api/compute/eltwise_unary/digamma.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `digamma_tile` (+`_init`)'
@@ -2282,6 +2300,13 @@ files:
 - path: include/jit_hw/internal/circular_buffer_interface.h
   section: include/jit_hw/internal/
   summary: forwarding shim → `jit_hw/internal/llk_state.h`
+- path: include/jit_hw/internal/deep_sfpu.h
+  section: include/jit_hw/internal/
+  summary: Deep-SFPU bridge — run_unary_sfpu points the sfpi dst_reg cursor at __emule_dst[idst] so a real silicon ckernel_sfpu_<op>.h calculate runs on emule's sfpi backend.
+  symbols:
+  - {kind: namespace, name: __emule_deep}
+  - {kind: global, name: kTileIterations}
+  - {kind: function, name: run_unary_sfpu}
 - path: include/jit_hw/internal/emule_cb_ptr.h
   section: include/jit_hw/internal/
   summary: 'Per-RISC circular-buffer read/write pointers — the single source of truth (issue #139). `struct LocalCBInterface` + thread_local `__emule_local_cb[NUM_CIRCULAR_BUFFERS]` (mirrors silicon''s
