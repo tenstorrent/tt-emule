@@ -303,18 +303,31 @@ public:
 
 inline DstReg dst_reg;
 
-// l_reg[LRegs::LRegN] — silicon: direct access to LRegN. Emule: 8 thread-local
-// vFloats backing LReg0..7. Used by topk to stash partial results between
-// TTI_SFP intrinsics; emule's scalar shim won't track TTI_SFP state, but
-// the read/assign paths compile cleanly so the surface parses.
+// l_reg[LRegs::LRegN] — silicon: direct access to an SFPU LReg. Emule backs
+// LReg0..15 with thread-local 32-lane bit storage (vUInt). The coefficient
+// LUTs (tanh/sigmoid) load packed FP16/INT bit patterns into LRegs via SFPLOADI
+// (see the jit_hw ckernel_ops.h shim), then lut()/lut2() read them. l_reg is
+// vUInt-typed — the only emule users (the LUT ops) treat it as raw bits.
+inline thread_local vUInt __emule_lreg[16] = {};
 struct LRegFile {
-    vFloat& operator[](LRegs idx);
-    const vFloat& operator[](LRegs idx) const;
+    vUInt& operator[](LRegs idx) { return __emule_lreg[static_cast<uint8_t>(idx)]; }
+    const vUInt& operator[](LRegs idx) const { return __emule_lreg[static_cast<uint8_t>(idx)]; }
 };
-inline thread_local vFloat __emule_l_reg_storage[8] = {};
-inline vFloat& LRegFile::operator[](LRegs idx) { return __emule_l_reg_storage[static_cast<uint8_t>(idx)]; }
-inline const vFloat& LRegFile::operator[](LRegs idx) const { return __emule_l_reg_storage[static_cast<uint8_t>(idx)]; }
 inline LRegFile l_reg;
+
+// SFPLOADI into an LReg (called by the jit_hw ckernel_ops.h shim). The immediate
+// is uniform across lanes. insmod per ckernel_sfpu_load_config.h:
+//   2  -> imm16 unsigned, zero-extended (clears upper 16)
+//   10 -> write lower 16, keep upper;  8 -> write upper 16, keep lower
+inline void __emule_sfploadi(unsigned dest, unsigned insmod, unsigned val) {
+    if (dest >= 16) return;
+    uint32_t cur = __emule_lreg[dest].v[0];
+    if (insmod == 2)       cur = val & 0xFFFFu;
+    else if (insmod == 10) cur = (cur & 0xFFFF0000u) | (val & 0xFFFFu);
+    else if (insmod == 8)  cur = (cur & 0x0000FFFFu) | ((val & 0xFFFFu) << 16);
+    else                   cur = val;
+    for (uint32_t i = 0; i < 32; ++i) __emule_lreg[dest].v[i] = cur;
+}
 
 // ---- Constants ----
 
@@ -512,6 +525,63 @@ inline void vec_max_min(vFloat& a, vFloat& b) {
         float lo = a.v[i] > b.v[i] ? b.v[i] : a.v[i];
         a.v[i] = hi; b.v[i] = lo;
     }
+}
+
+// ---- LUT piecewise-linear evaluators (SFPLUT / SFPLUTFP32) ----
+// Coefficient decoders (exact per tt-isa-documentation Blackhole).
+inline float __lut8_to_fp32(uint8_t x) {
+    if (x == 0xFF) return 0.0f;                       // 0xFF maps to 0
+    uint32_t sign = x >> 7, exp = (x >> 4) & 7u, man = x & 0xFu;
+    uint32_t bits = (sign << 31) | ((127u - exp) << 23) | (man << 19);
+    float f; std::memcpy(&f, &bits, 4); return f;
+}
+inline float __lut16_to_fp32(uint16_t x) {
+    uint32_t sign = x >> 15, exp = (x >> 10) & 0x1Fu, man = x & 0x3FFu;
+    uint32_t bits = (sign << 31) | ((exp == 0x1Fu ? 0u : 112u + exp) << 23) | (man << 13);
+    float f; std::memcpy(&f, &bits, 4); return f;
+}
+inline float __apply_sgn_retain(float res, float in) {
+    uint32_t rb; std::memcpy(&rb, &res, 4);
+    rb = (rb & 0x7FFFFFFFu) | (std::signbit(in) ? 0x80000000u : 0u);  // result sign = sign(in)
+    float f; std::memcpy(&f, &rb, 4); return f;
+}
+
+// SFPLUT: 3-entry, 8-bit coefficients. Ranges by Abs(v): [0,1)->l0, [1,2)->l1,
+// [2,inf)->l2. a=hi8, c=lo8 of the chosen LReg. VD = a*|v| + c, sign retained.
+inline vFloat lut(const vFloat& v, const vUInt& l0, const vUInt& l1, const vUInt& l2) {
+    vFloat r;
+    for (uint32_t i = 0; i < 32; ++i) {
+        float x = v.v[i], ax = std::fabs(x);
+        uint32_t coeffs = (ax < 1.0f) ? l0.v[i] : (ax < 2.0f) ? l1.v[i] : l2.v[i];
+        float a = __lut8_to_fp32((coeffs >> 8) & 0xFFu);
+        float c = __lut8_to_fp32(coeffs & 0xFFu);
+        r.v[i] = __apply_sgn_retain(a * ax + c, x);
+    }
+    return r;
+}
+
+// SFPLUTFP32 6-entry FP16 table (TABLE1: last split 3.0; TABLE2/mode!=1: 4.0).
+// a01/a23/a45 pack two FP16 slopes each (lo/hi 16b); b01/b23/b45 the intercepts.
+// Ranges by Abs(v): [0,.5) [.5,1) [1,1.5) [1.5,2) [2,cut) [cut,inf). Sign retained.
+inline vFloat lut2(const vFloat& v,
+                   const vUInt& a01, const vUInt& a23, const vUInt& a45,
+                   const vUInt& b01, const vUInt& b23, const vUInt& b45, int mode = 1) {
+    const float cut = (mode == 1) ? 3.0f : 4.0f;
+    vFloat r;
+    for (uint32_t i = 0; i < 32; ++i) {
+        float x = v.v[i], ax = std::fabs(x);
+        uint32_t areg, breg; bool hi;
+        if      (ax < 0.5f) { areg = a01.v[i]; breg = b01.v[i]; hi = false; }
+        else if (ax < 1.0f) { areg = a01.v[i]; breg = b01.v[i]; hi = true;  }
+        else if (ax < 1.5f) { areg = a23.v[i]; breg = b23.v[i]; hi = false; }
+        else if (ax < 2.0f) { areg = a23.v[i]; breg = b23.v[i]; hi = true;  }
+        else if (ax < cut)  { areg = a45.v[i]; breg = b45.v[i]; hi = false; }
+        else                { areg = a45.v[i]; breg = b45.v[i]; hi = true;  }
+        uint16_t ab = hi ? (areg >> 16) : (areg & 0xFFFFu);
+        uint16_t cb = hi ? (breg >> 16) : (breg & 0xFFFFu);
+        r.v[i] = __apply_sgn_retain(__lut16_to_fp32(ab) * ax + __lut16_to_fp32(cb), x);
+    }
+    return r;
 }
 
 // ---- Narrow bf16 types + convert (SFPSTORE narrowing boundary) ----

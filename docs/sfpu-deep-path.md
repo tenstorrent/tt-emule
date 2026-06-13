@@ -58,15 +58,36 @@ which points the sfpi cursor at `__emule_dst[idst]` for the call. Policy lives i
 `api/compute/eltwise_unary/deep_sfpu_registry.h`. Ops with **no** shadow engage the
 deep path automatically (planned: deep arm of `sfpu_split_includes.h`).
 
-`sqrt` and `silu` are wired as reference overrides (`EMULE_DEEP_SFPU_SQRT`,
-`EMULE_DEEP_SFPU_SILU`).
+`sqrt`, `silu`, `sigmoid`, and `tanh` are wired as reference overrides
+(`EMULE_DEEP_SFPU_SQRT` / `_SILU` / `_SIGMOID` / `_TANH`).
+
+## LUT-based ops (sigmoid / tanh)
+
+`tanh` and `sigmoid` are piecewise-linear LUT ops. Their `_init_` loads packed
+coefficient bit-patterns into LRegs via `SFPLOADI` (through
+`ckernel_sfpu_load_config.h` → `ckernel_ops.h`), then `_calculate_` calls
+`lut()` (3-entry `SFPLUT`) / `lut2()` (6-entry `SFPLUTFP32`) which read those
+LRegs. Emule provides:
+
+- `sfpi.h`: `l_reg[LRegN]` backed by 32-lane `vUInt __emule_lreg[16]`, the
+  `__emule_sfploadi` writer, and faithful `lut`/`lut2` evaluators
+  (`__lut8_to_fp32` / `__lut16_to_fp32` decoders, `Abs(x)` range buckets, and
+  `VD = a·Abs(x) + c` with sign-retain) — exact per tt-isa-documentation.
+- `jit_hw/ckernel_ops.h`: a shim defining the `TT_SFPLOADI`/`TTI_SFPLOADI`
+  (→ `__emule_sfploadi`) and `TTI_SFPCONFIG` (no-op) macros; the real
+  `ckernel_ops.h` emits raw Tensix instructions and can't compile on x86.
+
+Note: the silicon `tanh` LUT is coarse (3 pieces; ~0.14 abs error near |x|=1) —
+the deep path reproduces **silicon**, not torch, so PCC-vs-torch reflects that.
 
 ## Status / verification
 
-- Real `ckernel_sfpu_{sqrt,log,silu}.h` compile on clang-20 against emule `sfpi.h`
-  and run correctly: **sqrt → exact**; **log → PCC 0.999999 vs torch** (abs ≈1% =
-  the silicon 3rd-order Chebyshev poly, incl. sub-1 inputs via the sign-magnitude
-  exponent path); **silu → PCC 0.999992** (piecewise-linear + 5th-order-poly sigmoid).
+- Real `ckernel_sfpu_{sqrt,log,silu,sigmoid,tanh}.h` compile on clang-20 against
+  emule `sfpi.h` and run correctly (PCC vs torch): **sqrt → exact**; **log →
+  0.999999** (silicon 3rd-order Chebyshev, incl. sub-1 inputs via the
+  sign-magnitude exponent path); **silu → 0.999992**; **sigmoid → 0.999940**
+  (6-piece SFPLUTFP32); **tanh → 0.997499** (coarse 3-piece SFPLUT — silicon's
+  own accuracy, faithfully reproduced).
 - Blackhole **19/0** and Wormhole **39/0** regressions are unchanged from baseline
   after the `sfpi.h` model change + deep-path wiring (the masked-assignment change
   did not regress the existing sfpi ops: clamped_silu, topk, …).
