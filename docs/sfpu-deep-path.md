@@ -109,9 +109,22 @@ the deep path reproduces **silicon**, not torch, so PCC-vs-torch reflects that.
   after the `sfpi.h` model change + deep-path wiring (the masked-assignment change
   did not regress the existing sfpi ops: clamped_silu, topk, …).
 
+## Tier-3 (cross-lane primitives) — fail loud
+
+`vec_swap` (lane-local SFPSWAP) is modeled faithfully. `subvec_transp` (SFPTRANSP,
+cross-sub-vector) and the SFPSHFT2 sub-vector shuffles are **not yet modeled**:
+the stubs call `__emule_sfpu_unsupported(...)` which aborts with a clear message
+(project rule: fail loud, never silently wrong). Model them when a target op
+needs them.
+
 ## Arch note
 
-Tier-1 is Blackhole-first. Wormhole reuses the same mechanism via
-`tt_llk_wormhole_b0` paths; Quasar later. Tier-2 (LUT transcendentals — exp/gelu/
-sigmoid via `SFPLUTFP32`) and centralized fidelity knobs (partially-fused FMA,
-DEST-format-aware store truncation) are the next deep-path increments.
+The mechanism is arch-parameterized: each deep override header keys its real
+ckernel include on `ARCH_BLACKHOLE` / `ARCH_WORMHOLE`. Validated on both — deep
+`sqrt` compiles + runs exact against `tt_llk_wormhole_b0` as well as
+`tt_llk_blackhole`. Quasar can be added the same way.
+
+Deferred (raw `TTI_SFP*` fast paths, tracked on the PR): **`gelu`**
+(`TTI_SFPLUTFP32` + cdf + recip) and **`exp`** (`SFPLOADMACRO`/`SFPCONFIG`/
+`SFPSWAP`). These need raw-`TTI_SFP*` intrinsic support in the backend (or
+routing `exp` to its non-TTI accurate sfpi path).

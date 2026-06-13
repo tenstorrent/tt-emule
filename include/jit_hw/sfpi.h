@@ -40,6 +40,8 @@
 #include <cstring>
 #include <array>
 #include <limits>
+#include <cstdio>
+#include <cstdlib>
 
 // Real silicon ckernel_sfpu_*.h headers (pulled in by the deep-SFPU path)
 // mark functions with `sfpi_inline`. On RISC-V this maps to an
@@ -693,6 +695,31 @@ public:
 };
 inline const __vCRegFloat vConstFloatPrgm0{0}, vConstFloatPrgm1{1}, vConstFloatPrgm2{2};
 inline const __vCRegInt   vConstIntPrgm0{0},   vConstIntPrgm1{1},   vConstIntPrgm2{2};
+
+// ---- Tier-3: shuffle / swap primitives ----
+// Fail loud, never silently wrong (project rule). An op that reaches an
+// unmodeled cross-lane primitive aborts with a clear message rather than
+// computing garbage; model it faithfully when a target op needs it.
+[[noreturn]] inline void __emule_sfpu_unsupported(const char* op) {
+    std::fprintf(stderr,
+        "[EMULE] SFPU primitive not yet modeled in the deep sfpi backend: %s. "
+        "It is a cross-lane op; add a faithful model before using an op that needs it. "
+        "See docs/sfpu-deep-path.md.\n", op);
+    std::abort();
+}
+
+// vec_swap: unconditional element-wise swap of two vectors (SFPSWAP). This is
+// lane-local, so it is modeled faithfully (mask-aware). The conditional SFPSWAP
+// modes are vec_min_max / vec_max_min (above).
+inline void vec_swap(vFloat& a, vFloat& b) { for (uint32_t i = 0; i < 32; ++i) if (__emule_sfpi_mask[i]) { float t = a.v[i]; a.v[i] = b.v[i]; b.v[i] = t; } }
+inline void vec_swap(vInt& a, vInt& b)     { for (uint32_t i = 0; i < 32; ++i) if (__emule_sfpi_mask[i]) { int32_t t = a.v[i]; a.v[i] = b.v[i]; b.v[i] = t; } }
+inline void vec_swap(vUInt& a, vUInt& b)   { for (uint32_t i = 0; i < 32; ++i) if (__emule_sfpi_mask[i]) { uint32_t t = a.v[i]; a.v[i] = b.v[i]; b.v[i] = t; } }
+
+// subvec_transp: SFPTRANSP — cross-sub-vector transpose of 4 registers. The
+// exact lane permutation is not yet modeled; fail loud until an op needs it.
+inline void subvec_transp(vFloat&, vFloat&, vFloat&, vFloat&) { __emule_sfpu_unsupported("subvec_transp(vFloat)"); }
+inline void subvec_transp(vInt&,   vInt&,   vInt&,   vInt&)   { __emule_sfpu_unsupported("subvec_transp(vInt)"); }
+inline void subvec_transp(vUInt&,  vUInt&,  vUInt&,  vUInt&)  { __emule_sfpu_unsupported("subvec_transp(vUInt)"); }
 
 }  // namespace sfpi
 

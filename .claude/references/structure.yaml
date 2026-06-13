@@ -609,6 +609,9 @@ files:
   - {kind: class, name: __vCRegInt}
   - {kind: global, name: vConstFloatPrgm0}
   - {kind: global, name: vConstIntPrgm0}
+  - {kind: function, name: __emule_sfpu_unsupported}
+  - {kind: function, name: vec_swap}
+  - {kind: function, name: subvec_transp}
   - {kind: macro, name: v_if}
   - {kind: macro, name: v_elseif}
   - {kind: macro, name: v_else}
