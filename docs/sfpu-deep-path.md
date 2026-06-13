@@ -88,8 +88,11 @@ intended to engage the deep path automatically (deep arm of
 `sfpu_split_includes.h` — not yet wired; the per-op override above is the
 landed path).
 
-`sqrt`, `silu`, `sigmoid`, and `tanh` are wired as reference overrides
-(`EMULE_DEEP_SFPU_SQRT` / `_SILU` / `_SIGMOID` / `_TANH`).
+`sqrt` is **deep-default**: `eltwise_unary/sqrt.h` runs the real silicon SQRT_23
+unconditionally (no libm shadow, no toggle) — the migrated-op end state, and the
+shape any unshadowed op takes through the deep bridge. `silu`, `sigmoid`, `tanh`
+are toggle-gated reference overrides (`EMULE_DEEP_SFPU_{SILU,SIGMOID,TANH}` via
+the `TT_EMULE_DEEP_SFPU` env var); their default stays the libm shadow.
 
 ## LUT-based ops (sigmoid / tanh)
 

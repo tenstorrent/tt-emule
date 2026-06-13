@@ -19,3 +19,10 @@
 // This header intentionally defines NOTHING by default; overrides come from the
 // build/JIT define set. It exists as the single documented home for the policy
 // and as a stable include point for the shimmed ops' guarded branches.
+//
+// Current state:
+//   * sqrt           — DEEP-DEFAULT (migrated; no libm shadow, no toggle —
+//                      eltwise_unary/sqrt.h runs the real silicon SQRT_23). This
+//                      is the shape an unshadowed op takes via the deep bridge.
+//   * silu/sigmoid/tanh — toggle-gated overrides (EMULE_DEEP_SFPU_<OP> via the
+//                      TT_EMULE_DEEP_SFPU env var); default stays the libm shadow.
