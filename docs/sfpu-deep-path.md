@@ -67,13 +67,26 @@ at the store chokepoint (not yet wired — emule's DST is fp32 and deep ops
 ## Engaging the deep path
 
 Default = layer-1 shadow (byte-identical baseline). To promote a shadowed op,
-define `EMULE_DEEP_SFPU_<OP>` (e.g. via the JIT define set, so it lands in the
-cache key). The op's `eltwise_unary/<op>.h` carries a guarded branch whose
+define `EMULE_DEEP_SFPU_<OP>`. At runtime this is driven by the
+**`TT_EMULE_DEEP_SFPU`** env var, e.g.:
+
+```
+TT_EMULE_DEEP_SFPU=sqrt,sigmoid   # promote sqrt + sigmoid to the deep path
+```
+
+The runner (`emulated_program_runner.cpp`, `build_kernel_defines`) parses the
+comma-separated list and injects `EMULE_DEEP_SFPU_<UPPER>` into the JIT define
+set (so it lands in the cache key — toggling invalidates stale `.so`). That env
+var is the tt-metal sister change (PR tenstorrent/tt-metal#46945).
+
+Each shadowed op's `eltwise_unary/<op>.h` carries a guarded branch whose
 *else*-branch is the untouched layer-1 default; the deep branch delegates to the
 real silicon calculate via `__emule_deep::run_unary_sfpu` (`internal/deep_sfpu.h`),
 which points the sfpi cursor at `__emule_dst[idst]` for the call. Policy lives in
-`api/compute/eltwise_unary/deep_sfpu_registry.h`. Ops with **no** shadow engage the
-deep path automatically (planned: deep arm of `sfpu_split_includes.h`).
+`api/compute/eltwise_unary/deep_sfpu_registry.h`. Ops with **no** shadow are
+intended to engage the deep path automatically (deep arm of
+`sfpu_split_includes.h` — not yet wired; the per-op override above is the
+landed path).
 
 `sqrt`, `silu`, `sigmoid`, and `tanh` are wired as reference overrides
 (`EMULE_DEEP_SFPU_SQRT` / `_SILU` / `_SIGMOID` / `_TANH`).
