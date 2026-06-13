@@ -58,14 +58,15 @@ which points the sfpi cursor at `__emule_dst[idst]` for the call. Policy lives i
 `api/compute/eltwise_unary/deep_sfpu_registry.h`. Ops with **no** shadow engage the
 deep path automatically (planned: deep arm of `sfpu_split_includes.h`).
 
-`sqrt` is wired as the reference override.
+`sqrt` and `silu` are wired as reference overrides (`EMULE_DEEP_SFPU_SQRT`,
+`EMULE_DEEP_SFPU_SILU`).
 
 ## Status / verification
 
-- Real `ckernel_sfpu_sqrt.h` (+ `rsqrt_compat.h`) and `ckernel_sfpu_log.h` compile on
-  clang-20 against emule `sfpi.h` and run correctly: **sqrt → exact**;
-  **log → PCC 0.999999 vs torch** (abs ≈1% = the silicon 3rd-order Chebyshev poly,
-  faithfully reproduced, incl. sub-1 inputs through the sign-magnitude exponent path).
+- Real `ckernel_sfpu_{sqrt,log,silu}.h` compile on clang-20 against emule `sfpi.h`
+  and run correctly: **sqrt → exact**; **log → PCC 0.999999 vs torch** (abs ≈1% =
+  the silicon 3rd-order Chebyshev poly, incl. sub-1 inputs via the sign-magnitude
+  exponent path); **silu → PCC 0.999992** (piecewise-linear + 5th-order-poly sigmoid).
 - Blackhole **19/0** and Wormhole **39/0** regressions are unchanged from baseline
   after the `sfpi.h` model change + deep-path wiring (the masked-assignment change
   did not regress the existing sfpi ops: clamped_silu, topk, …).

@@ -486,6 +486,33 @@ inline vFloat int32_to_float(const vInt& in, RoundMode = RoundMode::NearestEven)
     }
     return r;
 }
+// abs(vFloat): clear the sign bit (SFPABS float mode).
+inline vFloat abs(const vFloat& v) {
+    vFloat r;
+    for (uint32_t i = 0; i < 32; ++i) {
+        uint32_t b; std::memcpy(&b, &v.v[i], 4);
+        b &= 0x7FFFFFFFu;
+        std::memcpy(&r.v[i], &b, 4);
+    }
+    return r;
+}
+// vec_min_max(a,b): a <- min(a,b), b <- max(a,b)  (SFPSWAP min/max; used to
+// clamp, e.g. ckernel_sfpu_exp.h). vec_max_min is the swapped variant.
+// Honors the active lane mask (a silicon SFPSWAP inside v_if is predicated).
+inline void vec_min_max(vFloat& a, vFloat& b) {
+    for (uint32_t i = 0; i < 32; ++i) if (__emule_sfpi_mask[i]) {
+        float lo = a.v[i] < b.v[i] ? a.v[i] : b.v[i];
+        float hi = a.v[i] < b.v[i] ? b.v[i] : a.v[i];
+        a.v[i] = lo; b.v[i] = hi;
+    }
+}
+inline void vec_max_min(vFloat& a, vFloat& b) {
+    for (uint32_t i = 0; i < 32; ++i) if (__emule_sfpi_mask[i]) {
+        float hi = a.v[i] > b.v[i] ? a.v[i] : b.v[i];
+        float lo = a.v[i] > b.v[i] ? b.v[i] : a.v[i];
+        a.v[i] = hi; b.v[i] = lo;
+    }
+}
 
 // ---- Narrow bf16 types + convert (SFPSTORE narrowing boundary) ----
 class sFloat16b {

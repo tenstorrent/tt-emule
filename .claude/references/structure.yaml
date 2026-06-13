@@ -582,6 +582,9 @@ files:
   - {kind: function, name: setexp}
   - {kind: function, name: addexp}
   - {kind: function, name: int32_to_float}
+  - {kind: function, name: abs}
+  - {kind: function, name: vec_min_max}
+  - {kind: function, name: vec_max_min}
   - {kind: class, name: sFloat16b}
   - {kind: class, name: sFloat16a}
   - {kind: class, name: vFloat16b}
