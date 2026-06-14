@@ -25,6 +25,11 @@
 
 namespace ckernel {
 
+// APPROXIMATION_MODE is fixed false: emule does not thread the upstream `APPROX`
+// op define (it is not defined in the emule JIT), and sqrt's approximate-init
+// algorithm is not modelled separately. FAST_APPROX (the template param) only
+// affects _calculate_sqrt_'s final-clamp, not the constants — so _init_sqrt_
+// stays consistent with _calculate_ regardless of FAST_APPROX.
 template <bool FAST_APPROX = false>
 ALWI void sqrt_tile_init() {
     // Program the SQRT_23 constant registers (vConstIntPrgm0 / vConstFloatPrgm1/2).
@@ -38,11 +43,13 @@ ALWI void sqrt_tile(uint32_t idst) {
     // sqrt_tile_init (idempotent — just sets three cregs).
     ckernel::sfpu::_init_sqrt_</*APPROXIMATION_MODE*/ false>();
     // Run the real silicon SQRT_23 over the whole DST tile via the deep bridge.
+    // FAST_APPROX is threaded through to the real calculate (it selects the
+    // fast-approx final-clamp path).
     __emule_deep::run_unary_sfpu(idst, [](int it) {
         ckernel::sfpu::_calculate_sqrt_</*APPROXIMATION_MODE*/ false,
                                         __emule_deep::kTileIterations,
                                         /*fp32_dest_acc_en*/ true,
-                                        /*FAST_APPROX*/ false>(it);
+                                        FAST_APPROX>(it);
     });
 }
 

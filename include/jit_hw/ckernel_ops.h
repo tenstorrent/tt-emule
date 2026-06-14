@@ -21,9 +21,12 @@
 
 // SFPCONFIG programs the shared programmable-constant LRegs (11-14) from LReg0
 // via the CONFIG path. The tanh/sigmoid LUT inits use SFPLOADI directly and do
-// NOT use this; it is a no-op so load_config.h's _sfpu_load_config32_ /
-// _init_sfpu_config_reg compile. A future deep op that programs constants this
-// way must implement the LReg0 -> creg copy here (don't leave it silent).
+// NOT use this, so it is not yet modeled. It FAILS LOUD (not a silent no-op):
+// if a deep op actually executes SFPCONFIG, it aborts with a clear message
+// rather than silently producing wrong constants. (load_config.h's
+// _sfpu_load_config32_ / _init_sfpu_config_reg still compile; they only abort
+// if invoked.) Implement the LReg0 -> creg copy here when a target op needs it.
 #ifndef TTI_SFPCONFIG
-#define TTI_SFPCONFIG(imm16_math, config_dest, instr_mod1) ((void)0)
+#define TTI_SFPCONFIG(imm16_math, config_dest, instr_mod1) \
+    ::sfpi::__emule_sfpu_unsupported("TTI_SFPCONFIG (SFPU config-reg path not modeled)")
 #endif

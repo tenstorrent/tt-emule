@@ -276,6 +276,7 @@ files:
   - {kind: macro, name: TT_SFPLOADI}
   - {kind: macro, name: TTI_SFPLOADI}
   - {kind: macro, name: TTI_SFPCONFIG}
+  - {kind: function, name: __emule_sfpu_unsupported}
 - path: include/jit_hw/ckernel_sfpu_exp.h
   section: include/jit_hw/
   summary: stub of silicon SFPU exp ckernel (functional impl in `api/compute/eltwise_unary/exp.h`)

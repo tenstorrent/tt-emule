@@ -88,6 +88,11 @@ inline constexpr uint32_t SFPSHFT2_MOD1_SUBVEC_SHFLROR1 = 0;
 enum class LRegs : uint8_t {
     LReg0 = 0, LReg1 = 1, LReg2 = 2, LReg3 = 3,
     LReg4 = 4, LReg5 = 5, LReg6 = 6, LReg7 = 7,
+    // LReg8..15 back the full SFPU register file (storage is __emule_lreg[16]);
+    // LReg11..14 are the programmable-constant slots (also exposed as the
+    // vConstFloatPrgm*/vConstIntPrgm* views).
+    LReg8 = 8, LReg9 = 9, LReg10 = 10, LReg11 = 11,
+    LReg12 = 12, LReg13 = 13, LReg14 = 14, LReg15 = 15,
 };
 
 // ---- 32-lane vector types ----
@@ -182,7 +187,7 @@ inline vFloat operator+(const vFloat& a, const vFloat& b) { vFloat r; for (uint3
 inline vFloat operator-(const vFloat& a, const vFloat& b) { vFloat r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = __emule_sfpu_finalize(a.v[i] - b.v[i]); return r; }
 inline vFloat operator*(const vFloat& a, const vFloat& b) { vFloat r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = __emule_sfpu_finalize(a.v[i] * b.v[i]); return r; }
 inline vFloat operator/(const vFloat& a, const vFloat& b) { vFloat r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = __emule_sfpu_finalize(a.v[i] / b.v[i]); return r; }
-inline vFloat operator-(const vFloat& a) { vFloat r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = -a.v[i]; return r; }
+inline vFloat operator-(const vFloat& a) { vFloat r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = __emule_sfpu_finalize(-a.v[i]); return r; }
 
 inline vInt operator+(const vInt& a, const vInt& b) { vInt r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] + b.v[i]; return r; }
 inline vInt operator-(const vInt& a, const vInt& b) { vInt r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] - b.v[i]; return r; }
@@ -504,7 +509,7 @@ inline vFloat setexp(const vFloat& vf, const vInt& exp) {
 // addexp(in, e) = in * 2^e  (SFPDIVP2 ADD on the exponent field).
 inline vFloat addexp(const vFloat& in, int exp) {
     vFloat r;
-    for (uint32_t i = 0; i < 32; ++i) r.v[i] = std::ldexp(in.v[i], exp);
+    for (uint32_t i = 0; i < 32; ++i) r.v[i] = __emule_sfpu_finalize(std::ldexp(in.v[i], exp));
     return r;
 }
 
@@ -593,7 +598,7 @@ inline vFloat lut(const vFloat& v, const vUInt& l0, const vUInt& l1, const vUInt
         uint32_t coeffs = (ax < 1.0f) ? l0.v[i] : (ax < 2.0f) ? l1.v[i] : l2.v[i];
         float a = __lut8_to_fp32((coeffs >> 8) & 0xFFu);
         float c = __lut8_to_fp32(coeffs & 0xFFu);
-        r.v[i] = __apply_sgn_retain(a * ax + c, x);
+        r.v[i] = __apply_sgn_retain(__emule_sfpu_finalize(a * ax + c), x);
     }
     return r;
 }
@@ -617,7 +622,7 @@ inline vFloat lut2(const vFloat& v,
         else                { areg = a45.v[i]; breg = b45.v[i]; hi = true;  }
         uint16_t ab = hi ? (areg >> 16) : (areg & 0xFFFFu);
         uint16_t cb = hi ? (breg >> 16) : (breg & 0xFFFFu);
-        r.v[i] = __apply_sgn_retain(__lut16_to_fp32(ab) * ax + __lut16_to_fp32(cb), x);
+        r.v[i] = __apply_sgn_retain(__emule_sfpu_finalize(__lut16_to_fp32(ab) * ax + __lut16_to_fp32(cb)), x);
     }
     return r;
 }
