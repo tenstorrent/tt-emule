@@ -79,6 +79,18 @@ struct __emule_dw_state {
     uint32_t val = 0;
 };
 
+// unified_kernels stateful-NOC (preprogram-all-state → issue-txn) capture slot,
+// per NOC. One slot per transaction category (read/write/atomic/multicast) so a
+// sender that preprograms a write then an atomic-inc and issues both does not
+// alias the captured operands. Used by blaze/kernels/dataflow_utils.hpp.
+struct __emule_uk_state {
+    uint64_t noc_addr = 0;      // write: dst noc addr; read: src noc addr; atomic: target
+    uint32_t local_addr = 0;    // write: src local L1; read: dst local L1; multicast: src local
+    uint32_t len = 0;
+    uint32_t incr = 0;          // atomic increment value
+    bool include_self = false;  // multicast: mirrors NOC_CMD_BRCST_SRC_INCLUDE
+};
+
 // Matmul operand bridge: llk_unpack_AB_matmul records the operand CBs/tiles,
 // llk_math_matmul reads them back (HW splits these across cores; emule serializes).
 struct __emule_matmul_bridge {
@@ -222,6 +234,10 @@ struct DatamovementThreadCtx : ThreadCommonCtx {
     __emule_dw_state dw_st[2];                      // was __emule_dw_st
     uint32_t  noc_cached_size[2] = {};             // was __emule_noc_cached_size (NUM_NOCS=2)
     uintptr_t noc_cached_write_dst[2] = {};        // was __emule_noc_cached_write_dst
+    __emule_uk_state uk_rd[2];                      // was __emule_uk_rd (PR #182)
+    __emule_uk_state uk_wr[2];                      // was __emule_uk_wr (PR #182)
+    __emule_uk_state uk_at[2];                      // was __emule_uk_at (PR #182)
+    __emule_uk_state uk_mc[2];                      // was __emule_uk_mc (PR #182)
 
     DatamovementThreadCtx() : ThreadCommonCtx(Kind::Datamovement) {}
 };
