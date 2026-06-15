@@ -21,13 +21,15 @@
 #include "jit_hw/sfpi.h"
 
 // Variadic dispatcher: accept any params after dst_idx + vector_mode and
-// forward them to the function pointer.
-template <bool /*APPROX*/ = false, int /*DST_ACCUM_MODE*/ = 0, typename Fn, typename... Args>
+// forward them to the function pointer. vector_mode is templated (VM) so callers
+// can pass either `ckernel::VectorMode` or an int form.
+template <bool /*APPROX*/ = false, int /*DST_ACCUM_MODE*/ = 0, typename Fn, typename VM, typename... Args>
 inline void _llk_math_eltwise_unary_sfpu_params_(
     Fn /*fn*/,
     uint32_t /*dst_idx*/,
-    int /*vector_mode*/,
+    VM /*vector_mode*/,
     Args... /*params*/) {
-    // TODO: invoke fn with sfpi context. For now, no-op so kernels parse
-    // and link. upstream SFPU output will be unchanged from prior DST contents.
+    // TODO (Issue 3): invoke fn with the sfpi cursor pointed at __emule_dst[idst]
+    // so the first-column exp/recip/softplus functors actually execute. For now a
+    // no-op so kernels parse + link; executed SFPU paths leave DST unchanged.
 }
