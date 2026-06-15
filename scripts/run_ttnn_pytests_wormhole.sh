@@ -351,6 +351,10 @@ run_pytest "dm_test_tosa_gather" "$DM_TEST_DIR/test_tosa_gather.py"  # promoted 
 run_pytest "reduce_test_max" "$REDUCE_TEST_DIR/test_max.py"
 run_pytest "reduce_test_ema" "$REDUCE_TEST_DIR/test_ema.py"
 
+run_pytest "reduce_test_topk"                "$REDUCE_TEST_DIR/test_topk.py"
+run_pytest "reduce_test_topk_reduction"      "$REDUCE_TEST_DIR/test_reduction.py" -k topk
+run_pytest "reduce_test_topk_graph_capture"  "$BF_TEST_DIR/test_graph_capture.py::test_graph_capture_topk"
+
 run_pytest "matmul_test_linear" "$MATMUL_TEST_DIR/test_linear.py" -k 'test_linear_fp32_acc or test_vector_linear'
 
 run_pytest "matmul_test_addmm" "$MATMUL_TEST_DIR/test_addmm.py" \

@@ -634,6 +634,7 @@ files:
   - {kind: global, name: my_y}
   - {kind: global, name: __emule_logical_x}
   - {kind: global, name: __emule_logical_y}
+  - {kind: global, name: __emule_cb_self_consume_mask}
   - {kind: global, name: unpack_tile_size}
   - {kind: global, name: unpack_src_format}
   - {kind: global, name: pack_dst_format}
@@ -991,7 +992,7 @@ files:
 - path: include/jit_hw/api/compute/compute_kernel_api.h
   section: include/jit_hw/api/compute/
   summary: '`ckernel::` `square_tile`/`sigmoid_tile`/`sign_tile`/`signbit_tile`/`signbit_tile_int32`/`silu_tile`/`log_tile`/`log_with_base_tile`/`exp2_tile`/`expm1_tile`/`power_tile`/`power_iterative_tile`/`tiled_prod_tile`/`unary_max_tile`/`unary_min_tile`/`unary_max_int32_tile`/`unary_min_int32_tile`/`unary_max_uint32_tile`/`unary_min_uint32_tile`/`alt_complex_rotate90_tile`
-    (+`_init`), `silu_tile_pack`/`silu_tile_init_pack`, `sfpu_reduce_init`, `topk_tile_init`; `namespace __emule_topk`; `struct RowView`'
+    (+`_init`), `silu_tile_pack`/`silu_tile_init_pack`, `sfpu_reduce_init`, `topk_tile_init`/`topk_local_sort`/`topk_merge`/`topk_rebuild`; `namespace __emule_topk` (`merge_split_col`/`sort_col`)'
   symbols:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: square_tile_init}
@@ -1041,9 +1042,8 @@ files:
   - {kind: function, name: sfpu_reduce}
   - {kind: function, name: sfpu_reduce_init}
   - {kind: namespace, name: __emule_topk}
-  - {kind: struct, name: RowView}
-  - {kind: function, name: sort_row}
-  - {kind: function, name: row}
+  - {kind: function, name: merge_split_col}
+  - {kind: function, name: sort_col}
   - {kind: function, name: topk_tile_init}
   - {kind: function, name: topk_local_sort}
   - {kind: function, name: topk_merge}

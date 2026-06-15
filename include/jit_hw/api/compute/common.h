@@ -886,6 +886,10 @@ inline void __emule_unpack_cb_tile_to(uint32_t icb, uint32_t itile, float* out) 
         // comparison shims read the value via __emule_dst_load_i32.
         const uint16_t* ubuf = reinterpret_cast<const uint16_t*>(buf);
         uint32_t n = __emule_compute::cb_tile_elems(icb);
+        // Clamp to the tile bound (matches the 32-bit branch): an oversized page
+        // (e.g. 2080-byte index tiles on the dim=1 topk path) would otherwise
+        // index rowmajor_to_nfaces[] and the DST tile out of bounds.
+        if (n > __EMULE_TILE_ELEMS) n = __EMULE_TILE_ELEMS;
         for (uint32_t i = 0; i < n; i++) {
             int32_t v = static_cast<int32_t>(ubuf[__emule_nfaces::rowmajor_to_nfaces[i]]);
             std::memcpy(&out[i], &v, sizeof(uint32_t));
