@@ -17,6 +17,17 @@ enum class InputClamping : uint8_t {
 // VectorMode lives in ckernel::; see api/compute/vector_mode.h.
 #include "jit_hw/api/compute/vector_mode.h"
 
+// Raw-TTI compile-only surface (TTI_SFP* / addr_mod_t / p_sfpu LREGs /
+// InstrModLoadStore) for kernels whose never-instantiated branches reference it
+// (e.g. SDPA's calculate_exponential_polynomial). Parse-only; never executed.
+#include "jit_hw/ckernel_tti_stubs.h"
+
+// SFPU functor dispatcher `_llk_math_eltwise_unary_sfpu_params_` used by SDPA's
+// first-column exp/recip/softplus helpers. NOTE: currently a no-op (does not invoke
+// the functor) — the executed first-column SFPU paths therefore won't compute yet;
+// making it functional (cursor → __emule_dst[idst], run functor) is Issue-3 work.
+#include "jit_hw/llk_math_eltwise_unary_sfpu_params.h"
+
 // p_sfpu constants used by real exp_tile callers
 namespace p_sfpu {
 constexpr uint16_t kCONST_1_FP16B = 0x3F80;
