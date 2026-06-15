@@ -179,6 +179,17 @@ silicon model and fixes the `pad_rm_sharded_stickwise` race (issue #139), where 
 shared write index let the writer corrupt the reader's shard base. See
 `docs/cb-emulation.md` §2b.
 
+### 4.2c Non-core-local CBs (cross-core CB addressing)
+
+| Silicon | Emule |
+|---|---|
+| A CB's L1 address is **program-global** — the same offset on every core in the grid. A kernel can therefore compute a *remote* core's CB address with `get_write_ptr(cb)` even for a CB allocated only on that other core, then NOC-write to it. | `init_core_cb_sync` (`emulated_program_runner.cpp`) configures **every** program CB on **every** core at its global L1 address: on-core CBs first (own geometry), then the rest by global address. So `get_write_ptr`/`get_read_ptr` on any core return the consistent offset; `__emule_resolve_noc_addr` masks it to the L1 offset and routes the write to the owning core. Such off-core slots are only valid as cross-core NOC targets — this core never produces/consumes them locally. |
+
+This is what lets a kernel write into another core's CB (e.g. multi-core TopK's
+local cores NOC-write their results into the final core's `final_*_cb`, which is
+allocated only on the final core). No effect on uniform-grid ops, where every CB
+is already on every core.
+
 ### 4.3 Tile format dispatch
 
 `__emule_compute::cb_is_32bit_format(cb_id)` is **enum-driven**: it reads the
