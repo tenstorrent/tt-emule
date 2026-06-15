@@ -43,7 +43,8 @@ inline void llk_unpack_A(uint32_t /*operand*/, uint32_t /*tile_index*/) {}
 // layout here; no-op stub in emule.
 template <ckernel::BroadcastType BType = ckernel::BroadcastType::NONE,
           bool acc_to_dest = false,
-          ckernel::EltwiseBinaryReuseDestType binary_reuse_dest = ckernel::EltwiseBinaryReuseDestType::NONE>
+          ckernel::EltwiseBinaryReuseDestType binary_reuse_dest = ckernel::EltwiseBinaryReuseDestType::NONE,
+          bool unpack_to_dest = false>
 inline void llk_unpack_A_init(
     uint32_t /*transpose_of_faces*/ = 0,
     uint32_t /*within_face_16x16_transpose*/ = 0,
