@@ -16,6 +16,8 @@
 // be needed if a raw-TTI path were actually instantiated (e.g. exp_approx_mode=false).
 
 #include <cstdint>
+#include "jit_hw/sfpi.h"                 // __emule_sfpi_dst_base / _cursor / sfpi::__emule_sfpi_mask
+#include "jit_hw/api/compute/common.h"   // __emule_dst (for the math:: addr-mod-base hook)
 
 // The SDPA exp polynomial kernel declares `constexpr float M_LN2 = ...` as a local
 // identifier. On bare-metal silicon M_LN2 is not a macro; emule's hosted <cmath>
@@ -95,10 +97,23 @@ struct p_setrwc {
     constexpr static std::uint32_t SET_D    = 0x4;
 };
 
-// math:: address-mode base programming — HW addrmod register config; no-op here.
+// math:: address-mode base programming. On silicon this configures the SFPU's DST
+// address-mode base. emule uses it as the hook that aims the sfpi cursor at the DST
+// region for the raw-TTI direct-SFPU path (recip_tile_first_column_wh_idst0_direct) —
+// the ONLY caller — which bypasses the unary-sfpu-params dispatcher and so would
+// otherwise leave __emule_sfpi_dst_base unset (operating on scratch, not real DST).
+// That path's contract is "always operates on DST tile 0", so point there + reset the
+// cursor; the two calculate_recip_first_column() calls then walk faces 0,1 naturally.
 namespace math {
-inline void set_addr_mod_base() {}
-inline void clear_addr_mod_base() {}
+inline void set_addr_mod_base() {
+    ::__emule_sfpi_dst_base = &__emule_dst[0][0];
+    ::__emule_sfpi_cursor = 0;
+    ::sfpi::__emule_sfpi_mask.fill(true);
+}
+inline void clear_addr_mod_base() {
+    ::__emule_sfpi_dst_base = nullptr;
+    ::__emule_sfpi_cursor = 0;
+}
 }  // namespace math
 
 }  // namespace ckernel
