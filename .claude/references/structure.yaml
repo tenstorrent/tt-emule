@@ -664,8 +664,8 @@ files:
   - {kind: function, name: is_bfp8_page_size}
 - path: include/jit_hw/api/cb_api.h
   section: include/jit_hw/api/
-  summary: '`cb_wait_front`/`cb_pop_front`/`cb_reserve_back`/`cb_push_back`, `get_write_ptr`/`get_read_ptr`, `get_tile_size`/`get_tile_hw`/`get_tile_num_faces`, `get_dataformat`, `__emule_cb_timeout_sec`;
-    constexpr arrays `unpack_tile_size`/`unpack_tile_r_dim`/`unpack_tile_c_dim`/`unpack_num_faces_r_dim`/`unpack_num_faces_c_dim`/`unpack_src_format`/`pack_dst_format`/`unpack_dst_format`/`pack_src_format`'
+  summary: '`cb_wait_front`/`cb_pop_front`/`cb_reserve_back`/`cb_push_back`, `get_write_ptr`/`get_read_ptr`, `get_tile_size`/`get_tile_hw`/`get_tile_r_dim`/`get_tile_c_dim`/`get_tile_num_faces`, `get_dataformat`,
+    `__emule_cb_timeout_sec`; constexpr arrays `unpack_tile_size`/`unpack_tile_r_dim`/`unpack_tile_c_dim`/`unpack_num_faces_r_dim`/`unpack_num_faces_c_dim`/`unpack_src_format`/`pack_dst_format`/`unpack_dst_format`/`pack_src_format`'
   symbols:
   - {kind: global, name: my_x}
   - {kind: global, name: my_y}
@@ -689,6 +689,8 @@ files:
   - {kind: function, name: get_read_ptr}
   - {kind: function, name: get_tile_size}
   - {kind: function, name: get_tile_hw}
+  - {kind: function, name: get_tile_r_dim}
+  - {kind: function, name: get_tile_c_dim}
   - {kind: function, name: get_tile_num_faces}
   - {kind: function, name: get_dataformat}
 - path: include/jit_hw/api/compile_time_args.h
