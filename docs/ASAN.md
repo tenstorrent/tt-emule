@@ -132,6 +132,16 @@ inside the kernel thread before the thread-locals are cleared — NOT a
 post-join occupancy scan. Leftover occupancy alone is fine: a producer
 that reserves+pushes but is never consumed ends occupied yet flushed.
 
+This check has a dedicated per-check opt-out on top of the master switch:
+setting `TT_METAL_EMULE_ASAN_SKIP_DIRTY_CB` (non-empty, not `0`) makes the
+runner's `sweep_per_kernel_dirty_cbs` return early, suppressing **only** the
+Dirty CB check while every other sanitizer stays active. Its purpose is to let
+a full regression run continue past a kernel with a known un-flushed-CB bug
+without giving up OOB / Padding / Object-Intent / CB-Boundary coverage. The
+gate helper is `dirty_cb_check_skipped()` in `host_sanitizers.hpp` (re-read
+every call, like the master switch); the `test_cb_leak.cpp` death tests
+`unsetenv` it so they still exercise the check when it is exported globally.
+
 ### Kernel-side checks (in `__emule_local_l1_to_ptr`)
 
 `__emule_local_l1_to_ptr(uint32_t l1_addr)` is the single chokepoint for
