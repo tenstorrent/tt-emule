@@ -4,6 +4,7 @@
 
 #include "internal/llk_state.h"
 #include "api/compute/common.h"
+#include "jit_hw/llk_types.h"  // ckernel::PackMode
 
 // ---- Pack helpers ----
 
@@ -191,6 +192,15 @@ template <bool Untilize, bool IsTilize, bool DiagonalEn>
 inline void llk_pack_init(uint32_t /*ocb*/) {}
 template <bool Untilize, bool IsTilize>
 inline void llk_pack_init(uint32_t /*ocb*/) {}
+
+// PackMode-based pack init (SDPA streaming configure_pack_width). The flags
+// (zero_output / skip_addrmod_config / skip_packer_strides) are packer reconfig
+// micro-optimizations — HW pipeline config with no numerical effect, so no-op.
+template <ckernel::PackMode pack_mode = ckernel::PackMode::Default,
+          bool zero_output = false,
+          bool skip_addrmod_config = false,
+          bool skip_packer_strides = false>
+inline void llk_pack_init(uint32_t /*ocb*/, uint32_t /*pack_width*/ = 1) {}
 
 // Pack-side dest sync stubs.
 // llk_packer_wait_for_math_done lives in llk_sync_stubs.h.

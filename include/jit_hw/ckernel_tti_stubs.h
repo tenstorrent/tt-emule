@@ -41,6 +41,8 @@
 #define TTI_SFPSETEXP(...)     ((void)0)
 #define TTI_SFPARECIP(...)     ((void)0)
 #define TTI_SFP_STOCH_RND(...) ((void)0)
+#define TTI_SETRWC(...)        ((void)0)
+#define TTI_STALLWAIT(...)     ((void)0)
 
 // p_sfpu register indices. Global namespace, matching emule's existing p_sfpu in
 // eltwise_unary/exp.h (silicon keeps it in ckernel::, but emule's surface is global
@@ -82,5 +84,21 @@ enum class InstrModLoadStore : std::uint8_t {
     LO16_ONLY     = 14,
     HI16_ONLY     = 15,
 };
+
+// Instruction-modifier parameter constants for raw SETRWC / STALLWAIT. They are
+// only ever passed to the no-op TTI_* macros above, so the values are opaque to
+// emule (never interpreted) — names mirror upstream ckernel_instr_params.h.
+// p_setrwc instruction-modifier constants (p_stall already lives in ckernel.h).
+struct p_setrwc {
+    constexpr static std::uint32_t CLR_NONE = 0x0;
+    constexpr static std::uint32_t CR_D     = 0x4;
+    constexpr static std::uint32_t SET_D    = 0x4;
+};
+
+// math:: address-mode base programming — HW addrmod register config; no-op here.
+namespace math {
+inline void set_addr_mod_base() {}
+inline void clear_addr_mod_base() {}
+}  // namespace math
 
 }  // namespace ckernel
