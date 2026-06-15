@@ -75,3 +75,15 @@ inline void llk_math_eltwise_unary_datacopy(uint32_t dst_idx) {
     if (__llk_unpack_is_tilize) __llk_tilize_datacopy(dst_idx);
     else __llk_untilize_datacopy(dst_idx);
 }
+
+// Datacopy init — HW unpack/math format + pipeline config; no-op in emule
+// (the actual copy happens in llk_math_eltwise_unary_datacopy above). PackMode
+// is config-only (silicon `(void)`s it). Signature mirrors upstream
+// llk_math_unary_datacopy_api.h so kernels that call the LLK init directly
+// (e.g. SDPA sdpa_reduce_copy_tile_to_dst_init_short) resolve it.
+template <ckernel::DataCopyType type,
+          bool is_fp32_dest_acc_en = false,
+          BroadcastType src_b_bcast_type = BroadcastType::NONE,
+          bool is_int_fpu_en = false,
+          ckernel::PackMode pack_mode = ckernel::PackMode::Default>
+inline void llk_math_eltwise_unary_datacopy_init(uint32_t operand = 0) {}

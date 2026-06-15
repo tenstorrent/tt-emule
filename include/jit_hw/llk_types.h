@@ -58,6 +58,16 @@ enum class DataCopyType : std::uint8_t {
     A2D = 0,
     B2D = 1,
 };
+
+// PackMode — packer datapath/tiling config selector, a template param of
+// llk_math_eltwise_unary_datacopy_init. Config-only: silicon discards it
+// (`(void)pack_mode;` in llk_math_unary_datacopy_api.h), no numerical effect.
+// Values mirror upstream tt-llk/common/inc/ckernel_defs.h.
+enum class PackMode : std::uint8_t {
+    Default  = 0,
+    Untilize = 1,
+    Tilize   = 2,
+};
 }  // namespace ckernel
 
 // UnpackToDestEn — bool flag used as a template parameter in D2M-emitted
