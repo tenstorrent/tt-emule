@@ -280,17 +280,44 @@ inline float* __emule_sfpi_active_dst() {
     return __emule_sfpi_dst_base ? __emule_sfpi_dst_base : __emule_sfpi_dst_fallback;
 }
 
+// SFPU lane i (0..31) at DST address `addr` → row-major index into the 32x32 tile.
+// Silicon (WH B0, confirmed via DeepWiki ISA): one SFPLOAD/SFPSTORE covers a
+// 4-row x 8-column block. `addr & ~3` selects a 4-row block (face-major row),
+// `addr & 2` selects the even/odd column half, bit 0 is unused. Lane layout:
+//   row_face = (addr & ~3) + i/8   (4 consecutive rows)
+//   col      = (i & 7)*2 + (addr&2 ? 1 : 0)   (8 even-or-odd cols of a 16-wide face)
+// emule's __emule_dst is row-major 32x32, while the SFPU addresses face-major, so
+// map the face (face-major-row/16) back to the row-major quadrant. sfpi's stride
+// unit is SFP_DESTREG_STRIDE=2, so dst_reg[k] uses addr = cursor + 2k and
+// dst_reg += n advances the cursor by 2n (see DstReg below).
+inline uint32_t __emule_sfpi_lane_index(uint32_t addr, uint32_t i) {
+    const uint32_t row_face = (addr & ~3u) + (i >> 3);            // global face-major row
+    // Large dst_reg[k] cross DST-tile boundaries (e.g. the fused softmax reads
+    // worker_max/sum from neighbouring DST tiles via dst_reg[32]/[64]/...). Each
+    // 32x32 tile spans 64 face-major rows = __EMULE_SFPI_TILE_ELEMS contiguous
+    // elements in __emule_dst, so split off the tile then map within it.
+    const uint32_t tile     = row_face / 64u;                     // tile offset from base
+    const uint32_t frt      = row_face % 64u;                     // face-major row in tile 0..63
+    const uint32_t col      = ((i & 7u) << 1) + ((addr & 2u) ? 1u : 0u);  // col 0..15 in face
+    const uint32_t face     = frt >> 4;                           // 0..3
+    const uint32_t face_row = frt & 15u;                          // 0..15
+    const uint32_t R = ((face >> 1) << 4) + face_row;             // row-major row 0..31
+    const uint32_t C = ((face & 1u) << 4) + col;                  // row-major col 0..31
+    return tile * __EMULE_SFPI_TILE_ELEMS + (R << 5) + C;
+}
+
 class DstRegLane {
-    uint32_t lane_offset_;  // offset from __emule_sfpi_cursor; usually 0
+    uint32_t addr_delta_;  // DST-address delta (2*k for dst_reg[k]); added to cursor
 public:
-    constexpr DstRegLane(uint32_t off) : lane_offset_(off) {}
+    constexpr DstRegLane(uint32_t d) : addr_delta_(d) {}
 
     // Load 32 lanes from DST into a vFloat.
     operator vFloat() const {
         vFloat r;
         float* base = __emule_sfpi_active_dst();
+        const uint32_t addr = __emule_sfpi_cursor + addr_delta_;
         for (uint32_t i = 0; i < 32; ++i) {
-            r.v[i] = base[__emule_sfpi_cursor + lane_offset_ * 32 + i];
+            r.v[i] = base[__emule_sfpi_lane_index(addr, i)];
         }
         return r;
     }
@@ -298,8 +325,9 @@ public:
     operator vInt() const {
         vInt r;
         float* base = __emule_sfpi_active_dst();
+        const uint32_t addr = __emule_sfpi_cursor + addr_delta_;
         for (uint32_t i = 0; i < 32; ++i) {
-            float f = base[__emule_sfpi_cursor + lane_offset_ * 32 + i];
+            float f = base[__emule_sfpi_lane_index(addr, i)];
             int32_t bits;
             std::memcpy(&bits, &f, sizeof(bits));
             r.v[i] = bits;
@@ -315,21 +343,24 @@ public:
     // yet wired. Identity when the macro is unset (byte-identical baseline).
     DstRegLane& operator=(const vFloat& x) {
         float* base = __emule_sfpi_active_dst();
+        const uint32_t addr = __emule_sfpi_cursor + addr_delta_;
         for (uint32_t i = 0; i < 32; ++i) {
             if (__emule_sfpi_mask[i]) {
-                base[__emule_sfpi_cursor + lane_offset_ * 32 + i] = __emule_sfpu_finalize(x.v[i]);
+                // #155 finalize (value fidelity) + prefill first-column lane mapping (addressing).
+                base[__emule_sfpi_lane_index(addr, i)] = __emule_sfpu_finalize(x.v[i]);
             }
         }
         return *this;
     }
     DstRegLane& operator=(const vInt& x) {
         float* base = __emule_sfpi_active_dst();
+        const uint32_t addr = __emule_sfpi_cursor + addr_delta_;
         for (uint32_t i = 0; i < 32; ++i) {
             if (__emule_sfpi_mask[i]) {
                 int32_t bits = x.v[i];
                 float f;
                 std::memcpy(&f, &bits, sizeof(f));
-                base[__emule_sfpi_cursor + lane_offset_ * 32 + i] = f;
+                base[__emule_sfpi_lane_index(addr, i)] = f;
             }
         }
         return *this;
@@ -339,16 +370,12 @@ public:
 
 class DstReg {
 public:
-    DstRegLane operator[](int i) const { return DstRegLane(static_cast<uint32_t>(i)); }
-    // dst_reg++ : silicon advances the implicit slice pointer by 32 lanes.
-    DstReg& operator++() { __emule_sfpi_cursor += 32; return *this; }
-    DstReg operator++(int) { DstReg t = *this; __emule_sfpi_cursor += 32; return t; }
-    // dst_reg += n : extend the ++ convention (one unit = one 32-lane window).
-    // NOTE: kernels that use `dst_reg += 2` (e.g. SDPA first-column recip/exp)
-    // rely on silicon's SFPTRANSP stride-2 lane view; emule's linear cursor here
-    // is the suspected Issue-3 correctness gap, not yet validated. Compile-faithful;
-    // numeric faithfulness of the strided form is tracked separately.
-    DstReg& operator+=(int n) { __emule_sfpi_cursor += 32 * static_cast<uint32_t>(n); return *this; }
+    // dst_reg[k] addresses DST Addr = cursor + 2k (SFP_DESTREG_STRIDE = 2).
+    DstRegLane operator[](int i) const { return DstRegLane(2u * static_cast<uint32_t>(i)); }
+    // dst_reg++ / dst_reg += n advance the DST RWC by 2 / 2n.
+    DstReg& operator++() { __emule_sfpi_cursor += 2; return *this; }
+    DstReg operator++(int) { DstReg t = *this; __emule_sfpi_cursor += 2; return t; }
+    DstReg& operator+=(int n) { __emule_sfpi_cursor += 2u * static_cast<uint32_t>(n); return *this; }
 };
 
 inline DstReg dst_reg;
