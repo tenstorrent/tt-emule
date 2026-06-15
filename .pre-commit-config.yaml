@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Pre-commit hooks for tt-emule. Install once with `pre-commit install`
+# (pip install pre-commit). The structure-index hook keeps
+# `.claude/references/structure.yaml` in sync with the source tree so the
+# file/symbol index can't drift — it is the source of truth consumed by
+# scripts/find_symbol.py and scripts/classify_kernels.py.
+repos:
+  - repo: local
+    hooks:
+      - id: structure-index
+        name: structure.yaml is in sync (gen_structure.py --check)
+        entry: python3 scripts/gen_structure.py --check
+        language: system
+        pass_filenames: false
+        # Re-check whenever a source file or the index itself changes. The hook
+        # fails (without restaging) if stale; run `gen_structure.py --write`.
+        files: ^(src/|include/|\.claude/references/structure\.yaml$|scripts/gen_structure\.py$)
