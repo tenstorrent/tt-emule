@@ -908,7 +908,9 @@ files:
   section: include/jit_hw/api/compute/
   summary: includes `compute/common.h` + `api/cb_api.h` (shim)
   symbols:
+  - {kind: namespace, name: ckernel}
   - {kind: function, name: get_tile_address}
+  - {kind: function, name: read_tile_value}
 - path: include/jit_hw/api/compute/common.h
   section: include/jit_hw/api/compute/
   summary: macros `PACK`/`MATH`/`UNPACK`/`ALWI`, `DST_ACCUM_MODE`; `namespace __emule_compute`, `ckernel`; `enum class EltwiseBinaryType`/`BroadcastType`/`ReluType`/`EltwiseBinaryReuseDestType`/`p_dim_stride_target`/`MathFidelity`;
