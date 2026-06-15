@@ -343,6 +343,12 @@ public:
     // dst_reg++ : silicon advances the implicit slice pointer by 32 lanes.
     DstReg& operator++() { __emule_sfpi_cursor += 32; return *this; }
     DstReg operator++(int) { DstReg t = *this; __emule_sfpi_cursor += 32; return t; }
+    // dst_reg += n : extend the ++ convention (one unit = one 32-lane window).
+    // NOTE: kernels that use `dst_reg += 2` (e.g. SDPA first-column recip/exp)
+    // rely on silicon's SFPTRANSP stride-2 lane view; emule's linear cursor here
+    // is the suspected Issue-3 correctness gap, not yet validated. Compile-faithful;
+    // numeric faithfulness of the strided form is tracked separately.
+    DstReg& operator+=(int n) { __emule_sfpi_cursor += 32 * static_cast<uint32_t>(n); return *this; }
 };
 
 inline DstReg dst_reg;
@@ -420,6 +426,9 @@ inline uint16_t float_to_fp16a(float f) {
     std::memcpy(&bits, &f, sizeof(bits));
     return static_cast<uint16_t>((bits >> 16) ^ ((bits >> 31) << 15));
 }
+
+// vFloat16b + convert<vFloat16b> come from #155's deep-SFPU backend below (single
+// copy); the SDPA recip path's convert<vFloat16b> resolves to it.
 
 // ---- Sign manipulation ----
 
@@ -729,6 +738,12 @@ inline void subvec_transp(vUInt&,  vUInt&,  vUInt&,  vUInt&)  { __emule_sfpu_uns
 
 }  // namespace sfpi
 
+// Some kernels reference `RoundMode` unqualified (e.g. SDPA's first-column
+// recip writes `convert<sfpi::vFloat16b>(out, RoundMode::NearestEven)` — sfpi::
+// on the type but bare on the enum). On silicon the TRISC build preamble brings
+// sfpi names into scope; emule re-exports just this enum to global scope to match.
+using ::sfpi::RoundMode;
+
 // ---- v_if / v_elseif / v_else / v_endif macros ----
 //
 // Silicon: per-lane mask stack pushed by v_if, popped by v_endif.
@@ -742,14 +757,16 @@ inline void subvec_transp(vUInt&,  vUInt&,  vUInt&,  vUInt&)  { __emule_sfpu_uns
 #define v_endif           ::sfpi::__emule_sfpi_endif(); } while (0)
 #endif
 
-// ---- SFPU library functions used by upstream kernels (in ckernel::) ----
+// ---- SFPU library functions used by upstream kernels (in ckernel::sfpu) ----
 //
-// On silicon, `_sfpu_sigmoid_<...>`, `_sfpu_reciprocal_<...>`, `_sfpu_exp_`
-// live in `ckernel::sfpu` and emit SFPU LUT+polynomial sequences via
-// TTI_SFP intrinsics. emule provides scalar `expf` / `1/x` per lane —
-// correct to ~bf16 precision for typical input ranges.
+// On silicon these live in `ckernel::sfpu` and emit SFPU LUT+polynomial
+// sequences via TTI_SFP intrinsics. emule provides scalar `expf` / `1/x` per
+// lane — correct to ~bf16 precision for typical input ranges. The integer
+// template params (APPROX_MODE / max_iter) select the silicon Newton-Raphson
+// iteration count; emule's exact 1/x is at least as precise, so they are no-ops.
 
 namespace ckernel {
+namespace sfpu {
 
 template <bool is_fp32_dest_acc_en = false>
 inline ::sfpi::vFloat _sfpu_sigmoid_(const ::sfpi::vFloat& x) {
@@ -777,4 +794,60 @@ inline ::sfpi::vFloat _sfpu_reciprocal_(const ::sfpi::vFloat& x) {
 template <bool APPROX = false>
 inline void _init_sfpu_reciprocal_() {}
 
+// Reciprocal-via-rsqrt-compat path (ckernel_sfpu_rsqrt_compat.h). On silicon a
+// Newton-Raphson reciprocal with `max_iter` iterations; scalar 1/x in emule.
+template <int max_iter = 3>
+inline ::sfpi::vFloat _reciprocal_compat_(const ::sfpi::vFloat& in) {
+    ::sfpi::vFloat r;
+    for (uint32_t i = 0; i < 32; ++i) r.v[i] = 1.0f / in.v[i];
+    return r;
+}
+
+template <bool APPROX = false>
+inline void sfpu_reciprocal_init() {}
+
+// exp(val * scale), scale = bf16-decoded from exp_base_scale_factor's low 16 bits
+// (silicon: `val * sfpi::sFloat16b(exp_base_scale_factor)` then exp). emule uses
+// std::exp (more accurate than silicon's exp_21f polynomial). The SDPA softmax
+// exp path runs this for exp_approx_mode=true.
+template <bool SCALE_EN, bool is_fp32_dest_acc_en>
+inline ::sfpi::vFloat _ckernel_sfpu_exp_accurate_(::sfpi::vFloat val, std::uint32_t exp_base_scale_factor) {
+    float s = 1.0f;
+    if constexpr (SCALE_EN) {
+        std::uint32_t b = (exp_base_scale_factor & 0xFFFFu) << 16;
+        std::memcpy(&s, &b, sizeof(s));
+    }
+    ::sfpi::vFloat r;
+    for (uint32_t i = 0; i < 32; ++i) r.v[i] = std::exp(val.v[i] * s);
+    return r;
+}
+
+// Reinterpret an fp32 bit pattern as float (kernels pass beta/threshold as bits).
+// Distinct from ::sfpi::Converter, whose as_float returns a vFloat.
+struct Converter {
+    static float as_float(std::uint32_t bits) {
+        float f;
+        std::memcpy(&f, &bits, sizeof(f));
+        return f;
+    }
+};
+
+// softplus(x) = (1/beta)*ln(1 + exp(beta*x)), linear above threshold. Operates on
+// the dst_reg cursor window. NOTE: silicon uses a degree-8 polynomial approximation
+// (ckernel_sfpu_softplus.h); emule uses exact libm softplus. The SDPA prefill test
+// does not exercise softplus/logsigmoid (compile-only here), so the polynomial is
+// not ported — revisit if a softplus-using suite is brought up.
+template <bool APPROXIMATION_MODE, bool is_fp32_dest_acc_en>
+inline void calculate_softplus_body(const float beta, const float beta_reciprocal, const float threshold) {
+    ::sfpi::vFloat val = ::sfpi::dst_reg[0];
+    ::sfpi::vFloat out;
+    for (uint32_t i = 0; i < 32; ++i) {
+        float x = val.v[i];
+        float t = beta * x;
+        out.v[i] = (t < threshold) ? beta_reciprocal * std::log1p(std::exp(t)) : x;
+    }
+    ::sfpi::dst_reg[0] = out;
+}
+
+}  // namespace sfpu
 }  // namespace ckernel
