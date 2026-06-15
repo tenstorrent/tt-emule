@@ -35,21 +35,43 @@ constexpr uint16_t kCONST_1_FP16B = 0x3F80;
 
 namespace ckernel {
 
-template <bool approx = false, bool fast_and_approx = true,
-          bool scale_en = false, bool skip_positive_check = false,
-          InputClamping input_clamping = InputClamping::ClampToNegative,
-          int iterations = 8>
-ALWI void exp_tile_init(uint32_t = 0, uint32_t = 0) {}
+// Signatures mirror current upstream api/compute/eltwise_unary/exp.h.
+template <bool approx = false, uint32_t scale = 0x3F800000,
+          InputClamping input_clamping = InputClamping::ClampToNegative>
+ALWI void exp_tile_init() {}
 
-template <bool approx = false, bool fast_and_approx = true,
-          bool scale_en = false, bool skip_positive_check = false,
-          InputClamping input_clamping = InputClamping::ClampToNegative,
-          int iterations = 8>
-ALWI void exp_tile(uint32_t idst, int vector_mode = (int)VectorMode::RC,
+// exp(x), optionally exp(x * scale) when scale_en (scale is a bf16 bit pattern).
+// vector_mode gates which faces are written (default RC = whole tile). approx /
+// input_clamping / iterations are silicon SFPU-approximation knobs with no effect
+// on emule's exact std::exp.
+template <bool approx = false, bool scale_en = false,
+          InputClamping input_clamping = InputClamping::ClampToNegative, int iterations = 8>
+ALWI void exp_tile(uint32_t idst, VectorMode vector_mode = VectorMode::RC,
                    uint16_t scale = p_sfpu::kCONST_1_FP16B) {
     __emule_dst_check(idst, "exp_tile");
-    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::exp(__emule_dst[idst][i]);
+    float s = 1.0f;
+    if constexpr (scale_en) {
+        uint32_t b = static_cast<uint32_t>(scale) << 16;
+        std::memcpy(&s, &b, sizeof(s));
+    }
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        if (!__emule_vector_mode_active(i, vector_mode)) continue;
+        __emule_dst[idst][i] = std::exp(__emule_dst[idst][i] * s);
+    }
+}
+
+// Pack-thread variants: silicon runs the exp on the PACK thread instead of MATH.
+// emule executes UNPACK/MATH/PACK inline in one thread, so these are identical to
+// exp_tile{,_init} — delegate.
+template <bool approx = false, uint32_t scale = 0x3F800000,
+          InputClamping input_clamping = InputClamping::ClampToNegative>
+ALWI void exp_packthread_tile_init() {}
+
+template <bool approx = false, bool scale_en = false,
+          InputClamping input_clamping = InputClamping::ClampToNegative, int iterations = 8>
+ALWI void exp_packthread_tile(uint32_t idst, VectorMode vector_mode = VectorMode::RC,
+                              uint16_t scale = p_sfpu::kCONST_1_FP16B) {
+    exp_tile<approx, scale_en, input_clamping, iterations>(idst, vector_mode, scale);
 }
 
 } // namespace ckernel
