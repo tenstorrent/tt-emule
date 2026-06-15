@@ -94,6 +94,16 @@ constexpr uint8_t unpack_num_faces_r_dim[32] = {
 constexpr uint8_t unpack_num_faces_c_dim[32] = {
     2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
 };
+// Per-CB face row dim (16) and faces-per-tile (4) for standard 32x32 tiles. The
+// chlkc analogs on silicon; SDPA streaming's sdpa_unpack_format_changed() reads
+// these to decide whether a CB-switch needs a data-format reconfig.
+constexpr uint8_t unpack_tile_face_r_dim[32] = {
+    16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,
+    16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,
+};
+constexpr uint8_t unpack_tile_num_faces[32] = {
+    4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
+};
 
 // ---- Per-RISC CB pointers ----
 // The per-thread read/write pointers (the single source of truth that fixes the
@@ -277,6 +287,9 @@ constexpr inline uint32_t get_tile_num_faces(uint32_t cb_id) {
     return static_cast<uint32_t>(unpack_num_faces_r_dim[cb_id]) *
            static_cast<uint32_t>(unpack_num_faces_c_dim[cb_id]);
 }
+
+// read_tile_value is provided by main's api/compute/cb_api.h (ckernel::); the SDPA
+// compute kernel (sdpa.cpp) uses that single copy to read the chunked control index.
 
 // get_dataformat — return the CB's real data format, faithful to the device's
 // dataflow_api.h: `get_dataformat(operand) = unpack_src_format[operand]`. Falls back to
