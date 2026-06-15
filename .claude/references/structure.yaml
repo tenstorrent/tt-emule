@@ -1296,7 +1296,11 @@ files:
   - {kind: global, name: rowmajor_to_nfaces}
   - {kind: function, name: make_nfaces_to_rowmajor}
   - {kind: global, name: nfaces_to_rowmajor}
+  - {kind: function, name: tile_rc_to_nfaces}
   - {kind: function, name: tile_rm_to_nfaces}
+  - {kind: function, name: tile_nfaces_to_rm}
+  - {kind: function, name: tile_num_exp}
+  - {kind: function, name: tile_bfp_mant_offset}
   - {kind: function, name: tile_rows_from_pagesize}
 - path: include/jit_hw/api/compute/pack.h
   section: include/jit_hw/api/compute/

@@ -36,13 +36,22 @@ inline void apply(uint32_t icb0, uint32_t icb1, uint32_t itile0, uint32_t itile1
                   uint32_t idst, uint32_t bcast_row_idx, Op op) {
     __emule_dst_check(idst, "bcast");
     __emule_dst_mark_dirty(idst);
-    // Block-float (Bfp8_b/Bfp4_b) inputs carry a shared exponent per face-row
-    // and cannot be read element-by-element: they MUST go through the central
-    // format-aware reader, which decodes the shared exponent. (They are always
-    // full 32-row tiles — faces are 16×16 — so the thin-tile path never applies
-    // to them; note rows_a/rows_b below are mis-derived for block-float since
-    // the page size doesn't map to a 2-byte element stride.) Route either-side
-    // block-float through __emule_unpack_cb_tile_to, matching main's behavior.
+    // Output / operand-0 shape (tiny-tile aware); DST stays the 32-strided grid
+    // (out_i = r*32+c). The broadcast operand maps (r,c) → (b_r,b_c) per dim:
+    // ROW→(bcast_row_idx, c), COL→(r, 0), SCALAR→(0, 0).
+    const uint32_t th0 = get_tile_r_dim(icb0);
+    const uint32_t tw0 = get_tile_c_dim(icb0);
+    const uint32_t th1 = get_tile_r_dim(icb1);
+    const uint32_t tw1 = get_tile_c_dim(icb1);
+    auto bsrc = [&](uint32_t r, uint32_t c, uint32_t& b_r, uint32_t& b_c) {
+        if constexpr (D == Dim::Rows)      { b_r = bcast_row_idx; b_c = c; }
+        else if constexpr (D == Dim::Cols) { b_r = r;             b_c = 0; }
+        else                               { b_r = 0;             b_c = 0; }  // Scalar
+    };
+    // Block-float (Bfp8_b/Bfp4_b) inputs carry a shared exponent per face-row and
+    // can't be read element-by-element — route through the central format-aware
+    // reader, which decodes the shared exponent into a row-major float[1024].
+    // (Tiny block-float is gated by __emule_unpack_cb_tile_to until D5.)
     if (__emule_compute::cb_is_bfp8_b_format(icb0) ||
         __emule_compute::cb_is_bfp4_b_format(icb0) ||
         __emule_compute::cb_is_bfp8_b_format(icb1) ||
@@ -51,62 +60,39 @@ inline void apply(uint32_t icb0, uint32_t icb1, uint32_t itile0, uint32_t itile1
         float tile_b[__EMULE_TILE_ELEMS];
         __emule_unpack_cb_tile_to(icb0, itile0, tile_a);
         __emule_unpack_cb_tile_to(icb1, itile1, tile_b);
-        for (uint32_t r = 0; r < 32; ++r) {
-            for (uint32_t c = 0; c < 32; ++c) {
-                const uint32_t out_i = r * 32 + c;
-                float v = op(tile_a[out_i], tile_b[src_idx(D, r, c, bcast_row_idx)]);
-                if constexpr (acc_to_dest) {
-                    __emule_dst[idst][out_i] += v;
-                } else {
-                    __emule_dst[idst][out_i] = v;
-                }
+        for (uint32_t r = 0; r < th0; ++r)
+            for (uint32_t c = 0; c < tw0; ++c) {
+                uint32_t b_r, b_c; bsrc(r, c, b_r, b_c);
+                float v = op(tile_a[r * 32u + c], tile_b[b_r * 32u + b_c]);
+                if constexpr (acc_to_dest) __emule_dst[idst][r * 32u + c] += v;
+                else                       __emule_dst[idst][r * 32u + c] = v;
             }
-        }
         return;
     }
-    // Tile-shape-aware: thin tiles (rows < 32) use a 2-column-face layout
-    // rather than the 4-face 32×32 layout that the rowmajor_to_nfaces LUT
-    // assumes. Required for Tile([1,32]) / Tile([2,32]) inputs used by rope,
-    // broadcast_rmsnorm, etc. We can't reuse __emule_unpack_cb_tile_to here
-    // because it always applies the 32×32 LUT — for thin tiles that would
-    // produce a scrambled row-major buffer. Inline the load with the
-    // shape-aware tile_rm_to_nfaces helper instead.
+    // Non-block-float: read each operand directly via the shape-aware nfaces map
+    // (narrow tiles use a single column-face; partial-height tiles use shorter faces).
     const bool in0_is_32b = __emule_compute::cb_is_32bit_format(icb0);
     const bool in1_is_32b = __emule_compute::cb_is_32bit_format(icb1);
     const uint8_t* a_ptr = __emule_compute::cb_read_ptr_at(icb0, itile0);
     const uint8_t* b_ptr = __emule_compute::cb_read_ptr_at(icb1, itile1);
-    const uint32_t elem_a = in0_is_32b ? 4u : 2u;
-    const uint32_t elem_b = in1_is_32b ? 4u : 2u;
-    const uint32_t rows_a = __emule_nfaces::tile_rows_from_pagesize(
-        __emule_compute::cb_page_size(icb0), elem_a);
-    const uint32_t rows_b = __emule_nfaces::tile_rows_from_pagesize(
-        __emule_compute::cb_page_size(icb1), elem_b);
     auto load_a = [&](uint32_t r, uint32_t c) -> float {
-        uint32_t ni = __emule_nfaces::tile_rm_to_nfaces(r * 32 + c, rows_a);
-        return in0_is_32b
-            ? reinterpret_cast<const float*>(a_ptr)[ni]
-            : __emule_bf16::to_f32(reinterpret_cast<const uint16_t*>(a_ptr)[ni]);
+        uint32_t ni = __emule_nfaces::tile_rc_to_nfaces(r, c, th0, tw0);
+        return in0_is_32b ? reinterpret_cast<const float*>(a_ptr)[ni]
+                          : __emule_bf16::to_f32(reinterpret_cast<const uint16_t*>(a_ptr)[ni]);
     };
     auto load_b = [&](uint32_t r, uint32_t c) -> float {
-        uint32_t ni = __emule_nfaces::tile_rm_to_nfaces(r * 32 + c, rows_b);
-        return in1_is_32b
-            ? reinterpret_cast<const float*>(b_ptr)[ni]
-            : __emule_bf16::to_f32(reinterpret_cast<const uint16_t*>(b_ptr)[ni]);
+        uint32_t ni = __emule_nfaces::tile_rc_to_nfaces(r, c, th1, tw1);
+        return in1_is_32b ? reinterpret_cast<const float*>(b_ptr)[ni]
+                          : __emule_bf16::to_f32(reinterpret_cast<const uint16_t*>(b_ptr)[ni]);
     };
-    for (uint32_t r = 0; r < rows_a; ++r) {
-        for (uint32_t c = 0; c < 32; ++c) {
-            const uint32_t out_i = r * 32 + c;
-            // src_idx maps the output (r,c) to a logical (r',c') in the bcast
-            // tile B: ROW→(bcast_row_idx, c), COL→(r, 0), SCALAR→(0, 0),
-            // NONE→(r, c). Decompose the returned linear index to call load_b.
-            const uint32_t b_i = src_idx(D, r, c, bcast_row_idx);
-            const uint32_t b_r = b_i / 32;
-            const uint32_t b_c = b_i % 32;
+    for (uint32_t r = 0; r < th0; ++r) {
+        for (uint32_t c = 0; c < tw0; ++c) {
+            uint32_t b_r, b_c; bsrc(r, c, b_r, b_c);
             float v = op(load_a(r, c), load_b(b_r, b_c));
             if constexpr (acc_to_dest) {
-                __emule_dst[idst][out_i] += v;
+                __emule_dst[idst][r * 32u + c] += v;
             } else {
-                __emule_dst[idst][out_i] = v;
+                __emule_dst[idst][r * 32u + c] = v;
             }
         }
     }
