@@ -99,7 +99,11 @@ faces). Unpack/pack permute via constexpr LUTs in
 `include/jit_hw/api/compute/nfaces.h`:
 
 - `rowmajor_to_nfaces[1024]` / `nfaces_to_rowmajor[1024]` — full-tile maps.
-- `tile_rm_to_nfaces(i, rows)` — shape-aware for thin tiles (rows < 32).
+- `tile_rc_to_nfaces(r, c, th, tw)` — the general tile-shape-aware map (single
+  source of truth): handles thin (`th<32`) **and** narrow (`tw=16`) tiles via
+  `face_r_dim`/`num_faces_c` derived from the CB's `get_tile_r_dim`/`get_tile_c_dim`.
+- `tile_rm_to_nfaces(i, rows)` — thin wrapper over `tile_rc_to_nfaces` (width
+  always 32); `rows >= 32` take the cached full-tile LUT.
 - `tile_rows_from_pagesize(page, elem_bytes)` — derive row count from CB page.
 
 The full pack/unpack pipeline (block-float codecs, thin tiles, L1-accumulation,

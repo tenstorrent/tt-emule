@@ -92,6 +92,10 @@ The JIT compute/dataflow surface (`include/jit_hw/api/cb_api.h`) over the per-co
   view of the CB.
 - `get_tile_size(cb_id)` / `get_tile_hw` / `get_tile_num_faces` — constexpr
   lookups into the `EMULE_TILE_SIZES` array.
+- `get_tile_r_dim(cb_id)` / `get_tile_c_dim(cb_id)` — per-CB active tile height /
+  width, from the `unpack_tile_r_dim`/`unpack_tile_c_dim` arrays the runner emits
+  via `EMULE_TILE_R_DIM`/`EMULE_TILE_C_DIM` (the tiny-tile shape plumbing;
+  default 32×32). Drive the tile-shape-aware nfaces / pack / unpack paths.
 - `get_dataformat(cb_id)` — from `EMULE_CB_DATA_FORMATS` (enum-only; no
   page-size fallback — see [cb-dataformat.md](cb-dataformat.md)).
 - Waits are **`<chrono>`-free by default** (`jit_hw/emule_wait.h`): `cv.wait` +
