@@ -51,7 +51,8 @@ inline void apply(uint32_t icb0, uint32_t icb1, uint32_t itile0, uint32_t itile1
     // Block-float (Bfp8_b/Bfp4_b) inputs carry a shared exponent per face-row and
     // can't be read element-by-element — route through the central format-aware
     // reader, which decodes the shared exponent into a row-major float[1024].
-    // (Tiny block-float is gated by __emule_unpack_cb_tile_to until D5.)
+    // (Tiny block-float is supported here too: __emule_unpack_cb_tile_to decodes
+    // Bfp8_b/Bfp4_b tiny tiles via tile_bfp_mant_offset + the 2D nfaces map.)
     if (__emule_compute::cb_is_bfp8_b_format(icb0) ||
         __emule_compute::cb_is_bfp4_b_format(icb0) ||
         __emule_compute::cb_is_bfp8_b_format(icb1) ||

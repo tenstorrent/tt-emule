@@ -60,7 +60,10 @@ inline constexpr auto nfaces_to_rowmajor = make_nfaces_to_rowmajor();
 // A narrow tile (tile_w=16) has one column-face; a partial-height tile (tile_h<16)
 // has shorter faces (face_r_dim = tile_h). No padding to 16×16.
 // The return value is the CB-side offset; the caller's DST/SRC buffer stays a
-// 32-strided grid (index r*32 + c). Precondition: r<tile_h, c<tile_w, tile_w∈{16,32}.
+// 32-strided grid (index r*32 + c). Precondition: r<tile_h, c<tile_w, tile_w∈{16,32},
+// tile_h∈{1,2,4,8,16,32}. The face layout assumes tile_h is ≤16 (one short face of
+// face_r_dim=tile_h) or exactly 32 (two 16-row faces); an in-between height like 24
+// would leave padding gaps in the upper face and is NOT supported.
 inline constexpr uint32_t tile_rc_to_nfaces(uint32_t r, uint32_t c,
                                             uint32_t tile_h, uint32_t tile_w) {
     const uint32_t face_r_dim  = tile_h < 16u ? tile_h : 16u;

@@ -635,14 +635,14 @@ ALWI void add_tiles_init_nof() {}
 ALWI void sub_tiles_init_nof() {}
 ALWI void mul_tiles_init_f() {}
 
-// Thin-tile broadcast helper: when icb1 has a smaller page_size than icb0
-// (e.g. mask is a Tile([1, W]) thin tile but operand 0 is a full 32x32 tile),
+// Thin-tile broadcast helper: when icb1 has fewer rows (smaller tile height) than
+// icb0 (e.g. mask is a Tile([1, W]) thin tile but operand 0 is a full 32x32 tile),
 // the operand-1 buffer holds only `n_b1` row-major bf16/fp32 elements stored
 // contiguously. We treat that as a per-column mask broadcast across all rows,
 // matching how the softmax_k kernel uses `add_tiles(scores, after_k_mask)` with a
 // [1, W] mask tile. For row-major position i = r*32 + c, we return buf1[c].
 //
-// Returns true if icb1 is a thin-tile broadcast (page_size mismatch).
+// Returns true if icb1 is a thin-tile broadcast (fewer tile rows than operand 0).
 // A thin-tile broadcast operand has fewer ROWS than operand 0 (e.g. a [1,W]
 // mask). Compare row counts, not raw page sizes: an fp32 full tile (4096B) and
 // a bf16 full tile (2048B) are both 32-row tiles — the page gap is dtype width,
