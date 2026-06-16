@@ -35,27 +35,46 @@ constexpr uint16_t kCONST_1_FP16B = 0x3F80;
 
 namespace ckernel {
 
+// Scale baked into the SFPU exp constant by exp_tile_init's template `scale`
+// parameter (an fp32 bit pattern, default 1.0f). On silicon's approx path,
+// exp_init folds this into the 1/ln2 constant (A_scaled = A * scale_fp32 in
+// ckernel_sfpu_exp.h:exp_init), so calculate_exponential computes exp(in * scale)
+// regardless of the runtime scale_en flag. SDPA fuses the 1/sqrt(d) softmax scale
+// here (exp_tile_init<true, scale_fp32, None> in compute_common.hpp). Persists
+// across calls until the next init, mirroring the SFPU constant register.
+static thread_local float __emule_exp_init_scale = 1.0f;
+
 // Signatures mirror current upstream api/compute/eltwise_unary/exp.h.
 template <bool approx = false, uint32_t scale = 0x3F800000,
           InputClamping input_clamping = InputClamping::ClampToNegative>
-ALWI void exp_tile_init() {}
+ALWI void exp_tile_init() {
+    float s;
+    uint32_t b = scale;
+    std::memcpy(&s, &b, sizeof(s));
+    __emule_exp_init_scale = s;
+}
 
-// exp(x), optionally exp(x * scale) when scale_en (scale is a bf16 bit pattern).
-// vector_mode gates which faces are written (default RC = whole tile). approx /
-// input_clamping / iterations are silicon SFPU-approximation knobs with no effect
-// on emule's exact std::exp.
+// exp(x * scale). The effective scale follows silicon:
+//   - approx mode: the scale baked in by exp_tile_init (runtime scale_en ignored,
+//     matching ckernel_sfpu_exp.h's approx path which uses the pre-loaded constant);
+//   - non-approx mode: the runtime `scale` (a bf16/fp16b bit pattern) when scale_en,
+//     else 1.0 — matching _ckernel_sfpu_exp_accurate_.
+// vector_mode + iterations gate which faces are written (see vector_mode.h).
+// input_clamping is a silicon SFPU-approximation knob with no effect on std::exp.
 template <bool approx = false, bool scale_en = false,
           InputClamping input_clamping = InputClamping::ClampToNegative, int iterations = 8>
 ALWI void exp_tile(uint32_t idst, VectorMode vector_mode = VectorMode::RC,
                    uint16_t scale = p_sfpu::kCONST_1_FP16B) {
     __emule_dst_check(idst, "exp_tile");
     float s = 1.0f;
-    if constexpr (scale_en) {
+    if constexpr (approx) {
+        s = __emule_exp_init_scale;
+    } else if constexpr (scale_en) {
         uint32_t b = static_cast<uint32_t>(scale) << 16;
         std::memcpy(&s, &b, sizeof(s));
     }
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        if (!__emule_vector_mode_active(i, vector_mode)) continue;
+        if (!__emule_vector_mode_active(i, vector_mode, iterations)) continue;
         __emule_dst[idst][i] = std::exp(__emule_dst[idst][i] * s);
     }
 }
@@ -65,7 +84,9 @@ ALWI void exp_tile(uint32_t idst, VectorMode vector_mode = VectorMode::RC,
 // exp_tile{,_init} — delegate.
 template <bool approx = false, uint32_t scale = 0x3F800000,
           InputClamping input_clamping = InputClamping::ClampToNegative>
-ALWI void exp_packthread_tile_init() {}
+ALWI void exp_packthread_tile_init() {
+    exp_tile_init<approx, scale, input_clamping>();
+}
 
 template <bool approx = false, bool scale_en = false,
           InputClamping input_clamping = InputClamping::ClampToNegative, int iterations = 8>
