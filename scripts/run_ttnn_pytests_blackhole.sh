@@ -357,6 +357,16 @@ run_pytest "reduce_test_topk"                "$REDUCE_TEST_DIR/test_topk.py"
 run_pytest "reduce_test_topk_reduction"      "$REDUCE_TEST_DIR/test_reduction.py" -k topk
 run_pytest "reduce_test_topk_graph_capture"  "$BF_TEST_DIR/test_graph_capture.py::test_graph_capture_topk"
 
+# ttnn.sort — Batcher bitonic argsort (values + gather-validated indices).
+# Single-core (Wt<=64) and cross-core data-exchange (64<Wt<=hybrid threshold)
+# paths pass; both rely on emule's >=-semaphore wait (dataflow_api.h). The
+# single-row multi-core DRAM path is excluded — its VALID/0 coordinator-release
+# handshake races under emule's synchronous multicast, and the threshold is lower
+# on Blackhole's ~110-core grid so a wider set of shapes hits it. See
+# `/index-based-ops` §Sort.
+run_pytest "dm_test_sort"                    "$DM_TEST_DIR/test_sort.py" \
+    -k "not test_sort_long_tensor and not test_sort_program_cache and not (test_sort_l1_memory_tensor and 8192)"
+
 run_pytest "matmul_test_linear" "$MATMUL_TEST_DIR/test_linear.py" -k 'test_linear_fp32_acc or test_vector_linear'
 
 run_pytest "matmul_test_addmm" "$MATMUL_TEST_DIR/test_addmm.py" \
