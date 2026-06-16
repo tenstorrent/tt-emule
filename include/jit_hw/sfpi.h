@@ -869,7 +869,15 @@ inline ::sfpi::vFloat _ckernel_sfpu_exp_accurate_(::sfpi::vFloat val, std::uint3
         std::memcpy(&s, &b, sizeof(s));
     }
     ::sfpi::vFloat r;
-    for (uint32_t i = 0; i < 32; ++i) r.v[i] = std::exp(val.v[i] * s);
+    for (uint32_t i = 0; i < 32; ++i) {
+        float e = std::exp(val.v[i] * s);
+        // Fully-masked-row degeneracy (same as exp_tile in eltwise_unary/exp.h): the
+        // softmax correction exp(prev_max - cur_max) is NaN when both maxes are the
+        // bf16 -inf of an all-masked K-chunk (-inf - (-inf)). Such a chunk's running
+        // accumulators are 0, so the rescale must yield 0 (or 1; both leave 0*acc=0) —
+        // collapse the NaN to 0 to match silicon's non-NaN output for those rows.
+        r.v[i] = std::isnan(e) ? 0.0f : e;
+    }
     return r;
 }
 
