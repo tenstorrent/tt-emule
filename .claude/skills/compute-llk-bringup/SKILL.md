@@ -402,6 +402,9 @@ and per-op test runs centrally after the workers return.
   specializes (Strategy A for compute shims).
 - `/parallel-mock-implementation` — Workflow-tool dispatch pattern for
   batch shim authoring.
+- `/index-based-ops` — bring-up playbook for value+index ops (TopK / Sort /
+  Argmax): the values-exact + gather-cosine test contract, the per-column sort
+  axis, and the CB/unpack infra gaps they surface.
 - `.claude/references/structure.yaml` — file-level index of `src/` + `include/` with top-level
   symbols. Grep first when triaging.
 - `.claude/references/structure.yaml` — the authoritative index of what's currently shimmed

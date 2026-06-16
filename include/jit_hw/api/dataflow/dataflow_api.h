@@ -20,6 +20,10 @@
 
 #include "jit_hw/jit_kernel_stubs.hpp"
 #include "jit_hw/api/cb_api.h"
+// INVALID/VALID semaphore sentinels — silicon's dataflow_api.h includes this
+// (real header line 22); kernels like reduction/topk/.../reader_final_topk.cpp
+// reference INVALID/VALID unqualified and rely on this transitive include.
+#include "jit_hw/hostdevcommon/common_values.hpp"
 #include "jit_hw/internal/dataflow/dataflow_api_addrgen.h"
 // noc_parameters.h must be in scope before tensor_accessor.h so that the
 // NOC_UNICAST_ADDR_X/Y macros (used at upstream tensor_accessor.h:235) resolve.

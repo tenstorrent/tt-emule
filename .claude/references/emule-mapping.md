@@ -123,6 +123,7 @@ Owner: `tt-emule/include/jit_hw/api/compute/nfaces.h`.
 | `matmul_tiles` uses MM accumulator with optional transpose | `__emule_dst[idst][r*32+c] += sum_k A[r,k]*B[k,c]` (or transposed if `__emule_mm_transpose_in1`). AVX2-enabled FMA inner loop. |
 | `recip_tile`, `exp_tile`, `sigmoid_tile`, `silu_tile`, `relu_tile` | `expf`, `1/x`, `1/(1+exp(-x))`, `x*sigmoid(x)`, `max(0,x)` per element on row-major DST |
 | `reduce_tile<MAX/SUM, REDUCE_ROW/COL/SCALAR>` | Real per-axis reduction on DST |
+| `topk_local_sort`/`topk_merge`/`topk_rebuild` (bitonic SFPU TopK; index-based) | Host `std::stable_sort` on (value,index) pairs **per column** (W is on rows after the kernel's `transpose_wh`). merge & rebuild both = "full-sort 64 (V0∪V1), top-32→V0". Single-core (`topk.cpp`, W<8192) uses local_sort only; multi-core (`topk_local`+`topk_final`, W≥8192) adds merge/rebuild + cross-core NOC aggregation. Test checks **values** exact (bf16 lossless) + **gather cosine** on indices, so emule need only return the correct top-K set + valid indices. See `/compute-llk-bringup` §"Index-based ops". Owner: `compute/compute_kernel_api.h::__emule_topk`. |
 | `sub_tiles_bcast<COL>` etc. | `any_tiles_bcast<op, bcast, bool acc_to_dest=false>` with `bcast_b(r,c) = load_b(r,0)` for COL, `load_b(0,c)` for ROW, `load_b(0,0)` for SCALAR. `acc_to_dest=true` accumulates DST in place; `false` overwrites. Silicon's `llk_math_eltwise_binary<...>` takes this as a runtime flag; emule does it as a compile-time template. (Note: callers like `deepseek_mul_tiles_bcast_scalar` pass `acc_to_dest=true`.) |
 
 Owner files:
@@ -177,6 +178,17 @@ This split (per-RISC pointers + shared `occupied` semaphore) is the faithful
 silicon model and fixes the `pad_rm_sharded_stickwise` race (issue #139), where a
 shared write index let the writer corrupt the reader's shard base. See
 `docs/cb-emulation.md` §2b.
+
+### 4.2c Non-core-local CBs (cross-core CB addressing)
+
+| Silicon | Emule |
+|---|---|
+| A CB's L1 address is **program-global** — the same offset on every core in the grid. A kernel can therefore compute a *remote* core's CB address with `get_write_ptr(cb)` even for a CB allocated only on that other core, then NOC-write to it. | `init_core_cb_sync` (`emulated_program_runner.cpp`) configures **every** program CB on **every** core at its global L1 address: on-core CBs first (own geometry), then the rest by global address. So `get_write_ptr`/`get_read_ptr` on any core return the consistent offset; `__emule_resolve_noc_addr` masks it to the L1 offset and routes the write to the owning core. Such off-core slots are only valid as cross-core NOC targets — this core never produces/consumes them locally. |
+
+This is what lets a kernel write into another core's CB (e.g. multi-core TopK's
+local cores NOC-write their results into the final core's `final_*_cb`, which is
+allocated only on the final core). No effect on uniform-grid ops, where every CB
+is already on every core.
 
 ### 4.3 Tile format dispatch
 

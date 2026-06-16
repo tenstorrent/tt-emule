@@ -273,110 +273,116 @@ ALWI void sfpu_reduce_init(Ts...) {}
 //   DST[idst+2]   — index tile A (uint32_t reinterpreted as float in DST)
 //   DST[idst+3]   — index tile B (merge/rebuild only)
 //
-// Each operation acts independently per row. Real SFPU uses bitonic sort
-// instruction sequences; emule's host path sorts pairs (value, index) with
-// std::stable_sort, which produces equivalent results at significantly worse
-// throughput (irrelevant for emulation).
+// Sort axis is the COLUMN: the ttnn kernels run transpose_wh_tile on each tile
+// first, moving the sort dim W onto the ROW index (DST[r*32+c] = input[H=c][W=r]),
+// so topk along W is an independent sort over rows r at each fixed column c.
+// SFPU does this with a bitonic network; emule stable_sorts (value,index) pairs.
+// Strict comparator + stable_sort matches the SFPU no-swap-on-equal tie-break;
+// ties pick a different-but-valid index (the test gathers indices for cosine and
+// compares values, which are bf16-exact regardless of the tied index).
 namespace __emule_topk {
 
-// Pair view over a single 32-element row at offset `row*32` in the data + index DST slots.
-struct RowView {
-    float* data;     // points at DST[idst][row*32]
-    uint32_t* idx;   // points at DST[idst+2][row*32] reinterpreted as uint32_t*
-};
-
-// Bring values and indices together into a temp array, run sort, write back.
-// `op` is the strict-weak-ordering comparator on the value field.
-template <typename Cmp>
-inline void sort_row(RowView a, uint32_t len, Cmp cmp) {
-    std::pair<float, uint32_t> tmp[32];
-    for (uint32_t i = 0; i < len; ++i) tmp[i] = {a.data[i], a.idx[i]};
-    std::stable_sort(tmp, tmp + len,
-                     [cmp](const auto& x, const auto& y) { return cmp(x.first, y.first); });
-    for (uint32_t i = 0; i < len; ++i) {
-        a.data[i] = tmp[i].first;
-        a.idx[i]  = tmp[i].second;
+// Sort the 64 datums of column `c` from tiles A (idst) ∪ B (idst+1) (+ index
+// tiles idst+2/idst+3), top-32 → A, bottom-32 → B. `descending` = largest-first.
+inline void merge_split_col(uint32_t idst, uint32_t c, bool descending) {
+    uint32_t* idxA = reinterpret_cast<uint32_t*>(&__emule_dst[idst + 2][0]);
+    uint32_t* idxB = reinterpret_cast<uint32_t*>(&__emule_dst[idst + 3][0]);
+    std::pair<float, uint32_t> tmp[64];
+    for (uint32_t r = 0; r < 32; ++r) {
+        tmp[r]      = {__emule_dst[idst][r * 32 + c],     idxA[r * 32 + c]};
+        tmp[32 + r] = {__emule_dst[idst + 1][r * 32 + c], idxB[r * 32 + c]};
+    }
+    std::stable_sort(tmp, tmp + 64, [descending](const auto& x, const auto& y) {
+        return descending ? (x.first > y.first) : (x.first < y.first);
+    });
+    for (uint32_t r = 0; r < 32; ++r) {
+        __emule_dst[idst][r * 32 + c]     = tmp[r].first;
+        idxA[r * 32 + c]                  = tmp[r].second;
+        __emule_dst[idst + 1][r * 32 + c] = tmp[32 + r].first;
+        idxB[r * 32 + c]                  = tmp[32 + r].second;
     }
 }
 
-inline RowView row(uint32_t idst, uint32_t r) {
-    return RowView{
-        &__emule_dst[idst][r * 32],
-        reinterpret_cast<uint32_t*>(&__emule_dst[idst + 2][r * 32]),
-    };
+// Sort the 32 datums of a SINGLE value tile (idst) + index tile (idst+2) along
+// column `c`. `descending` selects largest-first.
+inline void sort_col(uint32_t idst, uint32_t c, bool descending) {
+    uint32_t* idx = reinterpret_cast<uint32_t*>(&__emule_dst[idst + 2][0]);
+    std::pair<float, uint32_t> tmp[32];
+    for (uint32_t r = 0; r < 32; ++r) tmp[r] = {__emule_dst[idst][r * 32 + c], idx[r * 32 + c]};
+    std::stable_sort(tmp, tmp + 32, [descending](const auto& x, const auto& y) {
+        return descending ? (x.first > y.first) : (x.first < y.first);
+    });
+    for (uint32_t r = 0; r < 32; ++r) {
+        __emule_dst[idst][r * 32 + c] = tmp[r].first;
+        idx[r * 32 + c]               = tmp[r].second;
+    }
 }
 
 } // namespace __emule_topk
 
 ALWI void topk_tile_init() {}
 
-// Local sort: per-row sort of each of the 32 rows.
-// idir == 0 → descending; idir == 1 → ascending.
+// Local sort. i_end_phase >= 5 (single-core; multi-core K==64): A and B are one
+// 64-element sequence per column → merge_split. i_end_phase < 5 (multi-core
+// local stage): A and B are independent candidate sets → sort each in place
+// (topk_merge/topk_rebuild combine them later). idir 0 = descending, 1 = ascending.
 template <bool stable_sort = false>
-ALWI void topk_local_sort(uint32_t idst, int idir, int /*i_end_phase*/,
+ALWI void topk_local_sort(uint32_t idst, int idir, int i_end_phase,
                           int /*i_start_phase*/ = 0, int /*i_end_step*/ = 0,
                           int /*i_start_step*/ = 0) {
-    __emule_dst_check(idst, "topk_local_sort.data");
-    __emule_dst_check(idst + 2, "topk_local_sort.indices");
-    for (uint32_t r = 0; r < 32; ++r) {
-        if (idir == 1) {
-            __emule_topk::sort_row(__emule_topk::row(idst, r), 32,
-                                   [](float x, float y) { return x < y; });
-        } else {
-            __emule_topk::sort_row(__emule_topk::row(idst, r), 32,
-                                   [](float x, float y) { return x > y; });
+    __emule_dst_check(idst, "topk_local_sort.A");
+    __emule_dst_check(idst + 1, "topk_local_sort.B");
+    __emule_dst_check(idst + 2, "topk_local_sort.A_idx");
+    __emule_dst_check(idst + 3, "topk_local_sort.B_idx");
+    const bool desc = (idir == 0);
+    if (i_end_phase >= 5) {
+        for (uint32_t c = 0; c < 32; ++c) {
+            __emule_topk::merge_split_col(idst, c, desc);
+        }
+    } else {
+        for (uint32_t c = 0; c < 32; ++c) {
+            __emule_topk::sort_col(idst, c, desc);
+            __emule_topk::sort_col(idst + 1, c, desc);
         }
     }
 }
 
-// Merge: combine tile A (idst) and tile B (idst+1) per-row. After the merge
-// stage, tile A row holds the top K (descending if `idir==false`, ascending
-// otherwise) and tile B row holds the bottom K. emule implementation: sort
-// the combined 64-element row, split.
-template <bool idir = false, bool stable_sort = false>
+// topk_merge (process_tiles) and topk_rebuild (process_tile_pair) both "move the
+// larger 32 into the 0th dest, lower 32 into the 1st" (topk_common_funcs.hpp) —
+// emulated as the order-independent full-sort merge_split, which converges to the
+// global top-K over the kernel's reduction tree for all K without needing the
+// SFPU's exact bitonic intermediate state. Template bool is `top_min` (driver
+// passes false for largest, true for smallest).
+template <bool top_min = false, bool stable_sort = false>
 ALWI void topk_merge(uint32_t idst, int /*m_iter*/, int /*k*/) {
     __emule_dst_check(idst, "topk_merge.A");
     __emule_dst_check(idst + 1, "topk_merge.B");
     __emule_dst_check(idst + 2, "topk_merge.A_idx");
     __emule_dst_check(idst + 3, "topk_merge.B_idx");
-    for (uint32_t r = 0; r < 32; ++r) {
-        std::pair<float, uint32_t> tmp[64];
-        for (uint32_t c = 0; c < 32; ++c) {
-            tmp[c]      = {__emule_dst[idst][r * 32 + c],
-                           reinterpret_cast<uint32_t*>(&__emule_dst[idst + 2][0])[r * 32 + c]};
-            tmp[32 + c] = {__emule_dst[idst + 1][r * 32 + c],
-                           reinterpret_cast<uint32_t*>(&__emule_dst[idst + 3][0])[r * 32 + c]};
-        }
-        if constexpr (idir) {
-            std::stable_sort(tmp, tmp + 64,
-                             [](const auto& x, const auto& y) { return x.first < y.first; });
-        } else {
-            std::stable_sort(tmp, tmp + 64,
-                             [](const auto& x, const auto& y) { return x.first > y.first; });
-        }
-        for (uint32_t c = 0; c < 32; ++c) {
-            __emule_dst[idst][r * 32 + c]                                                 = tmp[c].first;
-            reinterpret_cast<uint32_t*>(&__emule_dst[idst + 2][0])[r * 32 + c]            = tmp[c].second;
-            __emule_dst[idst + 1][r * 32 + c]                                             = tmp[32 + c].first;
-            reinterpret_cast<uint32_t*>(&__emule_dst[idst + 3][0])[r * 32 + c]            = tmp[32 + c].second;
-        }
+    for (uint32_t c = 0; c < 32; ++c) {
+        __emule_topk::merge_split_col(idst, c, /*descending=*/!top_min);
     }
 }
 
-// Rebuild: re-sort each row in the direction `idir` to restore monotonicity
-// after merge. emule implementation: per-row stable sort.
+// Rebuild: same merge-and-keep-larger-K as topk_merge, producing a fully sorted
+// top-K run in A. `idir` (the driver's `ascending`): false → descending
+// (largest), true → ascending (smallest). `skip_second`: when only the top-K
+// run survives, B was not loaded — sort just the single tile A in place.
 template <bool stable_sort = false>
 ALWI void topk_rebuild(uint32_t idst, bool idir, int /*m_iter*/, int /*k*/,
-                       int /*logk*/, int /*skip_second*/) {
-    __emule_dst_check(idst, "topk_rebuild.data");
-    __emule_dst_check(idst + 2, "topk_rebuild.indices");
-    for (uint32_t r = 0; r < 32; ++r) {
-        if (idir) {
-            __emule_topk::sort_row(__emule_topk::row(idst, r), 32,
-                                   [](float x, float y) { return x < y; });
-        } else {
-            __emule_topk::sort_row(__emule_topk::row(idst, r), 32,
-                                   [](float x, float y) { return x > y; });
+                       int /*logk*/, int skip_second) {
+    __emule_dst_check(idst, "topk_rebuild.A");
+    __emule_dst_check(idst + 2, "topk_rebuild.A_idx");
+    const bool desc = !idir;  // idir false → descending
+    if (skip_second) {
+        for (uint32_t c = 0; c < 32; ++c) {
+            __emule_topk::sort_col(idst, c, desc);
+        }
+    } else {
+        __emule_dst_check(idst + 1, "topk_rebuild.B");
+        __emule_dst_check(idst + 3, "topk_rebuild.B_idx");
+        for (uint32_t c = 0; c < 32; ++c) {
+            __emule_topk::merge_split_col(idst, c, desc);
         }
     }
 }
