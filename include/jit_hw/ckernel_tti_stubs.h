@@ -109,10 +109,15 @@ inline void set_addr_mod_base() {
     ::__emule_sfpi_dst_base = &__emule_dst[0][0];
     ::__emule_sfpi_cursor = 0;
     ::sfpi::__emule_sfpi_mask.fill(true);
+    // This hook fires only for the first-column column-vector recip path; switch
+    // the sfpi lane walk to the linear col-0 mapping so the 2-face loop sweeps
+    // the denominator across rows 0..31 (see __emule_sfpi_first_col_mode).
+    ::__emule_sfpi_first_col_mode = true;
 }
 inline void clear_addr_mod_base() {
     ::__emule_sfpi_dst_base = nullptr;
     ::__emule_sfpi_cursor = 0;
+    ::__emule_sfpi_first_col_mode = false;
 }
 }  // namespace math
 

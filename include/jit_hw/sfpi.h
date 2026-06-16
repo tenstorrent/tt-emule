@@ -66,6 +66,20 @@ inline thread_local float* __emule_sfpi_dst_base = nullptr;
 // the next sfpi::dst_reg[k] load/store will hit.
 inline thread_local uint32_t __emule_sfpi_cursor = 0;
 
+// First-column column-vector mode. SDPA's first-column SFPU helpers
+// (recip/exp/softplus _first_column) reciprocate/exp the per-row softmax
+// denominator/max, which is a logical column vector of 32 rows. On silicon the
+// reduce output is stored TRANSPOSED so a VectorMode::C 2-face SFPU walk sweeps
+// all 32 entries; emule has no physical face transpose, so the reduce writes the
+// vector linearly into col 0 of rows 0..31 (row-major). In this mode the lane
+// walk must therefore advance the cursor linearly across rows 0..31 of col 0,
+// NOT through the face-major quadrant remap used for full-tile SFPU ops (that
+// remap sends the 2nd face to rows 0-15/cols 16-31 instead of rows 16-31/col 0,
+// leaving the bottom-half denominators un-reciprocated). Set by
+// math::set_addr_mod_base() (the WH-direct path's exclusive hook) and by the
+// unary-SFPU dispatcher for first-column functors; cleared after.
+inline thread_local bool __emule_sfpi_first_col_mode = false;
+
 namespace sfpi {
 
 // ---- Rounding/instruction-modifier enums (used by reinterpret-style helpers) ----
@@ -292,13 +306,23 @@ inline float* __emule_sfpi_active_dst() {
 // dst_reg += n advances the cursor by 2n (see DstReg below).
 inline uint32_t __emule_sfpi_lane_index(uint32_t addr, uint32_t i) {
     const uint32_t row_face = (addr & ~3u) + (i >> 3);            // global face-major row
+    const uint32_t col      = ((i & 7u) << 1) + ((addr & 2u) ? 1u : 0u);  // col 0..15 in face
+    if (__emule_sfpi_first_col_mode) {
+        // First-column column-vector walk: map the cursor LINEARLY to rows 0..31
+        // of the active tile (no face-major quadrant remap). row_face directly is
+        // the row-major row; col stays 0..15 (only col 0 holds the live denominator,
+        // cols 2..14 are unused padding — recip(0)=inf there is harmless, matching
+        // silicon's sliced-off columns). See __emule_sfpi_first_col_mode.
+        const uint32_t tile = row_face / 32u;
+        const uint32_t R    = row_face % 32u;
+        return tile * __EMULE_SFPI_TILE_ELEMS + (R << 5) + col;
+    }
     // Large dst_reg[k] cross DST-tile boundaries (e.g. the fused softmax reads
     // worker_max/sum from neighbouring DST tiles via dst_reg[32]/[64]/...). Each
     // 32x32 tile spans 64 face-major rows = __EMULE_SFPI_TILE_ELEMS contiguous
     // elements in __emule_dst, so split off the tile then map within it.
     const uint32_t tile     = row_face / 64u;                     // tile offset from base
     const uint32_t frt      = row_face % 64u;                     // face-major row in tile 0..63
-    const uint32_t col      = ((i & 7u) << 1) + ((addr & 2u) ? 1u : 0u);  // col 0..15 in face
     const uint32_t face     = frt >> 4;                           // 0..3
     const uint32_t face_row = frt & 15u;                          // 0..15
     const uint32_t R = ((face >> 1) << 4) + face_row;             // row-major row 0..31
