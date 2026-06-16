@@ -20,17 +20,6 @@ namespace ckernel {
 namespace __emule_bcast {
 enum class Dim { Rows, Cols, Scalar };
 
-// Map a row-major output element (r, c) to the row-major index of the
-// broadcast-tile element it pulls from.
-inline uint32_t src_idx(Dim d, uint32_t r, uint32_t c, uint32_t bcast_row_idx) {
-    switch (d) {
-        case Dim::Rows:   return bcast_row_idx * 32 + c;
-        case Dim::Cols:   return r * 32;
-        case Dim::Scalar: return 0;
-    }
-    return 0;
-}
-
 template <Dim D, bool acc_to_dest, typename Op>
 inline void apply(uint32_t icb0, uint32_t icb1, uint32_t itile0, uint32_t itile1,
                   uint32_t idst, uint32_t bcast_row_idx, Op op) {
@@ -51,8 +40,10 @@ inline void apply(uint32_t icb0, uint32_t icb1, uint32_t itile0, uint32_t itile1
     // Block-float (Bfp8_b/Bfp4_b) inputs carry a shared exponent per face-row and
     // can't be read element-by-element — route through the central format-aware
     // reader, which decodes the shared exponent into a row-major float[1024].
-    // (Tiny block-float is supported here too: __emule_unpack_cb_tile_to decodes
-    // Bfp8_b/Bfp4_b tiny tiles via tile_bfp_mant_offset + the 2D nfaces map.)
+    // (__emule_unpack_cb_tile_to decodes tiny Bfp8_b/Bfp4_b as well.) NOTE:
+    // silicon's llk_unpack_AB does NOT support ROW/COL broadcast on a narrow tile
+    // (tile_w=16, num_faces_c < num_faces_r) — it asserts (llk_unpack_AB.h:78,99).
+    // emule computes it regardless; a faithful ASSERT is tracked in #178.
     if (__emule_compute::cb_is_bfp8_b_format(icb0) ||
         __emule_compute::cb_is_bfp4_b_format(icb0) ||
         __emule_compute::cb_is_bfp8_b_format(icb1) ||

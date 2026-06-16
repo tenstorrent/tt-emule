@@ -785,7 +785,6 @@ files:
   - {kind: namespace, name: ckernel}
   - {kind: namespace, name: __emule_bcast}
   - {kind: enum, name: Dim}
-  - {kind: function, name: src_idx}
   - {kind: function, name: apply}
   - {kind: function, name: init_bcast}
   - {kind: function, name: add_bcast_rows_init_short}
