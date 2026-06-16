@@ -443,7 +443,8 @@ run_pytest "bf_test_tail_batch" \
     "$BENCH_TEST_DIR/test_benchmark.py" \
     -m "not disable_fast_runtime_mode"
 
-# test_matmul.py: curated 221-test subset. Excludes tiny_tile* (TinyTile gap),
+# test_matmul.py: curated 221-test subset. Excludes tiny_tile* (promoted to the
+# dedicated matmul_test_tiny_tile entry below, which runs with LLK asserts on),
 # multiple_output_blocks_per_core (slow loop, no numeric bug), and on_subdevice
 # (slow loop). Includes the Phase A unblock target
 # (test_matmul_activation_with_sharded_input → silu fused-activation), the
@@ -452,6 +453,13 @@ run_pytest "bf_test_tail_batch" \
 # by the bfp4_b + include_self + per-operand dispatch fixes on this branch.
 run_pytest "matmul_test_basic" "$MATMUL_TEST_DIR/test_matmul.py" \
     -k '(test_matmul_with_matched_width_height or test_matmul_does_dot_product or test_matmul_same_shape or test_tutorial_matmul or test_small_matmul_pcc or test_matmul_with_core_grid or test_matmul_activation_with_sharded_input or test_matmul_by_passing_in_1D_systolic_array_program_config or test_pytorch_2_0_failed_cases or test_linear_with_optional_output_tensor or test_wide_matmul_with_argument_for_core_grid_set_to_device_grid or test_tall_matmul_with_argument_for_core_grid_set_to_device_grid or test_optional_output_argument or test_falcon_query_key_value_matmul or test_alternating_dst_sync_mode_matmul or test_sharded_matmul or test_padded_2d_matmul or test_matmul_padding or test_matmul_height_sharded_input_with_padding or test_matmul_block_sharded_input_with_padding or test_matmul_with_transpose_a_or_b or test_matmul_transpose_a_with_core_grid or test_matmul_reuse_config_sharded_fd_column or test_linear_fused_non_broadcast_bias_2d_mesh_multiple_blocks or test_padded_1d_matmul or test_matmul_with_transpose_and_configs or test_matmul_in0_in1_bias_sharded or test_interleaved_input_sharded_output_matmul or test_linear_with_non_tile_aligned_bias or test_matmul_column_wise_bfp_tilize_via_transpose_b or test_from_torch_col_tilize or test_matmul_compute_output_specs_with_allowed_worker_cores) and not tiny_tile and not tiny_tiles and not multiple_output_blocks_per_core and not on_subdevice'
+
+# test_matmul.py tiny-tile: sub-32×32 tiles. Run with TT_METAL_LLK_ASSERTS=1
+# so the HW-unsupported combos (e.g. transpose_tile=True + tile_w=16) pytest.skip
+# the way they do on silicon, instead of running and producing garbage.
+export TT_METAL_LLK_ASSERTS=1
+run_pytest "matmul_test_tiny_tile" "$MATMUL_TEST_DIR/test_matmul.py" -k tiny_tile
+unset TT_METAL_LLK_ASSERTS
 
 echo ""
 echo "========================================"
