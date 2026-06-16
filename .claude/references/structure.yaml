@@ -269,6 +269,14 @@ files:
   symbols:
   - {kind: namespace, name: ckernel}
   - {kind: enum, name: firmware_msg_e}
+- path: include/jit_hw/ckernel_ops.h
+  section: include/jit_hw/
+  summary: Shim for the real ckernel_ops.h (which emits raw Tensix instructions) — defines TT_SFPLOADI/TTI_SFPLOADI (-> __emule_sfploadi) + TTI_SFPCONFIG (no-op) for the SFPU LUT init path.
+  symbols:
+  - {kind: macro, name: TT_SFPLOADI}
+  - {kind: macro, name: TTI_SFPLOADI}
+  - {kind: macro, name: TTI_SFPCONFIG}
+  - {kind: function, name: __emule_sfpu_unsupported}
 - path: include/jit_hw/ckernel_sfpu_exp.h
   section: include/jit_hw/
   summary: stub of silicon SFPU exp ckernel (functional impl in `api/compute/eltwise_unary/exp.h`)
@@ -532,6 +540,7 @@ files:
   section: include/jit_hw/
   summary: '`namespace sfpi`; `enum class RoundMode`/`LRegs`; TLS `__emule_sfpi_dst_base`/`__emule_sfpi_cursor`; `SFPSHFT2_*` constants (SFPU vector-API shim)'
   symbols:
+  - {kind: macro, name: sfpi_inline}
   - {kind: global, name: __EMULE_SFPI_LANES}
   - {kind: global, name: __EMULE_SFPI_TILE_ELEMS}
   - {kind: global, name: __emule_sfpi_dst_base}
@@ -546,6 +555,8 @@ files:
   - {kind: class, name: vFloat}
   - {kind: class, name: vInt}
   - {kind: class, name: vUInt}
+  - {kind: function, name: __emule_sfpu_finalize}
+  - {kind: function, name: __emule_sfpu_mad}
   - {kind: struct, name: vCond}
   - {kind: function, name: v_and}
   - {kind: function, name: v_or}
@@ -563,9 +574,10 @@ files:
   - {kind: class, name: DstRegLane}
   - {kind: class, name: DstReg}
   - {kind: global, name: dst_reg}
+  - {kind: global, name: __emule_lreg}
   - {kind: struct, name: LRegFile}
-  - {kind: global, name: __emule_l_reg_storage}
   - {kind: global, name: l_reg}
+  - {kind: function, name: __emule_sfploadi}
   - {kind: global, name: vConst0}
   - {kind: global, name: vConst1}
   - {kind: global, name: vConstNeg1}
@@ -576,6 +588,31 @@ files:
   - {kind: function, name: float_to_fp16a}
   - {kind: function, name: setsgn}
   - {kind: struct, name: Converter}
+  - {kind: enum, name: ExponentMode}
+  - {kind: function, name: exexp}
+  - {kind: function, name: setexp}
+  - {kind: function, name: addexp}
+  - {kind: function, name: int32_to_float}
+  - {kind: function, name: abs}
+  - {kind: function, name: vec_min_max}
+  - {kind: function, name: vec_max_min}
+  - {kind: function, name: __lut8_to_fp32}
+  - {kind: function, name: __lut16_to_fp32}
+  - {kind: function, name: __apply_sgn_retain}
+  - {kind: function, name: lut}
+  - {kind: function, name: lut2}
+  - {kind: class, name: sFloat16b}
+  - {kind: class, name: sFloat16a}
+  - {kind: class, name: vFloat16b}
+  - {kind: function, name: convert}
+  - {kind: global, name: __emule_prgm_creg}
+  - {kind: class, name: __vCRegFloat}
+  - {kind: class, name: __vCRegInt}
+  - {kind: global, name: vConstFloatPrgm0}
+  - {kind: global, name: vConstIntPrgm0}
+  - {kind: function, name: __emule_sfpu_unsupported}
+  - {kind: function, name: vec_swap}
+  - {kind: function, name: subvec_transp}
   - {kind: macro, name: v_if}
   - {kind: macro, name: v_elseif}
   - {kind: macro, name: v_else}
@@ -627,8 +664,8 @@ files:
   - {kind: function, name: is_bfp8_page_size}
 - path: include/jit_hw/api/cb_api.h
   section: include/jit_hw/api/
-  summary: '`cb_wait_front`/`cb_pop_front`/`cb_reserve_back`/`cb_push_back`, `get_write_ptr`/`get_read_ptr`, `get_tile_size`/`get_tile_hw`/`get_tile_num_faces`, `get_dataformat`, `__emule_cb_timeout_sec`;
-    constexpr arrays `unpack_tile_size`/`unpack_tile_r_dim`/`unpack_tile_c_dim`/`unpack_num_faces_r_dim`/`unpack_num_faces_c_dim`/`unpack_src_format`/`pack_dst_format`/`unpack_dst_format`/`pack_src_format`'
+  summary: '`cb_wait_front`/`cb_pop_front`/`cb_reserve_back`/`cb_push_back`, `get_write_ptr`/`get_read_ptr`, `get_tile_size`/`get_tile_hw`/`get_tile_r_dim`/`get_tile_c_dim`/`get_tile_num_faces`, `get_dataformat`,
+    `__emule_cb_timeout_sec`; constexpr arrays `unpack_tile_size`/`unpack_tile_r_dim`/`unpack_tile_c_dim`/`unpack_num_faces_r_dim`/`unpack_num_faces_c_dim`/`unpack_src_format`/`pack_dst_format`/`unpack_dst_format`/`pack_src_format`'
   symbols:
   - {kind: global, name: my_x}
   - {kind: global, name: my_y}
@@ -653,6 +690,8 @@ files:
   - {kind: function, name: get_read_ptr}
   - {kind: function, name: get_tile_size}
   - {kind: function, name: get_tile_hw}
+  - {kind: function, name: get_tile_r_dim}
+  - {kind: function, name: get_tile_c_dim}
   - {kind: function, name: get_tile_num_faces}
   - {kind: function, name: get_dataformat}
 - path: include/jit_hw/api/compile_time_args.h
@@ -870,7 +909,9 @@ files:
   section: include/jit_hw/api/compute/
   summary: includes `compute/common.h` + `api/cb_api.h` (shim)
   symbols:
+  - {kind: namespace, name: ckernel}
   - {kind: function, name: get_tile_address}
+  - {kind: function, name: read_tile_value}
 - path: include/jit_hw/api/compute/common.h
   section: include/jit_hw/api/compute/
   summary: macros `PACK`/`MATH`/`UNPACK`/`ALWI`, `DST_ACCUM_MODE`; `namespace __emule_compute`, `ckernel`; `enum class EltwiseBinaryType`/`BroadcastType`/`ReluType`/`EltwiseBinaryReuseDestType`/`p_dim_stride_target`/`MathFidelity`;
@@ -1590,6 +1631,9 @@ files:
   - {kind: function, name: nez_tile_int32}
   - {kind: function, name: nez_tile_uint16}
   - {kind: function, name: nez_tile_uint32}
+- path: include/jit_hw/api/compute/eltwise_unary/deep_sfpu_registry.h
+  section: include/jit_hw/api/compute/eltwise_unary/
+  summary: Deep-SFPU per-op override policy doc; define EMULE_DEEP_SFPU_<OP> to promote a shadowed op to the real-silicon deep path (default = layer-1 shadow).
 - path: include/jit_hw/api/compute/eltwise_unary/digamma.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `digamma_tile` (+`_init`)'
@@ -2282,6 +2326,13 @@ files:
 - path: include/jit_hw/internal/circular_buffer_interface.h
   section: include/jit_hw/internal/
   summary: forwarding shim → `jit_hw/internal/llk_state.h`
+- path: include/jit_hw/internal/deep_sfpu.h
+  section: include/jit_hw/internal/
+  summary: Deep-SFPU bridge — run_unary_sfpu points the sfpi dst_reg cursor at __emule_dst[idst] so a real silicon ckernel_sfpu_<op>.h calculate runs on emule's sfpi backend.
+  symbols:
+  - {kind: namespace, name: __emule_deep}
+  - {kind: global, name: kTileIterations}
+  - {kind: function, name: run_unary_sfpu}
 - path: include/jit_hw/internal/emule_cb_ptr.h
   section: include/jit_hw/internal/
   summary: 'Per-RISC circular-buffer read/write pointers — the single source of truth (issue #139). `struct LocalCBInterface` + thread_local `__emule_local_cb[NUM_CIRCULAR_BUFFERS]` (mirrors silicon''s

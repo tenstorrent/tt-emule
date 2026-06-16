@@ -53,10 +53,12 @@ ALWI void deepseek_moe_gate_init(uint32_t /*icb0*/, uint32_t /*icb1*/) {
 //   7. pick top-8 from candidates by bias_score (carry the score+index)
 //   8. normalize: out_score = score * scale / (sum(top8_scores) + eps)
 //   9. write top-8 normalized scores to DST[0][0..7]
-//      write top-8 flat indices (r*32+c) to DST[1][0..7] via bit-pack
-//      (uint16(V) << 16) so pack_tile's bf16 truncation deposits the
-//      raw uint16 bit pattern in L1 — matches the silicon LO16-only
-//      indices encoding without needing a uint16 pack path.
+//      write top-8 flat indices (r*32+c) to DST[1][0..7] as the raw
+//      index in the low 16 bits of the DST word. The out_indices CB is
+//      uint16-formatted, so pack consumes the low 16 bits directly (same
+//      convention as glm/kimi). The Layer-1.5 pack subrect set up by the
+//      kernel reads col0 of row0..7 of face 0 — matching silicon's
+//      LO16-only indices encoding.
 template <bool enable_sigmoid = false, bool is_32bit = false>
 ALWI void deepseek_moe_gate(uint32_t icb0, uint32_t icb1,
                             uint32_t eps_packed, uint32_t scale_packed) {
@@ -152,7 +154,7 @@ ALWI void deepseek_moe_gate(uint32_t icb0, uint32_t icb1,
     __emule_dst_mark_dirty(1);
     for (uint32_t i = 0; i < 8; ++i) {
         __emule_dst[0][i] = top8_scores[i];
-        uint32_t idx_bits = static_cast<uint32_t>(top8_indices[i]) << 16;
+        uint32_t idx_bits = static_cast<uint32_t>(top8_indices[i]);
         float idx_as_float;
         std::memcpy(&idx_as_float, &idx_bits, sizeof(float));
         __emule_dst[1][i] = idx_as_float;

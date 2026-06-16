@@ -390,19 +390,23 @@ run_pytest "pca_test_per_core_allocation" "$PCA_TEST_DIR/test_per_core_allocatio
 run_pytest "tensor_dir_all" "$TENSOR_TEST_DIR" -m "not disable_fast_runtime_mode"
 
 # ---- data_movement explicit function targets (issue #72) ----
-# 8 of 15 listed targets pass cleanly under emule. Remaining 7:
+# 10 of 15 listed targets pass cleanly under emule. Remaining 5:
 #   - test_run_tilize_with_val_padding_test: collection fails (needs IPython)
 #   - test_pad: silicon-side @pytest.mark.skip (ttnn.pad row_major PCC error)
-#   - test_tiled_concat, test_embedding_bw_with_program_cache,
-#     test_tosa_scatter_normal,
+#   - test_tiled_concat, test_tosa_scatter_normal,
 #     test_sort_indices: real failures (PCC / hang) — documented in #72 closeout
 #   - test_convert_to_hwc_*: FIXED — now covered by dm_test_convert_to_hwc below.
+# test_embedding_bw_with_program_cache: now passes — promoted below (issue #111 fixed).
 run_pytest "dm_test_function_targets_batch" \
     "$DM_TEST_DIR/test_untilize.py::test_untilize_single_core_interleaved_to_interleaved" \
     "$DM_TEST_DIR/test_untilize_with_unpadding.py::test_untilize_with_unpadding_height_sharded" \
     "$DM_TEST_DIR/test_fill_pad.py::test_fill_pad_complex_sharding" \
     "$DM_TEST_DIR/test_slice.py::test_slice_usecase1" \
     "$DM_TEST_DIR/test_interleaved_to_sharded.py::test_interleaved_to_sharded_nd_with_equivalent_2d"
+
+# test_backward_embedding: promoted (issue #111) — emule get_tile_size now returns the CB
+# tile size (not page size), so the reader fetches all 32 indices per block (PCC ~1.0).
+run_pytest "dm_test_backward_embedding" "$DM_TEST_DIR/test_backward_embedding.py"
 # Note: test_tilize_test, test_gather_general, test_pc_with_different_shapes_in_sequence
 # (also in issue #72) are now covered by the promoted dm_test_tilize / dm_test_gather /
 # dm_test_repeat whole-file entries — see issue #73 promotions.

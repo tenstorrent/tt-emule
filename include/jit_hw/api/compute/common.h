@@ -1102,5 +1102,10 @@ using namespace ckernel;
 #include "jit_hw/llk_math_unary_sfpu.h"
 #include "jit_hw/llk_sync_stubs.h"
 
+// ---- CB mailbox helpers (get_tile_address / read_tile_value) ----
+// Silicon's compute/common.h includes compute/cb_api.h, so any compute kernel
+// sees these without an explicit include.
+#include "jit_hw/api/compute/cb_api.h"
+
 // (ELWADD / ELWSUB / ELWMUL unscoped imports live earlier in this file
 //  alongside the EltwiseBinaryType enum, near line 79.)
