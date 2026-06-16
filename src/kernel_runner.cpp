@@ -44,6 +44,9 @@ thread_local uint32_t* __emule_l1_resolved_ranges_count = nullptr;
 thread_local uint32_t __emule_l1_resolved_ranges_capacity = 0;
 thread_local uint32_t __emule_cb_reserved_pages[32] = {};
 thread_local uint32_t __emule_cb_waited_pages[32] = {};
+// Dirty-CB leak flags (decoupled from the window counters above; see cb_api.h).
+thread_local bool __emule_cb_reserve_dangling[32] = {};
+thread_local bool __emule_cb_wait_dangling[32] = {};
 thread_local const char* __emule_cb_reserve_file[32] = {};
 thread_local uint32_t __emule_cb_reserve_line[32] = {};
 thread_local const char* __emule_cb_wait_file[32] = {};
