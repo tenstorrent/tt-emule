@@ -32,12 +32,14 @@ enum class DataFormat : uint8_t {
     Invalid   = 0xff
 };
 
-// PACK engine auto-advance: tracks the write offset within a reserve_back batch.
+// PACK engine auto-advance: tracks the write offset within a pack batch.
 // On real hardware the PACK engine auto-advances its L1 write pointer after each
 // pack_tile.  In emulation, cb_write_ptr resolves the calling RISC's per-thread
 // CB write pointer (jit_hw/internal/emule_cb_ptr.h), which only advances on
-// push_back.  This counter emulates the hardware auto-advance: reset to 0 on
-// reserve_back, incremented by pack_tile.
+// push_back.  This counter emulates the hardware auto-advance: incremented by
+// pack_tile, reset to 0 on cb_push_back (the batch commit — matching silicon
+// pack.h, which resets the sequential pack pointer after cb_push_back, NOT on
+// cb_reserve_back; a run of reserve_back calls with no push keeps advancing).
 static thread_local uint32_t __emule_pack_offset[NUM_CIRCULAR_BUFFERS] = {};
 
 // Per-DST-slot "fresh since acquire" flag.  Set true by tile_regs_acquire,

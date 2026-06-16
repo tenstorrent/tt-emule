@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
 """Query `.claude/references/structure.yaml` for files / symbols.
 
 The structured form lets you do kind- and path-aware lookups that plain
@@ -101,6 +104,24 @@ def cmd_query(files: list[dict], query: str, kind: str | None) -> None:
             emit_summary(f["path"], f.get("summary", ""))
 
 
+def cmd_surface(query: str, *, supports: bool, index: str, exit_status: bool) -> int:
+    """Early-detect probes backed by the shared emule_surface module."""
+    import emule_surface
+
+    surf = emule_surface.load(index)
+    if supports:
+        verdict, klass = surf.provides(query)
+        owners = surf.owners(query)
+        path = owners[0] if owners else "-"
+        print(f"{query}\t{klass}\t{verdict}\t{path}")
+        ok = verdict == "layer1"
+    else:  # --shadows
+        path = surf.shadow_path(query)
+        print(f"{query}\t{'shadowed' if path else 'unshadowed'}\t{path or '-'}")
+        ok = path is not None
+    return 0 if (ok or not exit_status) else 1
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("query", nargs="?", help="Symbol name or summary substring")
@@ -109,6 +130,16 @@ def main() -> int:
     p.add_argument("--list-paths", action="store_true", help="Print every path in the index")
     p.add_argument("--list-symbols", action="store_true", help="Print every symbol (optionally filtered by --kind)")
     p.add_argument("--summary", action="store_true", help="Substring search against the summary field only")
+    detect = p.add_mutually_exclusive_group()
+    detect.add_argument("--supports", action="store_true",
+                        help="Early-detect: is <query> a tile/llk/ckernel symbol emule models? "
+                             "Prints `<sym>\\t<class>\\t<verdict>\\t<owning jit_hw path|->`")
+    detect.add_argument("--shadows", action="store_true",
+                        help="Early-detect: does emule shadow the #include <query>? "
+                             "Prints `<inc>\\t(shadowed|unshadowed)\\t<jit_hw path|->`")
+    p.add_argument("--exit-status", action="store_true",
+                   help="With --supports/--shadows: exit nonzero unless the verdict is "
+                        "layer1 / shadowed (lets a shell branch on emule support)")
     p.add_argument("--index", default=str(DEFAULT_INDEX), help=f"Path to structure.yaml (default: {DEFAULT_INDEX})")
     args = p.parse_args()
 
@@ -121,6 +152,12 @@ def main() -> int:
     if args.list_symbols:
         cmd_list_symbols(files, args.kind)
         return 0
+
+    if args.supports or args.shadows:
+        if not args.query:
+            p.error("--supports / --shadows require a <query>")
+        return cmd_surface(args.query, supports=args.supports, index=args.index,
+                           exit_status=args.exit_status)
 
     if not args.query:
         p.error("query is required (or use --list-paths / --list-symbols)")

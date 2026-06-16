@@ -33,9 +33,17 @@ faithful mock APIs.
 - The authoritative `src/` + `include/` file/symbol index lives at
   `references/structure.yaml` (replaces `STRUCTURE.md`). Query with
   `scripts/find_symbol.py <name>` (flags: `--kind`, `--path-prefix`,
-  `--list-symbols`, `--summary`); plain `grep` works for casual
-  lookups. Keep it in sync when you add/remove/rename a file or
-  top-level symbol.
+  `--list-symbols`, `--summary`; `--supports <sym>` / `--shadows
+  <include>` for an early-detect "is this kernel symbol/include modelable
+  by emule?" probe); plain `grep` works for casual lookups. The `symbols`
+  (and `path`/`section`) of every entry are **regenerated** from the
+  source by `scripts/gen_structure.py --write` and enforced in sync by a
+  pre-commit hook + the Structure Index CI gate (`--check`) — so don't
+  hand-edit `symbols`; instead run `--write` after adding/removing/
+  renaming a file or top-level symbol. The `summary` field IS
+  hand-written prose: a brand-new file needs a one-line summary (the
+  generator inserts a `TODO:` sentinel that fails `--check` until you
+  replace it).
 - `IMPLEMENTATION_REPORT.md` is the documentation entry point and
   index; per-subsystem references live under `docs/`
   (l1/dram/dest/cb/noc-emulation, metal-integration,

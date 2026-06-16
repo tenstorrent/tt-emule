@@ -44,6 +44,11 @@ extern thread_local uint32_t __emule_cb_waited_pages[32];
 
 // cb_addr_shift (16-byte fifo-pointer encoding) is defined in emule_cb_ptr.h.
 
+// Bitmask of CBs THIS thread consumes (set in cb_wait_front). cb_reserve_back
+// uses it to detect "self-recycled" CBs the same compute thread both produces
+// and consumes (see cb_reserve_back). Thread_local — fresh per kernel launch.
+inline thread_local uint32_t __emule_cb_self_consume_mask = 0;
+
 // ---- Constexpr tile metadata arrays (populated by JIT defines) ----
 // EMULE_TILE_SIZES is defined by the JIT compiler as a comma-separated list of
 // 32 page sizes (one per CB index), matching the real device's unpack_tile_size[].
@@ -80,15 +85,29 @@ constexpr uint8_t pack_dst_format[32] = {
 constexpr uint8_t unpack_dst_format[32] = {};  // DST-side (fp32) stub
 constexpr uint8_t pack_src_format[32]   = {};  // DST-side (fp32) stub
 
-// Standard 32×32 tiles: 2 faces in each dimension
+// Per-CB tile height/width (elements). Populated by the JIT compiler from each
+// CB's host-side Tile spec (CircularBufferConfig::tiles()[idx]->get_height()/
+// get_width()) via the EMULE_TILE_R_DIM / EMULE_TILE_C_DIM defines — the analog
+// of EMULE_TILE_SIZES. Thin tiles (e.g. Tile([1,16])) report their true active
+// region so reduce_tile bounds its iteration instead of assuming 32×32. The
+// fallback below is the standard full 32×32 tile (used by the standalone JIT
+// path, which doesn't emit these defines).
+#ifdef EMULE_TILE_R_DIM
+constexpr uint8_t unpack_tile_r_dim[32] = { EMULE_TILE_R_DIM };
+#else
 constexpr uint8_t unpack_tile_r_dim[32] = {
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
 };
+#endif
+#ifdef EMULE_TILE_C_DIM
+constexpr uint8_t unpack_tile_c_dim[32] = { EMULE_TILE_C_DIM };
+#else
 constexpr uint8_t unpack_tile_c_dim[32] = {
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
 };
+#endif
 constexpr uint8_t unpack_num_faces_r_dim[32] = {
     2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
 };
@@ -130,9 +149,21 @@ inline void cb_reserve_back(
                 cb_id, cb.num_pages, n, cb.page_size,
                 my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
     }
-    // Lock-free fast path (safe for SPSC — only consumer decrements occupied).
+    // __emule_pack_offset is reset by cb_push_back, NOT here. Per silicon
+    // pack.h, the sequential pack write pointer "is reset after cb_push_back",
+    // so reserve_back calls without an intervening push_back keep advancing —
+    // required by the multi-core topk final kernel (reserve_back(1) per tile +
+    // one trailing push_back(Wt)).
+    // Lock-free fast path (safe for SPSC — only consumer decrements occupied)
     if ((cb.num_pages - cb.occupied.load(std::memory_order_acquire)) >= n) {
-        __emule_pack_offset[cb_id] = 0;
+        __emule_cb_reserved_pages[cb_id] += n;
+        return;
+    }
+    // Self-recycled CB: this thread also consumes it (called cb_wait_front), so
+    // no other thread frees space — blocking would deadlock the in-place bitonic
+    // recycle (wait_front; pack_tile<true>; reserve_back; pop_front; push_back).
+    // emule runs compute single-threaded; silicon overlaps UNPACK/PACK.
+    if ((__emule_cb_self_consume_mask >> cb_id) & 1u) {
         __emule_cb_reserved_pages[cb_id] += n;
         return;
     }
@@ -148,8 +179,6 @@ inline void cb_reserve_back(
                 my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
         std::abort();
     }
-    // Reset PACK engine auto-advance offset for this new batch.
-    __emule_pack_offset[cb_id] = 0;
     __emule_cb_reserved_pages[cb_id] += n;
 }
 
@@ -165,6 +194,8 @@ inline void cb_push_back(uint32_t cb_id, uint32_t n) {
     // silicon), then bump the shared occupied semaphore.
     __emule_cb_advance_wr(cb_id, n);
     tt_emule::cb_sync_push(__emule_cbs[cb_id], n);
+    // Reset the PACK auto-advance offset on batch commit (see cb_reserve_back).
+    __emule_pack_offset[cb_id] = 0;
     // Bridge CB→DFB: update tile counters so DM's dfb_wait_front sees compute's output.
     // cb.mu already released; now safe to acquire tc.mu (consistent lock ordering).
     if (__emule_dfbs && __emule_tc_array && __emule_dfbs[cb_id].active) {
@@ -203,6 +234,10 @@ inline void cb_wait_front(
                 my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
         std::abort();
     }
+    // Mark this CB as consumed-by-this-thread so a later cb_reserve_back on it
+    // (the in-place recycle idiom) does not block waiting on a non-existent
+    // other consumer. See __emule_cb_self_consume_mask.
+    __emule_cb_self_consume_mask |= (1u << cb_id);
     // Lock-free fast path (safe for SPSC — only producer increments occupied).
     if (cb.occupied.load(std::memory_order_acquire) >= n) {
         // max(), not += — overlapping waits before a pop don't grow the
@@ -305,6 +340,15 @@ constexpr inline uint32_t get_tile_size(uint32_t cb_id) {
 constexpr inline uint32_t get_tile_hw(uint32_t cb_id) {
     return static_cast<uint32_t>(unpack_tile_r_dim[cb_id]) *
            static_cast<uint32_t>(unpack_tile_c_dim[cb_id]);
+}
+
+// get_tile_r_dim / get_tile_c_dim — return the CB tile's active height / width
+// (rows / columns, in elements). 32 for a full tile; smaller for thin tiles.
+constexpr inline uint32_t get_tile_r_dim(uint32_t cb_id) {
+    return static_cast<uint32_t>(unpack_tile_r_dim[cb_id]);
+}
+constexpr inline uint32_t get_tile_c_dim(uint32_t cb_id) {
+    return static_cast<uint32_t>(unpack_tile_c_dim[cb_id]);
 }
 
 // get_tile_num_faces — return number of faces per tile.

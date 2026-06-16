@@ -107,14 +107,82 @@ and avoid parallel/divergent code paths.
 
 ## Classification tooling
 
-> **Forward note (PR #136, not yet on this base).** A classifier
-> (`scripts/classify_kernels.py`) sweeps ttnn and blaze kernels and labels each
-> against the emule surface — `layer1` (already modeled), `needs_stub`, or
-> `ruled_out` — with the `ruled_out` cases bucketed and mapped onto the layer-2
-> / layer-3 distinction above (which LLK or HW symbol blocks them). It
-> operationalizes this taxonomy to answer "what should we bring up next?".
->
-> This section is a placeholder: it will be filled in (run instructions,
-> verdict definitions, the `ruled_out` bucket → layer mapping, `scripts/out/`
-> outputs) once PR #136 lands on a shared base. The taxonomy above stands on its
-> own regardless.
+`scripts/classify_kernels.py` operationalizes the taxonomy above. It is a
+deterministic, **no-LLM / no-build** classifier: point it at a directory of
+kernels or at a specific kernel file and it labels each against the emule
+surface, so you can answer "what should we bring up next?" without compiling
+anything. It is a per-kernel primitive and stays agnostic to any kernel tree's
+layout — an external driver can roll the per-kernel verdicts up however it
+likes (per operation, per test, per model). It decides includes the way emule's
+JIT does — an include that resolves into `include/jit_hw/` is a shadowed
+**layer-1 leaf**; one that falls through to the real source tree (under
+`--repo-root`) is recursed and scanned for lower-layer signals.
+
+```bash
+# every kernel TU under a tree, with its include search roots (JIT -I order)
+python3 scripts/classify_kernels.py --root /path/to/kernels \
+    -I /path/to/src/hw/inc -I /path/to/src
+
+# a single kernel (the unit an external driver loops over)
+python3 scripts/classify_kernels.py /path/to/kernels/reader.cpp -I /path/to/src
+```
+
+### Verdicts
+
+| verdict | meaning |
+|---|---|
+| `layer1` | modelable by emule today — only high-level `cb_*` / `noc_async_*` / `compute_kernel_api` wrappers in its include graph |
+| `needs_stub` | layer-1 by API, but calls a `*_tile`/`_tiles` wrapper emule doesn't ship yet — unblockable with a shim under `include/jit_hw/api/compute/` |
+| `ruled_out` | reaches a lower layer emule can't model (see buckets) |
+
+### `ruled_out` buckets → layer
+
+Each `ruled_out` unit carries a `ruleout_buckets` set and a `ruleout_primary`
+(its hardest blocker), mapped onto the layer stack defined above (ordered
+hardest → easiest to bring up):
+
+| bucket | layer | meaning |
+|--------|-------|---------|
+| `sfpi_intrinsics` | layer-3 | hand-written SFPU vector code (`sfpi::`, `vFloat/vInt`) |
+| `dst_register` | layer-3 | raw DST register indexing (`dst_reg[]`) |
+| `hw_instructions` | layer-3 | raw HW-instruction / MOP macros (`TTI_*`, `mop_run`, `TT_LLK_`) |
+| `llk_headers` | layer-2 | reaches a real LLK/SFPU header tree (`tt-llk/`, `ckernel_sfpu_*`) |
+| `unshadowed_ckernel` | layer-2 | uses a `ckernel::x` emule doesn't provide — shimmable |
+| `unshadowed_llk_call` | layer-2 | calls an `llk_x()` emule doesn't shadow — most tractable (add a jit_hw shim) |
+
+`llk_`/`ckernel::` usage is **gated against what emule actually provides in
+`jit_hw`** — a standard kernel calling a *shadowed* wrapper (e.g.
+`llk_pack_relu_config`, `ckernel::PoolType`) stays `layer1`. The report's
+**shimmable** set is the units ruled out *only* by unshadowed `llk_`/`ckernel`
+symbols (a single jit_hw shim unblocks each).
+
+### Outputs
+
+Writes to `--out-dir` (default `scripts/out/`, gitignored — the reports
+reference a specific source checkout): `kernels_manifest.json` (per-kernel
+verdicts, buckets, reasons, `kernel_files`, `missing_compute_stubs`) and
+`kernels_CLASSIFICATION.md` (the human report with the layer/bucket breakdown
+and the shimmable set). The console prints a summary.
+
+### "What does emule provide?" — single source of truth
+
+The classifier's denominators — which `*_tile` wrappers, `llk_*` shims, and
+`ckernel::` members emule ships in `jit_hw` — come from the authoritative
+file/symbol index [`.claude/references/structure.yaml`](../.claude/references/structure.yaml),
+the same index `scripts/find_symbol.py` queries. The index is regenerated and
+kept in sync with the headers by `scripts/gen_structure.py` (a pre-commit hook +
+the Structure Index CI gate run `--check`), so "what emule provides" stays
+consistent across the classifier, `find_symbol.py`, and the
+[compute-llk-bringup](../.claude/skills/compute-llk-bringup/SKILL.md) workflow.
+
+For a single-symbol / single-include probe — *without* running the full sweep —
+use the early-detect modes (backed by the shared `scripts/emule_surface.py`):
+
+```bash
+python3 scripts/find_symbol.py --supports <op>_tile          # layer1 / needs_stub / ruled_out for one symbol
+python3 scripts/find_symbol.py --shadows  api/compute/foo.h   # does emule shadow this include?
+python3 scripts/find_symbol.py --supports <op>_tile --exit-status   # exit 0 iff layer1 (shell branching)
+```
+
+`--supports` is the fast "does the shim already exist *and* would a kernel using
+it run?" check when bringing up a `ruled_out`/`needs_stub` unit.

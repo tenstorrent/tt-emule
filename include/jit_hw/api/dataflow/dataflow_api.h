@@ -20,6 +20,10 @@
 
 #include "jit_hw/jit_kernel_stubs.hpp"
 #include "jit_hw/api/cb_api.h"
+// INVALID/VALID semaphore sentinels — silicon's dataflow_api.h includes this
+// (real header line 22); kernels like reduction/topk/.../reader_final_topk.cpp
+// reference INVALID/VALID unqualified and rely on this transitive include.
+#include "jit_hw/hostdevcommon/common_values.hpp"
 #include "jit_hw/internal/dataflow/dataflow_api_addrgen.h"
 // noc_parameters.h must be in scope before tensor_accessor.h so that the
 // NOC_UNICAST_ADDR_X/Y macros (used at upstream tensor_accessor.h:235) resolve.
@@ -855,7 +859,14 @@ inline uint32_t get_semaphore(uint32_t semaphore_id) {
 // Atomic helpers for semaphore operations.
 // volatile reads are unreliable at -O3; use std::atomic for cross-thread visibility.
 inline std::atomic<uint32_t>* __emule_sem_atomic(volatile tt_l1_ptr uint32_t* sem_addr) {
-    return reinterpret_cast<std::atomic<uint32_t>*>(const_cast<uint32_t*>(sem_addr));
+    // sem_addr may be a raw firmware L1 offset cast straight to a pointer (e.g.
+    // a constexpr receiver-semaphore offset) rather than an absolute host
+    // pointer from get_semaphore() / l1_alloc().  Route it through the same
+    // offset-vs-absolute disambiguation every other dataflow path uses so the
+    // semaphore lands in the relocated L1 pool instead of dereferencing a bare
+    // offset.  Absolute pointers (>= l1_base) pass through unchanged.
+    uint32_t addr32 = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(const_cast<uint32_t*>(sem_addr)));
+    return reinterpret_cast<std::atomic<uint32_t>*>(__emule_local_l1_to_ptr(addr32));
 }
 
 // Set semaphore value (local L1 store).

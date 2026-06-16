@@ -886,6 +886,10 @@ inline void __emule_unpack_cb_tile_to(uint32_t icb, uint32_t itile, float* out) 
         // comparison shims read the value via __emule_dst_load_i32.
         const uint16_t* ubuf = reinterpret_cast<const uint16_t*>(buf);
         uint32_t n = __emule_compute::cb_tile_elems(icb);
+        // Clamp to the tile bound (matches the 32-bit branch): an oversized page
+        // (e.g. 2080-byte index tiles on the dim=1 topk path) would otherwise
+        // index rowmajor_to_nfaces[] and the DST tile out of bounds.
+        if (n > __EMULE_TILE_ELEMS) n = __EMULE_TILE_ELEMS;
         for (uint32_t i = 0; i < n; i++) {
             int32_t v = static_cast<int32_t>(ubuf[__emule_nfaces::rowmajor_to_nfaces[i]]);
             std::memcpy(&out[i], &v, sizeof(uint32_t));
@@ -1097,6 +1101,11 @@ using namespace ckernel;
 #include "jit_hw/llk_math_eltwise_unary_datacopy.h"
 #include "jit_hw/llk_math_unary_sfpu.h"
 #include "jit_hw/llk_sync_stubs.h"
+
+// ---- CB mailbox helpers (get_tile_address / read_tile_value) ----
+// Silicon's compute/common.h includes compute/cb_api.h, so any compute kernel
+// sees these without an explicit include.
+#include "jit_hw/api/compute/cb_api.h"
 
 // (ELWADD / ELWSUB / ELWMUL unscoped imports live earlier in this file
 //  alongside the EltwiseBinaryType enum, near line 79.)

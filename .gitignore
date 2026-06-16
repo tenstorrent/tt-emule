@@ -10,3 +10,5 @@ logs/
 docs/notes/
 build_clang20/
 build_*/
+scripts/out/
+__pycache__/

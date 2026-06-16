@@ -92,16 +92,25 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
     // kernel staged via copy_tile).
     const bool fresh = __emule_dst_take_fresh(idst);
 
+    // Bound the reduction by the input CB tile's active region. On a full 32×32
+    // tile th == tw == 32 (bit-identical to the historical hardcoded loops); on a
+    // thin tile (e.g. Tile([1,16])) the inactive lanes carry uninitialized unpack
+    // values that would otherwise pollute the reduction (e.g. an all-zero result
+    // from a thin-tile reduction). The tile-local layout is still row-major over a
+    // 32-stride, so the active region is rows [0,th) × cols [0,tw).
+    const uint32_t th = get_tile_r_dim(icb);
+    const uint32_t tw = get_tile_c_dim(icb);
+
     if constexpr (reduce_dim == ReduceDim::REDUCE_COL) {
         // Reduce columns: for each column c, sum/max across all rows → result in row 0
-        for (uint32_t c = 0; c < 32; c++) {
+        for (uint32_t c = 0; c < tw; c++) {
             float acc;
             if constexpr (reduce_type == PoolType::MAX)
                 acc = -std::numeric_limits<float>::infinity();
             else
                 acc = 0.0f;
 
-            for (uint32_t r = 0; r < 32; r++) {
+            for (uint32_t r = 0; r < th; r++) {
                 float val = src[r * 32 + c];
                 if constexpr (reduce_type == PoolType::MAX)
                     acc = std::max(acc, val);
@@ -115,16 +124,21 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
                 __emule_dst[idst][c] += result;
             }
         }
+        // Zero inactive output lanes on the fresh first write only, so downstream
+        // broadcast / elementwise ops see deterministic 0 — but never clobber an
+        // in-progress multi-tile accumulation.
+        if (fresh)
+            for (uint32_t c = tw; c < 32; c++) __emule_dst[idst][c] = 0.0f;
     } else if constexpr (reduce_dim == ReduceDim::REDUCE_ROW) {
         // Reduce rows: for each row r, sum/max across all cols → result in col 0
-        for (uint32_t r = 0; r < 32; r++) {
+        for (uint32_t r = 0; r < th; r++) {
             float acc;
             if constexpr (reduce_type == PoolType::MAX)
                 acc = -std::numeric_limits<float>::infinity();
             else
                 acc = 0.0f;
 
-            for (uint32_t c = 0; c < 32; c++) {
+            for (uint32_t c = 0; c < tw; c++) {
                 float val = src[r * 32 + c];
                 if constexpr (reduce_type == PoolType::MAX)
                     acc = std::max(acc, val);
@@ -139,20 +153,25 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
                 __emule_dst[idst][r * 32] += result;
             }
         }
+        // Zero inactive result rows (col 0) on the fresh first write only.
+        if (fresh)
+            for (uint32_t r = th; r < 32; r++) __emule_dst[idst][r * 32] = 0.0f;
     } else {
-        // REDUCE_SCALAR: reduce all 1024 elements to a single value
+        // REDUCE_SCALAR: reduce the active region to a single value
         float acc;
         if constexpr (reduce_type == PoolType::MAX)
             acc = -std::numeric_limits<float>::infinity();
         else
             acc = 0.0f;
 
-        for (uint32_t i = 0; i < 1024; i++) {
-            if constexpr (reduce_type == PoolType::MAX)
-                acc = std::max(acc, src[i]);
-            else
-                acc += src[i];
-        }
+        for (uint32_t r = 0; r < th; r++)
+            for (uint32_t c = 0; c < tw; c++) {
+                float val = src[r * 32 + c];
+                if constexpr (reduce_type == PoolType::MAX)
+                    acc = std::max(acc, val);
+                else
+                    acc += val;
+            }
         // Silicon's single-core HW reduce uses REDUCE_SCALAR, which applies the
         // scaler TWICE internally (once per dimension); the host pre-compensates
         // with sqrt(scaler) (reduce_op_single_core_hw_program_factory.cpp:48). So
