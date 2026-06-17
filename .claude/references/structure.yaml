@@ -281,6 +281,14 @@ files:
   symbols:
   - {kind: namespace, name: ckernel}
   - {kind: enum, name: firmware_msg_e}
+- path: include/jit_hw/ckernel_ops.h
+  section: include/jit_hw/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+  symbols:
+  - {kind: macro, name: TT_SFPLOADI}
+  - {kind: macro, name: TTI_SFPLOADI}
+  - {kind: macro, name: TTI_SFPCONFIG}
+  - {kind: function, name: __emule_sfpu_unsupported}
 - path: include/jit_hw/ckernel_sfpu_exp.h
   section: include/jit_hw/
   summary: stub of silicon SFPU exp ckernel (functional impl in `api/compute/eltwise_unary/exp.h`)
@@ -590,6 +598,7 @@ files:
   section: include/jit_hw/
   summary: '`namespace sfpi`; `enum class RoundMode`/`LRegs`; TLS `__emule_sfpi_dst_base`/`__emule_sfpi_cursor`; `SFPSHFT2_*` constants (SFPU vector-API shim)'
   symbols:
+  - {kind: macro, name: sfpi_inline}
   - {kind: global, name: __EMULE_SFPI_LANES}
   - {kind: global, name: __EMULE_SFPI_TILE_ELEMS}
   - {kind: global, name: __emule_sfpi_dst_base}
@@ -605,6 +614,8 @@ files:
   - {kind: class, name: vFloat}
   - {kind: class, name: vInt}
   - {kind: class, name: vUInt}
+  - {kind: function, name: __emule_sfpu_finalize}
+  - {kind: function, name: __emule_sfpu_mad}
   - {kind: struct, name: vCond}
   - {kind: function, name: v_and}
   - {kind: function, name: v_or}
@@ -623,9 +634,10 @@ files:
   - {kind: class, name: DstRegLane}
   - {kind: class, name: DstReg}
   - {kind: global, name: dst_reg}
+  - {kind: global, name: __emule_lreg}
   - {kind: struct, name: LRegFile}
-  - {kind: global, name: __emule_l_reg_storage}
   - {kind: global, name: l_reg}
+  - {kind: function, name: __emule_sfploadi}
   - {kind: global, name: vConst0}
   - {kind: global, name: vConst1}
   - {kind: global, name: vConstNeg1}
@@ -634,10 +646,33 @@ files:
   - {kind: function, name: reinterpret}
   - {kind: function, name: float_to_fp16b}
   - {kind: function, name: float_to_fp16a}
-  - {kind: class, name: vFloat16b}
-  - {kind: function, name: convert}
   - {kind: function, name: setsgn}
   - {kind: struct, name: Converter}
+  - {kind: enum, name: ExponentMode}
+  - {kind: function, name: exexp}
+  - {kind: function, name: setexp}
+  - {kind: function, name: addexp}
+  - {kind: function, name: int32_to_float}
+  - {kind: function, name: abs}
+  - {kind: function, name: vec_min_max}
+  - {kind: function, name: vec_max_min}
+  - {kind: function, name: __lut8_to_fp32}
+  - {kind: function, name: __lut16_to_fp32}
+  - {kind: function, name: __apply_sgn_retain}
+  - {kind: function, name: lut}
+  - {kind: function, name: lut2}
+  - {kind: class, name: sFloat16b}
+  - {kind: class, name: sFloat16a}
+  - {kind: class, name: vFloat16b}
+  - {kind: function, name: convert}
+  - {kind: global, name: __emule_prgm_creg}
+  - {kind: class, name: __vCRegFloat}
+  - {kind: class, name: __vCRegInt}
+  - {kind: global, name: vConstFloatPrgm0}
+  - {kind: global, name: vConstIntPrgm0}
+  - {kind: function, name: __emule_sfpu_unsupported}
+  - {kind: function, name: vec_swap}
+  - {kind: function, name: subvec_transp}
   - {kind: using, name: RoundMode}
   - {kind: macro, name: v_if}
   - {kind: macro, name: v_elseif}
@@ -702,6 +737,7 @@ files:
   - {kind: global, name: my_y}
   - {kind: global, name: __emule_logical_x}
   - {kind: global, name: __emule_logical_y}
+  - {kind: global, name: __emule_cb_self_consume_mask}
   - {kind: global, name: unpack_tile_size}
   - {kind: global, name: unpack_src_format}
   - {kind: global, name: pack_dst_format}
@@ -722,9 +758,9 @@ files:
   - {kind: function, name: get_read_ptr}
   - {kind: function, name: get_tile_size}
   - {kind: function, name: get_tile_hw}
+  - {kind: function, name: get_tile_r_dim}
+  - {kind: function, name: get_tile_c_dim}
   - {kind: function, name: get_tile_num_faces}
-  - {kind: namespace, name: ckernel}
-  - {kind: function, name: read_tile_value}
   - {kind: function, name: get_dataformat}
 - path: include/jit_hw/api/compile_time_args.h
   section: include/jit_hw/api/
@@ -817,7 +853,6 @@ files:
   - {kind: namespace, name: ckernel}
   - {kind: namespace, name: __emule_bcast}
   - {kind: enum, name: Dim}
-  - {kind: function, name: src_idx}
   - {kind: function, name: apply}
   - {kind: function, name: init_bcast}
   - {kind: function, name: add_bcast_rows_init_short}
@@ -941,7 +976,9 @@ files:
   section: include/jit_hw/api/compute/
   summary: includes `compute/common.h` + `api/cb_api.h` (shim)
   symbols:
+  - {kind: namespace, name: ckernel}
   - {kind: function, name: get_tile_address}
+  - {kind: function, name: read_tile_value}
 - path: include/jit_hw/api/compute/common.h
   section: include/jit_hw/api/compute/
   summary: macros `PACK`/`MATH`/`UNPACK`/`ALWI`, `DST_ACCUM_MODE`; `namespace __emule_compute`, `ckernel`; `enum class EltwiseBinaryType`/`BroadcastType`/`ReluType`/`EltwiseBinaryReuseDestType`/`p_dim_stride_target`/`MathFidelity`;
@@ -1114,9 +1151,8 @@ files:
   - {kind: function, name: sfpu_reduce}
   - {kind: function, name: sfpu_reduce_init}
   - {kind: namespace, name: __emule_topk}
-  - {kind: struct, name: RowView}
-  - {kind: function, name: sort_row}
-  - {kind: function, name: row}
+  - {kind: function, name: merge_split_col}
+  - {kind: function, name: sort_col}
   - {kind: function, name: topk_tile_init}
   - {kind: function, name: topk_local_sort}
   - {kind: function, name: topk_merge}
@@ -1329,7 +1365,11 @@ files:
   - {kind: global, name: rowmajor_to_nfaces}
   - {kind: function, name: make_nfaces_to_rowmajor}
   - {kind: global, name: nfaces_to_rowmajor}
+  - {kind: function, name: tile_rc_to_nfaces}
   - {kind: function, name: tile_rm_to_nfaces}
+  - {kind: function, name: tile_nfaces_to_rm}
+  - {kind: function, name: tile_num_exp}
+  - {kind: function, name: tile_bfp_mant_offset}
   - {kind: function, name: tile_rows_from_pagesize}
 - path: include/jit_hw/api/compute/pack.h
   section: include/jit_hw/api/compute/
@@ -1684,6 +1724,9 @@ files:
   - {kind: function, name: nez_tile_int32}
   - {kind: function, name: nez_tile_uint16}
   - {kind: function, name: nez_tile_uint32}
+- path: include/jit_hw/api/compute/eltwise_unary/deep_sfpu_registry.h
+  section: include/jit_hw/api/compute/eltwise_unary/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
 - path: include/jit_hw/api/compute/eltwise_unary/digamma.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `digamma_tile` (+`_init`)'
@@ -2395,6 +2438,13 @@ files:
 - path: include/jit_hw/internal/circular_buffer_interface.h
   section: include/jit_hw/internal/
   summary: forwarding shim → `jit_hw/internal/llk_state.h`
+- path: include/jit_hw/internal/deep_sfpu.h
+  section: include/jit_hw/internal/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+  symbols:
+  - {kind: namespace, name: __emule_deep}
+  - {kind: global, name: kTileIterations}
+  - {kind: function, name: run_unary_sfpu}
 - path: include/jit_hw/internal/emule_cb_ptr.h
   section: include/jit_hw/internal/
   summary: 'Per-RISC circular-buffer read/write pointers — the single source of truth (issue #139). `struct LocalCBInterface` + thread_local `__emule_local_cb[NUM_CIRCULAR_BUFFERS]` (mirrors silicon''s
