@@ -505,19 +505,18 @@ inline void noc_async_write_multicast_one_packet(
 
 // ---- Barriers ----
 
-// Models the first-input-read latency that silicon incurs (NOC round-trip to
-// DRAM, hundreds of cycles) before a core can emit cross-core output. emule reads
-// are instant, which lets a multi-core reducer's peers race ahead of its prologue:
-// argmax resets done_sem at k=0 (ungated) then waits for worker increments, and an
-// increment landing before the reset is clobbered, hanging the wait. A one-time
-// per-thread delay at the first read barrier restores the ordering — the reducer
-// has no read before its reset, the workers all do — and the sleeping workers cede
-// their cores so a starved reducer can reach its reset.
+// Models silicon's first-input-read latency (NOC round-trip to DRAM) before a core
+// can emit cross-core output. Emule reads are instant, which can let peers race
+// ahead of a reducer's ungated prologue (e.g., argmax resets done_sem at k=0),
+// clobbering an early increment and hanging the wait. We add a small one-time
+// per-thread delay on the first read barrier to restore typical ordering and to
+// yield the host scheduler so a starved reducer can run its prologue.
 inline void __emule_model_first_read_latency() {
     static thread_local bool first_read = true;
+    constexpr unsigned int kFirstReadLatencyUs = 200;
     if (first_read) {
         first_read = false;
-        usleep(200);
+        usleep(kFirstReadLatencyUs);
     }
 }
 
