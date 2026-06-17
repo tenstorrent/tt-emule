@@ -254,6 +254,9 @@ run_pytest "pool_test_upsample_nearest_interleaved" "$POOL_TEST_DIR/test_upsampl
 run_pytest "pool_test_upsample_multicore_corerange" "$POOL_TEST_DIR/test_upsample.py::test_upsample_multicore_corerange"
 
 run_pytest "fused_test_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_large_fill_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_accuracy" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_stable_neg_values" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_4096x4096_fp32" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_large_kernel_block_size" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_3D" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout" "$FUSED_TEST_DIR/test_softmax.py::test_softmax_with_padded_tile_layout_large"
+# #152 (reduce_tile element-wise scaler) regression guard — non-sharded layer_norm/rms_norm were 140/14-failing on non-32-aligned widths pre-fix.
+run_pytest "fused_test_layer_norm" "$FUSED_TEST_DIR/test_layer_norm.py"
+run_pytest "fused_test_rms_norm"   "$FUSED_TEST_DIR/test_rms_norm.py"
 run_pytest "reduce_test_cumprod" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_backward" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_failing_cases"
 run_pytest "reduce_test_cumsum_failing" "$REDUCE_TEST_DIR/test_cumsum.py::test_cumsum_failing_cases"
 
