@@ -111,7 +111,7 @@ stubbing every LLK header (see Strategy C in `/implement-mock`).
 
 | Silicon | Emule |
 |---|---|
-| Tiles are face-packed: 32×32 tile = 4 faces × 256 elements (16×16 each), packed sequentially | `__emule_nfaces::rowmajor_to_nfaces[1024]` permutation table maps row-major index i → face-packed index ni. UNPACK reads CB nfaces → row-major DST; PACK writes row-major DST → CB nfaces. Symmetric. |
+| Tiles are face-packed: 32×32 tile = 4 faces × 256 elements (16×16 each), packed sequentially; tiny tiles (`tile_h∈{1,2,4,8,16,32}`, `tile_w∈{16,32}`) use fewer/shorter faces | `__emule_nfaces::rowmajor_to_nfaces[1024]` maps row-major i → face-packed ni for full tiles; `tile_rc_to_nfaces(r,c,th,tw)` is the general tile-shape-aware map (thin + narrow), driven by `get_tile_r_dim`/`get_tile_c_dim`. UNPACK reads CB nfaces → row-major DST; PACK writes row-major DST → CB nfaces. Symmetric. |
 
 Owner: `tt-emule/include/jit_hw/api/compute/nfaces.h`.
 

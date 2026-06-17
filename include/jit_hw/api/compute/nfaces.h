@@ -54,24 +54,57 @@ constexpr std::array<uint32_t, 1024> make_nfaces_to_rowmajor() {
 
 inline constexpr auto nfaces_to_rowmajor = make_nfaces_to_rowmajor();
 
-// Tile shape-aware nfaces offset.
-// Silicon supports "thin" tiles with rows ∈ {1,2,4,8,16,32}, cols always = 32.
-// Layout: 2 column-faces (left cols 0-15, right cols 16-31), each face is
-// `rows × 16` row-major. For rows>16 (i.e. 32), there are also 2 row-faces,
-// giving 4 sub-faces of 16×16 — the standard 1024-element layout.
-//
-// elem_idx ranges 0 .. (rows*32 - 1) in row-major order (r * 32 + c).
+// General tile-shape nfaces offset: maps an active element (r, c) of a
+// (tile_h × tile_w) tile to its offset in the COMPACT nfaces buffer. Each face is
+// `face_r_dim × 16` row-major, faces stored back-to-back, row-major over faces.
+// A narrow tile (tile_w=16) has one column-face; a partial-height tile (tile_h<16)
+// has shorter faces (face_r_dim = tile_h). No padding to 16×16.
+// The return value is the CB-side offset; the caller's DST/SRC buffer stays a
+// 32-strided grid (index r*32 + c). Precondition: r<tile_h, c<tile_w, tile_w∈{16,32},
+// tile_h∈{1,2,4,8,16,32}. The face layout assumes tile_h is ≤16 (one short face of
+// face_r_dim=tile_h) or exactly 32 (two 16-row faces); an in-between height like 24
+// would leave padding gaps in the upper face and is NOT supported.
+inline constexpr uint32_t tile_rc_to_nfaces(uint32_t r, uint32_t c,
+                                            uint32_t tile_h, uint32_t tile_w) {
+    const uint32_t face_r_dim  = tile_h < 16u ? tile_h : 16u;
+    const uint32_t num_faces_c = tile_w / 16u;                 // 1 or 2
+    const uint32_t face_idx    = (r / face_r_dim) * num_faces_c + (c / 16u);
+    return face_idx * (face_r_dim * 16u) + (r % face_r_dim) * 16u + (c % 16u);
+}
+
+// Thin-tile offset, width always 32. Thin wrapper over tile_rc_to_nfaces (single
+// source of truth); rows>=32 keeps the cached-LUT fast path. elem_idx is a
+// stride-32 row-major index (r*32 + c).
 inline constexpr uint32_t tile_rm_to_nfaces(uint32_t elem_idx, uint32_t rows) {
     if (rows >= 32) {
         // Standard 32×32 4-face layout (cached LUT path).
         return rowmajor_to_nfaces[elem_idx];
     }
-    uint32_t r = elem_idx / 32;
-    uint32_t c = elem_idx % 32;
-    // Two faces of `rows × 16`. Sub-row stride within a face = 16.
-    uint32_t face_col = (c >= 16) ? 1u : 0u;
-    uint32_t face_elems = rows * 16;  // elements per face
-    return face_col * face_elems + r * 16u + (c % 16u);
+    return tile_rc_to_nfaces(elem_idx / 32u, elem_idx % 32u, rows, 32u);
+}
+
+// Inverse of tile_rc_to_nfaces: compact nfaces offset → DST stride-32 index
+// (r*32 + c). Used by the block-float pack path, which iterates compact face-rows
+// and must scatter each element back to its 32-strided DST position.
+inline constexpr uint32_t tile_nfaces_to_rm(uint32_t ni, uint32_t tile_h, uint32_t tile_w) {
+    const uint32_t face_r_dim  = tile_h < 16u ? tile_h : 16u;
+    const uint32_t num_faces_c = tile_w / 16u;
+    const uint32_t face_size   = face_r_dim * 16u;
+    const uint32_t face_idx    = ni / face_size;
+    const uint32_t within      = ni % face_size;
+    const uint32_t r = (face_idx / num_faces_c) * face_r_dim + within / 16u;
+    const uint32_t c = (face_idx % num_faces_c) * 16u + within % 16u;
+    return r * 32u + c;
+}
+
+// Block-float exponent layout. One shared exponent per 16-wide face-row, so the
+// count is tile_h * (tile_w/16) (= 64 for a full 32×32 tile). The mantissa
+// section follows the exponents, L1-aligned to 16 bytes.
+inline constexpr uint32_t tile_num_exp(uint32_t tile_h, uint32_t tile_w) {
+    return tile_h * (tile_w / 16u);
+}
+inline constexpr uint32_t tile_bfp_mant_offset(uint32_t tile_h, uint32_t tile_w) {
+    return (tile_num_exp(tile_h, tile_w) + 15u) & ~15u;  // round up to 16
 }
 
 // Compute rows-per-tile from CB page size + element byte width.

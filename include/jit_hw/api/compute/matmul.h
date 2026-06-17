@@ -51,9 +51,16 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
                        uint32_t in0_tile, uint32_t in1_tile, uint32_t idst) {
     __emule_dst_check(idst, "matmul_tiles");
     __emule_dst_mark_dirty(idst);
-    // Standard 32x32 × 32x32 matrix multiply, accumulating into DST[idst].
-    // Layout: row-major, 32 rows × 32 cols = 1024 elements per tile.
+    // A is M×K, B is K×N (tiny-tile aware). DST and the operand buffers stay
+    // 32-strided 32×32 grids with each tile in the top-left; only the M/K/N loop
+    // bounds shrink. For a full 32×32 tile this is the standard square GEMM.
     constexpr uint32_t DIM = 32;
+    const uint32_t M = get_tile_r_dim(in0_cb);
+    const uint32_t K = get_tile_c_dim(in0_cb);
+    const bool transpose = __llk_matmul_transpose;
+    // Under transpose, in1 is stored as N×K and used as its transpose (K×N);
+    // otherwise in1 is B directly (K×N).
+    const uint32_t N = transpose ? get_tile_r_dim(in1_cb) : get_tile_c_dim(in1_cb);
     float a_rm[DIM * DIM];
     float b_rm[DIM * DIM];
     // UNPACK both operands via the central format-aware reader (nfaces→row-major).
@@ -61,35 +68,38 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
     // formats (e.g. bf16 activations × Bfp4_b weights, as in MoE) decode correctly.
     __emule_unpack_cb_tile_to(in0_cb, in0_tile, a_rm);
     __emule_unpack_cb_tile_to(in1_cb, in1_tile, b_rm);
-    // Apply IN1 transpose if mm_init(... transpose=1) was set — silicon does
-    // this in the unpacker (THCON_SEC0_REG2_Haloize_mode_RMW); emule transposes
-    // the decoded row-major view in-place before the FMA loop.
-    if (__llk_matmul_transpose) {
-        for (uint32_t r = 0; r < DIM; r++) {
-            for (uint32_t c = r + 1; c < DIM; c++) {
-                std::swap(b_rm[r * DIM + c], b_rm[c * DIM + r]);
-            }
-        }
+    // Apply IN1 transpose if mm_init(... transpose=1) was set — silicon does this
+    // in the unpacker; emule transposes the decoded N×K view into b_t (K×N).
+    float b_t[DIM * DIM];
+    const float* b = b_rm;
+    if (transpose) {
+        std::memset(b_t, 0, sizeof(b_t));  // zero inactive lanes (AVX2 reads 8-wide)
+        const uint32_t h_b = get_tile_r_dim(in1_cb);  // stored rows (= N)
+        const uint32_t w_b = get_tile_c_dim(in1_cb);  // stored cols (= K)
+        for (uint32_t r = 0; r < h_b; r++)
+            for (uint32_t c = 0; c < w_b; c++)
+                b_t[c * DIM + r] = b_rm[r * DIM + c];
+        b = b_t;
     }
-    // MATH: row-major matmul accumulating into DST.
+    // MATH: DST[m,n] += A[m,k] * B[k,n], accumulating into the 32-strided DST.
 #ifdef EMULE_MATMUL_USE_AVX2
-    for (uint32_t r = 0; r < DIM; r++) {
-        for (uint32_t k = 0; k < DIM; k++) {
-            __m256 a_vec = _mm256_set1_ps(a_rm[r * DIM + k]);
-            for (uint32_t c = 0; c < DIM; c += 8) {
-                __m256 b_vec = _mm256_loadu_ps(&b_rm[k * DIM + c]);
-                __m256 d_vec = _mm256_loadu_ps(&__emule_dst[idst][r * DIM + c]);
+    for (uint32_t m = 0; m < M; m++) {
+        for (uint32_t k = 0; k < K; k++) {
+            __m256 a_vec = _mm256_set1_ps(a_rm[m * DIM + k]);
+            for (uint32_t n = 0; n < N; n += 8) {  // N ∈ {16,32}; inactive b lanes are 0
+                __m256 b_vec = _mm256_loadu_ps(&b[k * DIM + n]);
+                __m256 d_vec = _mm256_loadu_ps(&__emule_dst[idst][m * DIM + n]);
                 d_vec = _mm256_fmadd_ps(a_vec, b_vec, d_vec);
-                _mm256_storeu_ps(&__emule_dst[idst][r * DIM + c], d_vec);
+                _mm256_storeu_ps(&__emule_dst[idst][m * DIM + n], d_vec);
             }
         }
     }
 #else
-    for (uint32_t r = 0; r < DIM; r++) {
-        for (uint32_t k = 0; k < DIM; k++) {
-            float a_val = a_rm[r * DIM + k];
-            for (uint32_t c = 0; c < DIM; c++) {
-                __emule_dst[idst][r * DIM + c] += a_val * b_rm[k * DIM + c];
+    for (uint32_t m = 0; m < M; m++) {
+        for (uint32_t k = 0; k < K; k++) {
+            float a_val = a_rm[m * DIM + k];
+            for (uint32_t n = 0; n < N; n++) {
+                __emule_dst[idst][m * DIM + n] += a_val * b[k * DIM + n];
             }
         }
     }

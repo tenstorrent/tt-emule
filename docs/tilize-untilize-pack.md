@@ -55,8 +55,11 @@ permutation, decodes to fp32, writes into `out` (a DST slot or
 
 Format dispatch (enum-driven, checked in order):
 
-1. **Bfp8_b** (`cb_is_bfp8_b_format`) — 64 face-row 8-bit exponents +
-   1024 mantissa bytes. Decoded via `__emule_bfp8::to_f32` per element.
+1. **Bfp8_b / Bfp4_b** (`cb_is_bfp8_b_format` / `cb_is_bfp4_b_format`) —
+   `tile_num_exp(th, tw)` shared face-row exponents + tile-shape-aware
+   mantissa (offset via `tile_bfp_mant_offset(th, tw)`), decoded per active
+   element via `tile_rc_to_nfaces(r, c, th, tw)` through `__emule_bfp8::to_f32`
+   / `__emule_bfp4::to_f32`. Full 32×32 = 64 exponents + 1024 mantissa bytes.
 2. **32-bit** (`cb_is_32bit_format`: Float32 / Int32 / UInt32 / Tf32 /
    RawUInt32) — per-element `memcpy` preserves INT32 bit patterns that
    would otherwise be flushed to zero by x86 DAZ/FTZ on float assignment.
@@ -106,10 +109,11 @@ Lives in [common.h](../include/jit_hw/api/compute/common.h). Reads
 ReLU clamp (see below), and writes to `buf` in nfaces order. Format
 dispatch mirrors the unpack side but encodes:
 
-1. **Bfp8_b** — encode 64 face-rows via
-   `__emule_bfp8::encode_face_row(row16, exp, mant_row)`. L1 acc not
-   supported for Bfp8_b output (would require decoding + re-encoding;
-   deferred until a caller exposes it).
+1. **Bfp8_b / Bfp4_b** — encode `tile_num_exp(th, tw)` face-rows (from the
+   CB's `get_tile_r_dim`/`get_tile_c_dim`; full 32×32 = 64) via
+   `__emule_bfp8::encode_face_row(row16, exp, mant_row)`, mantissa offset from
+   `tile_bfp_mant_offset(th, tw)`. L1 acc not supported for block-float output
+   (would require decoding + re-encoding; deferred until a caller exposes it).
 2. **32-bit** — fast path `memcpy` (no ReLU) preserves INT32 bit
    patterns; ReLU path reinterprets as float, clamps, writes.
 3. **uint16** — write the low 16 bits of the DST int32 bit pattern.
@@ -250,11 +254,13 @@ emule:
 - **MOPs and address modes** — silicon programs PACR address modes per
   call (`narrow_row`, `dense`, `diagonal`, stride). emule replicates
   the resulting L1 layout via direct addressing in the pack helpers.
-- **Per-CB face dimensions** — `unpack_tile_r_dim`, `unpack_num_faces_r_dim`,
-  etc. in [cb_api.h](../include/jit_hw/api/cb_api.h) are hard-coded to
-  the standard 32×32 / 2×2-face layout. Partial-face tiles (face_r_dim
-  < 16, num_faces ∈ {1, 2}) are not currently supported — flagged in
-  the [LLK shim audit](#audit) as STRUCTURAL.
+- **Per-CB face dimensions** — the static `unpack_tile_r_dim`,
+  `unpack_num_faces_r_dim`, etc. arrays in [cb_api.h](../include/jit_hw/api/cb_api.h)
+  default to the 32×32 / 2×2-face layout, but the **live** per-CB tile shape is
+  plumbed from the runner (`EMULE_TILE_R_DIM`/`C_DIM`) and read via
+  `get_tile_r_dim`/`get_tile_c_dim`. Partial-face / narrow tiles (face_r_dim < 16,
+  num_faces ∈ {1, 2}, tile_w = 16) **are** supported as of the tiny-tile work
+  (#135): pack/unpack walk the active region via `tile_rc_to_nfaces(r, c, th, tw)`.
 - **Pre-emption / pipelining** — silicon's MATH↔PACK barriers in
   SyncHalf and the kickoff/done semaphore ops are no-ops here. emule
   runs entirely synchronously within a thread.

@@ -28,10 +28,12 @@
 
 namespace __emule_bfp4 {
 
-// to_f32: decode one Bfp4_b element at nfaces position `ni`.
-inline float to_f32(const uint8_t* tile_base, uint32_t ni) {
-    const uint8_t  exp_byte  = tile_base[ni >> 4];               // [0..63], one per 16
-    const uint8_t  data_byte = tile_base[64 + (ni >> 1)];        // two elements per byte
+// to_f32: decode one Bfp4_b element at nfaces position `ni`. `mant_offset` is the
+// byte offset of the mantissa section (= exponent-section size): 64 for a full
+// 32×32 tile, round_up(tile_h*(tile_w/16), 16) for tiny tiles.
+inline float to_f32(const uint8_t* tile_base, uint32_t ni, uint32_t mant_offset = 64) {
+    const uint8_t  exp_byte  = tile_base[ni >> 4];               // exp[ni/16]
+    const uint8_t  data_byte = tile_base[mant_offset + (ni >> 1)]; // two elements per byte
     const uint8_t  nib       = (ni & 1u) ? (data_byte >> 4) : (data_byte & 0x0Fu);
     const uint32_t sign      = (nib >> 3) & 0x1u;
     uint32_t       raw_man   = nib & 0x7u;
