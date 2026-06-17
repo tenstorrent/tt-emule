@@ -6,8 +6,8 @@ fabric/ethernet/CCL op, and do ttnn and blaze need the *same* level or different
 
 Companion to [`fabric-ccl-simulation.md`](fabric-ccl-simulation.md) (which recommends interception **B**, the
 fabric-client-API shim) — this doc validates that recommendation against the op surface. Also a companion to
-[`multichip-scaling-design.md`](multichip-scaling-design.md), [`ttsim-multichip-methodology.md`](ttsim-multichip-methodology.md),
-[`craqsim-multichip-methodology.md`](craqsim-multichip-methodology.md).
+[`scaling-architecture.md`](scaling-architecture.md), [`ttsim-methodology.md`](ttsim-methodology.md),
+[`craqsim-methodology.md`](craqsim-methodology.md).
 
 **Headline:** ttnn and blaze use the **same mocking level** — the fabric client API
 (`tt::tt_fabric::WorkerToFabricEdmSender`) is the single kernel-level choke point for *all* cross-chip
