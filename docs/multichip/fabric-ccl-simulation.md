@@ -1,7 +1,7 @@
 # Fabric & CCL simulation: how it works, how ttsim/craq-sim simulate it, and how emule will
 
 Status: **design / architecture exploration** (no code yet). Companion to
-[`multichip-scaling-design.md`](multichip-scaling-design.md) and
+[`scaling-architecture.md`](scaling-architecture.md) and
 [`fabric-ccl-op-coverage.md`](fabric-ccl-op-coverage.md). The scaling doc covers the *strategy* (the three
 orthogonal axes + the phased path); the coverage doc validates the interception level below against the full
 ttnn **and tt-blaze** op surfaces. **This doc is the fabric/CCL data-path deep-dive**: what the tt-metal
@@ -13,7 +13,7 @@ tt-blaze in the coverage doc.
 ## 1. Context & scope
 
 "Proper CCLs on quietbox" are in scope, and the modern ttnn CCL ops are **fabric-based** (confirmed in
-`multichip-scaling-design.md` §9), so the fabric/CCL layer is Phase-1-critical. The scaling doc named a fork
+`scaling-architecture.md` §9), so the fabric/CCL layer is Phase-1-critical. The scaling doc named a fork
 — **(A)** run the real persistent fabric router vs **(B)** shim the fabric client API. **Hard constraints
 (set by the team) resolve it toward B:**
 
@@ -102,7 +102,7 @@ one**, and a useful source of reusable mechanics — but it has **no fabric laye
   stubbed to a `RET` — no link-training runs. Eth cores are **not inert**, though: a host `RUN_MSG_GO` to a
   peered eth tile (`src/tile.cpp:3017-3069`) *can* launch an active-erisc kernel that the RV32 core then
   executes. But there is **no persistent fabric router**, so this does not enable fabric routing — see the
-  full account in [`ttsim-multichip-methodology.md`](ttsim-multichip-methodology.md).
+  full account in [`ttsim-methodology.md`](ttsim-methodology.md).
 - **Chip context + clock** (`src/sim.h:811`, `src/sim.cpp:75`, `src/libttsim.cpp:767`): `g_chips[NUM_CHIPS]`,
   `g_current_chip_id`, `ttsim_select_chip`; macros alias `g_t_tiles`/`g_e_tiles`/`g_dram` to the active chip.
   `libttsim_clock(n)` loops every chip one cycle each, incrementing a single global `g_clock` (BSP lockstep).
@@ -236,6 +236,23 @@ the worker loop makes progress.
 
 ## 8. emule design — the fabric-client-API shim (interception B)
 
+The teleport data path, end to end:
+
+```mermaid
+sequenceDiagram
+    participant W as Worker kernel<br/>(src chip)
+    participant Sh as Fabric-client shim<br/>(jit_hw shadow)
+    participant Sw as EmuleFabricSwitch<br/>(decode + route)
+    participant L1 as Dst core L1<br/>(dst chip)
+    participant C as Consumer fiber<br/>(dst chip)
+    W->>Sh: send_payload_* / stateful send
+    Sh->>Sw: teleport(src_chip, header, payload)
+    Note over Sw: decode real NocCommandFields;<br/>resolve dst chip (route table) + dst core (noc_addr)
+    Sw->>L1: write payload / atomic-inc semaphore
+    Sw->>C: wake fiber parked on that L1 address
+    C-->>C: noc_semaphore_wait satisfied → resume
+```
+
 Shim the **`WorkerToFabricEdmSender` object** so a worker's send routes straight to the emule eth switch —
 **no persistent router, no ETH_TXQ modeling**. The sender is reached via any of: `FabricConnectionManager`
 (ring fwd/bwd), raw `WorkerToFabricEdmSender[]` (MoE 4-dir), the mux `fabric_async_write`,
@@ -285,7 +302,7 @@ uses; it is excluded by the hard constraints (eth-core emulation + multi-hop) an
 | Cross-chip global semaphores | ❌ | semaphore objects reachable across chips, with wake |
 | Concurrent multi-device execution | ❌ (launch-and-join, single chip) | Pillar-0 fibers (scaling doc) |
 
-Cross-reference: `multichip-scaling-design.md` Pillar 0 (the fiber execution engine that makes cross-device
+Cross-reference: `scaling-architecture.md` Pillar 0 (the fiber execution engine that makes cross-device
 concurrency and the wake-on-delivery work) and its eth-switch section (the transport this shim delivers into).
 
 ## 10. Validation

@@ -2,8 +2,8 @@
 
 Reference account of how **ttsim-private** (the upstream functional ISA simulator;
 `/localdev/arminale/ttsim-private`, branch `main`) implements multi-chip, read from source. Companion to
-[`craqsim-multichip-methodology.md`](craqsim-multichip-methodology.md) (the fork) and to the emule design
-docs ([`multichip-scaling-design.md`](multichip-scaling-design.md),
+[`craqsim-methodology.md`](craqsim-methodology.md) (the fork) and to the emule design
+docs ([`scaling-architecture.md`](scaling-architecture.md),
 [`fabric-ccl-simulation.md`](fabric-ccl-simulation.md),
 [`fabric-ccl-op-coverage.md`](fabric-ccl-op-coverage.md)). Paths below are relative to the ttsim repo root.
 
@@ -146,4 +146,4 @@ access, and link-state injection.
 between wired peers (and supports host-mediated remote access), with a compile-time topology and a single
 lockstep clock. It has no fabric router, no multi-hop, and no terminal NOC-command semantics, so it cannot
 run fabric-based CCL. Everything above the raw link — routing, the EDM client protocol, collectives — is the
-fork (`craq-sim`)'s addition; see [`craqsim-multichip-methodology.md`](craqsim-multichip-methodology.md).
+fork (`craq-sim`)'s addition; see [`craqsim-methodology.md`](craqsim-methodology.md).

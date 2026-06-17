@@ -63,7 +63,9 @@ aliasing** (no per-access translation) — are what make emule fast and are what
    all of them. Requires a work-chunking execution engine (§6).
 2. **`MAP_32BIT` virtual-address ceiling.** All worker L1 must live in the low ~2 GB. WH ≈ 144 MB/chip, BH
    ≈ 240 MB/chip of L1-pool VA. 8 chips fit (~1.2–1.9 GB, tight on BH); ~16 chips overflow; 128 chips is
-   impossible (~18–31 GB).
+   impossible (~18–31 GB). `MAP_32BIT` is also mutually exclusive with `MAP_SHARED` (x86-64 `mmap` EINVAL),
+   so a multi-process layout **cannot** share aliased L1 across processes — it must post to the owning
+   process (see §8).
 3. **No chip_id in NOC addressing.** Cross-chip references are unrepresentable today.
 4. **No ethernet/fabric model.** No ERISC execution, no inter-chip transport.
 
@@ -99,12 +101,15 @@ ISA interpreter). emule must chunk via **fibers** (keeps native JIT, needs yield
 | Axis | Options |
 |---|---|
 | **1. Execution engine** | work-chunking via fibers (§6) — required in *every* configuration |
-| **2. Address space** | keep `MAP_32BIT` aliasing (→ multi-process) **vs** break it (→ single-process translation) |
+| **2. Address space** | keep `MAP_32BIT` aliasing — one ~2 GB window/process, so multi-process beyond ~16 chips — **vs** break it via per-access translation — one process at any scale, but slower per access |
 | **3. Transport** | the native eth switch, tiered by locality (in-proc / shared-memory / network) |
 
 Dispatch mode is **not** an axis we own (separate workstream, §9); we only track our dependency on it.
 
 ## 6. Pillar 0 — execution engine: work-chunking via fibers (the keystone)
+
+> Detailed design: **[pillar0-fiber-engine.md](pillar0-fiber-engine.md)** — `ucontext` stackful fibers, the
+> `thread_local`→fiber-local migration, the 11 yield-point conversions, and the `launch_cores` rewrite.
 
 thread-per-core-per-RISC is the root scaling problem, and **no process layout fixes it**. A bounded
 threadpool that runs kernels to completion *deadlocks*, because emule kernels **block** at sync points
@@ -182,18 +187,38 @@ Legacy per-op EDM CCL is explicitly out of scope. **Exit criterion:** a real ttn
 all-gather) across 8 chips passes PCC under a quietbox-class cluster descriptor; capture thread/VA/perf
 numbers to settle the end-state address-space axis.
 
-### End-state intra-host — quad / 128 chips: an address-space axis
+### End-state intra-host — galaxy / quad (32–128 chips): an address-space axis
 
 With fibers handling thread count and concurrency (Pillar 0), the end-state choice is **purely** about the
-`MAP_32BIT` VA ceiling. Two candidates, to be decided after Phase-1 measurements:
+`MAP_32BIT` VA ceiling (§3 #2). **Decision (measurement-gated): default multi-process** — quietbox stays
+single-process behind the `TeleportTransport` seam (§10), and the final multi-process-vs-translation call is
+settled by the Phase-1 measurement below. The two candidates:
 
-- **Multi-process, keep aliasing.** Each process keeps its private low-2 GB `MAP_32BIT` aliasing window +
-  native JIT (fastest per-access). Promote the eth switch to a **shared-memory** transport; cross-process
-  deliver + wake. Cost: shmem plumbing, cross-process fiber wakeup, a chip→process placement map. (Each
-  process still runs its own Pillar-0 fiber pool — multi-process is for *address space*, not threads.)
+- **Multi-process, keep aliasing (default).** Each process keeps its private low-2 GB `MAP_32BIT` aliasing
+  window + native JIT (fastest per-access). Because `MAP_32BIT` is incompatible with `MAP_SHARED` (§3 #2), a
+  process **cannot** map another chip's aliased L1 — so the shared-memory transport tier is a **message
+  ring**, not shared L1: the source posts (header+payload) to the dest chip's **owning process**, which
+  drains it, applies the write/atomic-inc to its own private L1, and wakes its fiber (post-to-dest-process;
+  a producer/owner asymmetry the in-process path doesn't have). This is exactly the `LocalTeleportTransport`
+  → `MultiProcessTeleportTransport` swap (§10) — the single-process teleport hooks
+  ([`implementation-plan.md`](implementation-plan.md) §3) are unchanged; only the transport impl behind the
+  seam differs. The four pieces multi-process adds live **outside** the seam (so "galaxy = a transport swap"
+  understates it): chip→process placement + launcher; cross-process route-table / control-plane consistency;
+  the two-stage cross-process wake (post → futex → dest-process drain fiber → local wake); and distributed
+  quiescence in the mesh CQ (local idle ≠ global idle). Each process still runs its own Pillar-0 fiber
+  pool — multi-process is for *address space*, not threads.
 - **Single-process, break aliasing (translation).** chip_id-indexed L1 translation on every access; no VA
-  ceiling, one in-process fiber scheduler + one in-process switch (simplest concurrency/wakeup), could reach
-  128 chips in one process (RAM permitting). Cost: sacrifices the direct-aliasing speed lever.
+  ceiling, one in-process fiber scheduler + one in-process switch (simplest concurrency/wakeup — no ring, no
+  distributed quiescence), could reach 128 chips in one process (RAM permitting). Keeps native JIT, so still
+  far faster than craq-sim's ISA sim. Cost: sacrifices the direct-aliasing speed lever — a per-access
+  base-lookup+add on the hot path (`l1_ptr` / `__emule_resolve_noc_addr` / CB derefs), reworked even for
+  quietbox.
+
+**Measurement gate.** After the Phase-1 quietbox run records thread/VA/perf (§8 exit, §12), settle the axis
+on: (a) the per-access cost a chip-indexed translation layer would add to the hot path vs (b) the realistic
+cost of the multi-process orchestration (the four pieces above + ring lifecycle). Default to multi-process;
+choose translation only if its measured per-access penalty is acceptable **and** the orchestration cost is
+judged too high.
 
 ### Multi-host — 1 galaxy per host (up to 36 galaxies)
 
@@ -247,8 +272,13 @@ Requirements:
 
 ## 10. Cross-cutting concerns
 
-- **3-tier transport abstraction.** One switch API, pluggable transport (in-proc queue / shared-memory /
-  network), selected per link by peer locality from the placement table.
+- **3-tier transport abstraction (`TeleportTransport`).** One switch API —
+  `deliver(dst_chip, noc_addr, payload, size, sem_inc)` + `wake_core(dst_chip, x, y)` — with three pluggable
+  impls: `LocalTeleportTransport` (in-proc `memcpy`), `MultiProcessTeleportTransport` (shared-memory message
+  ring, post-to-dest-process), and a network impl (multi-host). The impl is chosen **once** at switch-build
+  via a single `unique_ptr`, selected per link by peer locality from the placement table — it is the *only*
+  code that knows the process/host layout, so the rest of the stack (decode, routing, teleport hooks) stays
+  layout-agnostic.
 - **Placement / routing tables.** chip → (process, host) placement; the switch route table derived from the
   cluster descriptor + fabric control plane.
 - **Determinism.** Functional correctness only; the only ordering requirement is per-link in-order delivery
@@ -261,8 +291,9 @@ Requirements:
 ## 11. Open questions (decide in / after Phase 1)
 
 - **Interception level A vs B** (§7) — the load-bearing fidelity-vs-effort fork.
-- **End-state process model** — multi-process (aliasing) vs single-process (translation); settle with
-  Phase-1 thread/VA/perf numbers.
+- **End-state process model** — *resolved (measurement-gated):* default multi-process; quietbox is
+  single-process behind the `TeleportTransport` seam (§8). The only open part is the final
+  multi-process-vs-translation call, gated on the Phase-1 thread/VA/perf measurement.
 - **Partition granularity** — galaxy vs quad per host (a measurement call).
 - **Network transport** — TCP vs RDMA vs MPI for the multi-host tier.
 - **`SDMeshCommandQueue` launch ordering** — confirm it gives multi-device concurrency, not sequential
