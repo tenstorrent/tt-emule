@@ -125,7 +125,7 @@ namespace tt_emule::fiber {
   void    park_on(const void* key);   // park the current fiber until woken on key
   void    wake(const void* key);      // re-queue all fibers parked on key
   void    yield();                    // voluntary reschedule
-  void    run_until_idle();           // drain; throws first fiber exception; detects deadlock
+  void    run_until_idle();           // drain; throw first fiber exception; detect deadlock + livelock (§5.6)
 }
 ```
 
@@ -142,8 +142,9 @@ stateDiagram-v2
 ```
 
 `key` is the host address of the sync object (`CBSyncState*` or the semaphore atom).
-`run_until_idle` drains until no fiber is Ready **and** none is Parked; **Ready empty while
-Parked is non-empty = deadlock** → throw, naming the parked fibers and their keys.
+`run_until_idle` drains until no fiber is Ready **and** none is Parked, and errors out on a
+stuck run via the two-tier detector in §5.6 — **tier 1** quiescent deadlock (Ready empty ∧
+Parked non-empty) and **tier 2** a global no-progress watchdog for livelock / wake-cycles.
 
 ### 3.3 K=1 first, then K>1
 
@@ -266,16 +267,60 @@ call `wake(atom)` after the atomic store.
 ### 5.4 Barriers / flushes
 Already no-ops — no change.
 
-### 5.5 Lost-wakeup
-Under K=1, none possible (single-threaded, serialized). Under K>1, use the register-then-
-recheck-under-lock guard from §3.3.
+### 5.5 Wake invariants + lost-wakeup
+Three invariants keep a *healthy* op from ever spinning, and are what make the detection in
+§5.6 tractable:
+- **Progress-coupled wake** — `wake(key)` is emitted *only* by a producer that actually
+  changed the synchronized state (a `cb_push`/`cb_pop` that moved a page, a real
+  semaphore-inc), never speculatively. A wake therefore always reflects real forward
+  progress by the waker.
+- **Per-key wake (no thundering herd)** — only fibers parked on *that* sync object's host
+  address are re-queued; a CB is SPSC, so it is a single waiter, not a herd that all wake
+  and re-park.
+- **Re-check on resume** — a woken fiber re-evaluates its predicate and re-parks if still
+  false; a wake is never "proceed."
 
-### 5.6 Deadlock detection (a free upgrade)
-The 120 s CB timeout (`__emule_cb_timeout_sec`, `cb_api.h:109`) and the 10 M semaphore
-spin abort are replaced by precise detection: in `run_until_idle`, if the ready queue is
-empty and the parked map is non-empty, no fiber can make progress → throw immediately,
-naming the parked fibers and their wait keys. Instant, exact diagnosis instead of a
-two-minute hang.
+**Lost-wakeup:** under K=1 none is possible (single worker, serialized — a producer only
+runs while the consumer is parked). Under K>1, the register-then-recheck-under-lock guard
+(§3.3) closes the check-then-park race. A lost wakeup that did slip through would leave one
+fiber parked forever; once the independent fibers drain, the ready queue empties with it
+still parked → caught by tier 1 below.
+
+### 5.6 Hang detection — deadlock, livelock, and the wake-cycle
+Poorly-written ops must **error out, not hang**. Two tiers:
+
+**Tier 1 — quiescent deadlock (precise, instant, the common case).** When the scheduler
+finds the ready queue empty: if the parked map is non-empty, no fiber can run and (by
+progress-coupled wake) no in-flight producer can wake anyone → guaranteed deadlock; throw
+immediately. At **K>1** the trigger is *all workers simultaneously idle* ∧ parked
+non-empty — a quiescence barrier, not a per-worker check, so a worker mid-fiber is never a
+false positive. This catches mutual-wait bugs and the drained lost-wakeup case.
+
+**Can fibers wake each other in a cycle while the real producer starves?** For a *healthy*
+op, no: by the §5.5 invariants a woken-but-still-blocked fiber re-parks *without waking
+anyone*, so any spurious cycle decays to all-parked → tier 1. **A buggy op can, though** —
+e.g. two fibers ping-ponging a semaphore, neither ever completing: the ready queue never
+empties, so tier 1 never fires. The existing per-`cb_wait` 120 s timeout (`cb_api.h:109` /
+`__emule_cv_wait`) does not catch it either — **it resets on every wakeup**, so a wake-cycle
+keeps it alive forever. Hence tier 2.
+
+**Tier 2 — no-global-progress watchdog (livelock / wake-cycle backstop).** Maintain one
+**global** progress counter advanced by genuine forward progress — fiber completions
+(primary) plus data-publishing events (`cb_push`/`dfb_push` page counts, secondary). Unlike
+the per-op timer it is **never reset by an individual wakeup**. If the scheduler runs a
+bounded window of fiber resumptions (plus a generous wall-clock backstop — configurable,
+replacing the per-op 120 s) with **zero** advance, throw "no global progress — suspected
+livelock / lost wakeup." A livelock generates *many* fiber switches with no progress,
+whereas a legitimately long compute kernel generates *few* (it runs, it doesn't park) — so
+a resumption-count window separates the two. Tier 2 is a **heuristic** (perfect livelock
+detection is undecidable): it converts an infinite silent hang into a finite, *diagnosed*
+error, though it does not localize the bug as sharply as tier 1. It also catches a fiber
+that busy-`yield()`s forever (ready never empties, nothing completes).
+
+**Diagnostic dump (both tiers):** for every parked fiber — chip/core/RISC identity, the
+wait-key resolved to a human name (CB id / semaphore L1 address / DFB), the failing
+predicate, and the kernel source location — so the op author sees the exact mutual-wait or
+the starved producer.
 
 ---
 
@@ -356,8 +401,9 @@ Design-only here; the doc names the success criteria for the implementation:
 - The **existing WH N150 + BH single-chip regressions pass bit/PCC-identical** after the
   thread→fiber conversion (K=1), then again with K>1. Run them sequentially (shared JIT
   cache).
-- **Deadlock detection** surfaces a precise message (parked fibers + keys) on a
-  deliberately-broken sync, instead of a 120 s hang.
+- **Hang detection** errors out (never hangs) on a deliberately-broken sync — a *quiescent
+  deadlock* trips tier 1 with the precise parked-fiber dump, and a *wake-cycle / livelock*
+  trips the tier-2 no-progress watchdog (§5.6); confirm both, not a 120 s hang.
 - OS-thread count is bounded by the worker pool (1 at K=1), independent of core/chip
   count — confirm via `/proc/self/status` `Threads` during a run.
 
