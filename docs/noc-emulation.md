@@ -231,6 +231,14 @@ Spin-waits include hang detection: 10M iterations without progress triggers
 `std::abort()` with a context print. This catches deadlocks in mock-runtime
 mismatches without infinite hangs.
 
+The free function `noc_semaphore_wait(ptr, val)` waits for `>= val` when
+`val >= 1` (monotonic handshake counter) and exact `== 0` when `val == 0`
+(VALID→0 release toggle). Silicon polls `!= val`; that works there because NOC
+latency paces increments so the waiter observes every value, but emule's
+`noc_semaphore_inc` is a synchronous zero-latency atomic, so a peer can drive a
+counter `1→2→3` between two polls and an exact wait would skip the target and
+hang. A count-up target is never 0, so the split is unambiguous.
+
 ### 5.2 Remote operations
 
 | Call | Behaviour |

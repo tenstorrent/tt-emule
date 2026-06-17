@@ -707,8 +707,16 @@ inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t v
                 (void*)sem_addr, val, atom->load(std::memory_order_acquire),
                 __emule_logical_x, __emule_logical_y);
     }
+    // Wait until the semaphore reaches `val`. For a monotonic handshake counter
+    // (val >= 1), "reached" means `>= val`, not exact equality: emule's
+    // noc_semaphore_inc is a zero-latency atomic, so a peer can advance the
+    // counter past `val` between two of our polls and an equality wait would miss
+    // it and spin forever. (Silicon paces increments over the NOC, so an equality
+    // poll never misses.) For the VALID->0 release toggle (val == 0) we keep exact
+    // equality; a count-up target is never 0, so the split is unambiguous.
+    auto reached = [val](uint32_t cur) { return val > 0 ? cur >= val : cur == val; };
     uint64_t spins = 0;
-    while (atom->load(std::memory_order_acquire) != val) {
+    while (!reached(atom->load(std::memory_order_acquire))) {
         if (spins < 64) {
             // Busy-spin for fast wakeup
         } else if (spins < 1024) {

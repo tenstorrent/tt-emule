@@ -49,6 +49,28 @@ per column.
   to the global top-K for all K (32/64/3000) without reproducing the SFPU's exact
   bitonic intermediate state.
 
+## Sort (`ttnn.sort`)
+Reuses the TopK shims verbatim (`topk_local_sort`/`topk_merge`, not
+`topk_rebuild`) — `merge_split_col` is also correct for a full sort, so no new
+math is needed. It selects one of three program factories by width-in-tiles
+`Wt`: single-core (`Wt<=64`) and cross-core exchange are supported; the
+single-row multi-core DRAM path (largest `Wt`) is not (see below).
+
+General lesson (applies to any cross-core op, not just sort): emule's
+`noc_semaphore_inc` is a zero-latency atomic, so a polling waiter can miss a
+value the silicon NOC's latency would have let it observe. `noc_semaphore_wait`
+therefore waits `>= val` for monotonic handshake counters (exact `== 0` only for
+the VALID→0 release toggle). The cross-core reader also collapses an L1 pointer
+to a 32-bit address inside an `#include`d header, which the JIT x86 patcher now
+reaches (see the companion tt-metal change).
+
+Unsupported — multi-core DRAM path: its coordinator broadcasts a toggled VALID/0
+release via `noc_semaphore_set_multicast`, which races under emule's synchronous
+(zero-latency) multicast — the consumer can lose a release. Pacing the multicast
+fixes sort but stalls sticky-signal multicasts (e.g. matmul DRAM-sharded), and
+the two are indistinguishable at the multicast layer; the cases are excluded from
+the regression entries.
+
 ## Infra gaps these ops surfaced (general, not topk-specific)
 1. **`__emule_pack_offset` resets on `cb_push_back`, not `cb_reserve_back`**
    (`cb_api.h`, matching silicon `pack.h`). The multi-core final kernel fills a
