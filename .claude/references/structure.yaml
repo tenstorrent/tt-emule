@@ -1044,6 +1044,7 @@ files:
   symbols:
   - {kind: enum, name: DataFormat}
   - {kind: global, name: __emule_pack_offset}
+  - {kind: global, name: __emule_pack_width}
   - {kind: global, name: __emule_dst_fresh}
   - {kind: function, name: __emule_dst_mark_dirty}
   - {kind: function, name: __emule_dst_take_fresh}

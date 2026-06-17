@@ -778,10 +778,15 @@ ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
 // uint16 / Bfp8_b / Bfp4_b.
 // When L1 acc enabled, accumulates into existing CB data instead of overwriting.
 ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
-    __emule_dst_check(idst, "pack_tile");
+    // Blocked pack (llk_pack_init pack_width>1): one issue emits w consecutive
+    // tiles DST[idst..idst+w-1] → CB slots, auto-advancing the offset each.
+    const uint32_t w = __emule_pack_width[ocb] ? __emule_pack_width[ocb] : 1;
+    __emule_dst_check(idst + w - 1, "pack_tile");
     // PACK engine auto-advance: write to current offset, then advance.
-    __emule_compute::pack_dst_to_buf(
-        __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++), idst, ocb);
+    for (uint32_t t = 0; t < w; ++t) {
+        __emule_compute::pack_dst_to_buf(
+            __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++), idst + t, ocb);
+    }
 }
 
 // pack_tile (templated 3-arg form). Default `false` matches upstream's
@@ -794,13 +799,20 @@ ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
 // `output_offset`. Mirrors silicon's single PACK pointer.
 template <bool UseOutputOffset = false>
 ALWI void pack_tile(uint32_t idst, uint32_t ocb, uint32_t output_offset = 0) {
-    __emule_dst_check(idst, "pack_tile<templated>");
     if constexpr (UseOutputOffset) {
-        __emule_compute::pack_dst_to_buf(__emule_compute::cb_write_ptr_at(ocb, output_offset), idst, ocb);
-        if (output_offset >= __emule_pack_offset[ocb]) {
-            __emule_pack_offset[ocb] = output_offset + 1;
+        // Blocked pack (llk_pack_init pack_width>1): one issue emits w consecutive
+        // tiles DST[idst..idst+w-1] → CB[output_offset..output_offset+w-1].
+        const uint32_t w = __emule_pack_width[ocb] ? __emule_pack_width[ocb] : 1;
+        __emule_dst_check(idst + w - 1, "pack_tile<templated>");
+        for (uint32_t t = 0; t < w; ++t) {
+            __emule_compute::pack_dst_to_buf(
+                __emule_compute::cb_write_ptr_at(ocb, output_offset + t), idst + t, ocb);
+        }
+        if (output_offset + w > __emule_pack_offset[ocb]) {
+            __emule_pack_offset[ocb] = output_offset + w;
         }
     } else {
+        __emule_dst_check(idst, "pack_tile<templated>");
         pack_tile(idst, ocb);
     }
 }
