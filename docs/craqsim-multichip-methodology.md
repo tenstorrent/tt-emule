@@ -4,7 +4,8 @@ Reference account of how **craq-sim** (the heavily-modified ttsim fork that is t
 `SIMULATION` backend; `/localdev/arminale/craq-sim`, branch `main`) implements multi-chip, read from source.
 Companion to [`ttsim-multichip-methodology.md`](ttsim-multichip-methodology.md) (the upstream sim) and to the
 emule design docs ([`multichip-scaling-design.md`](multichip-scaling-design.md),
-[`fabric-ccl-simulation.md`](fabric-ccl-simulation.md)). Paths below are relative to the craq-sim repo root
+[`fabric-ccl-simulation.md`](fabric-ccl-simulation.md),
+[`fabric-ccl-op-coverage.md`](fabric-ccl-op-coverage.md)). Paths below are relative to the craq-sim repo root
 unless prefixed. Authoritative narrative cross-check: `MULTICHIP.md`.
 
 **One-line answer:** craq-sim is a *runtime, instruction-accurate, fabric-complete* multichip simulator. It
