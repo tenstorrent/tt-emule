@@ -322,6 +322,65 @@ wait-key resolved to a human name (CB id / semaphore L1 address / DFB), the fail
 predicate, and the kernel source location — so the op author sees the exact mutual-wait or
 the starved producer.
 
+### 5.7 Native data-race detection (TSAN-style)
+
+The other poorly-written-op failure (beyond the hangs in §5.6) is a **data race**: two cores
+touch the same L1 with no synchronization ordering them — a kernel that forgets, or
+mis-orders, a semaphore / CB handshake. emule can detect these **natively**, reusing
+ThreadSanitizer's *algorithm* without its machinery (no external `-fsanitize=thread`).
+
+**TSAN in brief (the algorithm we reuse).** A data race = two accesses to the same location,
+from different threads, ≥1 a write, with no **happens-before** (HB) ordering. HB is a partial
+order: program order within a thread; *across* threads, an edge exists only through
+synchronization (a release-store observed by an acquire-load; a mutex unlock→lock; here, a
+**semaphore-inc → semaphore-wait** or **`cb_push` → `cb_wait`**). TSAN tracks HB with **vector
+clocks** — each thread holds a per-thread logical timestamp; a *release* stamps the thread's
+clock into the sync object, an *acquire* takes the element-wise max back out — plus **shadow
+memory** (recent `{thread, clock, is-write}` per location) checked on each access. Real TSAN
+injects that check on *every* load/store via compiler instrumentation and shadows every byte —
+hence the 5–15× cost. **emule reuses the algorithm but not the per-byte instrumentation.**
+
+**Native design — reuse the algorithm, change the observation point.** emule owns the
+scheduler and the sync layer, so the expensive parts come for free:
+- **Per-fiber vector clocks** — one VC per (core, RISC) fiber (emule already tracks fibers, §3).
+- **HB edges from the silicon primitives** — `cb_push` / semaphore-inc = *release* (stamp the
+  fiber's VC into the CB / semaphore shadow); a passing `cb_wait` / semaphore-wait = *acquire*
+  (join that VC). The scheduler's own park/wake is **not** an HB edge (the analogue of TSAN's
+  `no_sync` switch) — so HB reflects the **silicon** ordering, not emule's cooperative
+  interleaving.
+- **Shadow per L1 region / CB / semaphore**, not per byte — `{last writer, readers, their VCs}`.
+- **Observation = the hooks emule already mediates** — every cross-core access goes through
+  them: NOC transactions (`__emule_resolve_noc_addr` / `__emule_multicast_write` — exact
+  address, size, direction), CB/DFB pointer **grants** (`get_read_ptr` / `get_write_ptr` carry
+  region + read-vs-write intent + fiber, even though the later raw deref is invisible), and the
+  sync ops. On each, run the FastTrack-style check: a prior conflicting access from another
+  fiber that does *not* happen-before the current one → **race**, throw with a precise report.
+
+**Worked example.** Core A writes payload into region R, then `noc_semaphore_inc`s sem S; core
+B `noc_semaphore_wait`s S, then reads R. *Correct:* the inc (release) → wait (acquire) edge puts
+A's write before B's read in HB → no race. *Buggy (B omits the wait):* no HB edge → A's write
+and B's read are concurrent on R → flagged — **even though**, under K=1, A happened to run
+first and B read the right bytes. That is the silicon bug emule would otherwise hide.
+
+**Catches vs misses.** Catches the full *cross-core* surface: publish-before-write, multi-writer
+with no arbitration, consume-before-release, CB/semaphore protocol misuse. Misses (vs real
+TSAN): byte-precision *within* a granted region; races via raw pointer arithmetic that escapes
+the CB/NOC API; purely-local accesses (which can't race cross-core anyway). Byte-level would
+require a custom JIT instrumentation pass — i.e. rebuilding the sanitizer — and is out of scope;
+going native is what keeps it cheap and sidesteps the external tool's frictions (its fixed
+shadow layout would also fight emule's `MAP_32BIT` window).
+
+**Cost & diagnostics.** Only bookkeeping on operations that already pass through hooks, plus one
+shadow entry per region (no per-byte shadow) — cheap enough to leave on in CI, unlike real
+TSAN. Because emule owns the hooks, a flagged race resolves to src/dst core, CB id / semaphore
+L1 offset, and both kernel source locations.
+
+**Shared infrastructure with §5.6.** Race detection (§5.7) and hang detection (§5.6) run on the
+same scheduler-owned state (per-fiber clocks + the sync edges at the same yield points), and
+both are deterministic and reproducible (the same run flags the same race) — unlike
+timing-dependent hardware races. Together they turn a poorly-written op into a **diagnosed
+error** instead of a silent wrong answer or a hang.
+
 ---
 
 ## 6. `launch_cores` rewrite + completion / exceptions
@@ -404,6 +463,10 @@ Design-only here; the doc names the success criteria for the implementation:
 - **Hang detection** errors out (never hangs) on a deliberately-broken sync — a *quiescent
   deadlock* trips tier 1 with the precise parked-fiber dump, and a *wake-cycle / livelock*
   trips the tier-2 no-progress watchdog (§5.6); confirm both, not a 120 s hang.
+- **Race detection (§5.7)** flags a kernel that drops a semaphore/CB handshake (write
+  without the release→acquire edge) with the src/dst core + CB/semaphore + source lines —
+  *even when* the K=1 run produced correct bytes; and stays silent on a correctly-synchronized
+  op. Deterministic across runs.
 - OS-thread count is bounded by the worker pool (1 at K=1), independent of core/chip
   count — confirm via `/proc/self/status` `Threads` during a run.
 
