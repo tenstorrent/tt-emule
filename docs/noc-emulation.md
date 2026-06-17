@@ -22,10 +22,12 @@ API names.
 
 Consequences:
 - **Async / posted / non-posted distinctions collapse** — all are sync memcpy.
-- **Barriers are no-op** — there is nothing to wait for. `noc_async_read_barrier`,
-  `noc_async_write_barrier`, `noc_async_writes_flushed`, `noc_async_full_barrier`
-  all return immediately, and the per-NOC barrier semantics collapse vacuously
-  (no in-flight transactions on either NOC).
+- **Barriers are no-op** — there is nothing to wait for. `noc_async_write_barrier`,
+  `noc_async_writes_flushed`, `noc_async_full_barrier` all return immediately, and
+  the per-NOC barrier semantics collapse vacuously (no in-flight transactions on
+  either NOC). The one exception is `noc_async_read_barrier`, which models a
+  one-time-per-thread first-read latency (timing only, not a correctness wait — the
+  data was already memcpy'd by the preceding read); see Section 1.1.
 - **TRID (transaction id) is no-op** — `noc_async_*_set_trid`,
   `*_barrier_with_trid`, `ncrisc_noc_*_with_transaction_id_*` return without
   side-effects (or return `true` for completion probes).
@@ -39,6 +41,25 @@ Consequences:
 This is correct **by design**, not drift: a kernel that produces the right
 value on silicon produces the right value on emule. Timing and ordering
 guarantees aren't preserved — emule is a correctness model, not a perf model.
+
+### 1.1 Cross-core start ordering
+
+Multi-core kernels that lean on silicon's launch/NOC timing rather than explicit
+handshakes need two minimal timing models, because emule runs each core as a host
+thread spawned sequentially with instant reads:
+
+- **Startup barrier** (`emulated_program_runner.cpp::launch_cores`) — all kernel
+  threads wait before running any kernel body, modeling simultaneous dispatch and
+  removing the spawn stagger that lets an early thread finish before a peer starts.
+- **First-read latency** (`dataflow_api.h::noc_async_read_barrier`) — a one-time
+  per-thread delay modeling the NOC round-trip a core's first input read incurs
+  before it can emit cross-core output. Sleeping threads also cede their cores, so
+  a starved peer can run its prologue.
+
+Motivating case: argmax's multi-core reducer resets `done_sem` in its ungated
+`k=0` prologue then waits for worker increments; without these models a worker
+increment can land before the reset, get clobbered, and hang the wait. See
+[`index-based-ops`](../.claude/skills/index-based-ops/SKILL.md).
 
 ---
 

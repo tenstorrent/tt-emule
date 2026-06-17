@@ -56,13 +56,9 @@ math is needed. It selects one of three program factories by width-in-tiles
 `Wt`: single-core (`Wt<=64`) and cross-core exchange are supported; the
 single-row multi-core DRAM path (largest `Wt`) is not (see below).
 
-General lesson (applies to any cross-core op, not just sort): emule's
-`noc_semaphore_inc` is a zero-latency atomic, so a polling waiter can miss a
-value the silicon NOC's latency would have let it observe. `noc_semaphore_wait`
-therefore waits `>= val` for monotonic handshake counters (exact `== 0` only for
-the VALID→0 release toggle). The cross-core reader also collapses an L1 pointer
-to a 32-bit address inside an `#include`d header, which the JIT x86 patcher now
-reaches (see the companion tt-metal change).
+The cross-core reader collapses an L1 pointer to a 32-bit address inside an
+`#include`d header, which the JIT x86 patcher now reaches (companion tt-metal
+change). For the semaphore handshake itself see *Cross-core handshakes* below.
 
 Unsupported — multi-core DRAM path: its coordinator broadcasts a toggled VALID/0
 release via `noc_semaphore_set_multicast`, which races under emule's synchronous
@@ -70,6 +66,38 @@ release via `noc_semaphore_set_multicast`, which races under emule's synchronous
 fixes sort but stalls sticky-signal multicasts (e.g. matmul DRAM-sharded), and
 the two are indistinguishable at the multicast layer; the cases are excluded from
 the regression entries.
+
+## Argmax (`ttnn.argmax`)
+**Dataflow-only** — no compute/SFPU; the max-scan runs in the NCRISC reader.
+Indices are compared **exactly** to `torch.argmax` (first/lowest max wins), not
+gather-validated, so the kernel's strict-`>` / `idx<max_idx` tie-break must run
+faithfully (it does — emule just executes it). Three readers: single-core
+ROW_MAJOR, single-core TILE (walks faces, excludes the `-42` implicit padding),
+multi-core ROW_MAJOR. No new shim needed — `api/numeric/*` and
+`api/debug/waypoint.h` resolve to real tt-metal headers (waypoint is a no-op
+without `WATCHER_ENABLED`). The multi-core path depends on the cross-core
+start-ordering below.
+
+## Cross-core handshakes under emule
+A reducer-style op (workers signal a collator core, which waits) leans on two
+silicon timings emule collapses. When one hangs, suspect these before declaring a
+path unsupportable:
+
+1. **Zero-latency atomics.** `noc_semaphore_inc` lands instantly, so a polling
+   waiter can skip past a value the NOC's latency would have let it observe. Use
+   `noc_semaphore_wait`'s `>= val` for monotonic counters (exact `==0` only for a
+   VALID→0 toggle). The class `Semaphore<>::wait` is exact-match — fine for a
+   counter that settles at its terminal value, but not robust to overshoot.
+2. **Instant reads + sequential thread spawn.** A worker can run to its increment
+   before a peer has executed its prologue. If that peer is an *ungated* reducer
+   resetting its counter (no start-sem gate that iteration), the reset clobbers the
+   early increment and the exact-match wait hangs — worse with more cores. Fixed
+   globally (not per-op) by the startup barrier + first-read latency in
+   `docs/noc-emulation.md` §1.1; both were needed (barrier alone still raced).
+
+Symptom to recognize: `Semaphore::wait(N) stuck at M<N`, nondeterministic, scaling
+with core count. *Genuinely* unsupportable is different — see the sort multi-core
+DRAM multicast race above (a toggled release the synchronous multicast loses).
 
 ## Infra gaps these ops surfaced (general, not topk-specific)
 1. **`__emule_pack_offset` resets on `cb_push_back`, not `cb_reserve_back`**

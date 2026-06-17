@@ -505,7 +505,23 @@ inline void noc_async_write_multicast_one_packet(
 
 // ---- Barriers ----
 
-inline void noc_async_read_barrier(uint8_t noc = 0) {}
+// Models the first-input-read latency that silicon incurs (NOC round-trip to
+// DRAM, hundreds of cycles) before a core can emit cross-core output. emule reads
+// are instant, which lets a multi-core reducer's peers race ahead of its prologue:
+// argmax resets done_sem at k=0 (ungated) then waits for worker increments, and an
+// increment landing before the reset is clobbered, hanging the wait. A one-time
+// per-thread delay at the first read barrier restores the ordering — the reducer
+// has no read before its reset, the workers all do — and the sleeping workers cede
+// their cores so a starved reducer can reach its reset.
+inline void __emule_model_first_read_latency() {
+    static thread_local bool first_read = true;
+    if (first_read) {
+        first_read = false;
+        usleep(200);
+    }
+}
+
+inline void noc_async_read_barrier(uint8_t noc = 0) { __emule_model_first_read_latency(); }
 inline void noc_async_write_barrier(uint8_t noc = 0) {}
 inline void noc_async_writes_flushed(uint8_t noc = 0) {}
 inline void noc_async_posted_writes_flushed(uint8_t noc = 0) {}
@@ -519,7 +535,9 @@ inline void noc_async_posted_writes_flushed(uint8_t noc = 0) {}
 // its only call sites are experimental kernels (ccl/deepseek/prefetcher) not
 // in the routine bring-up regression scope, and adding it would also require
 // noc_async_read_one_packet_set_state / _with_state which are a separate gap.
-inline void noc_async_read_barrier_with_trid(uint32_t trid, uint8_t noc = 0) {}
+inline void noc_async_read_barrier_with_trid(uint32_t trid, uint8_t noc = 0) {
+    __emule_model_first_read_latency();
+}
 inline void noc_async_write_barrier_with_trid(uint32_t trid, uint8_t noc = 0) {}
 inline void noc_async_write_flushed_with_trid(uint32_t trid, uint8_t noc = 0) {}
 // noc_async_read_set_trid lives further down in the trid / shard-state cluster
