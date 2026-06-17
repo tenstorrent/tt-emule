@@ -1,11 +1,14 @@
 # Fabric & CCL simulation: how it works, how ttsim/craq-sim simulate it, and how emule will
 
 Status: **design / architecture exploration** (no code yet). Companion to
-[`multichip-scaling-design.md`](multichip-scaling-design.md). That doc covers the scaling *strategy* —
-the three orthogonal axes (execution engine / address space / transport) and the phased path. **This doc
-is the fabric/CCL data-path deep-dive**: what the tt-metal fabric layer actually is, a full account of how
-**ttsim** and **craq-sim** simulate multi-chip/fabric, a decomposition of the real fabric router, a
-side-by-side comparison, how CCL ops ride fabric end-to-end, and the recommended emule design.
+[`multichip-scaling-design.md`](multichip-scaling-design.md) and
+[`fabric-ccl-op-coverage.md`](fabric-ccl-op-coverage.md). The scaling doc covers the *strategy* (the three
+orthogonal axes + the phased path); the coverage doc validates the interception level below against the full
+ttnn **and tt-blaze** op surfaces. **This doc is the fabric/CCL data-path deep-dive**: what the tt-metal
+fabric layer actually is, a full account of how **ttsim** and **craq-sim** simulate multi-chip/fabric, a
+decomposition of the real fabric router, a side-by-side comparison, how CCL ops ride fabric end-to-end, and
+the recommended emule design. The interception-B recommendation here is validated across both ttnn and
+tt-blaze in the coverage doc.
 
 ## 1. Context & scope
 
@@ -49,10 +52,16 @@ registers; eth transmission via ETH_TXQ; runs until the host writes a terminatio
 directly; they use a client adapter:
 - `WorkerToFabricEdmSender` (`tt_metal/fabric/hw/inc/edm_fabric/edm_fabric_worker_adapters.hpp`):
   `open()/open_start/open_finish`, `wait_for_empty_write_slot()`, `get_num_free_write_slots()`,
-  `send_payload_*_from_address()`, `send_current_slot_*`, `close()`.
+  `send_payload_*_from_address()` (blocking), and the **stateful** path `setup_stateful_send_cmd_bufs()` +
+  `send_current_slot_*` (incl. `send_current_slot_stateful_non_blocking_from_address`), `close()`.
 - Mux façade `fabric_async_write(conn, pkt_hdr, src, size)`
   (`tt_metal/fabric/hw/inc/tt_fabric_mux_interface.hpp`).
-- CCL kernels wrap this in `FabricConnectionManager` → `get_forward_connection()` / `get_backward_connection()`.
+- Wrappers over the sender: `FabricConnectionManager` (ring fwd/bwd) → `get_forward_connection()` /
+  `get_backward_connection()`; and **`RoutingPlaneConnectionManager`** (N-slot, FABRIC_2D) → `get(slot).sender`
+  (used by tt-blaze cross-device ops — see [`fabric-ccl-op-coverage.md`](fabric-ccl-op-coverage.md)).
+- **`socket_api.h`** (`tt_metal/hw/inc/api/socket_api.h`) is a fabric-backed surface (it includes
+  `fabric_connection_manager.hpp` and does `fabric_set_unicast_route` for D2D sockets) — i.e. sockets ride
+  the *same* fabric transport, not a separate one.
 
 **Packet headers** (`tt_metal/fabric/fabric_edm_packet_header.hpp`):
 - 1D `LowLatencyPacketHeaderT` (48–64B, 2 bits/hop routing) vs 2D `HybridMeshPacketHeaderT` (80–128B, 8
@@ -227,18 +236,26 @@ the worker loop makes progress.
 
 ## 8. emule design — the fabric-client-API shim (interception B)
 
-Shim `WorkerToFabricEdmSender` / `FabricConnectionManager` (and the mux `fabric_async_write`) so a worker's send
-routes straight to the emule eth switch — **no persistent router, no ETH_TXQ modeling**:
+Shim the **`WorkerToFabricEdmSender` object** so a worker's send routes straight to the emule eth switch —
+**no persistent router, no ETH_TXQ modeling**. The sender is reached via any of: `FabricConnectionManager`
+(ring fwd/bwd), raw `WorkerToFabricEdmSender[]` (MoE 4-dir), the mux `fabric_async_write`,
+**`RoutingPlaneConnectionManager`** (tt-blaze, N-slot), and **`socket_api.h`** (sockets-over-fabric). The shim
+must cover the **full sender method surface — blocking *and* stateful** (the coverage doc found tt-blaze
+`all_gather`/`all_reduce`/`sdpa_reduce` use the stateful path; a `send_payload_*`-only shim would miss them):
 
 - **Connection lifecycle** (`open`/`close`): no-op / bookkeeping. Resolve the connection's target chip from the
   control-plane routing tables (forward/backward direction → peer `FabricNodeId` → `SWEmuleChip`).
 - **Flow control** (`wait_for_empty_write_slot` / `get_num_free_write_slots`): report "always free" (or a fake
   credit) so the worker loop progresses — there is no real EDM buffer.
-- **`send_payload_*`**: decode the **real** `NocCommandFields` packet header (write / inline-write / atomic-inc /
-  fused / scatter; dest noc address) — a fidelity advantage over craq-sim's stub encoding — then **teleport** to
-  the final destination: write payload → L1 / atomic-inc the remote semaphore / fused / scatter, and **wake the
-  parked consumer fiber** (the scaling doc's Pillar 0). **chip-multicast = a contiguous chip range → replay a
-  unicast per chip**; scatter = per-chunk writes/sem-incs on one chip; `flush` → immediate.
+- **Sends — both forms:** blocking `send_payload_{without_header_non_blocking,flush_blocking}_from_address`, and
+  the stateful `setup_stateful_send_cmd_bufs` + `send_current_slot_{non_blocking,stateful_non_blocking_from_address}`.
+  Decode the **real** `NocCommandFields` packet header (write / inline-write / atomic-inc / fused / scatter; dest
+  noc address) — note the header may have been **built by a different (worker) core and forwarded via L1 slots**
+  (the tt-blaze worker→forwarder split; that worker→forwarder leg is intra-chip NOC, emule-native) — then
+  **teleport** to the final destination: write payload → L1 / atomic-inc the remote semaphore / fused / scatter,
+  and **wake the parked consumer fiber** (the scaling doc's Pillar 0). **chip-multicast = a contiguous chip
+  range → replay a unicast per chip**; scatter = per-chunk writes/sem-incs on one chip; `flush` → immediate.
+  This surface covers both ttnn and tt-blaze (see [`fabric-ccl-op-coverage.md`](fabric-ccl-op-coverage.md)).
 - **Routing without hops:** final dest chip(s) = `this_chip + N` in the connection direction, by direct index
   against the control-plane mesh graph. No intermediate-router simulation, no multi-hop.
 - emule must implement `compile_fabric` / `configure_fabric` (today no-op stubs in `device.hpp`) to consume the
@@ -261,7 +278,7 @@ uses; it is excluded by the hard constraints (eth-core emulation + multi-hop) an
 | Capability | emule has | emule needs |
 |---|---|---|
 | Per-chip memory (L1/DRAM) | ✅ `SWEmuleChip` + L1Pool | per-chip core maps keyed by chip_id (scaling doc) |
-| Kernel-API shim pattern | ✅ jit_hw shims everywhere | new shim for `WorkerToFabricEdmSender`/`FabricConnectionManager`/`fabric_async_write` |
+| Kernel-API shim pattern | ✅ jit_hw shims everywhere | shim the full `WorkerToFabricEdmSender` method set (blocking + stateful) via `FabricConnectionManager` / raw `[]` / mux / `RoutingPlaneConnectionManager` / `socket_api.h` |
 | Inter-chip transport | ❌ (eth stubs short-circuit) | the native eth switch (scaling doc) + teleport-to-final-dest |
 | Fabric setup | ❌ (`compile/configure_fabric` no-op) | consume the control plane, build the switch route table |
 | Packet decode | ❌ | decode `NocCommandFields` (write/inline/atomic/fused/scatter) + chip routing fields |
@@ -291,4 +308,7 @@ concurrency and the wake-on-delivery work) and its eth-switch section (the trans
 - **Completion/credit handshake fidelity** — how faithfully `wait_for_empty_write_slot` / the open/close
   handshake must be faked to keep workers live without a real EDM buffer.
 
-*(Decided OUT of scope: multi-hop routing and ethernet-core emulation.)*
+*(Resolved by [`fabric-ccl-op-coverage.md`](fabric-ccl-op-coverage.md): the fabric client API is a single
+choke point grounded across both ttnn and tt-blaze — no op bypasses the `WorkerToFabricEdmSender` object with
+raw eth; the shim surface is the full sender method set incl. the stateful path. Decided OUT of scope:
+multi-hop routing and ethernet-core emulation; host-side mesh CCL and blaze disaggregation.)*

@@ -24,6 +24,9 @@ Constraints / decisions:
 - Reference simulators live as sibling checkouts: `/localdev/arminale/ttsim-private` (functional ISA sim)
   and `/localdev/arminale/craq-sim` (the heavily-modified ttsim fork that is tt-metal's production
   `SIMULATION` backend; authoritative multichip reference: `craq-sim/MULTICHIP.md`).
+- Op consumers analyzed for mocking coverage: **ttnn** and **tt-blaze** (`/localdev/arminale/tt-blaze`, a
+  fused-op / pipeline framework that embeds craq-sim). Both use the same fabric-client-API choke point — see
+  [`fabric-ccl-op-coverage.md`](fabric-ccl-op-coverage.md).
 
 The hard question is whether emule's execution model scales, because emule's speed comes from two things
 the reference simulators deliberately do *not* do (§4).
@@ -155,7 +158,10 @@ NOC), so the switch is the single interception point.
   straight to the switch using the route table. **No persistent router runs**, no ETH_TXQ modeling. Lighter,
   matches how emule shims every other LLK, and aligns with the functional-correctness-only goal. Tradeoff:
   lower fidelity (the real router code never executes), and the `tt_fabric` client API surface must be
-  shimmed faithfully — validate that surface in Phase 1.
+  shimmed faithfully — validate that surface in Phase 1. The surface is the **full `WorkerToFabricEdmSender`
+  method set (blocking *and* stateful)** reached via `FabricConnectionManager` / raw `[]` / mux /
+  `RoutingPlaneConnectionManager` / `socket_api.h`; it covers both ttnn and tt-blaze (validated in
+  [`fabric-ccl-op-coverage.md`](fabric-ccl-op-coverage.md)).
 
 Worker / cross-device concurrency needs Pillar-0 fibers under **either** option; only **(A)** additionally
 needs the persistent-router fiber. Recommend **(B)**; the doc carries both so the choice can be settled in

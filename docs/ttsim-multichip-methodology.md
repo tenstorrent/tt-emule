@@ -4,7 +4,8 @@ Reference account of how **ttsim-private** (the upstream functional ISA simulato
 `/localdev/arminale/ttsim-private`, branch `main`) implements multi-chip, read from source. Companion to
 [`craqsim-multichip-methodology.md`](craqsim-multichip-methodology.md) (the fork) and to the emule design
 docs ([`multichip-scaling-design.md`](multichip-scaling-design.md),
-[`fabric-ccl-simulation.md`](fabric-ccl-simulation.md)). Paths below are relative to the ttsim repo root.
+[`fabric-ccl-simulation.md`](fabric-ccl-simulation.md),
+[`fabric-ccl-op-coverage.md`](fabric-ccl-op-coverage.md)). Paths below are relative to the ttsim repo root.
 
 **One-line answer:** ttsim is a *compile-time, single-hop* multichip simulator. It faithfully delivers raw
 ethernet packets point-to-point and supports host-mediated remote access, but it has **no fabric router, no
