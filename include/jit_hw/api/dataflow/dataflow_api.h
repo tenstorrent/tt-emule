@@ -100,136 +100,10 @@ inline uint32_t __emule_addr_to_offset(uint32_t addr) {
     return addr & 0x1FFFFF;  // SLOT_MASK = 2 MB - 1
 }
 
-// Inverse of __emule_addr_to_offset: convert a uint32_t L1 address (which
-// may be either a firmware-style offset or an absolute host pointer from
-// l1_alloc / CB / DFB) to a dereferenceable host pointer.
-//
-// l1_alloc() returns l1_base_ + bump  (>= l1_base, always a valid host ptr).
-// Firmware HAL addresses (e.g. 0x19520) are offsets into the L1 buffer.
-// We distinguish by comparing against __emule_bridge_l1's numeric address.
-#ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED
-#define __EMULE_LOCAL_L1_TO_PTR_DEFINED
-inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
-    if (__emule_sem_l1_range_end > 0 &&
-        l1_addr >= __emule_sem_l1_range_start && l1_addr < __emule_sem_l1_range_end) {
-        __emule_asan_panic(
-                "[ASAN ERROR] Illegal Semaphore Access: Offset 0x%x is inside the reserved Semaphore region [0x%x, 0x%x)\n",
-                l1_addr, __emule_sem_l1_range_start, __emule_sem_l1_range_end);
-    }
-    // CB range must be checked before OOB — CB memory is not in LiveL1Ranges.
-    if (__emule_cbs != nullptr) {
-        for (uint32_t cb_id = 0; cb_id < 32; ++cb_id) {
-            auto& cb = __emule_cbs[cb_id];
-            if (cb.num_pages == 0) continue;
-            uint32_t cb_start = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(cb.base));
-            uint32_t cb_size = cb.num_pages * cb.page_size;
-            if (l1_addr < cb_start || l1_addr >= cb_start + cb_size) continue;
-            if (__emule_cb_boundary_strict) {
-                uint32_t access_page = (l1_addr - cb_start) / cb.page_size;
-                // #139: write/read pointers are now per-RISC (emule_cb_ptr.h),
-                // no longer CBSyncState fields. Reconstruct the page indices.
-                uint32_t write_idx = __emule_cb_wr_page(cb_id);
-                uint32_t read_idx  = __emule_cb_rd_page(cb_id);
-                uint32_t write_dist = (access_page + cb.num_pages - write_idx) % cb.num_pages;
-                uint32_t read_dist  = (access_page + cb.num_pages - read_idx)  % cb.num_pages;
-                uint32_t reserved = __emule_cb_reserved_pages[cb_id];
-                uint32_t waited   = __emule_cb_waited_pages[cb_id];
-                // Only meaningful when the kernel holds an ACTIVE reservation/wait
-                // window. reserved==0 && waited==0 means raw get_write_ptr /
-                // get_read_ptr addressing (globally-allocated/sharded CBs, single-
-                // buffered scratch, output CBs written then DMA'd) — there is no
-                // window to be "outside" of, so it is not a boundary violation.
-                // (A genuine write past the CB's allocated region is still caught
-                // downstream by the OOB-tensor check.)
-                if ((reserved > 0 || waited > 0) && !(write_dist < reserved) && !(read_dist < waited)) {
-                    __emule_asan_panic(
-                            "[ASAN ERROR] CB Boundary Violation: Attempted to access CB %u at offset 0x%x "
-                            "(byte %u of %u, page %u of %u). "
-                            "Write window: write_idx=%u, %u page(s) reserved. "
-                            "Read window: read_idx=%u, %u page(s) waited.\n",
-                            cb_id, l1_addr, l1_addr - cb_start, cb_size,
-                            access_page, cb.num_pages,
-                            write_idx, reserved,
-                            read_idx, waited);
-                }
-            }
-            uint32_t l1_base_cb = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
-            if (l1_addr >= l1_base_cb) {
-                return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
-            }
-            return __emule_bridge_l1 + l1_addr;
-        }
-    }
-    // Reduce to the within-slot L1 offset by masking the low 21 bits (2 MB worker
-    // slot). The high bits just encode which core / absolute bridge base the
-    // address came through, while the live tensor/padding ranges are stored as
-    // buffer-relative offsets (buffer.address()). Masking means two addresses that
-    // share their low 21 bits map to the same offset regardless of core — so a
-    // legitimate access isn't flagged just because its high bits differ from this
-    // thread's base. (Per-core L1 bases are 2 MB-aligned in both the L1Pool and the
-    // tt-metal external-backing builds, so for an in-slot address the mask equals
-    // the base-subtraction `__emule_addr_to_offset` does — but the mask is robust
-    // for any high bits, e.g. an absolute address from another core's slot.)
-
-    // KNOWN LIMITATION (accepted, see review): because the ranges are offset-based
-    // and a sharded tensor occupies the *same* offset on each of its shard cores,
-    // a write to that offset on a core where the tensor is NOT sharded passes this
-    // check (a false negative). Catching it would require per-core shard-placement
-    // tracking, not just offsets.
-    uint32_t l1_off = l1_addr & 0x1FFFFF;  // SLOT_MASK = 2 MB - 1
-    if (__emule_l1_tensor_ranges != nullptr && l1_off >= __emule_l1_unreserved_base) {
-        bool in_tensor = false;
-        uint64_t matched_packed = 0;
-        for (uint32_t i = 0; i < __emule_l1_tensor_ranges_count; ++i) {
-            uint64_t packed = __emule_l1_tensor_ranges[i];
-            uint32_t r_start = static_cast<uint32_t>(packed >> 32);
-            uint32_t r_end = static_cast<uint32_t>(packed);
-            if (l1_off >= r_start && l1_off < r_end) {
-                in_tensor = true;
-                matched_packed = packed;
-                break;
-            }
-        }
-        if (!in_tensor) {
-            __emule_asan_panic(
-                    "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
-                    l1_off);
-        }
-        if (__emule_l1_resolved_ranges != nullptr &&
-            __emule_l1_resolved_ranges_count != nullptr) {
-            uint32_t cur = *__emule_l1_resolved_ranges_count;
-            bool already = false;
-            for (uint32_t i = 0; i < cur; ++i) {
-                if (__emule_l1_resolved_ranges[i] == matched_packed) {
-                    already = true;
-                    break;
-                }
-            }
-            if (!already && cur < __emule_l1_resolved_ranges_capacity) {
-                __emule_l1_resolved_ranges[cur] = matched_packed;
-                *__emule_l1_resolved_ranges_count = cur + 1;
-            }
-        }
-    }
-    if (__emule_l1_padding_ranges != nullptr) {
-        for (uint32_t i = 0; i < __emule_l1_padding_ranges_count; ++i) {
-            uint64_t packed = __emule_l1_padding_ranges[i];
-            uint32_t logical_end = static_cast<uint32_t>(packed >> 32);
-            uint32_t physical_end = static_cast<uint32_t>(packed);
-            if (l1_off >= logical_end && l1_off < physical_end) {
-                __emule_asan_panic(
-                        "[ASAN ERROR] Tensor Padding Violation: Attempted to write to a padded memory region at address 0x%x (logical_end=0x%x, physical_end=0x%x)\n",
-                        l1_off, logical_end, physical_end);
-            }
-        }
-    }
-    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
-    if (l1_addr >= l1_base) {
-        return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
-    }
-    return __emule_bridge_l1 + l1_addr;
-}
-#endif
+// L1 access chokepoint (__emule_local_l1_to_ptr) — single definition shared with
+// jit_kernel_stubs.hpp. (__emule_addr_to_offset above is a separate helper for
+// NOC-address construction, not the access chokepoint.)
+#include "jit_hw/internal/emule_l1_to_ptr.h"
 
 // ---- Coordinate translation tables ----
 // On real hardware, these are L1-resident lookup tables populated by firmware.
@@ -345,7 +219,7 @@ FORCE_INLINE void noc_async_read_page(
     } else {
         page_size = (1u << addrgen.log_base_2_of_page_size);
     }
-    ++__emule_pending_noc_reads;
+    if (__emule_asan_enabled()) ++__emule_pending_noc_reads;
     uint64_t noc_addr = addrgen.get_noc_addr(id, offset, noc);
     uint8_t* dst = __emule_local_l1_to_ptr(dst_local_l1_addr);
     uint8_t* src = __emule_resolve_noc_addr(noc_addr);
@@ -473,7 +347,7 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
     // NOC addresses are already properly constructed by get_noc_addr() or
     // get_noc_addr_from_bank_id() — no fixup needed here.  Applying
     // __emule_fixup_noc_addr would destroy DRAM bank offsets (> 2MB).
-    ++__emule_pending_noc_reads;
+    if (__emule_asan_enabled()) ++__emule_pending_noc_reads;
     uint8_t* dst = __emule_local_l1_to_ptr(dst_local_l1_addr);
     uint8_t* src = __emule_resolve_noc_addr(src_noc_addr);
     if (__emule_debug_multicast()) {

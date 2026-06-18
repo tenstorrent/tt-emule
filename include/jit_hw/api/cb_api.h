@@ -160,11 +160,8 @@ constexpr uint8_t unpack_tile_num_faces[32] = {
     4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
 };
 
-// Master ASAN switch (TT_METAL_EMULE_ASAN). Re-read every call; see ASAN.md.
-inline bool __emule_asan_enabled() {
-    const char* v = std::getenv("TT_METAL_EMULE_ASAN");
-    return v != nullptr && v[0] != '\0' && v[0] != '0';
-}
+// __emule_asan_enabled() (master switch) now lives in emule_asan.h (included
+// above), so every ASAN TU shares one definition.
 
 // ---- Circular Buffer sync operations ----
 

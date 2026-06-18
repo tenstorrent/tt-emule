@@ -35,10 +35,20 @@ A single env var, `TT_METAL_EMULE_ASAN`, gates every sanitizer:
   kernel translation unit; placing the helper here makes it visible to
   `dataflow_api.h` and `jit_kernel_stubs.hpp` without a separate include.)
 
-Both helpers re-read the environment on every call (no static caching).
-Caching breaks combined test runs where one gtest sets the var via
-`setenv` and the next gtest expects it unset — a `static bool` would be
-sticky to the first observed value.
+The **host** helper re-reads the environment on every call (no static
+caching): a process-global `static bool` would be sticky to the first
+observed value and break the combined gtest binary, where one test sets the
+var via `setenv` and the next expects it unset.
+
+The **kernel** helper (`__emule_asan_enabled()`) caches the result in a
+`static thread_local int`. This is *not* a process-global cache: emule spawns
+a fresh `std::thread` per kernel per launch (no thread pool), so the
+thread_local is zero-initialised — and re-seeded from the env — at the start
+of every launch. A test that toggles the var then launches a program gets the
+new value, because the new value is read by the launch's brand-new threads.
+The cache exists because every kernel memory access flows through
+`__emule_local_l1_to_ptr`; a `getenv` per access would be far too costly, so
+the cost is amortised to one `getenv` per kernel launch.
 
 When the switch is off:
 
@@ -46,9 +56,16 @@ When the switch is off:
 - The runner skips the snapshot/registration block in
   `execute_program_emulated` — every thread-local state pointer plumbed
   through `EmuleOobTensorState` stays null/zero.
-- Kernel-side checks short-circuit on null/zero state (the inline check
-  pattern is always `if (<state> != nullptr) { ... }` or
-  `if (<bool> && ...)`).
+- `__emule_local_l1_to_ptr` **early-outs at its first line** to the plain
+  address→host-pointer translation, so the per-access semaphore / CB-scan /
+  OOB / padding work is skipped entirely (not merely guarded item-by-item on
+  null state). This makes the chokepoint a true no-op for normal emulation
+  runs — the off-path translation is byte-identical to the tail every on-path
+  branch already returns.
+- The remaining kernel-side checks (NoC alignment, NoC-read-pending) are each
+  guarded by `if (__emule_asan_enabled() && ...)`, and the
+  `__emule_pending_noc_reads` counter is only incremented when the switch is
+  on, so they too cost nothing when off.
 
 The one exception is **CB Reservation Overflow** in `cb_reserve_back`,
 which is always on. It is structurally load-bearing — see
@@ -174,6 +191,9 @@ need the function inlined.
 
 Checks run in this order inside `__emule_local_l1_to_ptr`:
 
+0. **Master-switch early-out** — `if (!__emule_asan_enabled())` return the
+   plain address translation immediately. All the checks below only run with
+   ASAN on; this is the first line so the off path is a true no-op.
 1. **Illegal Semaphore Access** — `l1_addr` inside
    `[sem_l1_range_start, sem_l1_range_end)`. Sem accesses are supposed
    to go through `noc_semaphore_*` APIs; a raw pointer dereference
@@ -328,8 +348,10 @@ A repeatable recipe based on how the existing ones were built:
    gtest matches on `<Category>` with a regex.
 3. **Gate on the master switch.** First line of the check function is
    `if (!emule_asan_enabled()) return;` (host) or wrap the check in
-   `if (__emule_asan_enabled() && ...)` (kernel-side, in a hot path).
-   Re-read, no caching.
+   `if (__emule_asan_enabled() && ...)` (kernel-side). The host helper
+   re-reads the env every call (no caching); the kernel helper caches in a
+   per-launch `thread_local` (see the Master switch section) — both pick up an
+   env toggle between launches, neither sticks to a process-global first value.
 4. **State plumbing if needed.**
    - Host-only: add to `emule_live_ranges.hpp` if it's a registry, or
      keep state local to the helper.

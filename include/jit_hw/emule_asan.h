@@ -21,6 +21,19 @@
 // kernel_runner.cpp for the standalone tt-emule runtime).
 
 #include <cstdint>
+#include <cstdlib>
+
+// Master ASAN switch (TT_METAL_EMULE_ASAN). Cached in a per-launch thread_local;
+// see ASAN.md "Master switch" for why caching here is safe (and required for the
+// hot L1 chokepoint).
+inline bool __emule_asan_enabled() {
+    static thread_local int cached = -1;
+    if (cached < 0) {
+        const char* v = std::getenv("TT_METAL_EMULE_ASAN");
+        cached = (v != nullptr && v[0] != '\0' && v[0] != '0') ? 1 : 0;
+    }
+    return cached != 0;
+}
 
 // Human-readable source path of the kernel currently running on this thread, or
 // nullptr when no kernel is on the stack (host-API checks). Set per launch.

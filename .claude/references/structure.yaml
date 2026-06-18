@@ -331,6 +331,7 @@ files:
   section: include/jit_hw/
   summary: Unified [ASAN ERROR] panic+abort with kernel context and symbolized backtrace (__emule_asan_panic).
   symbols:
+  - {kind: function, name: __emule_asan_enabled}
   - {kind: global, name: __emule_kernel_name}
   - {kind: extern_c, name: __emule_asan_panic}
   - {kind: global, name: my_x}
@@ -389,22 +390,7 @@ files:
   - {kind: extern_c, name: __emule_dram_ptr}
   - {kind: extern_c, name: __emule_noc_resolve}
   - {kind: global, name: __emule_bridge_l1}
-  - {kind: global, name: __emule_sem_l1_range_start}
-  - {kind: global, name: __emule_sem_l1_range_end}
   - {kind: global, name: __emule_pending_noc_reads}
-  - {kind: global, name: __emule_l1_unreserved_base}
-  - {kind: global, name: __emule_l1_tensor_ranges}
-  - {kind: global, name: __emule_l1_tensor_ranges_count}
-  - {kind: global, name: __emule_l1_padding_ranges}
-  - {kind: global, name: __emule_l1_padding_ranges_count}
-  - {kind: global, name: __emule_l1_resolved_ranges}
-  - {kind: global, name: __emule_l1_resolved_ranges_count}
-  - {kind: global, name: __emule_l1_resolved_ranges_capacity}
-  - {kind: global, name: __emule_cb_reserved_pages}
-  - {kind: global, name: __emule_cb_waited_pages}
-  - {kind: global, name: __emule_cb_boundary_strict}
-  - {kind: macro, name: __EMULE_LOCAL_L1_TO_PTR_DEFINED}
-  - {kind: function, name: __emule_local_l1_to_ptr}
   - {kind: global, name: bank_to_dram_offset}
   - {kind: global, name: bank_to_l1_offset}
   - {kind: global, name: my_x}
@@ -741,7 +727,6 @@ files:
   - {kind: global, name: unpack_tile_c_dim}
   - {kind: global, name: unpack_num_faces_r_dim}
   - {kind: global, name: unpack_num_faces_c_dim}
-  - {kind: function, name: __emule_asan_enabled}
   - {kind: function, name: __emule_cb_timeout_sec}
   - {kind: function, name: cb_reserve_back}
   - {kind: function, name: cb_push_back}
@@ -2169,8 +2154,6 @@ files:
   - {kind: extern_c, name: __emule_noc_addr_is_dram}
   - {kind: function, name: __emule_debug_multicast}
   - {kind: function, name: __emule_addr_to_offset}
-  - {kind: macro, name: __EMULE_LOCAL_L1_TO_PTR_DEFINED}
-  - {kind: function, name: __emule_local_l1_to_ptr}
   - {kind: global, name: worker_logical_col_to_virtual_col}
   - {kind: global, name: worker_logical_row_to_virtual_row}
   - {kind: macro, name: __EMULE_GET_LOGICAL_COORDS_DEFINED}
@@ -2419,6 +2402,25 @@ files:
   - {kind: function, name: __emule_cb_advance_rd}
   - {kind: function, name: __emule_cb_wr_page}
   - {kind: function, name: __emule_cb_rd_page}
+- path: include/jit_hw/internal/emule_l1_to_ptr.h
+  section: include/jit_hw/internal/
+  summary: 'Single source of truth for the kernel L1 access chokepoint `__emule_local_l1_to_ptr` (master-switch early-out + semaphore/CB-boundary/OOB/padding sanitizer checks) plus the sanitizer thread-locals it consumes; included by jit_kernel_stubs.hpp and dataflow_api.h (was duplicated in both). See docs/ASAN.md.'
+  symbols:
+  - {kind: global, name: __emule_bridge_l1}
+  - {kind: global, name: __emule_sem_l1_range_start}
+  - {kind: global, name: __emule_sem_l1_range_end}
+  - {kind: global, name: __emule_l1_unreserved_base}
+  - {kind: global, name: __emule_l1_tensor_ranges}
+  - {kind: global, name: __emule_l1_tensor_ranges_count}
+  - {kind: global, name: __emule_l1_padding_ranges}
+  - {kind: global, name: __emule_l1_padding_ranges_count}
+  - {kind: global, name: __emule_l1_resolved_ranges}
+  - {kind: global, name: __emule_l1_resolved_ranges_count}
+  - {kind: global, name: __emule_l1_resolved_ranges_capacity}
+  - {kind: global, name: __emule_cb_reserved_pages}
+  - {kind: global, name: __emule_cb_waited_pages}
+  - {kind: global, name: __emule_cb_boundary_strict}
+  - {kind: function, name: __emule_local_l1_to_ptr}
 - path: include/jit_hw/internal/firmware_common.h
   section: include/jit_hw/internal/
   summary: '`WAYPOINT` macro; cache-op stubs'
