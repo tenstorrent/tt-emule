@@ -60,6 +60,8 @@ template <auto... TArgs>
 inline void llk_unpack_reconfig_data_format_srcb(uint32_t /*old_or_new*/ = 0, uint32_t /*new_operand*/ = 0) {}
 template <auto... TArgs>
 inline void llk_math_reconfig_data_format_srcb(uint32_t /*old_or_new*/ = 0, uint32_t /*new_operand*/ = 0) {}
+// No-op on WH/Quasar silicon (only BH has a body); emule models no remap state.
+inline void llk_math_reconfig_remap(const bool /*remap_enable*/) {}
 
 inline void llk_unpack_AB_matmul(uint32_t in0_cb, uint32_t in1_cb, uint32_t in0_idx, uint32_t in1_idx) {
     __emule_matmul_state = {in0_cb, in1_cb, in0_idx, in1_idx};

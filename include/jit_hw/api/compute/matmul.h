@@ -133,6 +133,17 @@ ALWI void mm_block_init_short_with_dt(uint32_t in0_cb_id, uint32_t in1_cb_id,
     (void)ct_dim; (void)rt_dim; (void)kt_dim;
     __llk_matmul_transpose = (transpose != 0);
 }
+// Both-dt variant: emule reads CB format per-call, so the old_cb reconfig args
+// are ignored (as in _with_dt above).
+ALWI void mm_block_init_short_with_both_dt(uint32_t in0_cb_id, uint32_t in1_cb_id,
+                                           uint32_t old_in0_cb_id, uint32_t old_in1_cb_id,
+                                           const uint32_t transpose = 0,
+                                           uint32_t ct_dim = 1, uint32_t rt_dim = 1,
+                                           uint32_t kt_dim = 1) {
+    (void)in0_cb_id; (void)in1_cb_id; (void)old_in0_cb_id; (void)old_in1_cb_id;
+    (void)ct_dim; (void)rt_dim; (void)kt_dim;
+    __llk_matmul_transpose = (transpose != 0);
+}
 // matmul_block: compute rt_dim × ct_dim block of output tiles.
 // For each output tile (r, c): DST[idst + r*ct_dim + c] += A[in0_tile + r*kt_dim] * B[in1_tile + c]
 // The runtime `transpose` arg here overrides any value previously set by

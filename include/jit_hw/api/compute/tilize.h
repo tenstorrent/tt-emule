@@ -158,20 +158,13 @@ inline void fast_tilize_init_skip_remap(uint32_t icb, uint32_t full_dim, uint32_
                                         uint32_t /*call_line*/ = 0) {
     tilize_init(icb, full_dim, ocb);
 }
-// _with_dt fast-tilize forwarders mirror silicon's data-type-reconfig API
-// (used by pool / conv2d-reuse / group_attn_matmul / upsample-bilinear).
-// Emule reads CB format per-call so the format change is implicit.
-template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim>
-inline void fast_tilize_init_with_dt(uint32_t /*old_icb*/, uint32_t new_icb,
-                                     uint32_t /*block_dst_tiles*/, uint32_t ocb) {
-    tilize_init(new_icb, full_ct_dim, ocb);
+// _with_dt forwarders mirror silicon's 3-arg reconfig API (tilize.h:330,334);
+// emule reads CB format per-call so the format reconfig is implicit.
+inline void fast_tilize_init_with_dt(uint32_t icb, uint32_t full_dim, uint32_t ocb) {
+    tilize_init(icb, full_dim, ocb);
 }
-template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim>
-inline void fast_tilize_init_with_dt_skip_remap(uint32_t /*old_icb*/, uint32_t new_icb,
-                                                uint32_t /*block_dst_tiles*/,
-                                                uint32_t ocb,
-                                                uint32_t /*call_line*/ = 0) {
-    tilize_init(new_icb, full_ct_dim, ocb);
+inline void fast_tilize_init_with_dt_skip_remap(uint32_t icb, uint32_t full_dim, uint32_t ocb) {
+    tilize_init(icb, full_dim, ocb);
 }
 template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim>
 inline void fast_tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb,

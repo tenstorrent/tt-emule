@@ -243,6 +243,7 @@ files:
   - {kind: global, name: STALL_TDMA}
   - {kind: global, name: STALL_ON_ZERO}
   - {kind: global, name: STALL_ON_MAX}
+  - {kind: global, name: STALL_THCON}
   - {kind: function, name: t6_semaphore_wait_on_zero}
   - {kind: function, name: t6_semaphore_wait_on_max}
   - {kind: enum, name: SfpuType}
@@ -262,7 +263,13 @@ files:
   - {kind: function, name: neg_init}
 - path: include/jit_hw/ckernel_defs.h
   section: include/jit_hw/
-  summary: empty shim (pragma-once only)
+  summary: canonical home for ckernel tile/face geometry consts (TILE/FACE_HEIGHT/WIDTH=32/16); shared by dataflow + compute kernels
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: global, name: FACE_HEIGHT}
+  - {kind: global, name: FACE_WIDTH}
+  - {kind: global, name: TILE_HEIGHT}
+  - {kind: global, name: TILE_WIDTH}
 - path: include/jit_hw/ckernel_include.h
   section: include/jit_hw/
   summary: '`enum firmware_msg_e`; `namespace ckernel`'
@@ -927,11 +934,7 @@ files:
   - {kind: enum, name: EltwiseBinaryType}
   - {kind: enum, name: BroadcastType}
   - {kind: enum, name: EltwiseBinaryReuseDestType}
-  - {kind: global, name: TILE_WIDTH}
-  - {kind: global, name: TILE_HEIGHT}
   - {kind: global, name: TILE_HW}
-  - {kind: global, name: FACE_WIDTH}
-  - {kind: global, name: FACE_HEIGHT}
   - {kind: global, name: FACE_HW}
   - {kind: global, name: ELWADD}
   - {kind: global, name: ELWSUB}
@@ -960,6 +963,9 @@ files:
   - {kind: global, name: UNP1}
   - {kind: global, name: PAC}
   - {kind: macro, name: TTI_SETADCXX}
+  - {kind: macro, name: TTI_STALLWAIT}
+  - {kind: macro, name: TTI_SEMWAIT}
+  - {kind: macro, name: TT_SETC16}
   - {kind: function, name: _llk_pack_mop_config_}
   - {kind: function, name: __emule_apply_pack_relu}
   - {kind: global, name: __emule_src_scratch}
@@ -1254,6 +1260,7 @@ files:
   - {kind: function, name: mm_block_init}
   - {kind: function, name: mm_block_init_short}
   - {kind: function, name: mm_block_init_short_with_dt}
+  - {kind: function, name: mm_block_init_short_with_both_dt}
   - {kind: function, name: matmul_block}
   - {kind: macro, name: TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_MATMUL_LLKS_H}
   - {kind: namespace, name: experimental}
@@ -2495,6 +2502,7 @@ files:
   - {kind: function, name: llk_math_reconfig_data_format_srca}
   - {kind: function, name: llk_unpack_reconfig_data_format_srcb}
   - {kind: function, name: llk_math_reconfig_data_format_srcb}
+  - {kind: function, name: llk_math_reconfig_remap}
   - {kind: function, name: llk_unpack_AB_matmul}
   - {kind: function, name: matmul_tiles}
   - {kind: function, name: llk_math_matmul}
