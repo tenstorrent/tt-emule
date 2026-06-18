@@ -2,8 +2,8 @@
 # tt-metal at the SHA that main-tip tt-mlir itself pins, against tt-emule main.
 # Warning-only: failures don't block merges. Two purposes:
 #   1. Detect tt-mlir-induced D2M breakage within 24h.
-#   2. Warm the GitHub Actions ccache so PRs which later bump tt-mlir-pin.txt
-#      already hit warm cache.
+#   2. Warm the GitHub Actions ccache for D2M builds (the PR D2M job is
+#      currently disabled, but a re-enable or manual dispatch hits warm cache).
 
 name: Nightly D2M Upstream
 

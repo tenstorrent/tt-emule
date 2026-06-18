@@ -167,17 +167,16 @@ jobs:
           if-no-files-found: error
 
   test:
-    name: Run regression (${{ matrix.arch }})
+    name: Run regression (all archs)
     needs: [changes, build]
     if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: tt-ubuntu-2204-xlarge-stable
-    timeout-minutes: 60
+    # One runner visits wormhole/blackhole/quasar sequentially (they share a JIT
+    # cache and cannot run concurrently). Folds the former 3-leg matrix into one
+    # job — fewer concurrent runners, at the cost of summed wall-clock.
+    timeout-minutes: 150
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [wormhole, blackhole, quasar]
     steps:
       - name: Checkout tt-emule (PR)
         uses: actions/checkout@v4
@@ -227,38 +226,25 @@ jobs:
         shell: bash
         run: bash tt-metal/install_dependencies.sh --sfpi
 
-      - name: Run regression
+      - name: Run regression (all archs, sequential) + classify
+        # ci-regression-all.sh loops wormhole→blackhole→quasar, writing each
+        # arch's gtest XML to gtest-xml/<arch>/ and classifying per arch
+        # (quasar gets the known-failures allowlist; wh/bh are zero-tolerance).
+        # Exits non-zero if any arch has a new failure.
         env:
-          TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
-          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
-          TT_EMULE_ARCH: ${{ matrix.arch }}
+          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
+          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule
         shell: bash
-        run: bash tt-emule/.github/scripts/ci-regression.sh
-
-      - name: Classify results
-        env:
-          BUILD_DIR: ${{ github.workspace }}/tt-metal/build_emule
-        shell: bash
-        run: |
-          # wormhole/blackhole: no allowlist => every test must pass.
-          # quasar: allow the documented known failures.
-          allowlist=()
-          if [ "${{ matrix.arch }}" = "quasar" ]; then
-            allowlist=(--allowlist tt-emule/.github/known-failures-quasar.txt)
-          fi
-          python3 tt-emule/.github/scripts/classify-results.py \
-            --xml-dir "${RUNNER_TEMP}/gtest-xml" \
-            "${allowlist[@]}" \
-            --build-dir "$BUILD_DIR"
+        run: bash tt-emule/.github/scripts/ci-regression-all.sh
 
       - name: Upload regression artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: regression-results-${{ matrix.arch }}
+          name: regression-results
           path: |
-            ${{ runner.temp }}/regression.log
-            ${{ runner.temp }}/gtest-xml/*.xml
+            ${{ runner.temp }}/regression-*.log
+            ${{ runner.temp }}/gtest-xml/*/*.xml
           retention-days: 30
           if-no-files-found: warn
 
