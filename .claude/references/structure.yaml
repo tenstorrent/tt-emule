@@ -283,7 +283,7 @@ files:
   - {kind: enum, name: firmware_msg_e}
 - path: include/jit_hw/ckernel_ops.h
   section: include/jit_hw/
-  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+  summary: Shim for the real ckernel_ops.h (which emits raw Tensix instructions) — defines TT_SFPLOADI/TTI_SFPLOADI (-> __emule_sfploadi) + TTI_SFPCONFIG (no-op) for the SFPU LUT init path.
   symbols:
   - {kind: macro, name: TT_SFPLOADI}
   - {kind: macro, name: TTI_SFPLOADI}
@@ -1726,7 +1726,7 @@ files:
   - {kind: function, name: nez_tile_uint32}
 - path: include/jit_hw/api/compute/eltwise_unary/deep_sfpu_registry.h
   section: include/jit_hw/api/compute/eltwise_unary/
-  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+  summary: Deep-SFPU per-op override policy doc; define EMULE_DEEP_SFPU_<OP> to promote a shadowed op to the real-silicon deep path (default = layer-1 shadow).
 - path: include/jit_hw/api/compute/eltwise_unary/digamma.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `digamma_tile` (+`_init`)'
@@ -2440,7 +2440,7 @@ files:
   summary: forwarding shim → `jit_hw/internal/llk_state.h`
 - path: include/jit_hw/internal/deep_sfpu.h
   section: include/jit_hw/internal/
-  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+  summary: Deep-SFPU bridge — run_unary_sfpu points the sfpi dst_reg cursor at __emule_dst[idst] so a real silicon ckernel_sfpu_<op>.h calculate runs on emule's sfpi backend.
   symbols:
   - {kind: namespace, name: __emule_deep}
   - {kind: global, name: kTileIterations}
