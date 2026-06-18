@@ -93,8 +93,17 @@ public:
 
     void wait(uint32_t target) {
         auto* a = atom();
+        // Mirror the free-function noc_semaphore_wait (dataflow_api.h): for a
+        // monotonic count-up handshake (target > 0), "reached" means >= target,
+        // not exact ==. emule's increments are zero-latency atomics, so a peer can
+        // advance the counter past `target` between two of our polls and an
+        // equality wait would miss it and spin to the watchdog. (Silicon paces
+        // increments over the NOC, so == never misses there.) For the VALID->0
+        // release toggle (target == 0) keep exact equality; a count-up target is
+        // never 0, so the split is unambiguous.
+        auto reached = [target](uint32_t cur) { return target > 0 ? cur >= target : cur == target; };
         uint64_t spins = 0;
-        while (a->load(std::memory_order_acquire) != target) {
+        while (!reached(a->load(std::memory_order_acquire))) {
             if (spins < 64) {
                 // busy-spin
             } else if (spins < 1024) {
