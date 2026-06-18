@@ -76,17 +76,25 @@ ALWI void exp_tile(uint32_t idst, VectorMode vector_mode = VectorMode::RC,
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
         if (!__emule_vector_mode_active(i, vector_mode, iterations)) continue;
         float r = std::exp(__emule_dst[idst][i] * s);
-        // Fully-masked-row degeneracy: SDPA masks out-of-window scores with bf16 -inf
-        // (0xFF80). When an ENTIRE row of a K-chunk is masked, the row's running max is
-        // also -inf, so the softmax max-subtraction computes exp(-inf - (-inf)) =
-        // exp(NaN) = NaN. The mathematically-correct softmax numerator for a masked
-        // entry is exp(-inf)=0, and that K-chunk must contribute nothing (a later
-        // in-window K-chunk — at minimum the causal diagonal — supplies the row's real
-        // output, and the online-softmax correction rescales this chunk's 0 away). So
-        // collapse the NaN to 0, matching silicon's valid (non-NaN) output for these
-        // rows. Partially-masked rows have a finite max, so exp(-inf - finite)=0 already
-        // and never reach here; finite masks (e.g. -1e9) never produce -inf at all.
-        __emule_dst[idst][i] = std::isnan(r) ? 0.0f : r;
+        if constexpr (approx) {
+            // Fully-masked-row degeneracy (APPROX path only — silicon's LUT/polynomial
+            // exp, which makes no IEEE special-value guarantee). SDPA masks out-of-window
+            // scores with bf16 -inf (0xFF80); when an ENTIRE row of a K-chunk is masked,
+            // the row's running max is also -inf, so the softmax max-subtraction computes
+            // exp(-inf - (-inf)) = exp(NaN) = NaN. The mathematically-correct softmax
+            // numerator for a masked entry is exp(-inf)=0, and that K-chunk must contribute
+            // nothing (a later in-window K-chunk — at minimum the causal diagonal —
+            // supplies the row's real output, and the online-softmax correction rescales
+            // this chunk's 0 away). So collapse the NaN to 0, matching silicon's valid
+            // (non-NaN) output for these rows. Partially-masked rows have a finite max, so
+            // exp(-inf - finite)=0 already; finite masks (e.g. -1e9) never produce -inf.
+            __emule_dst[idst][i] = std::isnan(r) ? 0.0f : r;
+        } else {
+            // Accurate path: faithful IEEE semantics (exp(NaN)=NaN, exp(+inf)=+inf,
+            // exp(-inf)=0) — required by ttnn.exp fp32 special-values. The NaN→0 collapse
+            // above is a property of the approx polynomial exp, not the accurate exp.
+            __emule_dst[idst][i] = r;
+        }
     }
 }
 
