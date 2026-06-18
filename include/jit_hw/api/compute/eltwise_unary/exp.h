@@ -23,9 +23,11 @@ enum class InputClamping : uint8_t {
 #include "jit_hw/ckernel_tti_stubs.h"
 
 // SFPU functor dispatcher `_llk_math_eltwise_unary_sfpu_params_` used by SDPA's
-// first-column exp/recip/softplus helpers. NOTE: currently a no-op (does not invoke
-// the functor) — the executed first-column SFPU paths therefore won't compute yet;
-// making it functional (cursor → __emule_dst[idst], run functor) is Issue-3 work.
+// first-column exp/recip/softplus helpers. Functional: it points the sfpi cursor at
+// __emule_dst[idst], resets the cursor/active-lane mask, and invokes the functor —
+// once per active face, and twice under VectorMode::C (the SDPA first-column case) so
+// col-0 rows 0..31 are all covered (mirrors silicon's per-face walk). See
+// llk_math_eltwise_unary_sfpu_params.h for the per-face C-iteration detail.
 #include "jit_hw/llk_math_eltwise_unary_sfpu_params.h"
 
 // p_sfpu constants used by real exp_tile callers
