@@ -153,7 +153,15 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
         if (fresh)
             for (uint32_t r = th; r < 32; r++) __emule_dst[idst][r * 32] = 0.0f;
     } else {
-        // REDUCE_SCALAR: reduce the active region to a single value
+        // REDUCE_SCALAR: reduce the active region to a single value.
+        //
+        // Unlike ROW/COL above, this path uses only the uniform scaler (scaler_tile[0]),
+        // never a per-position mask — and that is faithful, not an oversight. Silicon
+        // restricts per-position masking to ROW/COL; it always feeds REDUCE_SCALAR a
+        // uniform, full-tile scaler (see ttnn/.../kernel_lib/reduce_helpers_dataflow.inl:
+        // static_assert "REDUCE_SCALAR only supports full 32x32 tiles", plus the
+        // "Unused for REDUCE_SCALAR (which always fills the full tile)" note). A masked
+        // partial-tile scalar reduce therefore cannot occur, so there is nothing to drop.
         float acc;
         if constexpr (reduce_type == PoolType::MAX)
             acc = -std::numeric_limits<float>::infinity();
