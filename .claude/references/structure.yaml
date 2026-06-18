@@ -1308,6 +1308,11 @@ files:
 - path: include/jit_hw/api/compute/pack.h
   section: include/jit_hw/api/compute/
   summary: empty shim (pragma-once only)
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: enum, name: PackMode}
+  - {kind: function, name: llk_pack_reduce_mask_config}
+  - {kind: function, name: llk_pack_reduce_mask_clear}
 - path: include/jit_hw/api/compute/pack_untilize.h
   section: include/jit_hw/api/compute/
   summary: '`ckernel::`/`experimental::` `pack_untilize_block`, `pack_untilize_init`, `pack_untilize_dest_init`'
