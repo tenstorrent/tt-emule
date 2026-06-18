@@ -196,6 +196,13 @@ public:
         }
     }
 
+    // ----- is_read_trid_flushed -----
+    // Mirrors upstream Noc::is_read_trid_flushed. emule reads complete inline
+    // (synchronous memcpy), so the bridge always reports flushed.
+    bool is_read_trid_flushed(uint32_t trid) const {
+        return ncrisc_noc_read_with_transaction_id_flushed(noc_id_, trid);
+    }
+
     // ----- async_write -----
 
     template <
