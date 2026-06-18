@@ -293,25 +293,14 @@ files:
   summary: stub of silicon SFPU silu ckernel (emule scalar impl in `api/compute/eltwise_unary/sigmoid.h`)
 - path: include/jit_hw/ckernel_tti_stubs.h
   section: include/jit_hw/
-  summary: 'Compile-only stubs for the raw Tensix SFPU intrinsic surface (TTI_SFP*/SETRWC/STALLWAIT macros, addr_mod_t, p_sfpu/p_setrwc indices, InstrModLoadStore) used by never-instantiated SDPA branches;
-    plus the math:: addr-mod-base hook that aims the sfpi cursor at DST tile 0 for the WH direct-recip path, and an M_LN2 undef for the hosted-env libm collision.'
+  summary: 'Functional 32-lane SFPU interpreter (`__tti` namespace: LReg file + LaneFlags CC mask + SFPLOAD/STORE/MAD/LOADI/ADDI/STOCH_RND/CAST/SETEXP/SETCC/ENCC/INCRWC) that runs the raw-TTI exp polynomial
+    (calculate_exponential_polynomial) so SDPA exp_approx_mode=false works; DST addressing reuses the sfpi cursor. Also defines addr_mod_t, p_sfpu/p_setrwc indices, InstrModLoadStore, the sfpi:: SFPSTOCHRND_MOD1
+    selectors, the math:: addr-mod-base hook for the WH direct-recip path, and an M_LN2 undef for the hosted-env libm collision. BH-only ops (SFPARECIP/SFPGT) stay no-ops.'
   symbols:
-  - {kind: macro, name: TTI_SFPNOP}
-  - {kind: macro, name: TTI_INCRWC}
-  - {kind: macro, name: TT_SFPADDI}
-  - {kind: macro, name: TTI_SFPLOADI}
-  - {kind: macro, name: TTI_SFPLOAD}
-  - {kind: macro, name: TTI_SFPSTORE}
-  - {kind: macro, name: TTI_SFPMAD}
-  - {kind: macro, name: TTI_SFPCAST}
-  - {kind: macro, name: TTI_SFPENCC}
-  - {kind: macro, name: TTI_SFPGT}
-  - {kind: macro, name: TTI_SFPSETCC}
-  - {kind: macro, name: TTI_SFPSETEXP}
-  - {kind: macro, name: TTI_SFPARECIP}
-  - {kind: macro, name: TTI_SFP_STOCH_RND}
-  - {kind: macro, name: TTI_SETRWC}
-  - {kind: macro, name: TTI_STALLWAIT}
+  - {kind: namespace, name: sfpi}
+  - {kind: global, name: SFPSTOCHRND_MOD1_FP32_TO_FP16B}
+  - {kind: global, name: SFPSTOCHRND_MOD1_FP32_TO_UINT8}
+  - {kind: global, name: SFPSTOCHRND_MOD1_FP32_TO_INT8}
   - {kind: namespace, name: p_sfpu}
   - {kind: global, name: LREG0}
   - {kind: global, name: LREG4}
@@ -322,9 +311,49 @@ files:
   - {kind: struct, name: addr_mod_t}
   - {kind: enum, name: InstrModLoadStore}
   - {kind: struct, name: p_setrwc}
+  - {kind: namespace, name: __tti}
+  - {kind: global, name: NLANE}
+  - {kind: global, name: laneflag}
+  - {kind: global, name: use_flags}
+  - {kind: function, name: lane_active}
+  - {kind: function, name: as_f}
+  - {kind: function, name: as_u}
+  - {kind: function, name: ru}
+  - {kind: function, name: rf}
+  - {kind: function, name: wu}
+  - {kind: function, name: wf}
+  - {kind: function, name: round_ties_away}
+  - {kind: function, name: sfpmad}
+  - {kind: function, name: sfploadi}
+  - {kind: function, name: sfpaddi}
+  - {kind: function, name: stochrnd}
+  - {kind: function, name: sfpcast}
+  - {kind: function, name: sfpsetexp}
+  - {kind: function, name: sfpsetcc}
+  - {kind: function, name: sfpencc}
+  - {kind: function, name: sfpnop}
+  - {kind: function, name: sfpload}
+  - {kind: function, name: sfpstore}
+  - {kind: function, name: incrwc}
   - {kind: namespace, name: math}
   - {kind: function, name: set_addr_mod_base}
   - {kind: function, name: clear_addr_mod_base}
+  - {kind: macro, name: TTI_SFPNOP}
+  - {kind: macro, name: TTI_INCRWC}
+  - {kind: macro, name: TT_SFPADDI}
+  - {kind: macro, name: TTI_SFPLOADI}
+  - {kind: macro, name: TTI_SFPLOAD}
+  - {kind: macro, name: TTI_SFPSTORE}
+  - {kind: macro, name: TTI_SFPMAD}
+  - {kind: macro, name: TTI_SFPCAST}
+  - {kind: macro, name: TTI_SFPENCC}
+  - {kind: macro, name: TTI_SFPSETCC}
+  - {kind: macro, name: TTI_SFPSETEXP}
+  - {kind: macro, name: TTI_SFP_STOCH_RND}
+  - {kind: macro, name: TTI_SFPGT}
+  - {kind: macro, name: TTI_SFPARECIP}
+  - {kind: macro, name: TTI_SETRWC}
+  - {kind: macro, name: TTI_STALLWAIT}
 - path: include/jit_hw/core_config.h
   section: include/jit_hw/
   summary: '`enum class ProgrammableCoreType`; `MaxProcessorsPerCoreType`/`MaxProcessorsForThreadingVariables`/`MAX_NUM_NOCS_PER_CORE` constants'
@@ -373,6 +402,9 @@ files:
   symbols:
   - {kind: macro, name: __EMULE_JIT_MODE}
   - {kind: macro, name: KERNEL_BUILD}
+  - {kind: namespace, name: std}
+  - {kind: function, name: min}
+  - {kind: function, name: max}
   - {kind: macro, name: DM_DEDICATED_NOC}
   - {kind: macro, name: DM_DYNAMIC_NOC}
   - {kind: function, name: tensix_sync}
