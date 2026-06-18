@@ -36,6 +36,8 @@ TENSOR_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/tensor"
 PCA_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/per_core_allocation"
 BENCH_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/benchmarks"
 CONV_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/conv"
+SDPA_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/sdpa"
+NIGHTLY_SDPA_TEST_DIR="$TT_METAL_DIR/tests/ttnn/nightly/unit_tests/operations/sdpa"
 
 GTEST_XML_DIR="${GTEST_XML_DIR:-}"
 [ -n "$GTEST_XML_DIR" ] && mkdir -p "$GTEST_XML_DIR"
@@ -373,6 +375,16 @@ run_pytest "reduce_test_argmax"              "$REDUCE_TEST_DIR/test_argmax.py"
 
 # ttnn.sort is removed from the regression: multi-core sort hits the
 # Semaphore::wait watchdog abort under emule — tracked in tt-emule #200.
+
+# ttnn.transformer.scaled_dot_product_attention — SDPA prefill family (PR #177 bring-up).
+# Full files; the unrunnable configs self-skip (prefill: profiling/OOM guard on
+# test_sdpa_tt + test_sdpa_causal; chunked/joint: trace + large-s). No -k needed —
+# every runnable config passes. test_sdpa_prefill exercises the non-streaming paths
+# (mask/sink/sliding); chunked is the streaming + paged-KV path; joint is the
+# image+text MMDiT path.
+run_pytest "sdpa_test_prefill"  "$SDPA_TEST_DIR/test_sdpa_prefill.py"          # 4 passed, 2 skipped
+run_pytest "sdpa_test_chunked"  "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_chunked.py"  # 18 passed, 16 skipped
+run_pytest "sdpa_test_joint"    "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_joint.py"    # 168 passed, 32 skipped
 
 run_pytest "matmul_test_linear" "$MATMUL_TEST_DIR/test_linear.py" -k 'test_linear_fp32_acc or test_vector_linear'
 
