@@ -25,8 +25,16 @@ extern uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
 
 struct UnicastEndpoint {
     uint64_t get_noc_unicast_addr(uint32_t noc_x, uint32_t noc_y,
-                                   uint32_t addr, uint8_t noc) const {
-        return ::get_noc_addr(noc_x, noc_y, addr, noc);
+                                   uint32_t addr, uint8_t /*noc*/) const {
+        // addr is already a final NOC-local offset (e.g. decoded via NOC_LOCAL_ADDR_OFFSET in
+        // enhanced_noc_async_read, or a get_noc_addr_from_bank_id DRAM offset >2MB). Recombine
+        // raw (= silicon NOC_XY_ADDR) — do NOT route through get_noc_addr/__emule_addr_to_offset,
+        // which masks to 2MB in pool mode and corrupts DRAM offsets (see the __emule_addr_to_offset
+        // contract in dataflow_api.h). __emule_resolve_noc_addr applies the correct
+        // worker-slot-mask vs DRAM-raw handling.
+        return (uint64_t(noc_y & 0x3F) << (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) |
+               (uint64_t(noc_x & 0x3F) << NOC_ADDR_LOCAL_BITS) |
+               uint64_t(addr);
     }
 };
 
