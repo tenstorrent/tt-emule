@@ -216,6 +216,13 @@ def main() -> int:
     passed, failed = parse_xml(args.xml_dir)
     universe = passed | set(failed.keys())
 
+    # A run that produced no test results at all is never a pass: a missing test
+    # binary or a regression script that aborted before any gtest ran would
+    # otherwise classify green (no failures observed). Fail loudly instead.
+    if not universe:
+        print(f"::error::no test results found in {args.xml_dir} — regression did not run")
+        return 1
+
     # No --allowlist => empty allowlist => zero-tolerance (all tests must pass).
     if args.allowlist is None:
         allowlist_patterns, flaky_patterns = [], set()
