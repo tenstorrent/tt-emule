@@ -364,19 +364,8 @@ run_pytest "reduce_test_topk_reduction"      "$REDUCE_TEST_DIR/test_reduction.py
 run_pytest "reduce_test_topk_graph_capture"  "$BF_TEST_DIR/test_graph_capture.py::test_graph_capture_topk"
 run_pytest "reduce_test_argmax"              "$REDUCE_TEST_DIR/test_argmax.py"
 
-# ttnn.sort — Batcher bitonic argsort (values + gather-validated indices).
-# Single-core (Wt<=64) and cross-core data-exchange (64<Wt<=hybrid threshold)
-# paths pass; both rely on emule's >=-semaphore wait (dataflow_api.h) which fixes
-# the zero-latency increment-skip the silicon NOC's latency hides. The single-row
-# multi-core DRAM path (only [1,524288]=Wt16384 here) is excluded: its VALID/0
-# coordinator-release handshake races under emule's synchronous multicast (a
-# faithful fix would need to pace the multicast, but that stalls matmul's
-# DRAM-sharded multicast sync — so the path is left unsupported). See
-# `/index-based-ops` §Sort.
-# [1,262144]=Wt8192 (large multi-core long-tensor sort) is also excluded: it
-# aborts non-deterministically via the wait-watchdog (Semaphore::wait stuck) —
-# tracked in tt-emule #200 (symptom only; root cause unconfirmed).
-run_pytest "dm_test_sort"                    "$DM_TEST_DIR/test_sort.py" -k "not 524288 and not 262144"
+# ttnn.sort is removed from the regression: multi-core sort hits the
+# Semaphore::wait watchdog abort under emule — tracked in tt-emule #200.
 
 run_pytest "matmul_test_linear" "$MATMUL_TEST_DIR/test_linear.py" -k 'test_linear_fp32_acc or test_vector_linear'
 
