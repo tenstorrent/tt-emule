@@ -283,9 +283,9 @@ FORCE_INLINE void noc_async_write_tile(
 }
 
 // ---- NOC transfer alignment check (gated by TT_METAL_EMULE_ASAN) ----
-// __emule_check_noc_{read,write}_alignment live in asan_dataflow.h (included
+// __emule_check_noc_{read,write}_alignment live in asan/asan_dataflow.h (included
 // here, after the NOC params + __emule_noc_addr_is_dram decl they depend on).
-#include "jit_hw/asan/asan_dataflow.h"
+#include "jit_hw/api/dataflow/asan/asan_dataflow.h"
 
 // ---- Raw NOC read/write ----
 

@@ -691,15 +691,6 @@ files:
   - {kind: global, name: my_y}
   - {kind: global, name: __emule_logical_x}
   - {kind: global, name: __emule_logical_y}
-  - {kind: global, name: __emule_pending_noc_reads}
-  - {kind: global, name: __emule_cb_reserve_file}
-  - {kind: global, name: __emule_cb_reserve_line}
-  - {kind: global, name: __emule_cb_wait_file}
-  - {kind: global, name: __emule_cb_wait_line}
-  - {kind: global, name: __emule_cb_reserved_pages}
-  - {kind: global, name: __emule_cb_waited_pages}
-  - {kind: global, name: __emule_cb_reserve_dangling}
-  - {kind: global, name: __emule_cb_wait_dangling}
   - {kind: global, name: __emule_cb_self_consume_mask}
   - {kind: global, name: unpack_tile_size}
   - {kind: global, name: unpack_src_format}
@@ -2625,16 +2616,32 @@ files:
 - path: include/jit_hw/tt_metal/fabric/hw/inc/mesh/api.h
   section: include/jit_hw/tt_metal/fabric/hw/inc/mesh/
   summary: fabric include-path shim → `jit_hw/__emule_fabric_stubs.h` (multichip fabric out of scope)
-- path: include/jit_hw/asan/asan_dataflow.h
+- path: include/jit_hw/asan/asan_cb.h
   section: include/jit_hw/asan/
-  summary: 'NOC Transfer Alignment sanitizer (`__emule_check_noc_read_alignment` / `__emule_check_noc_write_alignment`), split out of dataflow_api.h; per-side absolute alignment (L1 16B, DRAM read 32/64B, DRAM write 16B). Gated by TT_METAL_EMULE_ASAN. See docs/ASAN.md §10.'
+  summary: 'CB-op sanitizer bookkeeping lifted out of cb_api.h: `__emule_asan_cb_on_{reserve,push,wait,pop}` helpers (Dirty-CB dangling flags + call sites, CB-Boundary window counters, always-on Reservation
+    Overflow check, gated NoC-read-pending race check) and the thread-local state they own. See docs/ASAN.md.'
   symbols:
-  - {kind: extern_c, name: __emule_noc_addr_is_dram}
-  - {kind: function, name: __emule_check_noc_read_alignment}
-  - {kind: function, name: __emule_check_noc_write_alignment}
+  - {kind: global, name: my_x}
+  - {kind: global, name: my_y}
+  - {kind: global, name: __emule_logical_x}
+  - {kind: global, name: __emule_logical_y}
+  - {kind: global, name: __emule_pending_noc_reads}
+  - {kind: global, name: __emule_cb_reserve_file}
+  - {kind: global, name: __emule_cb_reserve_line}
+  - {kind: global, name: __emule_cb_wait_file}
+  - {kind: global, name: __emule_cb_wait_line}
+  - {kind: global, name: __emule_cb_reserved_pages}
+  - {kind: global, name: __emule_cb_waited_pages}
+  - {kind: global, name: __emule_cb_reserve_dangling}
+  - {kind: global, name: __emule_cb_wait_dangling}
+  - {kind: function, name: __emule_asan_cb_on_reserve}
+  - {kind: function, name: __emule_asan_cb_on_push}
+  - {kind: function, name: __emule_asan_cb_on_wait}
+  - {kind: function, name: __emule_asan_cb_on_pop}
 - path: include/jit_hw/asan/asan_l1_checks.h
   section: include/jit_hw/asan/
-  summary: 'The per-access L1 sanitizer checks lifted out of the __emule_local_l1_to_ptr chokepoint: plain `__emule_l1_translate` + semaphore/CB-resolve(+boundary)/OOB-tensor/padding helpers, and the sanitizer thread-locals they consume. Reached only when TT_METAL_EMULE_ASAN is on. See docs/ASAN.md.'
+  summary: 'The per-access L1 sanitizer checks lifted out of the __emule_local_l1_to_ptr chokepoint: plain `__emule_l1_translate` + semaphore/CB-resolve(+boundary)/OOB-tensor/padding helpers, and the sanitizer
+    thread-locals they consume. Reached only when TT_METAL_EMULE_ASAN is on. See docs/ASAN.md.'
   symbols:
   - {kind: global, name: __emule_bridge_l1}
   - {kind: global, name: __emule_sem_l1_range_start}
@@ -2657,7 +2664,8 @@ files:
   - {kind: function, name: __emule_asan_check_padding}
 - path: include/jit_hw/asan/emule_asan.h
   section: include/jit_hw/asan/
-  summary: '`__emule_asan_enabled()` master switch (per-launch thread_local cache) + the unified `__emule_asan_panic()` diagnostic trace (kernel/core/processor context + symbolized backtrace); definition behind EMULE_ASAN_IMPLEMENTATION. Moved here from jit_hw/ root.'
+  summary: '`__emule_asan_enabled()` master switch (per-launch thread_local cache) + the unified `__emule_asan_panic()` diagnostic trace (kernel/core/processor context + symbolized backtrace); definition
+    behind EMULE_ASAN_IMPLEMENTATION. Moved here from jit_hw/ root.'
   symbols:
   - {kind: function, name: __emule_asan_enabled}
   - {kind: global, name: __emule_kernel_name}
@@ -2672,3 +2680,11 @@ files:
   - {kind: function, name: __emule_asan_symbolize}
   - {kind: function, name: __emule_asan_collapse_angles}
   - {kind: function, name: __emule_asan_print_trace}
+- path: include/jit_hw/api/dataflow/asan/asan_dataflow.h
+  section: include/jit_hw/api/dataflow/asan/
+  summary: NOC Transfer Alignment sanitizer (`__emule_check_noc_read_alignment` / `__emule_check_noc_write_alignment`), split out of dataflow_api.h; per-side absolute alignment (L1 16B, DRAM read 32/64B,
+    DRAM write 16B). Gated by TT_METAL_EMULE_ASAN. See docs/ASAN.md §10.
+  symbols:
+  - {kind: extern_c, name: __emule_noc_addr_is_dram}
+  - {kind: function, name: __emule_check_noc_read_alignment}
+  - {kind: function, name: __emule_check_noc_write_alignment}

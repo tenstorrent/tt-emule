@@ -9,6 +9,7 @@
 #include "jit_hw/emule_cb_state.h"
 #include "jit_hw/emule_dfb_state.h"
 #include "jit_hw/asan/emule_asan.h"
+#include "jit_hw/asan/asan_cb.h"            // CB-op sanitizer bookkeeping helpers + state
 #include "jit_hw/api/compute/common_globals.h"
 #include "jit_hw/emule_wait.h"
 #include "jit_hw/internal/emule_cb_ptr.h"   // per-RISC CB pointers + cb_addr_shift
@@ -22,47 +23,11 @@ extern thread_local uint8_t my_x[2];
 extern thread_local uint8_t my_y[2];
 extern thread_local uint32_t __emule_logical_x;
 extern thread_local uint32_t __emule_logical_y;
-extern thread_local uint32_t __emule_pending_noc_reads;
 
-// Per-CB source location of the most recent cb_reserve_back / cb_wait_front, so
-// the post-exit Dirty-CB check (which fires after the kernel has unwound off the
-// stack and thus has no kernel frame to backtrace) can still name the kernel
-// file:line of the unmatched reserve/wait. Captured cheaply at the call site via
-// __builtin_FILE/__builtin_LINE default args (compile-time; respects #line, so
-// it resolves to the real kernel source).
-extern thread_local const char* __emule_cb_reserve_file[32];
-extern thread_local uint32_t __emule_cb_reserve_line[32];
-extern thread_local const char* __emule_cb_wait_file[32];
-extern thread_local uint32_t __emule_cb_wait_line[32];
-
-// CB write/read *window* page counters (defined in the runner). These track how
-// many pages are reserved ahead of / waited behind the FIFO pointer and are read
-// by the CB Boundary check (jit_kernel_stubs.hpp / dataflow_api.h) as the active
-// write/read window size. Declared here — not only in jit_kernel_stubs.hpp — so
-// cb_api.h is self-contained: stubs includes cb_api.h before its own
-// declarations, so the reserve/push/wait/pop bodies below would otherwise see
-// them undeclared. NOTE: these are the *window* counters, not the Dirty-CB
-// leak signal — see __emule_cb_reserve_dangling below.
-extern thread_local uint32_t __emule_cb_reserved_pages[32];
-extern thread_local uint32_t __emule_cb_waited_pages[32];
-
-// Dirty-CB leak signal (defined in the runner), decoupled from the window
-// counters above. `reserve_dangling[cb]` is set true by cb_reserve_back and
-// cleared by cb_push_back; `wait_dangling[cb]` is set by cb_wait_front and
-// cleared by cb_pop_front. At kernel exit the Dirty-CB sweep flags a CB only
-// when a flag is still set — i.e. a cb_reserve_back with NO following
-// cb_push_back (or a cb_wait_front with no following cb_pop_front).
-//
-// Why a flag and not the window count: on silicon cb_reserve_back is a
-// non-cumulative free-space *wait* — it claims nothing and creates no
-// obligation to push exactly n. Legitimate lookahead/double-buffer producers
-// (e.g. the DRAM-sharded matmul in1 reader) reserve more than they push every
-// iteration as headroom for in-flight reads, yet push every block they produce.
-// Their net "reserved − pushed" is non-zero at exit but nothing is stranded, so
-// the old cumulative count false-positived. A trailing dangling reserve (a
-// reserve that no push ever follows) is the faithful "forgot to hand off" signal.
-extern thread_local bool __emule_cb_reserve_dangling[32];
-extern thread_local bool __emule_cb_wait_dangling[32];
+// The CB-op sanitizer state (Dirty-CB dangling flags + call sites, CB-Boundary
+// window counters) and the per-op `__emule_asan_cb_on_*` helpers that maintain
+// it live in asan/asan_cb.h; the cb_* ops below call those helpers so the CB
+// sync logic here stays uncluttered.
 
 // cb_addr_shift (16-byte fifo-pointer encoding) is defined in emule_cb_ptr.h.
 
@@ -179,32 +144,16 @@ inline void cb_reserve_back(
     uint32_t cb_id, uint32_t n,
     const char* __site_file = __builtin_FILE(), uint32_t __site_line = __builtin_LINE()) {
     auto& cb = __emule_cbs[cb_id];
-    // Record the call site for the Dirty-CB check (see __emule_cb_reserve_file).
-    __emule_cb_reserve_file[cb_id] = __site_file;
-    __emule_cb_reserve_line[cb_id] = __site_line;
-    // A reserve is now outstanding; a following cb_push_back clears it. Set here
-    // (before the fast-path returns) so every reserve path is covered. See the
-    // __emule_cb_reserve_dangling rationale in the declarations above.
-    __emule_cb_reserve_dangling[cb_id] = true;
-    // Always on: gating this would deadlock the CV wait below. See ASAN.md.
-    if (n > cb.num_pages) {
-        __emule_asan_panic(
-                "[ASAN ERROR] CB Reservation Overflow: CB %u has %u total pages, "
-                "but kernel requested to reserve %u pages. This would hang on silicon! "
-                "(page_size=%u) [phys (%u,%u) logical (%u,%u)]\n",
-                cb_id, cb.num_pages, n, cb.page_size,
-                my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
-    }
+    // ASAN: Dirty-CB site/flag, always-on Reservation Overflow check, reserve
+    // window. (__emule_pack_offset is intentionally NOT reset here — it is reset
+    // by cb_push_back; silicon pack.h: the sequential pack write pointer "is reset
+    // after cb_push_back", so a reserve_back without an intervening push keeps
+    // advancing, as the multi-core topk final kernel needs.)
+    __emule_asan_cb_on_reserve(cb_id, n, __site_file, __site_line);
     // This thread produces cb_id (see __emule_cb_self_produce_mask).
     __emule_cb_self_produce_mask |= (1u << cb_id);
-    // __emule_pack_offset is reset by cb_push_back, NOT here. Per silicon
-    // pack.h, the sequential pack write pointer "is reset after cb_push_back",
-    // so reserve_back calls without an intervening push_back keep advancing —
-    // required by the multi-core topk final kernel (reserve_back(1) per tile +
-    // one trailing push_back(Wt)).
-    // Lock-free fast path (safe for SPSC — only consumer decrements occupied)
+    // Lock-free fast path (safe for SPSC — only consumer decrements occupied).
     if ((cb.num_pages - cb.occupied.load(std::memory_order_acquire)) >= n) {
-        __emule_cb_reserved_pages[cb_id] += n;
         return;
     }
     // Self-recycled CB: this thread also consumes it (called cb_wait_front), so
@@ -212,7 +161,6 @@ inline void cb_reserve_back(
     // recycle (wait_front; pack_tile<true>; reserve_back; pop_front; push_back).
     // emule runs compute single-threaded; silicon overlaps UNPACK/PACK.
     if ((__emule_cb_self_consume_mask >> cb_id) & 1u) {
-        __emule_cb_reserved_pages[cb_id] += n;
         return;
     }
     std::unique_lock<std::mutex> lk(cb.mu);
@@ -227,22 +175,12 @@ inline void cb_reserve_back(
                 my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
         std::abort();
     }
-    __emule_cb_reserved_pages[cb_id] += n;
 }
 
 inline void cb_push_back(uint32_t cb_id, uint32_t n) {
-    // A push hands off the producer's data, clearing any outstanding reserve for
-    // the Dirty-CB leak signal (decoupled from the window count below). Any push
-    // clears it: a lookahead producer that reserves more than it pushes each
-    // iteration is correct on silicon as long as a push follows its last reserve.
-    __emule_cb_reserve_dangling[cb_id] = false;
-    // Shrink the reserved window before the FIFO advance — keeps any concurrent
-    // boundary check consistent.
-    if (n <= __emule_cb_reserved_pages[cb_id]) {
-        __emule_cb_reserved_pages[cb_id] -= n;
-    } else {
-        __emule_cb_reserved_pages[cb_id] = 0;
-    }
+    // ASAN: clear the dangling reserve + shrink the reserve window before the
+    // FIFO advance.
+    __emule_asan_cb_on_push(cb_id, n);
     // Advance this thread's own write pointer (mirrors the per-RISC write ptr on
     // silicon), then bump the shared occupied semaphore.
     __emule_cb_advance_wr(cb_id, n);
@@ -279,12 +217,8 @@ inline void cb_wait_front(
     uint32_t cb_id, uint32_t n,
     const char* __site_file = __builtin_FILE(), uint32_t __site_line = __builtin_LINE()) {
     auto& cb = __emule_cbs[cb_id];
-    // Record the call site for the Dirty-CB check (see __emule_cb_wait_file).
-    __emule_cb_wait_file[cb_id] = __site_file;
-    __emule_cb_wait_line[cb_id] = __site_line;
-    // A wait is now outstanding; a following cb_pop_front clears it (consumer
-    // analog of the reserve/push dangling flag). See declarations above.
-    __emule_cb_wait_dangling[cb_id] = true;
+    // ASAN: record site, mark wait outstanding, grow the waited window (max()).
+    __emule_asan_cb_on_wait(cb_id, n, __site_file, __site_line);
     if (n > cb.num_pages) {
         fprintf(stderr, "EMULE BUG: cb_wait_front(cb_id=%u, n=%u) requests more than capacity "
                 "(num_pages=%u, page_size=%u) [phys (%u,%u) logical (%u,%u)]\n",
@@ -298,11 +232,6 @@ inline void cb_wait_front(
     __emule_cb_self_consume_mask |= (1u << cb_id);
     // Lock-free fast path (safe for SPSC — only producer increments occupied).
     if (cb.occupied.load(std::memory_order_acquire) >= n) {
-        // max(), not += — overlapping waits before a pop don't grow the
-        // consumable region.
-        if (n > __emule_cb_waited_pages[cb_id]) {
-            __emule_cb_waited_pages[cb_id] = n;
-        }
         return;
     }
     // Self-produced CB: this thread also fills it (called cb_reserve_back/
@@ -325,32 +254,13 @@ inline void cb_wait_front(
                 my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
         std::abort();
     }
-    if (n > __emule_cb_waited_pages[cb_id]) {
-        __emule_cb_waited_pages[cb_id] = n;
-    }
 }
 
 inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
-    // All outstanding NoC reads must be barriered before a pop frees the page:
-    // popping releases the page for the producer to refill, and a read still
-    // landing into it would race the refill (consumer reads stale/torn data on
-    // silicon). cb_push_back has no such requirement — only writes precede a
-    // push, so an unbarriered read there is harmless.
-    if (__emule_asan_enabled() && __emule_pending_noc_reads > 0) {
-        __emule_asan_panic(
-                "[ASAN ERROR] Race Condition: cb_pop_front(cb_id=%u) called while a NoC read is still pending "
-                "(%u outstanding) — missing noc_async_read_barrier()\n",
-                cb_id, __emule_pending_noc_reads);
-    }
-    // A pop releases the consumer's claim, clearing any outstanding wait for the
-    // Dirty-CB leak signal (decoupled from the window count below).
-    __emule_cb_wait_dangling[cb_id] = false;
-    // Saturate at 0; popping more than waited is suspect but mustn't underflow.
-    if (n <= __emule_cb_waited_pages[cb_id]) {
-        __emule_cb_waited_pages[cb_id] -= n;
-    } else {
-        __emule_cb_waited_pages[cb_id] = 0;
-    }
+    // ASAN: NoC-read-pending race check (a pop frees the page for the producer to
+    // refill, so all reads must be barriered first), then clear the dangling wait
+    // + shrink the waited window.
+    __emule_asan_cb_on_pop(cb_id, n);
     // Advance this thread's own read pointer (mirrors the per-RISC read ptr on
     // silicon), then drop the shared occupied semaphore.
     __emule_cb_advance_rd(cb_id, n);

@@ -67,9 +67,10 @@ When the switch is off:
   `__emule_pending_noc_reads` counter is only incremented when the switch is
   on, so they too cost nothing when off.
 
-The one exception is **CB Reservation Overflow** in `cb_reserve_back`,
-which is always on. It is structurally load-bearing — see
-`cb_api.h:71` and the runner doc for why.
+The one exception is **CB Reservation Overflow** (in
+`__emule_asan_cb_on_reserve`, `asan/asan_cb.h`), which is always on. It is
+structurally load-bearing — gating it would let an over-reserve deadlock on the
+space wait instead of reporting a clear error.
 
 ## Live-range registries
 
@@ -248,7 +249,7 @@ requirement: only writes precede a push, so an unbarriered read there
 is harmless.
 
 **NOC Transfer Alignment** — `__emule_check_noc_{read,write}_alignment` in
-`api/dataflow/asan_dataflow.h`, called at the top of `noc_async_read`/
+`api/dataflow/asan/asan_dataflow.h`, called at the top of `noc_async_read`/
 `noc_async_write`. Each endpoint is checked against its OWN memory-type
 alignment (L1 = 16B; DRAM read = 32B WH / 64B BH; DRAM write = 16B), not a
 relative "low bits of src and dst must match" rule — the two sides have
@@ -395,11 +396,16 @@ Kernel side (tt-emule/include/jit_hw/):
   thread-locals they consume.
 - `jit_kernel_stubs.hpp` — extern thread_locals, `__emule_dram_ptr`; includes
   `internal/emule_l1_to_ptr.h` for the chokepoint.
-- `api/cb_api.h` — CB ops with the always-on Reservation Overflow check and the
-  gated NoC Barrier Missing check.
+- `api/cb_api.h` — the CB sync ops (`cb_reserve_back` / `cb_push_back` /
+  `cb_wait_front` / `cb_pop_front`); their sanitizer bookkeeping is delegated to
+  `asan/asan_cb.h`.
+- `asan/asan_cb.h` — the `__emule_asan_cb_on_{reserve,push,wait,pop}` helpers
+  (Dirty-CB dangling flags + call sites, CB-Boundary window counters, the
+  always-on Reservation Overflow check, the gated NoC-read-pending race check)
+  and the thread-local state they own.
 - `api/dataflow/dataflow_api.h` — includes the chokepoint and
-  `asan/asan_dataflow.h`.
-- `asan/asan_dataflow.h` — NOC transfer alignment checks.
+  `api/dataflow/asan/asan_dataflow.h`.
+- `api/dataflow/asan/asan_dataflow.h` — NOC transfer alignment checks.
 - `asan/emule_asan.h` — `__emule_asan_enabled()` (master switch) + the unified
   diagnostic trace. `__emule_asan_panic()` (which every check calls instead of
   `abort()`) prints the kernel/core/processor context + a symbolized backtrace.
