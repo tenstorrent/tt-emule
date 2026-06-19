@@ -319,6 +319,14 @@ Specializations live in:
 | `MulticastEndpoint` | `endpoints.h` | raw mcast addr (passed to `__emule_multicast_write`) |
 | `AllocatorBank<L1>` | `endpoints.h` | `__emule_resolve_noc_addr(get_noc_addr_from_bank_id<false>(bank_id, addr, noc))` |
 | `AllocatorBank<DRAM>` | `endpoints.h` | `__emule_resolve_noc_addr(get_noc_addr_from_bank_id<true>(bank_id, addr, noc))` |
+| `TensorAccessor<DSpec>` | `noc_traits.h` | `__emule_resolve_noc_addr(acc.get_noc_addr(page_id, off, noc))` |
+| `tensor_accessor::Page` | `noc_traits.h` | `__emule_resolve_noc_addr(page.noc_addr() + off)` |
+| `ShardView<Accessor>` | `noc_traits.h` | `__emule_resolve_noc_addr(acc.get_noc_addr(shard_id, off, noc))` |
+| `AbstractTensorAccessorWrapper` | `noc_traits.h` | `__emule_resolve_noc_addr(acc.get_noc_addr(page_id, off, noc))` |
+
+The tensor-accessor specializations in `noc_traits.h` are made visible to every
+dataflow kernel transitively through `circular_buffer.h` (mirroring upstream's
+`circular_buffer.h → noc_zero_dram.inl → noc_traits.h` chain).
 
 The `Noc::async_read<opts>(Src, Dst, size, src_args, dst_args, noc_opts)`
 template walks the traits to resolve both pointers, then `memcpy(size)`.

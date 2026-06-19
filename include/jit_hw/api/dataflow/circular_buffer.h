@@ -14,6 +14,7 @@
 
 #include "jit_hw/api/cb_api.h"
 #include "jit_hw/api/dataflow/noc.h"
+#include "api/tensor/noc_traits.h"  // make TensorAccessor/AbstractTensorAccessorWrapper noc_traits visible (mirrors upstream CB→noc_zero_dram.inl chain)
 #include "api/lock.h"    // RAII Lock — reachable via tt_metal/hw/inc/
 
 class CircularBuffer {
