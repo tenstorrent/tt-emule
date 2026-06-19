@@ -48,6 +48,6 @@
 // `#ifndef noc_mode` guard only tests *macros*, not variables, so defining it in
 // both headers would be an ODR/redefinition error in any TU including both.
 // jit_kernel_stubs.hpp is part of every kernel TU prelude, so the symbol is
-// always available where kernels need it. See docs/noc-mode-divergence.md.
+// always available where kernels need it. See docs/noc-emulation.md §8.3.
 
 #endif  // _RISC_COMMON_H_

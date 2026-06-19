@@ -166,7 +166,7 @@ extern thread_local uint32_t __emule_my_thread_id;
 // formula (noc_index = NOC_INDEX, noc_mode = NOC_MODE): the host emits these per
 // kernel type (kernel.cpp::process_defines) — BRISC→NOC0, NCRISC→NOC1, mode
 // DM_DEDICATED_NOC by default. emule's compute wrappers emit neither macro, so
-// default them. See docs/noc-mode-divergence.md.
+// default them. See docs/noc-emulation.md §8.3.
 #ifndef NOC_INDEX
 #define NOC_INDEX 0
 #endif
