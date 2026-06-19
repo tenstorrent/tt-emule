@@ -6,149 +6,34 @@
 
 // Single source of truth for the kernel L1 access chokepoint. Every kernel L1
 // access flows through __emule_local_l1_to_ptr, which converts a firmware-style
-// L1 offset (or an absolute host pointer) to a dereferenceable host pointer and,
-// when ASAN is on, runs the per-access sanitizer checks (semaphore / CB-boundary
-// / OOB-tensor / padding). Previously this function was duplicated verbatim in
-// jit_kernel_stubs.hpp and dataflow_api.h; both now include this header instead.
+// L1 offset (or an absolute host pointer) to a dereferenceable host pointer.
+// Previously this function was duplicated verbatim in jit_kernel_stubs.hpp and
+// dataflow_api.h; both now include this header instead.
 //
-// See docs/ASAN.md ("Kernel-side checks") for the check order, the slot-mask
-// offset rationale, and the accepted sharded-tensor false-negative limitation.
+// The function stays thin: with ASAN off it does only the plain translation;
+// with ASAN on it dispatches to the per-access check helpers in
+// asan/asan_l1_checks.h. See docs/ASAN.md "Kernel-side checks".
 
 #include <cstdint>
 
-#include "jit_hw/emule_cb_state.h"          // __emule_cbs (CBSyncState*)
-#include "jit_hw/internal/emule_cb_ptr.h"   // __emule_cb_wr_page / __emule_cb_rd_page
-#include "jit_hw/emule_asan.h"              // __emule_asan_panic / __emule_asan_enabled
-
-// L1 bridge base + sanitizer thread-locals consumed by the chokepoint. Defined
-// in the runner (emulated_program_runner.cpp / kernel_runner.cpp) and threaded
-// in per launch; see docs/ASAN.md "Thread-local handshake".
-extern thread_local uint8_t* __emule_bridge_l1;
-extern thread_local uint32_t __emule_sem_l1_range_start;
-extern thread_local uint32_t __emule_sem_l1_range_end;
-extern thread_local uint32_t __emule_l1_unreserved_base;
-extern thread_local const uint64_t* __emule_l1_tensor_ranges;
-extern thread_local uint32_t __emule_l1_tensor_ranges_count;
-extern thread_local const uint64_t* __emule_l1_padding_ranges;
-extern thread_local uint32_t __emule_l1_padding_ranges_count;
-extern thread_local uint64_t* __emule_l1_resolved_ranges;
-extern thread_local uint32_t* __emule_l1_resolved_ranges_count;
-extern thread_local uint32_t __emule_l1_resolved_ranges_capacity;
-extern thread_local uint32_t __emule_cb_reserved_pages[32];
-extern thread_local uint32_t __emule_cb_waited_pages[32];
-extern thread_local bool __emule_cb_boundary_strict;
+#include "jit_hw/asan/emule_asan.h"       // __emule_asan_enabled
+#include "jit_hw/asan/asan_l1_checks.h"   // __emule_l1_translate + check helpers
 
 inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
-    // Master-switch no-op: with ASAN off, skip every check and do only the plain
-    // translation (identical to the tail each path below returns). See ASAN.md.
     if (!__emule_asan_enabled()) {
-        uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
-        if (l1_addr >= l1_base) {
-            return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
-        }
-        return __emule_bridge_l1 + l1_addr;
+        return __emule_l1_translate(l1_addr);
     }
-    // Check 1 — Illegal Semaphore Access.
-    if (__emule_sem_l1_range_end > 0 &&
-        l1_addr >= __emule_sem_l1_range_start && l1_addr < __emule_sem_l1_range_end) {
-        __emule_asan_panic(
-                "[ASAN ERROR] Illegal Semaphore Access: Offset 0x%x is inside the reserved Semaphore region [0x%x, 0x%x)\n",
-                l1_addr, __emule_sem_l1_range_start, __emule_sem_l1_range_end);
-    }
-    // Check 2 — CB Boundary Violation. Matched before OOB: CB memory isn't in
-    // LiveL1Ranges and would otherwise look out-of-bounds.
-    if (__emule_cbs != nullptr) {
-        for (uint32_t cb_id = 0; cb_id < 32; ++cb_id) {
-            auto& cb = __emule_cbs[cb_id];
-            if (cb.num_pages == 0) continue;
-            uint32_t cb_start = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(cb.base));
-            uint32_t cb_size = cb.num_pages * cb.page_size;
-            if (l1_addr < cb_start || l1_addr >= cb_start + cb_size) continue;
-            if (__emule_cb_boundary_strict) {
-                uint32_t access_page = (l1_addr - cb_start) / cb.page_size;
-                uint32_t write_idx = __emule_cb_wr_page(cb_id);
-                uint32_t read_idx  = __emule_cb_rd_page(cb_id);
-                uint32_t write_dist = (access_page + cb.num_pages - write_idx) % cb.num_pages;
-                uint32_t read_dist  = (access_page + cb.num_pages - read_idx)  % cb.num_pages;
-                uint32_t reserved = __emule_cb_reserved_pages[cb_id];
-                uint32_t waited   = __emule_cb_waited_pages[cb_id];
-                // Fire only inside an ACTIVE reserve/wait window; raw get_*_ptr
-                // addressing (no window) is legitimate. See ASAN.md §7.
-                if ((reserved > 0 || waited > 0) && !(write_dist < reserved) && !(read_dist < waited)) {
-                    __emule_asan_panic(
-                            "[ASAN ERROR] CB Boundary Violation: Attempted to access CB %u at offset 0x%x "
-                            "(byte %u of %u, page %u of %u). "
-                            "Write window: write_idx=%u, %u page(s) reserved. "
-                            "Read window: read_idx=%u, %u page(s) waited.\n",
-                            cb_id, l1_addr, l1_addr - cb_start, cb_size,
-                            access_page, cb.num_pages,
-                            write_idx, reserved,
-                            read_idx, waited);
-                }
-            }
-            uint32_t l1_base_cb = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
-            if (l1_addr >= l1_base_cb) {
-                return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
-            }
-            return __emule_bridge_l1 + l1_addr;
-        }
+    __emule_asan_check_semaphore(l1_addr);
+    // CB memory isn't registered in LiveL1Ranges, so resolve it (and run the CB
+    // boundary check) before the OOB-tensor check below.
+    uint8_t* cb_ptr;
+    if (__emule_asan_cb_resolve(l1_addr, cb_ptr)) {
+        return cb_ptr;
     }
     // Mask to the within-slot offset (low 21 bits = 2 MB worker slot); live
-    // ranges are stored buffer-relative. See ASAN.md for the mask rationale and
-    // the accepted sharded-tensor false-negative.
+    // ranges are stored buffer-relative. See docs/ASAN.md for the rationale.
     uint32_t l1_off = l1_addr & 0x1FFFFF;  // SLOT_MASK = 2 MB - 1
-    // Check 3 — Out-of-Bounds Write (L1); also records resolved ranges for the
-    // runner's Object Intent check.
-    if (__emule_l1_tensor_ranges != nullptr && l1_off >= __emule_l1_unreserved_base) {
-        bool in_tensor = false;
-        uint64_t matched_packed = 0;
-        for (uint32_t i = 0; i < __emule_l1_tensor_ranges_count; ++i) {
-            uint64_t packed = __emule_l1_tensor_ranges[i];
-            uint32_t r_start = static_cast<uint32_t>(packed >> 32);
-            uint32_t r_end = static_cast<uint32_t>(packed);
-            if (l1_off >= r_start && l1_off < r_end) {
-                in_tensor = true;
-                matched_packed = packed;
-                break;
-            }
-        }
-        if (!in_tensor) {
-            __emule_asan_panic(
-                    "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
-                    l1_off);
-        }
-        if (__emule_l1_resolved_ranges != nullptr &&
-            __emule_l1_resolved_ranges_count != nullptr) {
-            uint32_t cur = *__emule_l1_resolved_ranges_count;
-            bool already = false;
-            for (uint32_t i = 0; i < cur; ++i) {
-                if (__emule_l1_resolved_ranges[i] == matched_packed) {
-                    already = true;
-                    break;
-                }
-            }
-            if (!already && cur < __emule_l1_resolved_ranges_capacity) {
-                __emule_l1_resolved_ranges[cur] = matched_packed;
-                *__emule_l1_resolved_ranges_count = cur + 1;
-            }
-        }
-    }
-    // Check 4 — Tensor Padding Violation.
-    if (__emule_l1_padding_ranges != nullptr) {
-        for (uint32_t i = 0; i < __emule_l1_padding_ranges_count; ++i) {
-            uint64_t packed = __emule_l1_padding_ranges[i];
-            uint32_t logical_end = static_cast<uint32_t>(packed >> 32);
-            uint32_t physical_end = static_cast<uint32_t>(packed);
-            if (l1_off >= logical_end && l1_off < physical_end) {
-                __emule_asan_panic(
-                        "[ASAN ERROR] Tensor Padding Violation: Attempted to write to a padded memory region at address 0x%x (logical_end=0x%x, physical_end=0x%x)\n",
-                        l1_off, logical_end, physical_end);
-            }
-        }
-    }
-    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
-    if (l1_addr >= l1_base) {
-        return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
-    }
-    return __emule_bridge_l1 + l1_addr;
+    __emule_asan_check_oob_tensor(l1_off);
+    __emule_asan_check_padding(l1_off);
+    return __emule_l1_translate(l1_addr);
 }

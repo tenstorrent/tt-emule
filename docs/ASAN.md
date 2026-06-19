@@ -30,10 +30,10 @@ A single env var, `TT_METAL_EMULE_ASAN`, gates every sanitizer:
 
 - Host helper: `tt::tt_metal::emule::emule_asan_enabled()` in
   `tt-metal/tt_metal/impl/emulation/host_sanitizers.hpp`.
-- Kernel helper: `__emule_asan_enabled()` at the top of
-  `tt-emule/include/jit_hw/api/cb_api.h`. (cb_api.h is included by every
-  kernel translation unit; placing the helper here makes it visible to
-  `dataflow_api.h` and `jit_kernel_stubs.hpp` without a separate include.)
+- Kernel helper: `__emule_asan_enabled()` in
+  `tt-emule/include/jit_hw/asan/emule_asan.h` (alongside `__emule_asan_panic`).
+  Every kernel translation unit pulls in `emule_asan.h`, so the one definition
+  is visible to `cb_api.h`, `dataflow_api.h`, and the L1 chokepoint.
 
 The **host** helper re-reads the environment on every call (no static
 caching): a process-global `static bool` would be sticky to the first
@@ -183,11 +183,17 @@ regex-based JIT translation injects calls to it for `l1_arg_ptr`-style
 expressions and for the explicit pointer casts that compute kernels
 emit.
 
-It is defined in both `jit_kernel_stubs.hpp` and `dataflow_api.h` (the
-second include guards with `#ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED`).
-This duplication is intentional — kernels that include only
-`jit_kernel_stubs.hpp` (compute kernels via the regex rewriter) still
-need the function inlined.
+It has a single definition in `internal/emule_l1_to_ptr.h`, which both
+`jit_kernel_stubs.hpp` and `dataflow_api.h` `#include` (so compute kernels —
+which pull in only the stub via the regex rewriter — and dataflow kernels both
+get it). It replaced two verbatim copies that were kept in sync by hand via an
+`#ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED` guard and had begun to drift.
+
+The chokepoint itself is thin: a master-switch early-out plus a dispatch to the
+four check helpers, which live in `asan/asan_l1_checks.h` (`__emule_l1_translate`,
+`__emule_asan_check_semaphore`, `__emule_asan_cb_resolve`,
+`__emule_asan_check_oob_tensor`, `__emule_asan_check_padding`). That header also
+owns the sanitizer thread-locals the checks consume.
 
 Checks run in this order inside `__emule_local_l1_to_ptr`:
 
@@ -241,10 +247,12 @@ races the refill and corrupts data. `cb_push_back` carries no such
 requirement: only writes precede a push, so an unbarriered read there
 is harmless.
 
-**NOC Transfer Alignment** — Three variants in `dataflow_api.h`,
-depending on src/dst type (DRAM/L1 × L1/DRAM). The check is on the low
-bits matching between src and dst — required by the NOC hardware's
-transaction packing, silently corrupts data on silicon when mismatched.
+**NOC Transfer Alignment** — `__emule_check_noc_{read,write}_alignment` in
+`api/dataflow/asan_dataflow.h`, called at the top of `noc_async_read`/
+`noc_async_write`. Each endpoint is checked against its OWN memory-type
+alignment (L1 = 16B; DRAM read = 32B WH / 64B BH; DRAM write = 16B), not a
+relative "low bits of src and dst must match" rule — the two sides have
+different requirements a shared mask can't express. See §10.
 
 ### Object Intent Violation — the complicated one
 
@@ -378,22 +386,31 @@ Host side (tt-metal/tt_metal/impl/emulation/):
 
 Kernel side (tt-emule/include/jit_hw/):
 
-- `jit_kernel_stubs.hpp` — extern thread_locals, `__emule_local_l1_to_ptr`,
-  `__emule_dram_ptr`.
-- `api/cb_api.h` — `__emule_asan_enabled`, CB ops with the always-on
-  Reservation Overflow check and the gated NoC Barrier Missing check.
-- `api/dataflow/dataflow_api.h` — second copy of `__emule_local_l1_to_ptr`
-  (guarded), NOC transfer alignment checks.
-- `emule_asan.h` — unified diagnostic trace. `__emule_asan_panic()` (which every
-  check calls instead of `abort()`) prints the kernel/core/processor context +
-  a symbolized backtrace. See *Diagnostic trace* below.
+- `internal/emule_l1_to_ptr.h` — single definition of the thin
+  `__emule_local_l1_to_ptr` chokepoint (master-switch early-out + dispatch to the
+  check helpers). Included by both `jit_kernel_stubs.hpp` and `dataflow_api.h`.
+- `asan/asan_l1_checks.h` — the lifted L1 check bodies (`__emule_l1_translate`,
+  `__emule_asan_check_semaphore`, `__emule_asan_cb_resolve`,
+  `__emule_asan_check_oob_tensor`, `__emule_asan_check_padding`) and the sanitizer
+  thread-locals they consume.
+- `jit_kernel_stubs.hpp` — extern thread_locals, `__emule_dram_ptr`; includes
+  `internal/emule_l1_to_ptr.h` for the chokepoint.
+- `api/cb_api.h` — CB ops with the always-on Reservation Overflow check and the
+  gated NoC Barrier Missing check.
+- `api/dataflow/dataflow_api.h` — includes the chokepoint and
+  `asan/asan_dataflow.h`.
+- `asan/asan_dataflow.h` — NOC transfer alignment checks.
+- `asan/emule_asan.h` — `__emule_asan_enabled()` (master switch) + the unified
+  diagnostic trace. `__emule_asan_panic()` (which every check calls instead of
+  `abort()`) prints the kernel/core/processor context + a symbolized backtrace.
+  See *Diagnostic trace* below.
 
 Tests (tt-metal/tests/tt_metal/tt_metal/api/test_*.cpp) — one file per
 sanitizer category.
 
 ## Diagnostic trace
 
-Every `[ASAN ERROR]` calls `__emule_asan_panic()` (in `emule_asan.h`) rather than
+Every `[ASAN ERROR]` calls `__emule_asan_panic()` (in `asan/emule_asan.h`) rather than
 a bare `abort()`. That prints:
 
 1. **Kernel identity** — when a kernel is on the stack: the kernel source path

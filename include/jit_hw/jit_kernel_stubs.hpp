@@ -88,7 +88,7 @@ inline void tensix_sync() {}
 #include "dev_mem_map.h"
 #include "emule_cb_state.h"
 #include "emule_dfb_state.h"
-#include "emule_asan.h"
+#include "jit_hw/asan/emule_asan.h"
 #include "tools/profiler/kernel_profiler.hpp"
 
 // CB-interface surface. Silicon kernels (and consumer kernel-lib templates

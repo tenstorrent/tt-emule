@@ -8,7 +8,7 @@
 
 #include "jit_hw/emule_cb_state.h"
 #include "jit_hw/emule_dfb_state.h"
-#include "jit_hw/emule_asan.h"
+#include "jit_hw/asan/emule_asan.h"
 #include "jit_hw/api/compute/common_globals.h"
 #include "jit_hw/emule_wait.h"
 #include "jit_hw/internal/emule_cb_ptr.h"   // per-RISC CB pointers + cb_addr_shift
