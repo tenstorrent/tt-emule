@@ -359,6 +359,7 @@ run_pytest "reduce_test_ema" "$REDUCE_TEST_DIR/test_ema.py"
 run_pytest "reduce_test_topk"                "$REDUCE_TEST_DIR/test_topk.py"
 run_pytest "reduce_test_topk_reduction"      "$REDUCE_TEST_DIR/test_reduction.py" -k topk
 run_pytest "reduce_test_topk_graph_capture"  "$BF_TEST_DIR/test_graph_capture.py::test_graph_capture_topk"
+run_pytest "reduce_test_argmax"              "$REDUCE_TEST_DIR/test_argmax.py"
 
 # ttnn.sort — Batcher bitonic argsort (values + gather-validated indices).
 # Single-core (Wt<=64) and cross-core data-exchange (64<Wt<=hybrid threshold)

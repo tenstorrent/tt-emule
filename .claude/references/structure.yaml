@@ -2148,6 +2148,7 @@ files:
   - {kind: function, name: noc_async_write_multicast}
   - {kind: function, name: noc_async_write_multicast_loopback_src}
   - {kind: function, name: noc_async_write_multicast_one_packet}
+  - {kind: function, name: __emule_model_first_read_latency}
   - {kind: function, name: noc_async_read_barrier}
   - {kind: function, name: noc_async_write_barrier}
   - {kind: function, name: noc_async_writes_flushed}
