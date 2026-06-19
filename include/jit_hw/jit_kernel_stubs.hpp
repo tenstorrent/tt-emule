@@ -89,7 +89,10 @@ inline void tensix_sync() {}
 // doesn't double-define. First-included wins.
 #ifndef __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED
 #define __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED
+// #46346: SrcOrder (matmul uses Reverse) — accepted-and-ignored in emule.
+enum class SrcOrder : uint8_t { Regular = 0, Reverse = 1 };
 inline void compute_kernel_hw_startup(uint32_t, uint32_t) {}
+template <SrcOrder = SrcOrder::Regular>
 inline void compute_kernel_hw_startup(uint32_t a, uint32_t b, uint32_t) { compute_kernel_hw_startup(a, b); }
 #endif
 

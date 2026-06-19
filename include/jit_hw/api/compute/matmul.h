@@ -40,6 +40,25 @@ ALWI void mm_init_short_with_dt(uint32_t in0_cb_id, uint32_t in1_cb_id,
     __llk_matmul_transpose = (transpose != 0);
 }
 
+// #46346/#22219 renamed mm_init->matmul_init and mm_block_init->matmul_block_init
+// (dropping out_cb_id, now owned by compute_kernel_hw_startup) + added a call_line
+// default. Same emule body as the mm_* stubs: only transpose is load-bearing
+// (applied to IN1 in matmul_tiles); CB ids / dims / call_line are signature parity.
+ALWI void matmul_init(uint32_t in0_cb_id, uint32_t in1_cb_id,
+                      const uint32_t transpose = 0,
+                      uint32_t call_line = __builtin_LINE()) {
+    (void)in0_cb_id; (void)in1_cb_id; (void)call_line;
+    __llk_matmul_transpose = (transpose != 0);
+}
+ALWI void matmul_block_init(uint32_t in0_cb_id, uint32_t in1_cb_id,
+                            const uint32_t transpose = 0, uint32_t ct_dim = 1,
+                            uint32_t rt_dim = 1, uint32_t kt_dim = 1,
+                            uint32_t call_line = __builtin_LINE()) {
+    (void)in0_cb_id; (void)in1_cb_id;
+    (void)ct_dim; (void)rt_dim; (void)kt_dim; (void)call_line;
+    __llk_matmul_transpose = (transpose != 0);
+}
+
 // ---- matmul_tiles: tile GEMM accumulate into DST ----
 // Reads tile A from CB[in0_cb] at tile offset in0_tile and tile B from
 // CB[in1_cb] at tile offset in1_tile.  Accumulates A*B into DST[idst].
