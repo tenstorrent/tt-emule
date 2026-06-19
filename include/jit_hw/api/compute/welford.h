@@ -134,21 +134,46 @@ ALWI void welford_restore_state(uint32_t mean_dst_idx, uint32_t group_id = 0) {
 // ---- finalize: write per-column mean and variance (M2 / N) into DST ----
 // N = scale_idx + 1 (the caller passes the final sample count minus one, used to
 // index the reciprocal LUT on silicon). Layernorm: scale_idx = W - 1 -> /W.
-inline void __emule_welford_finalize(uint32_t mean_dst_idx, uint32_t scale_idx, bool to_face) {
+inline void __emule_welford_finalize(uint32_t mean_dst_idx, uint32_t scale_idx, bool to_face,
+                                     uint32_t group_id = 0) {
     __emule_dst_check(mean_dst_idx, "welford_finalize.mean");
     __emule_dst_check(mean_dst_idx + 1, "welford_finalize.var");
     const float denom = static_cast<float>(scale_idx + 1);
     const float inv = 1.0f / denom;
     __emule_dst_mark_dirty(mean_dst_idx);
     __emule_dst_mark_dirty(mean_dst_idx + 1);
-    std::memset(__emule_dst[mean_dst_idx], 0, __EMULE_DST_BYTES);
-    std::memset(__emule_dst[mean_dst_idx + 1], 0, __EMULE_DST_BYTES);
-    // In emule we write mean/variance into row 0 of their respective DST tiles.
-    // (Silicon's *_to_face vs *_to_row differ in how the SFPU lays out lanes in DST.)
-    (void)to_face;
-    for (uint32_t c = 0; c < 32; ++c) {
-        __emule_dst[mean_dst_idx][c] = __emule_welford_mean[c];
-        __emule_dst[mean_dst_idx + 1][c] = __emule_welford_m2[c] * inv;
+    if (to_face) {
+        // groupnorm raw/face layout. Silicon's _store_mean_var_to_dst_raw_group_
+        // stores group_id's 32 per-column accumulators at a per-group DST offset
+        // (group_id<<2) WITHOUT clearing the rest, so all groups share one tile —
+        // group g's partials land at L1 uint16 offset g*64 (4 face-rows), even cols,
+        // which the reader (welford_combine, local_stride=2, per-group +2 rows)
+        // reads back. Replicate that: lane c of group g -> the DST datum that packs
+        // to L1 (face g/4, row 4*(g%4)+c/8, even col (c%8)*2). DST is zeroed by
+        // tile_regs_acquire; emule clears once on the first group (g==0) to give
+        // deterministic zeros in unwritten lanes without wiping earlier groups.
+        if (group_id == 0) {
+            std::memset(__emule_dst[mean_dst_idx], 0, __EMULE_DST_BYTES);
+            std::memset(__emule_dst[mean_dst_idx + 1], 0, __EMULE_DST_BYTES);
+        }
+        const uint32_t face = group_id >> 2;            // group_id / 4 (4 groups per face)
+        const uint32_t R_base = (face >> 1) * 16u;       // face row block
+        const uint32_t C_base = (face & 1u) * 16u;       // face col block
+        const uint32_t fr_grp = (group_id & 3u) << 2;    // 4*(group_id%4) within-face row offset
+        for (uint32_t c = 0; c < 32; ++c) {
+            const uint32_t R = R_base + fr_grp + (c >> 3);  // within-face row 4*(g%4)+c/8
+            const uint32_t C = C_base + ((c & 7u) << 1);    // within-face even col (c%8)*2
+            const uint32_t pos = R * 32u + C;
+            __emule_dst[mean_dst_idx][pos] = __emule_welford_mean[c];
+            __emule_dst[mean_dst_idx + 1][pos] = __emule_welford_m2[c] * inv;
+        }
+    } else {
+        std::memset(__emule_dst[mean_dst_idx], 0, __EMULE_DST_BYTES);
+        std::memset(__emule_dst[mean_dst_idx + 1], 0, __EMULE_DST_BYTES);
+        for (uint32_t c = 0; c < 32; ++c) {
+            __emule_dst[mean_dst_idx][c] = __emule_welford_mean[c];
+            __emule_dst[mean_dst_idx + 1][c] = __emule_welford_m2[c] * inv;
+        }
     }
 }
 
@@ -173,8 +198,9 @@ ALWI void welford_finalize_to_face(
     uint32_t group_id,
     uint32_t scale_idx,
     const std::array<uint32_t, reciprocal_size>& reciprocal_lut) {
+    (void)reciprocal_lut;
     welford_restore_state(mean_dst_idx, group_id);
-    welford_finalize_to_face<reciprocal_size>(mean_dst_idx, scale_idx, reciprocal_lut);
+    __emule_welford_finalize(mean_dst_idx, scale_idx, /*to_face=*/true, group_id);
 }
 
 }  // namespace ckernel
