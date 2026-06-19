@@ -117,6 +117,7 @@ inline std::uint32_t as_u(float f) { std::uint32_t b; std::memcpy(&b, &f, 4); re
 inline std::uint32_t ru(std::uint32_t idx, std::uint32_t lane) {
     if (idx == p_sfpu::LCONST_0) return 0x00000000u;  // 0.0f
     if (idx == p_sfpu::LCONST_1) return 0x3f800000u;  // 1.0f
+    if (idx >= 16) return 0u;  // bounds guard, symmetric with wu() (idx is always LREG0..7 in valid code)
     return lreg[idx][lane];
 }
 inline float rf(std::uint32_t idx, std::uint32_t lane) { return as_f(ru(idx, lane)); }
@@ -291,6 +292,28 @@ inline void clear_addr_mod_base() {
 // ---- Raw SFPU intrinsic macros -> functional interpreter -------------------
 // Wormhole exp-polynomial instruction set is modelled; Blackhole-only and
 // config-only ops remain no-ops.
+//
+// This header is pulled in (via exp.h) AFTER sfpi.h / common.h, which transitively
+// include ckernel_ops.h — and ckernel_ops.h defines some of these macros (e.g.
+// TTI_SFPLOADI -> sfpi::__emule_sfploadi) behind an #ifndef. So `#undef` each before
+// (re)defining: this header is the authoritative TTI surface for the exp-polynomial
+// path, the override is intentional, and it avoids a macro-redefinition warning.
+#undef TTI_SFPNOP
+#undef TTI_INCRWC
+#undef TT_SFPADDI
+#undef TTI_SFPLOADI
+#undef TTI_SFPLOAD
+#undef TTI_SFPSTORE
+#undef TTI_SFPMAD
+#undef TTI_SFPCAST
+#undef TTI_SFPENCC
+#undef TTI_SFPSETCC
+#undef TTI_SFPSETEXP
+#undef TTI_SFP_STOCH_RND
+#undef TTI_SFPGT
+#undef TTI_SFPARECIP
+#undef TTI_SETRWC
+#undef TTI_STALLWAIT
 #define TTI_SFPNOP             (::ckernel::__tti::sfpnop())
 #define TTI_INCRWC(...)        (::ckernel::__tti::incrwc(__VA_ARGS__))
 #define TT_SFPADDI(...)        (::ckernel::__tti::sfpaddi(__VA_ARGS__))
