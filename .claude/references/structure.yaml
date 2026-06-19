@@ -2603,3 +2603,6 @@ files:
 - path: include/jit_hw/tt_metal/fabric/hw/inc/mesh/api.h
   section: include/jit_hw/tt_metal/fabric/hw/inc/mesh/
   summary: fabric include-path shim → `jit_hw/__emule_fabric_stubs.h` (multichip fabric out of scope)
+- path: include/jit_hw/sfpu/ckernel_sfpu_rsqrt_compat.h
+  section: include/jit_hw/sfpu/
+  summary: forwarder → real per-arch `sfpu/ckernel_sfpu_rsqrt_compat.h` so the metal-layer `ckernel_sfpu_sqrt.h` include resolves on emule's JIT -I set
