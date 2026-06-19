@@ -66,6 +66,7 @@ faithful mock APIs.
 | Map HW concept → existing emule strategy | `references/emule-mapping.md` |
 | Where in the pipeline to inject a change | [`docs/api-injection-points.md`](../docs/api-injection-points.md) |
 | Verify a mock is complete | `/verify-mock` skill |
+| About to add a hack to make something pass (or editing code that carries one) | `/workarounds` skill |
 | Deep arch question on Wormhole/Blackhole/Quasar | sage agents (launched by arch-lookup) |
 
 ## Skills
@@ -117,6 +118,11 @@ beyond the upstream tt-llk versions.
 ## Skills (additional)
 
 - `skills/verify-mock` — pre-implementation through verification (invoke as `/verify-mock`)
+- `skills/workarounds` — registry of deliberate, non-ideal workarounds currently
+  live in the tree (hacks accepted to make something pass, **not** normal practice).
+  Read before adding any workaround or when editing code that carries one; each
+  entry records the hack, why it bends the rules, the real root cause, and the
+  path to removing it (invoke as `/workarounds`).
 
 ## Quick links to project-level context
 
