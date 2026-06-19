@@ -367,8 +367,8 @@ with no arbitration, consume-before-release, CB/semaphore protocol misuse. Misse
 TSAN): byte-precision *within* a granted region; races via raw pointer arithmetic that escapes
 the CB/NOC API; purely-local accesses (which can't race cross-core anyway). Byte-level would
 require a custom JIT instrumentation pass — i.e. rebuilding the sanitizer — and is out of scope;
-going native is what keeps it cheap and sidesteps the external tool's frictions (its fixed
-shadow layout would also fight emule's `MAP_32BIT` window).
+going native is what keeps it cheap and sidesteps the external tool's frictions (e.g. its fixed
+shadow layout could collide with emule's `MAP_32BIT` window).
 
 **Cost & diagnostics.** Only bookkeeping on operations that already pass through hooks, plus one
 shadow entry per region (no per-byte shadow) — cheap enough to leave on in CI, unlike real

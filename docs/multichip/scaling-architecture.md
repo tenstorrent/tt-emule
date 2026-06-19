@@ -63,9 +63,12 @@ aliasing** (no per-access translation) — are what make emule fast and are what
    all of them. Requires a work-chunking execution engine (§6).
 2. **`MAP_32BIT` virtual-address ceiling.** All worker L1 must live in the low ~2 GB. WH ≈ 144 MB/chip, BH
    ≈ 240 MB/chip of L1-pool VA. 8 chips fit (~1.2–1.9 GB, tight on BH); ~16 chips overflow; 128 chips is
-   impossible (~18–31 GB). `MAP_32BIT` is also mutually exclusive with `MAP_SHARED` (x86-64 `mmap` EINVAL),
-   so a multi-process layout **cannot** share aliased L1 across processes — it must post to the owning
-   process (see §8).
+   impossible (~18–31 GB). The aliasing identity (`uint32_t` address == host pointer) is also intrinsically
+   a **single-address-space** construct: a `uint32_t` only names a byte within *one* 2 GB layout, and all
+   chips' aliased addresses cannot coexist in 2 GB past ~8 chips (the very reason to go multi-process). So a
+   remote process cannot hold a remote chip's L1 at the address its kernels use — cross-process delivery must
+   post to the owning process (see §8). (`MAP_32BIT` itself *does* combine with `MAP_SHARED` — verified — so
+   it is the address identity, not an mmap-flag conflict, that blocks direct cross-process sharing.)
 3. **No chip_id in NOC addressing.** Cross-chip references are unrepresentable today.
 4. **No ethernet/fabric model.** No ERISC execution, no inter-chip transport.
 
@@ -195,8 +198,9 @@ single-process behind the `TeleportTransport` seam (§10), and the final multi-p
 settled by the Phase-1 measurement below. The two candidates:
 
 - **Multi-process, keep aliasing (default).** Each process keeps its private low-2 GB `MAP_32BIT` aliasing
-  window + native JIT (fastest per-access). Because `MAP_32BIT` is incompatible with `MAP_SHARED` (§3 #2), a
-  process **cannot** map another chip's aliased L1 — so the shared-memory transport tier is a **message
+  window + native JIT (fastest per-access). Because the aliasing identity can't span processes (§3 #2) —
+  all chips' canonical low-2 GB addresses don't fit in one process's 2 GB — a process **cannot** hold
+  another chip's L1 at the address its kernels use, so the shared-memory transport tier is a **message
   ring**, not shared L1: the source posts (header+payload) to the dest chip's **owning process**, which
   drains it, applies the write/atomic-inc to its own private L1, and wakes its fiber (post-to-dest-process;
   a producer/owner asymmetry the in-process path doesn't have). This is exactly the `LocalTeleportTransport`

@@ -73,7 +73,7 @@ flowchart TB
 
     subgraph GX["③ Galaxy — 32 chips, multi-process (delta only)"]
         direction TB
-        G0["MAP_32BIT VA ceiling exceeded ⇒ multi-process<br/>(MAP_32BIT ⊕ MAP_SHARED ⇒ no shared L1)"]
+        G0["MAP_32BIT VA ceiling exceeded ⇒ multi-process<br/>(aliased addresses can't span processes ⇒ post to owner)"]
         G1["chip → process placement + launcher"]
         G3["cross-process route-table / control-plane consistency"]
         G2["swap transport → MultiProcessTeleportTransport<br/>post-to-dest-process over a shared-mem ring"]
