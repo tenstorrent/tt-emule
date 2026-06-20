@@ -103,17 +103,14 @@ jobs:
           if-no-files-found: error
 
   test:
-    name: Run regression (${{ matrix.arch }})
+    name: Run regression (all archs)
     needs: build
     runs-on: tt-ubuntu-2204-xlarge-stable
-    timeout-minutes: 60
+    # One runner visits wormhole/blackhole/quasar sequentially (shared JIT cache).
+    timeout-minutes: 150
     continue-on-error: true
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [wormhole, blackhole, quasar]
     steps:
       - name: Checkout tt-emule (main)
         uses: actions/checkout@v4
@@ -162,38 +159,21 @@ jobs:
         shell: bash
         run: echo "${{ needs.build.outputs.sha }}" > tt-metal-pin-resolved.txt
 
-      - name: Run regression
+      - name: Run regression (all archs, sequential) + classify
         env:
-          TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
-          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
-          TT_EMULE_ARCH: ${{ matrix.arch }}
+          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
+          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule
         shell: bash
-        run: bash tt-emule/.github/scripts/ci-regression.sh
-
-      - name: Classify results
-        env:
-          BUILD_DIR: ${{ github.workspace }}/tt-metal/build_emule
-        shell: bash
-        run: |
-          # wormhole/blackhole: no allowlist => every test must pass.
-          # quasar: allow the documented known failures.
-          allowlist=()
-          if [ "${{ matrix.arch }}" = "quasar" ]; then
-            allowlist=(--allowlist tt-emule/.github/known-failures-quasar.txt)
-          fi
-          python3 tt-emule/.github/scripts/classify-results.py \
-            --xml-dir "${RUNNER_TEMP}/gtest-xml" \
-            "${allowlist[@]}" \
-            --build-dir "$BUILD_DIR"
+        run: bash tt-emule/.github/scripts/ci-regression-all.sh
 
       - name: Upload regression artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nightly-regression-results-${{ matrix.arch }}-${{ github.run_id }}
+          name: nightly-regression-results-${{ github.run_id }}
           path: |
-            ${{ runner.temp }}/regression.log
-            ${{ runner.temp }}/gtest-xml/*.xml
+            ${{ runner.temp }}/regression-*.log
+            ${{ runner.temp }}/gtest-xml/*/*.xml
             tt-metal-pin-resolved.txt
           retention-days: 30
           if-no-files-found: warn

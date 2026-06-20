@@ -92,8 +92,7 @@ tt-emule/
 ├── docs/                   # Architecture deep-dives (Quasar, DFB, etc.)
 ├── run_regression.sh       # Tiered C++ regression suite (Tier 1–6)
 ├── run_d2m_regression.sh   # tt-mlir D2M pytest regression driver
-├── tt-metal-pin.txt        # Pinned tt-metal SHA used by CI
-└── tt-mlir-pin.txt         # Pinned tt-mlir SHA used by CI
+└── tt-metal-pin.txt        # Pinned tt-metal SHA used by CI
 ```
 
 ---
