@@ -259,11 +259,14 @@ ALWI void silu_tile_init_pack() { silu_tile_init(); }
 ALWI void silu_tile_pack(uint32_t idst) { silu_tile(idst); }
 
 // --- sfpu_reduce — SFPU-based reduction helper; emule reduces via other paths.
-// No-op stubs let JIT compile; actual reduction tests use llk_defs.h reduce helpers.
-template <typename ...Ts>
-ALWI void sfpu_reduce(Ts...) {}
-template <typename ...Ts>
-ALWI void sfpu_reduce_init(Ts...) {}
+// No-op stubs let JIT compile. Upstream now calls these with non-type (enum)
+// template args, e.g. sfpu_reduce<PoolType, reduce_format, ReduceDim>(idst, ct, rt)
+// and sfpu_reduce_init<PoolType, reduce_format>(), so accept value template
+// params plus any runtime args.
+template <auto ...Vs, typename ...Args>
+ALWI void sfpu_reduce(Args...) {}
+template <auto ...Vs, typename ...Args>
+ALWI void sfpu_reduce_init(Args...) {}
 
 // --- topk (used by ttnn.topk via reduction/topk/device/kernels/compute/topk.cpp).
 //

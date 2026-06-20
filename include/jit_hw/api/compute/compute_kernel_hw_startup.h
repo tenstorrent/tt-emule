@@ -19,6 +19,9 @@
 // header directly). If both files are included, first-wins via this macro.
 #ifndef __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED
 #define __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED
+// #46346: SrcOrder selects how icb0/icb1 map onto SrcA/SrcB (matmul uses Reverse).
+// emule's startup is a state reset, so the mapping is accepted-and-ignored.
+enum class SrcOrder : uint8_t { Regular = 0, Reverse = 1 };
 inline void compute_kernel_hw_startup(uint32_t, uint32_t) {
     __llk_pack_offset = 0;
     __llk_pack_is_untilize = false;
@@ -33,7 +36,9 @@ inline void compute_kernel_hw_startup(uint32_t, uint32_t) {
     // config doesn't leak into this one.
     __emule_reset_pack_subrect();
 }
+template <SrcOrder src_order = SrcOrder::Regular>
 inline void compute_kernel_hw_startup(uint32_t a, uint32_t b, uint32_t) {
+    (void)src_order;  // mapping is ignored — emule resets the same state regardless
     compute_kernel_hw_startup(a, b);
 }
 #endif

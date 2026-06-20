@@ -339,10 +339,10 @@ files:
   - {kind: macro, name: KERNEL_BUILD}
   - {kind: macro, name: DM_DEDICATED_NOC}
   - {kind: macro, name: DM_DYNAMIC_NOC}
-  - {kind: global, name: noc_mode}
   - {kind: function, name: tensix_sync}
   - {kind: macro, name: ALWI}
   - {kind: macro, name: __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED}
+  - {kind: enum, name: SrcOrder}
   - {kind: function, name: compute_kernel_hw_startup}
   - {kind: namespace, name: tt_emule}
   - {kind: global, name: __rt_args}
@@ -366,7 +366,10 @@ files:
   - {kind: global, name: __emule_num_threads}
   - {kind: global, name: __emule_my_thread_id}
   - {kind: macro, name: tt_l1_ptr}
+  - {kind: macro, name: NOC_INDEX}
+  - {kind: macro, name: NOC_MODE}
   - {kind: global, name: noc_index}
+  - {kind: global, name: noc_mode}
   - {kind: function, name: get_arg_addr}
   - {kind: function, name: get_common_arg_addr}
   - {kind: function, name: get_arg_val}
@@ -939,6 +942,7 @@ files:
   - {kind: macro, name: __EMULE_MATH_FIDELITY_DEFINED}
   - {kind: enum, name: MathFidelity}
   - {kind: enum, name: ReluType}
+  - {kind: struct, name: ReluConfig}
   - {kind: enum, name: p_dim_stride_target}
   - {kind: macro, name: DST_ACCUM_MODE}
   - {kind: global, name: __EMULE_DST_TILES}
@@ -1093,6 +1097,7 @@ files:
   summary: '`compute_kernel_hw_startup` (2-arg + 3-arg)'
   symbols:
   - {kind: macro, name: __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED}
+  - {kind: enum, name: SrcOrder}
   - {kind: function, name: compute_kernel_hw_startup}
 - path: include/jit_hw/api/compute/copy_dest_values.h
   section: include/jit_hw/api/compute/
@@ -1250,10 +1255,13 @@ files:
   - {kind: function, name: mm_init}
   - {kind: function, name: mm_init_short}
   - {kind: function, name: mm_init_short_with_dt}
+  - {kind: function, name: matmul_init}
+  - {kind: function, name: matmul_block_init}
   - {kind: function, name: matmul_tiles}
   - {kind: function, name: mm_block_init}
   - {kind: function, name: mm_block_init_short}
   - {kind: function, name: mm_block_init_short_with_dt}
+  - {kind: function, name: mm_block_init_short_with_both_dt}
   - {kind: function, name: matmul_block}
   - {kind: macro, name: TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_MATMUL_LLKS_H}
   - {kind: namespace, name: experimental}
@@ -1304,6 +1312,11 @@ files:
 - path: include/jit_hw/api/compute/pack.h
   section: include/jit_hw/api/compute/
   summary: empty shim (pragma-once only)
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: enum, name: PackMode}
+  - {kind: function, name: llk_pack_reduce_mask_config}
+  - {kind: function, name: llk_pack_reduce_mask_clear}
 - path: include/jit_hw/api/compute/pack_untilize.h
   section: include/jit_hw/api/compute/
   summary: '`ckernel::`/`experimental::` `pack_untilize_block`, `pack_untilize_init`, `pack_untilize_dest_init`'
@@ -2454,6 +2467,10 @@ files:
   - {kind: struct, name: InterleavedPow2AddrGen}
   - {kind: struct, name: InterleavedPow2AddrGenFast}
   - {kind: struct, name: InterleavedAddrGenFast}
+- path: include/jit_hw/internal/dataflow/dataflow_api_common.h
+  section: include/jit_hw/internal/dataflow/
+  summary: empty shim for the firmware `dataflow_api_common.h` (Metal 2.0 dataflow kernels include it directly; noc_index/noc_mode + bank tables are already provided by jit_kernel_stubs.hpp, so pulling
+    the real header would redefine them)
 - path: include/jit_hw/internal/ethernet/dataflow_api.h
   section: include/jit_hw/internal/ethernet/
   summary: stub of silicon ethernet dataflow API (no ethernet engine in emule)
@@ -2590,3 +2607,6 @@ files:
 - path: include/jit_hw/tt_metal/fabric/hw/inc/mesh/api.h
   section: include/jit_hw/tt_metal/fabric/hw/inc/mesh/
   summary: fabric include-path shim → `jit_hw/__emule_fabric_stubs.h` (multichip fabric out of scope)
+- path: include/jit_hw/sfpu/ckernel_sfpu_rsqrt_compat.h
+  section: include/jit_hw/sfpu/
+  summary: forwarder → real per-arch `sfpu/ckernel_sfpu_rsqrt_compat.h` so the metal-layer `ckernel_sfpu_sqrt.h` include resolves on emule's JIT -I set
