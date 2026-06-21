@@ -2071,6 +2071,32 @@ files:
   - {kind: function, name: fill_arange_tile}
   - {kind: function, name: write_row_mask_tile}
   - {kind: function, name: write_col_mask_tile}
+- path: include/jit_hw/api/compute/experimental/mul_reduce_scalar.h
+  section: include/jit_hw/api/compute/experimental/
+  summary: emule model+shadow for fused multiply-reduce-scalar (dst[0][0]=scaler^2*sum(A*B)); shims the inlined LLK state machine sum_of_squares uses (mul/move/fill/column-reduce/scalar-reduce)
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: namespace, name: __emule_mrs}
+  - {kind: global, name: srcA}
+  - {kind: global, name: acc}
+  - {kind: global, name: scaler}
+  - {kind: function, name: mul_reduce_scalar_init}
+  - {kind: function, name: mul_reduce_scalar_uninit}
+  - {kind: function, name: llk_math_eltwise_mul_reduce_scalar_init}
+  - {kind: function, name: llk_math_eltwise_mul_reduce_scalar}
+  - {kind: function, name: llk_unpack_mul_reduce_scalar_switch_to_reduce}
+  - {kind: global, name: enforce_fp32_accumulation}
+  - {kind: function, name: llk_math_mul_reduce_scalar_reduce_init}
+  - {kind: function, name: llk_math_mul_reduce_scalar_move_dest_to_src}
+  - {kind: function, name: _calculate_fill_}
+  - {kind: macro, name: SFPU_UNARY_ONE_PARAM_KERNEL_EXTRA_PARAM}
+  - {kind: function, name: FN}
+  - {kind: function, name: llk_pack_reduce_mask_config}
+  - {kind: function, name: llk_pack_reduce_mask_clear}
+  - {kind: function, name: llk_math_mul_reduce_column}
+  - {kind: function, name: llk_math_mul_reduce_scalar}
+  - {kind: function, name: llk_math_mul_reduce_scalar_clear_dvalid}
+  - {kind: function, name: mul_reduce_scalar_tile}
 - path: include/jit_hw/api/compute/experimental/semaphore.h
   section: include/jit_hw/api/compute/experimental/
   summary: '`ckernel::Semaphore`'
