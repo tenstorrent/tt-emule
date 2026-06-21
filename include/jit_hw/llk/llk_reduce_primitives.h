@@ -63,6 +63,11 @@ inline void llk_math_reconfig_data_format_srcb(uint32_t /*old_or_new*/ = 0, uint
 // No-op on WH/Quasar silicon (only BH has a body); emule models no remap state.
 inline void llk_math_reconfig_remap(const bool /*remap_enable*/) {}
 
+// llk_math_reconfig_remap — moved to api/compute/common.h (which this header
+// includes) so it is ALSO visible to deepseek_compute_kernel_hw_startup.h,
+// which calls it (global scope) at HW-startup before any reduce header is
+// pulled in. Still a no-op (emule does not model the FPU input-remap MUX).
+
 inline void llk_unpack_AB_matmul(uint32_t in0_cb, uint32_t in1_cb, uint32_t in0_idx, uint32_t in1_idx) {
     __emule_matmul_state = {in0_cb, in1_cb, in0_idx, in1_idx};
 }

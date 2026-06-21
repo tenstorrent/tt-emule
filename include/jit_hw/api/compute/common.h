@@ -126,6 +126,16 @@ enum class p_dim_stride_target {
     FACE_ROW_MAJOR  // set dim/stride for unpacking face in row-major format
 };
 
+// llk_math_reconfig_remap — Blackhole MATH SrcA/SrcB input-remap MUX
+// reconfiguration. Called (unqualified, global scope) from
+// deepseek_compute_kernel_init() under ARCH_BLACKHOLE — i.e. at HW-startup,
+// before any reduce/matmul header is pulled in — so the declaration must be
+// visible here in common.h (which deepseek_compute_kernel_hw_startup.h
+// includes), not only in llk_reduce_primitives.h. emule does not model the
+// FPU input-remap MUX, so this is a no-op. Single definition lives here;
+// llk_reduce_primitives.h gets it transitively (it includes common.h).
+inline void llk_math_reconfig_remap(bool /*enable*/ = true) {}
+
 // DST_ACCUM_MODE: On real device, this is a compile-time integer define.
 // In emulation, provide it as a constexpr if not already defined as a macro.
 #ifndef DST_ACCUM_MODE
