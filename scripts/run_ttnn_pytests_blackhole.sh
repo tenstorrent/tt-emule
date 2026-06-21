@@ -265,6 +265,16 @@ run_pytest "fused_test_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_large_fil
 # #152 (reduce_tile element-wise scaler) regression guard — non-sharded layer_norm/rms_norm were 140/14-failing on non-32-aligned widths pre-fix.
 run_pytest "fused_test_layer_norm" "$FUSED_TEST_DIR/test_layer_norm.py"
 run_pytest "fused_test_rms_norm"   "$FUSED_TEST_DIR/test_rms_norm.py"
+# #129 (sharded fused-norm: welford to_face per-group DST layout + mul_tiles_init acc-to-dest default)
+# regression guard. FORKED=1 = per-test process isolation (emule's fresh-boot-per-test analog): the
+# large legacy group_norm kernels read a working-L1 region they don't fully initialize, which emule
+# faithfully exposes only when L1 is reused across programs in one process (see docs/mem-zeros-handling.md).
+# Deselects (all orthogonal to the sharded-welford bring-up): tile_layout (silent CV deadlock);
+# optional_weight_bias legacy (legacy DRAM mcast-path reduce deadlock); block_sharded_v2_8x4 legacy
+# W=8192 (bf16 Frobenius tolerance edge, PCC 0.99995 / ALLCLOSE pass).
+FORKED=1 run_pytest "fused_test_group_norm" "$FUSED_TEST_DIR/test_group_norm.py" \
+    -k "not tile_layout and not (optional_weight_bias and legacy)" \
+    --deselect "tests/ttnn/unit_tests/operations/fused/test_group_norm.py::test_group_norm_with_block_sharded_v2_8x4_grid[specify_grid=True-legacy-N=1-C=320-H=1-W=8192-num_groups=32-device_params={'l1_small_size': 0}]"
 run_pytest "reduce_test_cumprod" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_backward" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_failing_cases"
 run_pytest "reduce_test_cumsum_failing" "$REDUCE_TEST_DIR/test_cumsum.py::test_cumsum_failing_cases"
 
