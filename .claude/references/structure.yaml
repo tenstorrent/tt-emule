@@ -2630,6 +2630,16 @@ files:
 - path: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/deepseek_moe_gate.h
   section: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/
   summary: emule shadow for blaze's `deepseek_moe_gate` compute op → routes to the high-level `api/compute/deepseek_moe_gate.h` emule model
+- path: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/eltwise_mul_scalar.h
+  section: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/
+  summary: emule shadow for blaze's eltwise_mul_scalar ops (deepseek_mul_tiles_bcast_scalar = y*scale[0,0]; deepseek_binary_dest_reuse_tiles = dst*=cb); models on DST/CBs, bypasses state_configure/llk_math_eltwise_binary
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: deepseek_mul_tiles_bcast_scalar_init_short}
+  - {kind: function, name: deepseek_mul_tiles_bcast_scalar}
+  - {kind: function, name: deepseek_binary_dest_reuse_tiles_init}
+  - {kind: global, name: binary_reuse_dest}
+  - {kind: function, name: deepseek_binary_dest_reuse_tiles}
 - path: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/glm_moe_gate.h
   section: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/
   summary: emule shadow for blaze's `glm_moe_gate` compute op → routes to the high-level `api/compute/glm_moe_gate.h` emule model
