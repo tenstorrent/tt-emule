@@ -277,6 +277,21 @@ files:
   symbols:
   - {kind: macro, name: TT_SFPLOADI}
   - {kind: macro, name: TTI_SFPLOADI}
+  - {kind: macro, name: TTI_SFPNOP}
+  - {kind: macro, name: TTI_INCRWC}
+  - {kind: macro, name: TT_SFPADDI}
+  - {kind: macro, name: TTI_SFPMAD}
+  - {kind: macro, name: TTI_SFPLOAD}
+  - {kind: macro, name: TTI_SFPSTORE}
+  - {kind: macro, name: TTI_SFPCAST}
+  - {kind: macro, name: TTI_SFPENCC}
+  - {kind: macro, name: TTI_SFPSETCC}
+  - {kind: macro, name: TTI_SFPSETEXP}
+  - {kind: macro, name: TTI_SFP_STOCH_RND}
+  - {kind: macro, name: TTI_SFPGT}
+  - {kind: macro, name: TTI_SFPARECIP}
+  - {kind: macro, name: TTI_SETRWC}
+  - {kind: macro, name: TTI_STALLWAIT}
   - {kind: macro, name: TTI_SFPCONFIG}
   - {kind: function, name: __emule_sfpu_unsupported}
 - path: include/jit_hw/ckernel_sfpu_exp.h
@@ -291,69 +306,6 @@ files:
 - path: include/jit_hw/ckernel_sfpu_silu.h
   section: include/jit_hw/
   summary: stub of silicon SFPU silu ckernel (emule scalar impl in `api/compute/eltwise_unary/sigmoid.h`)
-- path: include/jit_hw/ckernel_tti_stubs.h
-  section: include/jit_hw/
-  summary: 'Functional 32-lane SFPU interpreter (`__tti` namespace: LReg file + LaneFlags CC mask + SFPLOAD/STORE/MAD/LOADI/ADDI/STOCH_RND/CAST/SETEXP/SETCC/ENCC/INCRWC) that runs the raw-TTI exp polynomial
-    (calculate_exponential_polynomial) so SDPA exp_approx_mode=false works; DST addressing reuses the sfpi cursor. Also defines addr_mod_t, p_sfpu/p_setrwc indices, InstrModLoadStore, the sfpi:: SFPSTOCHRND_MOD1
-    selectors, the math:: addr-mod-base hook for the WH direct-recip path, and an M_LN2 undef for the hosted-env libm collision. BH-only ops (SFPARECIP/SFPGT) stay no-ops.'
-  symbols:
-  - {kind: namespace, name: sfpi}
-  - {kind: global, name: SFPSTOCHRND_MOD1_FP32_TO_FP16B}
-  - {kind: global, name: SFPSTOCHRND_MOD1_FP32_TO_UINT8}
-  - {kind: global, name: SFPSTOCHRND_MOD1_FP32_TO_INT8}
-  - {kind: namespace, name: p_sfpu}
-  - {kind: global, name: LREG0}
-  - {kind: global, name: LREG4}
-  - {kind: global, name: LCONST_0}
-  - {kind: namespace, name: ckernel}
-  - {kind: global, name: ADDR_MOD_0}
-  - {kind: global, name: ADDR_MOD_4}
-  - {kind: struct, name: addr_mod_t}
-  - {kind: enum, name: InstrModLoadStore}
-  - {kind: struct, name: p_setrwc}
-  - {kind: namespace, name: __tti}
-  - {kind: global, name: NLANE}
-  - {kind: global, name: laneflag}
-  - {kind: global, name: use_flags}
-  - {kind: function, name: lane_active}
-  - {kind: function, name: as_f}
-  - {kind: function, name: as_u}
-  - {kind: function, name: ru}
-  - {kind: function, name: rf}
-  - {kind: function, name: wu}
-  - {kind: function, name: wf}
-  - {kind: function, name: round_ties_away}
-  - {kind: function, name: sfpmad}
-  - {kind: function, name: sfploadi}
-  - {kind: function, name: sfpaddi}
-  - {kind: function, name: stochrnd}
-  - {kind: function, name: sfpcast}
-  - {kind: function, name: sfpsetexp}
-  - {kind: function, name: sfpsetcc}
-  - {kind: function, name: sfpencc}
-  - {kind: function, name: sfpnop}
-  - {kind: function, name: sfpload}
-  - {kind: function, name: sfpstore}
-  - {kind: function, name: incrwc}
-  - {kind: namespace, name: math}
-  - {kind: function, name: set_addr_mod_base}
-  - {kind: function, name: clear_addr_mod_base}
-  - {kind: macro, name: TTI_SFPNOP}
-  - {kind: macro, name: TTI_INCRWC}
-  - {kind: macro, name: TT_SFPADDI}
-  - {kind: macro, name: TTI_SFPLOADI}
-  - {kind: macro, name: TTI_SFPLOAD}
-  - {kind: macro, name: TTI_SFPSTORE}
-  - {kind: macro, name: TTI_SFPMAD}
-  - {kind: macro, name: TTI_SFPCAST}
-  - {kind: macro, name: TTI_SFPENCC}
-  - {kind: macro, name: TTI_SFPSETCC}
-  - {kind: macro, name: TTI_SFPSETEXP}
-  - {kind: macro, name: TTI_SFP_STOCH_RND}
-  - {kind: macro, name: TTI_SFPGT}
-  - {kind: macro, name: TTI_SFPARECIP}
-  - {kind: macro, name: TTI_SETRWC}
-  - {kind: macro, name: TTI_STALLWAIT}
 - path: include/jit_hw/core_config.h
   section: include/jit_hw/
   summary: '`enum class ProgrammableCoreType`; `MaxProcessorsPerCoreType`/`MaxProcessorsForThreadingVariables`/`MAX_NUM_NOCS_PER_CORE` constants'
@@ -659,7 +611,29 @@ files:
   - {kind: global, name: __emule_lreg}
   - {kind: struct, name: LRegFile}
   - {kind: global, name: l_reg}
+  - {kind: function, name: __emule_sfp_ru}
+  - {kind: function, name: __emule_sfp_wu}
+  - {kind: function, name: __emule_sfp_rf}
+  - {kind: function, name: __emule_sfp_wf}
+  - {kind: function, name: __emule_half_to_float_bits}
   - {kind: function, name: __emule_sfploadi}
+  - {kind: function, name: __emule_sfp_mad}
+  - {kind: function, name: __emule_sfp_addi}
+  - {kind: function, name: __emule_sfp_round_ties_away}
+  - {kind: global, name: SFPSTOCHRND_MOD1_FP32_TO_FP16B}
+  - {kind: global, name: SFPSTOCHRND_MOD1_FP32_TO_UINT8}
+  - {kind: global, name: SFPSTOCHRND_MOD1_FP32_TO_INT8}
+  - {kind: function, name: __emule_sfp_stoch_rnd}
+  - {kind: function, name: __emule_sfp_cast}
+  - {kind: function, name: __emule_sfp_setexp}
+  - {kind: global, name: __emule_sfp_cc_outer}
+  - {kind: global, name: __emule_sfp_cc_active}
+  - {kind: function, name: __emule_sfp_setcc}
+  - {kind: function, name: __emule_sfp_encc}
+  - {kind: function, name: __emule_sfp_nop}
+  - {kind: function, name: __emule_sfp_load}
+  - {kind: function, name: __emule_sfp_store}
+  - {kind: function, name: __emule_sfp_incrwc}
   - {kind: global, name: vConst0}
   - {kind: global, name: vConst1}
   - {kind: global, name: vConstNeg1}
@@ -1805,8 +1779,19 @@ files:
   symbols:
   - {kind: enum, name: InputClamping}
   - {kind: namespace, name: p_sfpu}
-  - {kind: global, name: kCONST_1_FP16B}
+  - {kind: global, name: LREG0}
+  - {kind: global, name: LREG4}
+  - {kind: global, name: LCONST_0}
   - {kind: namespace, name: ckernel}
+  - {kind: global, name: ADDR_MOD_0}
+  - {kind: global, name: ADDR_MOD_4}
+  - {kind: struct, name: addr_mod_t}
+  - {kind: enum, name: InstrModLoadStore}
+  - {kind: struct, name: p_setrwc}
+  - {kind: namespace, name: math}
+  - {kind: function, name: set_addr_mod_base}
+  - {kind: function, name: clear_addr_mod_base}
+  - {kind: global, name: kCONST_1_FP16B}
   - {kind: global, name: __emule_exp_init_scale}
   - {kind: global, name: input_clamping}
   - {kind: function, name: exp_tile_init}

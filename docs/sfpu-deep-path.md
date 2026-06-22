@@ -112,12 +112,40 @@ LRegs. Emule provides:
   `__emule_sfploadi` writer, and faithful `lut`/`lut2` evaluators
   (`__lut8_to_fp32` / `__lut16_to_fp32` decoders, `Abs(x)` range buckets, and
   `VD = a·Abs(x) + c` with sign-retain) — exact per tt-isa-documentation.
-- `jit_hw/ckernel_ops.h`: a shim defining the `TT_SFPLOADI`/`TTI_SFPLOADI`
-  (→ `__emule_sfploadi`) and `TTI_SFPCONFIG` (no-op) macros; the real
-  `ckernel_ops.h` emits raw Tensix instructions and can't compile on x86.
+- `jit_hw/ckernel_ops.h`: a shim binding `TT_SFPLOADI`/`TTI_SFPLOADI`
+  (→ `__emule_sfploadi`) and the rest of the raw-`TTI_SFP*` family (see
+  *Raw-`TTI_SFP*` instructions* below); the real `ckernel_ops.h` emits raw
+  Tensix instructions and can't compile on x86.
 
 Note: the silicon `tanh` LUT is coarse (3 pieces; ~0.14 abs error near |x|=1) —
 the deep path reproduces **silicon**, not torch, so PCC-vs-torch reflects that.
+
+## Raw-`TTI_SFP*` instructions (single substrate)
+
+Some silicon kernels drop below sfpi to raw Tensix SFPU instructions — e.g.
+SDPA's online-softmax rescale calls `calculate_exponential_polynomial` (the
+`exp_approx_mode=false` branch), a hand-written `TTI_SFP*` sequence. emule backs
+these with the **same** state as the sfpi vector ops: the one
+`vUInt __emule_lreg[16]` register file and the one `__emule_sfpi_mask` CC —
+there is no second SFPU substrate. `sfpi.h` provides one `__emule_sfp_*`
+primitive per instruction (`mad`, `addi`, `setcc`, `encc`, `load`, `store`,
+`cast`, `setexp`, `stoch_rnd`, `nop`, `incrwc`, plus a complete
+`__emule_sfploadi` covering all six `SFPLOADI_MOD0_*` cases — FLOATB / FLOATA /
+USHORT / SHORT / UPPER / LOWER), and `ckernel_ops.h` binds the `TTI_SFP*` /
+`TT_SFP*` macros to them. No `#undef` shadowing: the macros resolve to the
+backend wherever `ckernel_ops.h` is included. Two faithful-to-silicon details
+carry the exp path:
+
+- **`SFPLOADI` writeback is CC-predicated.** The exp underflow handler runs
+  `SFPSETCC(LREG1==0); SFPLOADI(LREG2,0,0); SFPENCC` to zero `LREG2` only on the
+  underflowed (`k==0`) lanes; `__emule_sfploadi` gates on `__emule_sfpi_mask`,
+  so an all-lane write can't clobber the live lanes.
+- **`SFPSETCC`/`SFPENCC` push/pop the same mask** that sfpi `v_if`/`v_endif`
+  drive — one CC register, shared with the vector ops.
+
+Genuinely-unmodeled-but-reachable ops (`TTI_SFPGT`, `TTI_SFPARECIP`,
+`TTI_SFPCONFIG`) route to `__emule_sfpu_unsupported(...)` — fail loud, never a
+silent no-op. Only true config/sync (`TTI_SETRWC`, `TTI_STALLWAIT`) are `((void)0)`.
 
 ## Status / verification
 
@@ -146,7 +174,8 @@ ckernel include on `ARCH_BLACKHOLE` / `ARCH_WORMHOLE`. Validated on both — dee
 `sqrt` compiles + runs exact against `tt_llk_wormhole_b0` as well as
 `tt_llk_blackhole`. Quasar can be added the same way.
 
-Deferred (raw `TTI_SFP*` fast paths, tracked on the PR): **`gelu`**
-(`TTI_SFPLUTFP32` + cdf + recip) and **`exp`** (`SFPLOADMACRO`/`SFPCONFIG`/
-`SFPSWAP`). These need raw-`TTI_SFP*` intrinsic support in the backend (or
-routing `exp` to its non-TTI accurate sfpi path).
+The raw-`TTI_SFP*` exp polynomial used by SDPA's online-softmax rescale
+(`exp_approx_mode=false`) runs on the backend described in *Raw-`TTI_SFP*`
+instructions* above. Still deferred: **`gelu`** (`TTI_SFPLUTFP32` + cdf +
+recip) and the `SFPLOADMACRO`-based approx `exp` fast path — both reach ops
+(`SFPLOADMACRO`/`SFPSWAP`) that are not yet modeled and fail loud if hit.

@@ -416,19 +416,189 @@ struct LRegFile {
 };
 inline LRegFile l_reg;
 
-// SFPLOADI into an LReg (called by the jit_hw ckernel_ops.h shim). The immediate
-// is uniform across lanes. insmod per ckernel_sfpu_load_config.h:
-//   2  -> imm16 unsigned, zero-extended (clears upper 16)
-//   10 -> write lower 16, keep upper;  8 -> write upper 16, keep lower
-inline void __emule_sfploadi(unsigned dest, unsigned insmod, unsigned val) {
-    if (dest >= 16) return;
-    uint32_t cur = __emule_lreg[dest].v[0];
-    if (insmod == 2)       cur = val & 0xFFFFu;
-    else if (insmod == 10) cur = (cur & 0xFFFF0000u) | (val & 0xFFFFu);
-    else if (insmod == 8)  cur = (cur & 0x0000FFFFu) | ((val & 0xFFFFu) << 16);
-    else                   cur = val;
-    for (uint32_t i = 0; i < 32; ++i) __emule_lreg[dest].v[i] = cur;
+// ============================================================================
+// Raw-TTI SFP* instruction backend.
+//
+// The TTI_SFP* macros (ckernel_ops.h) bind here. These model the Wormhole
+// exp-polynomial instruction set (SDPA's calculate_exponential_polynomial, the
+// exp_approx_mode=false path) directly on the deep-SFPU backend's *single*
+// register file (__emule_lreg) and *single* CC mask (__emule_sfpi_mask) — the
+// same state sfpi-level ops (lut(), v_if) use, so raw-TTI and sfpi ops interop
+// on one substrate (no parallel LReg file / mask). Genuinely-unmodeled-but-
+// reachable ops route to __emule_sfpu_unsupported (fail loud) in ckernel_ops.h.
+//
+// LReg accessors honor the read-only constant registers (LReg9 = LCONST_0 = 0.0,
+// LReg10 = LCONST_1 = 1.0) and bounds; storage is the per-lane raw bits of vUInt.
+inline uint32_t __emule_sfp_ru(unsigned idx, uint32_t lane) {
+    if (idx == 9) return 0x00000000u;   // LCONST_0 = 0.0f
+    if (idx == 10) return 0x3f800000u;  // LCONST_1 = 1.0f
+    if (idx >= 16) return 0u;
+    return __emule_lreg[idx].v[lane];
 }
+inline void __emule_sfp_wu(unsigned idx, uint32_t lane, uint32_t bits) {
+    if (idx == 9 || idx == 10 || idx >= 16) return;  // constants are read-only
+    __emule_lreg[idx].v[lane] = bits;
+}
+inline float __emule_sfp_rf(unsigned idx, uint32_t lane) {
+    uint32_t b = __emule_sfp_ru(idx, lane); float f; std::memcpy(&f, &b, 4); return f;
+}
+inline void __emule_sfp_wf(unsigned idx, uint32_t lane, float f) {
+    uint32_t b; std::memcpy(&b, &f, 4); __emule_sfp_wu(idx, lane, b);
+}
+inline uint32_t __emule_half_to_float_bits(uint16_t h) {  // IEEE binary16 -> binary32
+    uint32_t sign = uint32_t(h & 0x8000u) << 16;
+    uint32_t exp = (h >> 10) & 0x1Fu, mant = h & 0x3FFu;
+    if (exp == 0) {
+        if (mant == 0) return sign;
+        exp = 1; while (!(mant & 0x400u)) { mant <<= 1; --exp; } mant &= 0x3FFu;
+        return sign | ((exp + 112u) << 23) | (mant << 13);
+    }
+    if (exp == 0x1Fu) return sign | 0x7F800000u | (mant << 13);  // inf / nan
+    return sign | ((exp + 112u) << 23) | (mant << 13);
+}
+
+// SFPLOADI — build/patch an LReg from a 16-bit immediate (uniform across lanes,
+// unconditional on silicon). One complete loader covering all six
+// SFPLOADI_MOD0_* cases (sfpi_constants.h): used by both the LUT-init path
+// (UPPER/LOWER/USHORT) and the exp polynomial (FLOATB).
+inline void __emule_sfploadi(unsigned dest, unsigned insmod, unsigned val) {
+    if (dest >= 16 || dest == 9 || dest == 10) return;  // bounds + read-only consts
+    // SFPLOADI writeback is CC-predicated on silicon: the exp polynomial relies on
+    // this for underflow handling — `SFPSETCC(LREG1==0); SFPLOADI(LREG2,0,0); SFPENCC`
+    // zeroes LREG2 ONLY on the masked (k==0) lanes. So gate on the CC mask (an
+    // unconditional all-lane write would zero every lane and destroy the result).
+    // The immediate is uniform, but compute nv per-lane (patch modes read cur).
+    for (uint32_t i = 0; i < 32; ++i) {
+        if (!__emule_sfpi_mask[i]) continue;
+        uint32_t cur = __emule_lreg[dest].v[i], nv;
+        switch (insmod) {
+            case 0:  nv = (val & 0xFFFFu) << 16; break;                              // FLOATB: bf16 -> fp32
+            case 1:  nv = __emule_half_to_float_bits(uint16_t(val & 0xFFFFu)); break; // FLOATA: fp16 -> fp32
+            case 2:  nv = val & 0xFFFFu; break;                                      // USHORT: zero-extend
+            case 4:  nv = uint32_t(int32_t(int16_t(uint16_t(val & 0xFFFFu)))); break; // SHORT: sign-extend
+            case 8:  nv = (cur & 0x0000FFFFu) | ((val & 0xFFFFu) << 16); break;       // UPPER: write hi 16
+            case 10: nv = (cur & 0xFFFF0000u) | (val & 0xFFFFu); break;              // LOWER: write lo 16
+            default: nv = val; break;
+        }
+        __emule_lreg[dest].v[i] = nv;
+    }
+}
+
+// SFPMAD(a,b,c,d,mod): d = a*b + c, lanewise (mod 0; no NEGATE on WH).
+inline void __emule_sfp_mad(unsigned a, unsigned b, unsigned c, unsigned d, unsigned) {
+    for (uint32_t i = 0; i < 32; ++i)
+        if (__emule_sfpi_mask[i])
+            __emule_sfp_wf(d, i, __emule_sfp_rf(a, i) * __emule_sfp_rf(b, i) + __emule_sfp_rf(c, i));
+}
+// TT_SFPADDI(imm16, vd, mod): vd += bf16(imm16) widened to fp32.
+inline void __emule_sfp_addi(unsigned imm, unsigned vd, unsigned) {
+    uint32_t ab = (imm & 0xFFFFu) << 16; float add; std::memcpy(&add, &ab, 4);
+    for (uint32_t i = 0; i < 32; ++i)
+        if (__emule_sfpi_mask[i]) __emule_sfp_wf(vd, i, __emule_sfp_rf(vd, i) + add);
+}
+// Round to nearest, ties away from zero (SFPU FP32->int behavior).
+inline float __emule_sfp_round_ties_away(float v) {
+    return (v >= 0.0f) ? std::floor(v + 0.5f) : std::ceil(v - 0.5f);
+}
+// SFP_STOCH_RND mod1 selectors (the exp polynomial references these as
+// sfpi::SFPSTOCHRND_MOD1_*). Values mirror upstream sfpi_constants.h.
+constexpr unsigned int SFPSTOCHRND_MOD1_FP32_TO_FP16B = 1;
+constexpr unsigned int SFPSTOCHRND_MOD1_FP32_TO_UINT8 = 2;
+constexpr unsigned int SFPSTOCHRND_MOD1_FP32_TO_INT8  = 3;
+
+// SFP_STOCH_RND(rnd, imm, _, src, dst, mod1): convert src -> dst.
+//   1 = FP32_TO_FP16B (round-nearest-even to bf16 precision); 2 = FP32_TO_UINT8;
+//   3 = FP32_TO_INT8 (both sign-magnitude int bits).
+inline void __emule_sfp_stoch_rnd(int, int, int, unsigned src, unsigned dst, unsigned mod1) {
+    for (uint32_t i = 0; i < 32; ++i) {
+        if (!__emule_sfpi_mask[i]) continue;
+        const float v = __emule_sfp_rf(src, i);
+        if (mod1 == 3) {
+            int k = static_cast<int>(__emule_sfp_round_ties_away(v));
+            if (k > 127) k = 127; if (k < -127) k = -127;
+            uint32_t mag = static_cast<uint32_t>(k < 0 ? -k : k) & 0x7FFFFFFFu;
+            __emule_sfp_wu(dst, i, (k < 0 ? 0x80000000u : 0u) | mag);
+        } else if (mod1 == 2) {
+            int k = static_cast<int>(__emule_sfp_round_ties_away(std::fabs(v)));
+            if (k > 255) k = 255; if (k < 0) k = 0;
+            __emule_sfp_wu(dst, i, static_cast<uint32_t>(k));
+        } else if (mod1 == 1) {
+            uint32_t b; std::memcpy(&b, &v, 4);
+            __emule_sfp_wu(dst, i, (b + 0x7FFFu + ((b >> 16) & 1u)) & 0xFFFF0000u);
+        }
+    }
+}
+// SFPCAST(r0, r1, mod): sign-magnitude int32 -> fp32 (mod 0).
+inline void __emule_sfp_cast(unsigned r0, unsigned r1, unsigned) {
+    for (uint32_t i = 0; i < 32; ++i) {
+        if (!__emule_sfpi_mask[i]) continue;
+        uint32_t b = __emule_sfp_ru(r1, i);
+        float f = static_cast<float>(b & 0x7FFFFFFFu);
+        if (b & 0x80000000u) f = -f;
+        __emule_sfp_wf(r0, i, f);
+    }
+}
+// SFPSETEXP(imm, vc, vd, mod): set vd's fp32 exponent from low byte of vd's int
+// value, sign+mantissa from vc. With vc=LCONST_0 this yields 2^k.
+inline void __emule_sfp_setexp(unsigned, unsigned vc, unsigned vd, unsigned) {
+    for (uint32_t i = 0; i < 32; ++i) {
+        if (!__emule_sfpi_mask[i]) continue;
+        uint32_t exp_byte = __emule_sfp_ru(vd, i) & 0xFFu;
+        uint32_t base = __emule_sfp_ru(vc, i) & 0x807FFFFFu;
+        __emule_sfp_wu(vd, i, base | (exp_byte << 23));
+    }
+}
+// SFPSETCC / SFPENCC bracket a predicated region on the *single* CC mask, as a
+// scoped push/pop (like v_if/v_endif): SFPSETCC intersects the compare with the
+// OUTER mask (the lanes the dispatcher / v_if left active — e.g. the first-column
+// valid col-0 lanes), and SFPENCC restores that outer mask. SFPENCC must NOT
+// blanket-enable all lanes: that would clobber the dispatcher's lane selection
+// (the streaming exp_tile_first_column rescale would then write padding lanes and
+// silently corrupt the cross-chunk correction). The outer is saved on region
+// entry (mirrors v_if's __MaskFrame.outer); both drive the same __emule_sfpi_mask.
+//   mod1: 0=<0, 2=!=0, 4=>=0, 6==0.
+inline thread_local std::array<bool, __EMULE_SFPI_LANES> __emule_sfp_cc_outer = {};
+inline thread_local bool __emule_sfp_cc_active = false;
+inline void __emule_sfp_setcc(unsigned, unsigned vc, unsigned, unsigned mod1) {
+    if (!__emule_sfp_cc_active) { __emule_sfp_cc_outer = __emule_sfpi_mask; __emule_sfp_cc_active = true; }
+    for (uint32_t i = 0; i < 32; ++i) {
+        float v = __emule_sfp_rf(vc, i);
+        bool cond;
+        switch (mod1) {
+            case 0:  cond = (v < 0.0f);  break;
+            case 2:  cond = (v != 0.0f); break;
+            case 4:  cond = (v >= 0.0f); break;
+            case 6:  cond = (v == 0.0f); break;
+            default: cond = true;        break;
+        }
+        __emule_sfpi_mask[i] = __emule_sfp_cc_outer[i] && cond;
+    }
+}
+inline void __emule_sfp_encc(int = 0, int = 0, int = 0, int = 0) {
+    if (__emule_sfp_cc_active) { __emule_sfpi_mask = __emule_sfp_cc_outer; __emule_sfp_cc_active = false; }
+}
+inline void __emule_sfp_nop() {}
+// SFPLOAD/SFPSTORE address DST via the sfpi cursor + lane->element map (reusing
+// the proven first-column / face-major addressing). fmt + addr_mod args ignored
+// (emule DST is fp32; advancement is via INCRWC).
+template <typename F, typename A>
+inline void __emule_sfp_load(unsigned vd, F, A, int imm) {
+    float* base = __emule_sfpi_active_dst();
+    const uint32_t addr = ::__emule_sfpi_cursor + static_cast<uint32_t>(imm);
+    for (uint32_t i = 0; i < 32; ++i) {
+        float f = base[__emule_sfpi_lane_index(addr, i)];
+        uint32_t b; std::memcpy(&b, &f, 4); __emule_sfp_wu(vd, i, b);
+    }
+}
+template <typename F, typename A>
+inline void __emule_sfp_store(unsigned vc, F, A, int imm) {
+    float* base = __emule_sfpi_active_dst();
+    const uint32_t addr = ::__emule_sfpi_cursor + static_cast<uint32_t>(imm);
+    for (uint32_t i = 0; i < 32; ++i)
+        if (__emule_sfpi_mask[i]) base[__emule_sfpi_lane_index(addr, i)] = __emule_sfp_rf(vc, i);
+}
+// INCRWC(cr, d, b, a): advance the DST row write counter (the sfpi cursor) by d.
+inline void __emule_sfp_incrwc(int, int d, int, int) { ::__emule_sfpi_cursor += static_cast<uint32_t>(d); }
 
 // ---- Constants ----
 
