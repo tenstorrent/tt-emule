@@ -111,6 +111,28 @@ Two host-mmap layouts:
 The address encoding is the same in both modes; only the conversion in
 `__emule_addr_to_offset` / `__emule_local_l1_to_ptr` differs.
 
+### 2.4 DRAM channel backing
+
+DRAM is backed by **one host mmap per physical DRAM channel** — 6 on Wormhole
+N150, 8 on Blackhole P100 (the outer dimension of the SoC descriptor's `dram:`
+array). Every NOC endpoint that fronts a channel aliases onto that single
+backing: the channel's subchannel cores (the inner `dram:` array), both
+NOC0/NOC1 preferred-worker coords, and the multiple metal `dram_views` that map
+to one physical channel (WH exposes 12 views over 6 channels — two views per
+channel, distinguished only by `bank_to_dram_offset`). This mirrors silicon:
+one physical channel addressed through many coords/views, so a write via any
+endpoint is visible via any other (and a NOC 1 read sees a NOC 0 / host write).
+
+The channel is resolved from the core's **UMD LOGICAL coordinate** (`x =
+channel`), consistently on both sides: the host path
+(`SWEmuleChip::write_to_device` → `get_dram_channel_for_core`) and the kernel
+core-map build (`emulated_program_runner.cpp`, translating each preferred-worker
+coord TRANSLATED→LOGICAL) — keyed by physical channel (not the metal view
+index) so every view of a channel shares one backing. Implementation:
+`SWEmuleChip::get_dram_channel_backing(channel)` in `device/chip/sw_emule_chip.cpp`
+(umd); the per-NOC bank tables that feed kernel-side DRAM resolution are
+described in §8.3.
+
 ---
 
 ## 3. Async read / write surface
@@ -120,11 +142,11 @@ The address encoding is the same in both modes; only the conversion in
 ```cpp
 template <uint32_t max_page_size, bool enable_noc_tracing = true>
 void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
-                    uint32_t size, uint8_t noc = 0, uint32_t vc = NOC_UNICAST_WRITE_VC);
+                    uint32_t size, uint8_t noc = noc_index, uint32_t vc = NOC_UNICAST_WRITE_VC);
 
 template <uint32_t max_page_size, bool enable_noc_tracing = true, bool posted = false>
 void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
-                     uint32_t size, uint8_t noc = 0, uint32_t vc = NOC_UNICAST_WRITE_VC);
+                     uint32_t size, uint8_t noc = noc_index, uint32_t vc = NOC_UNICAST_WRITE_VC);
 ```
 
 Both resolve the noc address via `__emule_resolve_noc_addr`, then `memcpy(size)`.
@@ -202,12 +224,12 @@ receive the packet too (silicon's `NOC_CMD_BRCST_SRC_INCLUDE` flag).
 template <uint32_t max_page_size = NOC_MAX_BURST_SIZE + 1>
 void noc_async_write_multicast(uint32_t src, uint64_t dst, uint32_t size,
                                uint32_t num_dests, bool linked = false,
-                               uint8_t noc = 0, uint8_t vc = NOC_MULTICAST_WRITE_VC);
+                               uint8_t noc = noc_index, uint8_t vc = NOC_MULTICAST_WRITE_VC);
 // include_self = false
 
 void noc_async_write_multicast_loopback_src(uint32_t src, uint64_t dst,
                                             uint32_t size, uint32_t num_dests,
-                                            bool linked = false, uint8_t noc = 0);
+                                            bool linked = false, uint8_t noc = noc_index);
 // include_self = true (silicon: NOC_CMD_BRCST_SRC_INCLUDE)
 
 template <bool enable_noc_tracing = true>
@@ -297,6 +319,14 @@ Specializations live in:
 | `MulticastEndpoint` | `endpoints.h` | raw mcast addr (passed to `__emule_multicast_write`) |
 | `AllocatorBank<L1>` | `endpoints.h` | `__emule_resolve_noc_addr(get_noc_addr_from_bank_id<false>(bank_id, addr, noc))` |
 | `AllocatorBank<DRAM>` | `endpoints.h` | `__emule_resolve_noc_addr(get_noc_addr_from_bank_id<true>(bank_id, addr, noc))` |
+| `TensorAccessor<DSpec>` | `noc_traits.h` | `__emule_resolve_noc_addr(acc.get_noc_addr(page_id, off, noc))` |
+| `tensor_accessor::Page` | `noc_traits.h` | `__emule_resolve_noc_addr(page.noc_addr() + off)` |
+| `ShardView<Accessor>` | `noc_traits.h` | `__emule_resolve_noc_addr(acc.get_noc_addr(shard_id, off, noc))` |
+| `AbstractTensorAccessorWrapper` | `noc_traits.h` | `__emule_resolve_noc_addr(acc.get_noc_addr(page_id, off, noc))` |
+
+The tensor-accessor specializations in `noc_traits.h` are made visible to every
+dataflow kernel transitively through `circular_buffer.h` (mirroring upstream's
+`circular_buffer.h → noc_zero_dram.inl → noc_traits.h` chain).
 
 The `Noc::async_read<opts>(Src, Dst, size, src_args, dst_args, noc_opts)`
 template walks the traits to resolve both pointers, then `memcpy(size)`.
@@ -341,8 +371,8 @@ kernel.
 | Symbol | Defined in | Used by |
 |---|---|---|
 | `__emule_resolve_noc_addr` | `emulated_program_runner.cpp` | Every read/write that needs core-map lookup |
-| `__emule_local_l1_ptr` | `emulated_program_runner.cpp` | `AllocatorBank<L1>` (legacy direct path; now goes through resolver) |
-| `__emule_dram_ptr` | `emulated_program_runner.cpp` | (legacy DRAM single-bank path; now unused since bank-aware path lands) |
+| `__emule_local_l1_ptr` | `emulated_program_runner.cpp` | local-core L1 fast path (not on the resolver path) |
+| `__emule_dram_ptr` | `emulated_program_runner.cpp` | DRAM-offset fast path (not on the resolver path) |
 | `__emule_multicast_write` | `emulated_program_runner.cpp` | Every multicast write / semaphore set_multicast |
 
 ### 8.2 Thread-local state
@@ -356,7 +386,9 @@ Set by the program runner per emulated core, read by the JIT kernel:
 | `my_x[2]`, `my_y[2]` | `uint8_t` | program runner per-core | `get_noc_addr(addr, noc)` 2-arg overload |
 | `__emule_cbs` | `__emule_cb_state*` | program runner per-program | every CB API |
 | `__emule_dfbs` | `__emule_dfb_iface*` | program runner per-program (Quasar) | every DFB API |
-| `noc_index` | `uint8_t` (constexpr 0) | `jit_kernel_stubs.hpp` | default noc arg |
+
+(`noc_index` / `noc_mode` are not TLS — they're per-kernel compile-time constants
+from host-emitted JIT defines; see §8.3.)
 
 ### 8.3 Per-NOC state
 
@@ -384,10 +416,20 @@ Per-NOC TLS / globals in emule today:
 | `__emule_noc_cached_size` | `uint32_t[NUM_NOCS]` | `noc_id_` | `Noc::{set_async_read_state, async_read_with_state, set_async_write_state, async_write_with_state}` transfer size |
 | `__emule_noc_cached_write_dst` | `uintptr_t[NUM_NOCS]` | `noc_id_` | `Noc::{set_async_write_state, async_write_with_state}` resolved dst |
 
-Outstanding single-shared state that should eventually be per-NOC:
+`noc_index` and `noc_mode` are **faithful per-kernel** compile-time constants —
+`constexpr uint8_t noc_index = NOC_INDEX; noc_mode = NOC_MODE;` in
+`jit_kernel_stubs.hpp`, mirroring the firmware `dataflow_api_common.h`
+`KERNEL_BUILD` formula. The host emits `NOC_INDEX` / `NOC_MODE` per kernel
+(BRISC→NOC 0, NCRISC→NOC 1; `DM_DEDICATED_NOC` default); emule's `#ifndef`
+fallbacks (`NOC_INDEX→0`, `NOC_MODE→DM_DEDICATED_NOC`) cover the compute
+wrappers that omit them. The dataflow API signatures default `noc = noc_index`
+(mirroring silicon), so a call that omits the arg uses the kernel's own NOC.
 
-- `noc_index` — currently `constexpr 0`. Making it a runtime per-thread
-  value is a separate follow-up (needs program runner support).
+The per-NOC bank tables (`dram_bank_to_noc_xy` / `l1_bank_to_noc_xy`) are
+declared `extern [2][NUM_*_BANKS]` on the kernel side; the runner lays them out
+with the matching **actual-count stride** (`tbl[noc*num_banks + bank]`, where
+`num_banks` is the real per-arch count, not a padded `MAX_NUM_BANKS`) so the
+`noc=1` row resolves to the right per-NOC coords.
 
 ---
 
@@ -418,21 +460,16 @@ These are NOT drift — emule deliberately collapses them:
 
 ---
 
-## 10. Known drift / follow-ups
+## 10. Known drift
 
-Drift the audit chose to defer. Each is documented in a follow-up issue;
-none affect correctness for the current single-chip, non-eth-fabric,
-TENSIX-only emule scope.
+Divergences from silicon that don't affect correctness for the current
+single-chip, non-eth-fabric, TENSIX-only emule scope:
 
-- `noc = 0` default mismatches vs silicon's `noc = noc_index`. Same value at
-  runtime in emule's single-NOC model.
 - `ProgrammableCoreType` per-core-type L1 base selection (eth-fabric not
   modeled in emule).
 - `Noc::inline_dw_write` `INLINE_REG` stream-register dispatch.
 - `noc_traits_t<UnicastEndpoint>::src/dst_addr<LOCAL_L1>` does a resolve+truncate
   through L1Pool's mask (same final pointer either way).
-
-See the linked follow-up issue for full triage and severity ratings.
 
 ---
 

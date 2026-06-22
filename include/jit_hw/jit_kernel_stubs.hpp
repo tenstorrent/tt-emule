@@ -19,17 +19,15 @@
 #define KERNEL_BUILD
 #endif
 
-// NOC mode constants — silicon firmware sets these per-RISC build. upstream kernels
-// has static_assert(noc_mode == DM_DYNAMIC_NOC) in several ops, so emule
-// reports dynamic mode. Universal because upstream code references them from both
-// compute and dataflow paths.
+// NOC mode constants — silicon firmware sets these per-RISC build.
 #ifndef DM_DEDICATED_NOC
 #define DM_DEDICATED_NOC 0
 #endif
 #ifndef DM_DYNAMIC_NOC
 #define DM_DYNAMIC_NOC 1
 #endif
-inline constexpr int noc_mode = DM_DYNAMIC_NOC;
+// noc_mode / noc_index are defined together further down, next to the other
+// firmware-mirrored constants, once <cstdint> (uint8_t) is in scope.
 
 // tensix_sync — silicon's TRISC sync barrier. emule runs all TRISCs on a
 // unified compute thread, so this is a no-op. Universal because compute
@@ -91,7 +89,10 @@ inline void tensix_sync() {}
 // doesn't double-define. First-included wins.
 #ifndef __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED
 #define __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED
+// #46346: SrcOrder (matmul uses Reverse) — accepted-and-ignored in emule.
+enum class SrcOrder : uint8_t { Regular = 0, Reverse = 1 };
 inline void compute_kernel_hw_startup(uint32_t, uint32_t) {}
+template <SrcOrder = SrcOrder::Regular>
 inline void compute_kernel_hw_startup(uint32_t a, uint32_t b, uint32_t) { compute_kernel_hw_startup(a, b); }
 #endif
 
@@ -164,8 +165,19 @@ extern thread_local uint32_t __emule_my_thread_id;
 #define tt_l1_ptr
 #endif
 
-// NOC index — always 0 for emulation (real firmware sets this per core).
-constexpr uint8_t noc_index = 0;
+// noc_index / noc_mode mirror the firmware dataflow_api_common.h KERNEL_BUILD
+// formula (noc_index = NOC_INDEX, noc_mode = NOC_MODE): the host emits these per
+// kernel type (kernel.cpp::process_defines) — BRISC→NOC0, NCRISC→NOC1, mode
+// DM_DEDICATED_NOC by default. emule's compute wrappers emit neither macro, so
+// default them. See docs/noc-emulation.md §8.3.
+#ifndef NOC_INDEX
+#define NOC_INDEX 0
+#endif
+#ifndef NOC_MODE
+#define NOC_MODE DM_DEDICATED_NOC
+#endif
+constexpr uint8_t noc_index = NOC_INDEX;
+constexpr uint8_t noc_mode = NOC_MODE;
 
 static inline uintptr_t get_arg_addr(int arg_idx) {
     return reinterpret_cast<uintptr_t>(&__rt_args[arg_idx]);

@@ -6,15 +6,11 @@
 // JIT emulation shadow for api/tensor/noc_traits.h.
 //
 // The real header defines noc_traits_t specialisations for:
-//   TensorAccessor<DSpecT>   — provided here (needed by DFB kernel tests)
-//   PageView<Accessor>       — omitted (not used in JIT kernels)
-//   ShardView<Accessor>      — omitted
-//   tensor_accessor::Page    — omitted
-//
-// Omitting the Page/PageView/ShardView specialisations avoids including the
-// real tensor_accessor.h (which chains through many hardware headers), and
-// avoids the partial-specialisation parse error that occurs when TensorAccessor
-// is not yet known to be a class template.
+//   TensorAccessor<DSpecT>           — provided here
+//   AbstractTensorAccessorWrapper    — provided here (type-erased accessor, #45671)
+//   tensor_accessor::Page            — provided here
+//   ShardView<Accessor>              — provided here
+//   PageView<Accessor>               — omitted (no JIT kernel uses it)
 //
 // Address resolution contract:
 //   noc_traits_t in emulation always returns HOST POINTERS as uintptr_t —
@@ -143,6 +139,37 @@ struct noc_traits_t<ShardView<Accessor>> {
     static uintptr_t dst_addr(const ShardView<Accessor>& dst, const Noc& noc,
                               const dst_args_type& args) {
         uint64_t noc_addr = dst.get_noc_addr(args.shard_id, args.offset_bytes, noc.get_noc_id());
+        return reinterpret_cast<uintptr_t>(__emule_resolve_noc_addr(noc_addr));
+    }
+};
+
+// ---- noc_traits_t<AbstractTensorAccessorWrapper> -------------------------
+// Type-erased accessor (#45671): make_abstract_tensor_accessor_wrappers wraps a
+// tuple of TensorAccessors into an array the concat readers iterate over. Page-
+// addressed via get_noc_addr — same host-pointer resolution as TensorAccessor.
+
+template <>
+struct noc_traits_t<AbstractTensorAccessorWrapper> {
+    struct src_args_type {
+        uint32_t page_id{};
+        uint32_t offset_bytes = 0;
+    };
+    struct dst_args_type {
+        uint32_t page_id{};
+        uint32_t offset_bytes = 0;
+    };
+
+    template <Noc::AddressType address_type>
+    static uintptr_t src_addr(const AbstractTensorAccessorWrapper& src, const Noc& noc,
+                              const src_args_type& args) {
+        uint64_t noc_addr = src.get_noc_addr(args.page_id, args.offset_bytes, noc.get_noc_id());
+        return reinterpret_cast<uintptr_t>(__emule_resolve_noc_addr(noc_addr));
+    }
+
+    template <Noc::AddressType address_type>
+    static uintptr_t dst_addr(const AbstractTensorAccessorWrapper& dst, const Noc& noc,
+                              const dst_args_type& args) {
+        uint64_t noc_addr = dst.get_noc_addr(args.page_id, args.offset_bytes, noc.get_noc_id());
         return reinterpret_cast<uintptr_t>(__emule_resolve_noc_addr(noc_addr));
     }
 };

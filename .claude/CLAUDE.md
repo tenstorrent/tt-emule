@@ -52,6 +52,11 @@ faithful mock APIs.
   and update it in the same change. Verify every claim against
   actual code before writing it down — the docs must never assert
   something the source doesn't do.
+- Committed documentation describes the project's current, actual
+  scope and behavior — not how it got there. Don't include historical
+  information, change narratives, or changelogs (e.g. "previously/now",
+  "the bug was", "the fix") unless explicitly asked; that belongs in
+  untracked local notes.
 
 ## When to use what
 

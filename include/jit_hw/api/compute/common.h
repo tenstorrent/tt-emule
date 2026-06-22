@@ -97,6 +97,21 @@ enum class MathFidelity : uint8_t { LoFi = 0, HiFi2 = 2, HiFi3 = 3, HiFi4 = 4 };
 
 enum class ReluType { NO_RELU, ZERO_RELU, MIN_THRESHOLD_RELU, MAX_THRESHOLD_RELU };
 
+// Pack-fused ReLU config — mirrors ckernel::ReluConfig
+// (tt_llk_wormhole_b0/llk_lib/llk_defs.h). Kernels (e.g. bmm fused-bias-
+// activation) now set pack ReLU via llk_pack_relu_config(ReluConfig::{none,zero}()).
+struct ReluConfig {
+    ReluType mode;
+    uint32_t threshold;
+    static constexpr ReluConfig none() { return {ReluType::NO_RELU, 0}; }
+    static constexpr ReluConfig zero() { return {ReluType::ZERO_RELU, 0}; }
+    static constexpr ReluConfig min_threshold(uint32_t t) { return {ReluType::MIN_THRESHOLD_RELU, t}; }
+    static constexpr ReluConfig max_threshold(uint32_t t) { return {ReluType::MAX_THRESHOLD_RELU, t}; }
+    static constexpr ReluConfig from_packed(uint32_t p) { return {static_cast<ReluType>(p & 0x3), (p >> 16) & 0xFFFFu}; }
+    constexpr ReluType get_mode() const { return mode; }
+    constexpr uint32_t get_threshold() const { return threshold; }
+};
+
 // p_dim_stride_target: reconfig behaviour for dim and stride. Defined upstream
 // at tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_unpack_common.h:25. Used
 // as a template arg on llk_unpack_reconfig_data_format_* (LLK functions emule
@@ -911,9 +926,9 @@ ALWI void copy_block_matmul_partials(
     }
 }
 
-// copy_tile_to_dst_init_short — no-op (hardware reconfiguration)
-ALWI void copy_tile_to_dst_init_short(uint32_t) {}
-ALWI void copy_tile_to_dst_init_short(uint32_t, uint32_t) {}
+// copy_tile_to_dst_init_short — no-op (hardware reconfiguration). Upstream takes
+// (cbid, transpose=0, transpose_within_16x16_face=0); defaults cover 1-/2-/3-arg calls.
+ALWI void copy_tile_to_dst_init_short(uint32_t, uint32_t = 0, uint32_t = 0) {}
 
 // copy_tile_init — alias used by D2M-generated code
 ALWI void copy_tile_init(uint32_t = 0) {}
@@ -954,6 +969,10 @@ ALWI void pack_reconfig_data_format(uint32_t, uint32_t) {}
 // threshold by `pack_set_relu_threshold`; `pack_relu_config(uint32_t)`
 // decodes the silicon-style packed config.
 ALWI void llk_pack_relu_config(ReluType type) { __emule_pack_relu_mode = type; }
+ALWI void llk_pack_relu_config(const ReluConfig& config) {
+    __emule_pack_relu_mode = config.get_mode();
+    __emule_pack_relu_threshold = static_cast<float>(config.get_threshold());
+}
 ALWI void pack_set_relu_threshold(float threshold) { __emule_pack_relu_threshold = threshold; }
 
 // Public-API forwarders for handwritten compute kernels that use silicon's

@@ -196,6 +196,13 @@ public:
         }
     }
 
+    // ----- is_read_trid_flushed -----
+    // Mirrors upstream Noc::is_read_trid_flushed. emule reads complete inline
+    // (synchronous memcpy), so the bridge always reports flushed.
+    bool is_read_trid_flushed(uint32_t trid) const {
+        return ncrisc_noc_read_with_transaction_id_flushed(noc_id_, trid);
+    }
+
     // ----- async_write -----
 
     template <
@@ -333,6 +340,23 @@ public:
             noc_async_write_barrier(noc_id_);
         }
     }
+
+    // ----- async_write_zeros + write_zeros_l1_barrier -----
+    // Silicon zero-fills via a dedicated zero-write cmd buf; emule memsets the
+    // resolved host pointer. The paired barrier is a no-op (emule writes are sync).
+    // Overload (1) zeros a LOCAL destination (a DataflowBuffer / CB write entry —
+    // zero_tile, reduce scaler), so resolve as LOCAL_L1 (a DFB without an mcast
+    // range static_asserts L1-only in dataflow_buffer.h).
+    template <typename Dst>
+    void async_write_zeros(const Dst& dst, uint32_t size_bytes, const dst_args_t<Dst>& dst_args = {}) const {
+        uint8_t* dst_ptr = to_host_ptr<AddressType::LOCAL_L1>(
+            noc_traits_t<Dst>::template dst_addr<AddressType::LOCAL_L1>(dst, *this, dst_args));
+        if (dst_ptr) {
+            std::memset(dst_ptr, 0, size_bytes);
+        }
+    }
+
+    void write_zeros_l1_barrier() const {}
 
     template <NocOptions opts = NocOptions::DEFAULT>
     void async_writes_flushed(const NocOptVals& noc_opts = {}) const {
