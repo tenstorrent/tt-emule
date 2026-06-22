@@ -538,6 +538,9 @@ files:
 - path: include/jit_hw/risc_common.h
   section: include/jit_hw/
   summary: includes `internal/firmware_common.h`
+- path: include/jit_hw/run_top32_llk.hpp
+  section: include/jit_hw/
+  summary: emule shadow for the bare-name `#include "run_top32_llk.hpp"` (local_top_k kernel); routes to api/compute/experimental/top32_rm.h.
 - path: include/jit_hw/sfpi.h
   section: include/jit_hw/
   summary: '`namespace sfpi`; `enum class RoundMode`/`LRegs`; TLS `__emule_sfpi_dst_base`/`__emule_sfpi_cursor`; `SFPSHFT2_*` constants (SFPU vector-API shim)'
@@ -1017,6 +1020,10 @@ files:
   - {kind: function, name: pack_reconfig_l1_acc}
   - {kind: function, name: pack_relu_config}
   - {kind: function, name: llk_pack_hw_configure}
+  - {kind: function, name: llk_unpack_hw_configure}
+  - {kind: function, name: llk_math_hw_configure}
+  - {kind: function, name: llk_math_pack_sync_init}
+  - {kind: function, name: llk_pack_dest_init}
   - {kind: global, name: ReuseType}
   - {kind: function, name: binary_dest_reuse_tiles_init}
   - {kind: function, name: binary_dest_reuse_tiles}
@@ -2105,6 +2112,21 @@ files:
   symbols:
   - {kind: namespace, name: ckernel}
   - {kind: class, name: Semaphore}
+- path: include/jit_hw/api/compute/experimental/top32_rm.h
+  section: include/jit_hw/api/compute/experimental/
+  summary: 'emule model for blaze `local_top_k_detail::run_top32_llk{,_presorted_1024_opt}` (row-major top-32): reads parallel (score,index) pairs from two ROW_MAJOR CBs, keeps top-32 by score (ties→lower
+    index), writes contiguously to the output CBs. Bypasses the top32_rm SFPU LLKs.'
+  symbols:
+  - {kind: namespace, name: blaze}
+  - {kind: namespace, name: local_top_k_detail}
+  - {kind: namespace, name: __emule_top32}
+  - {kind: global, name: TOPK}
+  - {kind: function, name: gather}
+  - {kind: function, name: run}
+  - {kind: global, name: presorted}
+  - {kind: function, name: run_top32_llk}
+  - {kind: global, name: fp32_dest_acc_en}
+  - {kind: function, name: run_top32_llk_presorted_1024_opt}
 - path: include/jit_hw/api/compute/sentinel/compute_kernel_sentinel.h
   section: include/jit_hw/api/compute/sentinel/
   summary: '`ckernel::` `enum class Operand`; `state_configure` no-op templates (+ `using ::Operand`/`::state_configure` re-exports). Sentinel-state tracking not needed in emule''s unified-thread model'
@@ -2651,3 +2673,6 @@ files:
 - path: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/topk_xl.h
   section: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/
   summary: emule shadow for blaze's `topk_xl` compute op → routes to the high-level `api/compute/topk_xl.h` emule model (bitonic TopK)
+- path: include/jit_hw/blaze/ops/local_top_k/kernels/run_top32_llk.hpp
+  section: include/jit_hw/blaze/ops/local_top_k/kernels/
+  summary: emule shadow for blaze/ops/local_top_k/kernels/run_top32_llk.hpp (full-path include used by cross_core_topk_merge / cross_device_top32_merge); routes to api/compute/experimental/top32_rm.h.

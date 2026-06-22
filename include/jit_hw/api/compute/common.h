@@ -1085,6 +1085,20 @@ ALWI void pack_relu_config(uint32_t config) {
 template <bool is_fp32_dest_acc_en>
 ALWI void llk_pack_hw_configure(uint32_t /*pack_output*/) {}
 
+// HW-engine configure / sync-init stubs used by deepseek_compute_kernel_hw_startup
+// (compute_kernel_api/deepseek_compute_kernel_hw_startup.h). On silicon these
+// program the unpack/math/pack engine registers + the math↔pack DST sync; emule
+// computes in software with no engine state, so they are no-ops — same as the
+// other llk_*_hw_configure stubs above.
+template <bool is_fp32_dest_acc_en = false>
+ALWI void llk_unpack_hw_configure(uint32_t /*icb0*/, uint32_t /*icb1*/) {}
+template <bool is_fp32_dest_acc_en = false>
+ALWI void llk_math_hw_configure(uint32_t /*icb0*/, uint32_t /*icb1*/) {}
+template <bool is_fp32_dest_acc_en = false>
+ALWI void llk_math_pack_sync_init() {}
+template <bool is_fp32_dest_acc_en = false, bool untilize = false>
+ALWI void llk_pack_dest_init(uint32_t /*ocb*/) {}
+
 // binary_dest_reuse stubs.
 // D2M emits these as `binary_dest_reuse_tiles{,_init}<BinaryType, ReuseType>(...)`
 // — note the template param ORDER is (BinaryType first, ReuseType second). Older
