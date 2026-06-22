@@ -44,7 +44,10 @@ OUT_DIR="${OUT_DIR:-$TT_METAL_DIR/../sweep-out/$TT_EMULE_ARCH}"
 XML_DIR="$OUT_DIR/xml"
 
 mkdir -p "$XML_DIR"
-[ "$KEEP_XML" = "1" ] || rm -f "$XML_DIR"/*.xml "$XML_DIR"/*.log 2>/dev/null || true
+# Also wipe the *.excluded.json sidecars: sweep.py reuses an existing one to
+# skip re-collecting, so a stale sidecar from a prior run in the same OUT_DIR
+# would cause incorrect ignores / missed import-error filtering.
+[ "$KEEP_XML" = "1" ] || rm -f "$XML_DIR"/*.xml "$XML_DIR"/*.log "$XML_DIR"/*.excluded.json 2>/dev/null || true
 
 echo "== post-commit sweep (local) =="
 echo "  arch:        $TT_EMULE_ARCH"

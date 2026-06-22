@@ -181,6 +181,7 @@ jobs:
     if: ${{ always() }}
     runs-on: tt-ubuntu-2204-large-stable
     timeout-minutes: 30
+    continue-on-error: true   # report-only; a parse/upload/Slack hiccup must not fail the run
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     strategy:
@@ -265,6 +266,11 @@ jobs:
           rate=$(python3 -c "import json;print(json.load(open('$headline'))['pass_rate']['of_executed_pct'])")
           passing=$(python3 -c "import json;d=json.load(open('$headline'))['tests'];print(f\"{d['passing']}/{d['executed']}\")")
           url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          # Build the payload with python (json.dumps) so the nightly does not
+          # depend on jq being installed in the container; args via argv avoid
+          # any shell-quoting / escaping pitfalls.
+          python3 -c "import json,sys; json.dump({'text': 'tt-emule post-commit sweep (%s): %s%% pass (%s executed)\n%s' % tuple(sys.argv[1:5])}, open('slack-payload.json','w'))" \
+            "$ARCH" "$rate" "$passing" "$url"
           curl -sf -X POST -H 'Content-Type: application/json' \
-            --data "$(jq -n --arg t "tt-emule post-commit sweep ($ARCH): ${rate}% pass (${passing} executed)\n$url" '{text:$t}')" \
+            --data @slack-payload.json \
             "$SLACK_WEBHOOK_URL" || echo "Slack post failed (non-fatal)"

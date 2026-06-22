@@ -320,15 +320,22 @@ def run_entry(rec, *, tt_metal_dir, out_dir, runtime_env, pytest_bin,
     # forked retry the sidecar already exists — reuse it instead of re-collecting.
     excluded = []
     if rec["is_pytest"] and not dry_run:
+        cached = None
         if excluded_path.is_file():
             try:
-                excluded = json.loads(excluded_path.read_text())
+                cached = json.loads(excluded_path.read_text())
             except (OSError, json.JSONDecodeError):
-                excluded = []
-        else:
+                # Unreadable sidecar — fall through and regenerate rather than
+                # silently skipping the collect-only pre-pass, which would
+                # reintroduce the pytest-9.0.3 collection-abort bug (and leave
+                # the bad sidecar in place for future runs).
+                cached = None
+        if cached is None:
             excluded = collect_filter(rec, tt_metal_dir=tt_metal_dir,
                                       runtime_env=env, pytest_bin=pytest_bin)
             excluded_path.write_text(json.dumps(excluded, indent=2) + "\n")
+        else:
+            excluded = cached
         if excluded:
             print(f"# pre-filter: ignoring {len(excluded)} import-error file(s): "
                   + ", ".join(e["file"] for e in excluded))
