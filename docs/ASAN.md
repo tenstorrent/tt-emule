@@ -435,3 +435,36 @@ of the JIT cache key so debug `.so` files don't pollute the normal cache). The
 header is self-contained (libc/POSIX only) so it compiles into both kernel `.so`
 files and libtt_metal. New checks get the trace for free — just call
 `__emule_asan_panic()` after the `fprintf`.
+
+### Core dumps (`TT_METAL_EMULE_ASAN_ALLOW_CORE`)
+
+Before printing, `__emule_asan_panic` calls `__emule_asan_handle_coredump()` (its
+metal mirror is `emule_asan_handle_coredump` in `emule_asan_panic.cpp`) to decide the
+fate of the core the `abort()` would otherwise trigger. It is called **under the panic
+lock**, so the winning thread acts exactly once — a kernel bug that trips every core at
+once never spawns more than one dump.
+
+- **Unset (the default): no core.** The function marks the process non-dumpable via
+  `prctl(PR_SET_DUMPABLE, 0)`. This is deliberate and load-bearing: the emulated process
+  maps GB-scale L1+DRAM, so each abort would otherwise dump a ~13 GB core, and on hosts
+  whose `core_pattern` pipes to a crash handler (e.g. Ubuntu's apport) `ulimit -c 0` /
+  `RLIMIT_CORE` is **ignored** — verified — whereas `PR_SET_DUMPABLE=0` the kernel honors
+  regardless of `core_pattern`. That is what lets the suite run on any machine with no
+  `LD_PRELOAD` shim, generated `nodump.so`, or other per-host setup (an earlier design
+  used exactly such a preload; this replaces it). The symbolized trace above already
+  captures everything a core would.
+- **Set: capture a core.** The function writes a real core of the process to
+  `./emule_asan_core.<pid>` in the CWD by `fork`/`exec`'ing `gcore` against its own pid
+  (`PR_SET_PTRACER_ANY` first, so the child can attach under a restrictive
+  `yama/ptrace_scope`). We dump it ourselves instead of relying on the kernel
+  `core_pattern` precisely because that global pipe (apport) silently discards cores from
+  locally-built, non-package binaries — so "just enable cores" would yield nothing on
+  those hosts. `gcore`/gdb chatter is redirected to `/dev/null` so the `[ASAN ERROR]`
+  report stays readable, and the path is printed. Best-effort: if `gcore` is missing or
+  ptrace is denied, the process is left dumpable (so a plain-file `core_pattern` still
+  produces a core) and a one-line note says so — never a hang.
+
+The output is a standard ELF core; open it with `gdb <binary> emule_asan_core.<pid>`
+(`bt`, `thread apply all bt`). It is ~13 GB (the full L1+DRAM snapshot), so use the
+opt-in on a single test, not a whole-suite run. Linux-only (`prctl`/`gcore`); the block
+is `#if defined(__linux__)`-guarded, matching the rest of the trace facility.
