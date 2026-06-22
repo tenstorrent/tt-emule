@@ -149,16 +149,28 @@ template <uint32_t K, uint32_t core_id>
 ALWI void topk_xl_add_lsb_indices(uint32_t idst) {
     using namespace __emule_topk_xl;
     constexpr uint32_t SEQ_TILES = tiles_per_seq_fused<K>();
-    uint32_t lane = 0;
+    // Silicon's SFPU encoder packs each element's position as a face/tile
+    // coordinate, NOT a linear lane:
+    //   [ core_id (15:11) | col (10:6) | tile_idx (bit 5) | row (4:0) ]
+    // (test_distributed_topk decodes exactly this; for epc=2048 the within
+    // field col*64 + tile_idx*32 + row is the face-permuted linear offset).
+    // topk_xl_copy_tile loaded this DST tile in raw nfaces (face) order, so
+    // element i is a compact face offset — map it back to the 32x32 (row,col)
+    // via the shared nfaces inverse before encoding. A linear lane is WRONG:
+    // it sets bit 5 and uses a contiguous range, so the host gather lands on
+    // the wrong cells whenever a proper subset of the values is selected
+    // (pos not a multiple of epc, or >1 core's data merged).
     for (uint32_t t = 0; t < SEQ_TILES; ++t) {
         __emule_dst_check(idst + t, "topk_xl_add_lsb_indices");
         float* dst = __emule_dst[idst + t];
         for (uint32_t i = 0; i < TILE_ELEMS; ++i) {
             auto vi = decode_fused(dst[i]);
-            // Index encoding: lane in low 11 bits, core_id in bits 11..15.
-            uint32_t new_idx = (lane & 0x7FF) | ((core_id & 0x1F) << 11);
+            const uint32_t rm  = __emule_nfaces::tile_nfaces_to_rm(i, 32u, 32u);  // row*32 + col
+            const uint32_t row = rm >> 5;    // 0..31
+            const uint32_t col = rm & 0x1F;  // 0..31
+            uint32_t new_idx = ((core_id & 0x1F) << 11) | ((col & 0x1F) << 6)
+                             | ((t & 0x1u) << 5) | (row & 0x1F);
             dst[i] = encode_fused(vi.v, new_idx);
-            ++lane;
         }
     }
 }
@@ -203,21 +215,57 @@ ALWI void topk_xl_local_sort(uint32_t idst, bool ascending) {
 template <uint32_t K, bool fused = true>
 ALWI void topk_xl_merge(uint32_t idst) {
     using namespace __emule_topk_xl;
-    constexpr uint32_t SEQ_TILES = fused ? tiles_per_seq_fused<K>() : (2 * tiles_per_seq_fused<K>());
-    constexpr uint32_t N = SEQ_TILES * TILE_ELEMS;
-    __emule_dst_check(idst + 2 * SEQ_TILES - 1, "topk_xl_merge");
+    constexpr uint32_t SEQ_V = tiles_per_seq_fused<K>();
+    constexpr uint32_t N = SEQ_V * TILE_ELEMS;
 
-    std::vector<float> all(2 * N);
-    for (uint32_t t = 0; t < 2 * SEQ_TILES; ++t) {
-        std::memcpy(all.data() + t * TILE_ELEMS, __emule_dst[idst + t],
-                    TILE_ELEMS * sizeof(float));
-    }
-    // Keep the top-N by value (descending sort, take first N).
-    std::partial_sort(all.begin(), all.begin() + N, all.end(),
-                      [](float a, float b) { return decode_fused(a).v > decode_fused(b).v; });
-    for (uint32_t t = 0; t < SEQ_TILES; ++t) {
-        std::memcpy(__emule_dst[idst + t], all.data() + t * TILE_ELEMS,
-                    TILE_ELEMS * sizeof(float));
+    if constexpr (fused) {
+        // Two fused sequences at [idst, idst+SEQ_V) and [idst+SEQ_V, idst+2*SEQ_V).
+        __emule_dst_check(idst + 2 * SEQ_V - 1, "topk_xl_merge");
+        std::vector<float> all(2 * N);
+        for (uint32_t t = 0; t < 2 * SEQ_V; ++t) {
+            std::memcpy(all.data() + t * TILE_ELEMS, __emule_dst[idst + t],
+                        TILE_ELEMS * sizeof(float));
+        }
+        std::partial_sort(all.begin(), all.begin() + N, all.end(),
+                          [](float a, float b) { return decode_fused(a).v > decode_fused(b).v; });
+        for (uint32_t t = 0; t < SEQ_V; ++t) {
+            std::memcpy(__emule_dst[idst + t], all.data() + t * TILE_ELEMS,
+                        TILE_ELEMS * sizeof(float));
+        }
+    } else {
+        // Non-fused: each sequence is SEQ_V value-tiles followed by SEQ_V
+        // index-tiles. Sequence A (acc) at [idst, idst+2*SEQ_V), sequence B
+        // (recv) at [idst+2*SEQ_V, idst+4*SEQ_V). Sort (value, full-index)
+        // pairs by value and keep the top N, then split back into the value
+        // half and the index half at [idst, idst+2*SEQ_V).
+        __emule_dst_check(idst + 4 * SEQ_V - 1, "topk_xl_merge");
+        std::vector<std::pair<float, uint32_t>> all(2 * N);
+        auto gather = [&](uint32_t seq_base, uint32_t out_off) {
+            for (uint32_t t = 0; t < SEQ_V; ++t) {
+                const float* vt = __emule_dst[idst + seq_base + t];
+                const float* it = __emule_dst[idst + seq_base + SEQ_V + t];
+                for (uint32_t i = 0; i < TILE_ELEMS; ++i) {
+                    uint32_t ibits;
+                    std::memcpy(&ibits, &it[i], sizeof(uint32_t));
+                    all[out_off + t * TILE_ELEMS + i] = {decode_fused(vt[i]).v, ibits};
+                }
+            }
+        };
+        gather(0, 0);
+        gather(2 * SEQ_V, N);
+        std::partial_sort(all.begin(), all.begin() + N, all.end(),
+                          [](const std::pair<float, uint32_t>& a, const std::pair<float, uint32_t>& b) {
+                              return a.first > b.first;
+                          });
+        for (uint32_t t = 0; t < SEQ_V; ++t) {
+            float* vt = __emule_dst[idst + t];
+            float* it = __emule_dst[idst + SEQ_V + t];
+            for (uint32_t i = 0; i < TILE_ELEMS; ++i) {
+                const auto& p = all[t * TILE_ELEMS + i];
+                vt[i] = encode_fused(p.first, 0);  // value slot: low16 cleared (see separate)
+                std::memcpy(&it[i], &p.second, sizeof(float));
+            }
+        }
     }
 }
 
@@ -227,17 +275,71 @@ ALWI void topk_xl_merge(uint32_t idst) {
 
 template <uint32_t K, bool fused = true>
 ALWI void topk_xl_rebuild(uint32_t idst, bool ascending) {
-    topk_xl_local_sort<K>(idst, ascending);
+    using namespace __emule_topk_xl;
+    if constexpr (fused) {
+        topk_xl_local_sort<K>(idst, ascending);
+    } else {
+        // Non-fused: sort the single sequence's value-tiles [idst, idst+SEQ_V)
+        // together with its parallel index-tiles [idst+SEQ_V, idst+2*SEQ_V).
+        constexpr uint32_t SEQ_V = tiles_per_seq_fused<K>();
+        constexpr uint32_t N = SEQ_V * TILE_ELEMS;
+        __emule_dst_check(idst + 2 * SEQ_V - 1, "topk_xl_rebuild");
+        std::vector<std::pair<float, uint32_t>> all(N);
+        for (uint32_t t = 0; t < SEQ_V; ++t) {
+            const float* vt = __emule_dst[idst + t];
+            const float* it = __emule_dst[idst + SEQ_V + t];
+            for (uint32_t i = 0; i < TILE_ELEMS; ++i) {
+                uint32_t ibits;
+                std::memcpy(&ibits, &it[i], sizeof(uint32_t));
+                all[t * TILE_ELEMS + i] = {decode_fused(vt[i]).v, ibits};
+            }
+        }
+        if (ascending) {
+            std::sort(all.begin(), all.end(),
+                      [](const std::pair<float, uint32_t>& a, const std::pair<float, uint32_t>& b) { return a.first < b.first; });
+        } else {
+            std::sort(all.begin(), all.end(),
+                      [](const std::pair<float, uint32_t>& a, const std::pair<float, uint32_t>& b) { return a.first > b.first; });
+        }
+        for (uint32_t t = 0; t < SEQ_V; ++t) {
+            float* vt = __emule_dst[idst + t];
+            float* it = __emule_dst[idst + SEQ_V + t];
+            for (uint32_t i = 0; i < TILE_ELEMS; ++i) {
+                const auto& p = all[t * TILE_ELEMS + i];
+                vt[i] = encode_fused(p.first, 0);  // value slot: low16 cleared (see separate)
+                std::memcpy(&it[i], &p.second, sizeof(float));
+            }
+        }
+    }
 }
 
 // ── topk_xl_separate_indices ─────────────────────────────────────────────
-// In unfused mode the value/index halves split across consecutive tiles.
-// Emule keeps fused representation so this is a no-op for correctness as
-// long as remove_msb / pack tile uses the same fused layout.
-
+// Split the fused [bf16 value | u16 index] sequence into a value half and a
+// full-width index half (non-fused layout): value-tiles stay at
+// [idst, idst+SEQ_V) (kept fused so the sort still decodes the value), and the
+// index-tiles at [idst+SEQ_V, idst+2*SEQ_V) receive the FULL 32-bit index with
+// the group/device bits OR'd in at bit 16 (group_id = core_id>>5 | device<<2).
+// This is why >32-core reductions go non-fused: core_id no longer fits the
+// 5-bit fused field (bits 11..15), so the high core bits + device move to bits
+// 16..20, which only a separate 32-bit index word can carry.
 template <uint32_t K, uint32_t group_id>
-ALWI void topk_xl_separate_indices(uint32_t /*idst*/) {
-    (void)group_id;
+ALWI void topk_xl_separate_indices(uint32_t idst) {
+    using namespace __emule_topk_xl;
+    constexpr uint32_t SEQ_V = tiles_per_seq_fused<K>();
+    for (uint32_t t = 0; t < SEQ_V; ++t) {
+        __emule_dst_check(idst + SEQ_V + t, "topk_xl_separate_indices");
+        float* vt = __emule_dst[idst + t];
+        float* it = __emule_dst[idst + SEQ_V + t];
+        for (uint32_t i = 0; i < TILE_ELEMS; ++i) {
+            auto vi = decode_fused(vt[i]);
+            uint32_t full = (vi.idx & 0xFFFFu) | (group_id << 16);
+            std::memcpy(&it[i], &full, sizeof(float));
+            // Clear the value slot's low 16 bits (silicon's separate pass does):
+            // keep_values reads the value as fp32 then rounds to bf16, so a
+            // non-zero index payload in the mantissa would round the value off.
+            vt[i] = encode_fused(vi.v, 0);
+        }
+    }
 }
 
 // ── topk_xl_remove_msb_values ────────────────────────────────────────────
