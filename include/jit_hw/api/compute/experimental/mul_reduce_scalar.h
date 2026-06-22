@@ -6,21 +6,24 @@
 
 // Emule model + shadow for the fused multiply-reduce-scalar compute op.
 //
-// Net semantics: dst[0][0] = scaler * sum(A*B) over all elements of `num_tiles`
-// tiles. blaze's sum_of_squares kernel INLINES the raw LLK state machine
-// (multiply phase → switch-to-reduce → per-tile column reduce → final scalar
-// reduce) rather than calling the high-level mul_reduce_scalar_tile wrapper, so
-// this shadow has to provide every LLK entry point the kernel touches, not just
-// the wrapper. Each is modelled against the documented net effect using
-// thread-local "register" state; the real per-TRISC SFPU/FPU LLKs (pulled by
-// upstream's TRISC_MATH/TRISC_UNPACK includes) are not consumable by emule.
+// Net semantics: dst[0][0] = scaler^2 * sum(A*B) over all elements of
+// `num_tiles` tiles. The fused multiply-reduce multiplies by the srcB scalar at
+// BOTH the column-reduce and the final scalar-reduce stages, so the scaler is
+// squared (the documented sum(x^2 * scalar^2) behaviour; callers fold a mean's
+// 1/N by passing scalar = 1/sqrt(N)).
 //
-// The multiply step receives only icb0 (the second operand comes from the
-// preceding llk_unpack_AB, a no-op in emule). The sole inlined caller is
-// sum_of_squares, where A == B == the same CB, so the product is the square of
-// icb0's tile; that is the assumption modelled here.
+// blaze's sum_of_squares kernel INLINES the raw LLK state machine (multiply
+// phase → switch-to-reduce → per-tile column reduce → final scalar reduce)
+// rather than calling the high-level mul_reduce_scalar_tile wrapper, so this
+// shadow provides every LLK entry point the kernel touches, not just the
+// wrapper. Each is modelled against the net effect using thread-local "register"
+// state; the real per-TRISC SFPU/FPU LLKs (pulled by upstream's
+// TRISC_MATH/TRISC_UNPACK includes) are not consumable by emule. The multiply
+// step reads both operands the paired llk_unpack_AB selected (via
+// __emule_unpack_AB_state), so it models a genuine A*B, not a hardcoded square.
 
-#include "jit_hw/api/compute/common.h"
+#include "jit_hw/api/compute/common.h"              // pulls llk_unpack_a.h → __emule_unpack_AB_state
+#include "jit_hw/api/compute/eltwise_unary/fill.h"  // fill_tile
 
 #include <cstdint>
 
@@ -39,14 +42,19 @@ ALWI void mul_reduce_scalar_uninit() {}
 template <MathFidelity /*mf*/ = MathFidelity::HiFi4>
 ALWI void llk_math_eltwise_mul_reduce_scalar_init(uint32_t /*operand_A*/, uint32_t /*acc_to_dest*/ = 0) {}
 
-// Multiply phase: dst[dst_index] = (icb0 tile dst_index)^2 (A==B square path).
+// Multiply phase: dst[dst_index] = A * B, where A/B are the operand tiles the
+// paired llk_unpack_AB selected (icb0 here is the math-side operand-A handle,
+// matching the unpacker's operandA). For sum_of_squares A == B == input.
 template <bool is_fp32_dest_acc_en = false, MathFidelity math_fidelity = MathFidelity::HiFi4>
-ALWI void llk_math_eltwise_mul_reduce_scalar(uint32_t dst_index, uint32_t icb0, bool /*clear*/ = true) {
+ALWI void llk_math_eltwise_mul_reduce_scalar(uint32_t dst_index, uint32_t /*icb0*/, bool /*clear*/ = true) {
     __emule_dst_check(dst_index, "llk_math_eltwise_mul_reduce_scalar");
-    float buf[__EMULE_TILE_ELEMS];
-    __emule_unpack_cb_tile_to(icb0, dst_index, buf);
+    const auto& ab = __emule_unpack_AB_state;
+    float a[__EMULE_TILE_ELEMS];
+    float b[__EMULE_TILE_ELEMS];
+    __emule_unpack_cb_tile_to(ab.operandA, ab.tile_index_a, a);
+    __emule_unpack_cb_tile_to(ab.operandB, ab.tile_index_b, b);
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        __emule_dst[dst_index][i] = buf[i] * buf[i];
+        __emule_dst[dst_index][i] = a[i] * b[i];
     }
 }
 
@@ -70,14 +78,13 @@ ALWI void llk_math_mul_reduce_scalar_move_dest_to_src(uint32_t idst = 0) {
     }
 }
 
-// _calculate_fill_(dst_idx, value): fill DST[dst_idx] uniformly with `value`.
-// Co-defined with the macro below so the kernel's
-// SFPU_UNARY_ONE_PARAM_KERNEL_EXTRA_PARAM(_calculate_fill_, …, DST_IDX, PARAM0)
-// routes straight here without the SFPU vector-call machinery.
-ALWI void _calculate_fill_(uint32_t dst_idx, float value) {
-    __emule_dst_check(dst_idx, "_calculate_fill_");
-    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[dst_idx][i] = value;
-}
+// _calculate_fill_(dst_idx, value): the fill SFPU op, modelled by reusing
+// fill_tile (eltwise_unary/fill.h). Co-defined with the macro below so the
+// kernel's SFPU_UNARY_ONE_PARAM_KERNEL_EXTRA_PARAM(_calculate_fill_, …, DST_IDX,
+// PARAM0) routes here without the SFPU vector-call machinery. (emule's
+// _calculate_fill_ takes the DST index explicitly where silicon's takes it
+// implicitly via the current-dst register.)
+ALWI void _calculate_fill_(uint32_t dst_idx, float value) { fill_tile(dst_idx, value); }
 
 #ifndef SFPU_UNARY_ONE_PARAM_KERNEL_EXTRA_PARAM
 #define SFPU_UNARY_ONE_PARAM_KERNEL_EXTRA_PARAM(FN, MODE, APPROXIMATE, EXTRA_PARAM, DST_IDX, PARAM0) \

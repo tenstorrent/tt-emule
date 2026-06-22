@@ -56,9 +56,25 @@ inline void llk_unpack_AB_init(
     uint32_t /*icb1*/ = 0,
     ckernel::Transpose /*transpose*/ = ckernel::Transpose::NoneT) {}
 
+// Most emule math/sfpu ops read CB data directly and ignore unpacker state. A
+// few fused ops (e.g. mul_reduce_scalar) instead reach for the operands the
+// *paired* llk_unpack_AB selected — mirroring silicon's unpack→srcA/srcB→math
+// dataflow — so record them here, exactly as llk_unpack_AB_matmul records
+// __emule_matmul_state. Purely additive: ops that don't read this state are
+// unaffected.
+struct __emule_unpack_AB_operands {
+    uint32_t operandA = 0;
+    uint32_t operandB = 0;
+    uint32_t tile_index_a = 0;
+    uint32_t tile_index_b = 0;
+};
+inline thread_local __emule_unpack_AB_operands __emule_unpack_AB_state;
+
 template <ckernel::BroadcastType BType = ckernel::BroadcastType::NONE>
-inline void llk_unpack_AB(uint32_t /*icb0*/, uint32_t /*icb1*/,
-                          uint32_t /*tile_idx0*/, uint32_t /*tile_idx1*/) {}
+inline void llk_unpack_AB(uint32_t icb0, uint32_t icb1,
+                          uint32_t tile_idx0, uint32_t tile_idx1) {
+    __emule_unpack_AB_state = {icb0, icb1, tile_idx0, tile_idx1};
+}
 
 inline void llk_unpack_tilize_init(
     uint32_t /*operand*/ = 0,

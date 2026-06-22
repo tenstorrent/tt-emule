@@ -489,6 +489,8 @@ files:
   - {kind: function, name: llk_unpack_A}
   - {kind: function, name: llk_unpack_A_init}
   - {kind: function, name: llk_unpack_AB_init}
+  - {kind: struct, name: __emule_unpack_AB_operands}
+  - {kind: global, name: __emule_unpack_AB_state}
   - {kind: function, name: llk_unpack_AB}
   - {kind: function, name: llk_unpack_tilize_init}
 - path: include/jit_hw/llk_unpack_AB_api.h
