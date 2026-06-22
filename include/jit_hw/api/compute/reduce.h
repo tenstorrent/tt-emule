@@ -69,13 +69,14 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
     float src[1024];
     __emule_unpack_cb_tile_to(icb, itile, src);
 
-    // UNPACK scaler tile (uniform; element 0 is the scale factor).
-    float scaler = 1.0f;
-    {
-        float s[1024];
-        __emule_unpack_cb_tile_to(icb_scaler, itile_scaler, s);
-        scaler = s[0];
-    }
+    // UNPACK the scaler tile. Usually uniform (element 0 is the scale factor), but a
+    // partial last tile (W % 32 != 0) carries a per-position MASK: scale value in the
+    // valid reduce-axis positions, 0 in the padding. Silicon contracts the source
+    // against this tile element-wise (GAPOOL/GMPOOL), so keep the whole tile rather
+    // than just scaler[0] — that drops the padding garbage from the reduction.
+    float scaler_tile[1024];
+    __emule_unpack_cb_tile_to(icb_scaler, itile_scaler, scaler_tile);
+    const float scaler = scaler_tile[0];
 
     // Real HW leaves DST undefined after tile_regs_acquire and the kernel is
     // responsible for staging multi-tile accumulation (e.g. via copy_tile from
@@ -102,22 +103,20 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
     const uint32_t tw = get_tile_c_dim(icb);
 
     if constexpr (reduce_dim == ReduceDim::REDUCE_COL) {
-        // Reduce columns: for each column c, sum/max across all rows → result in row 0
+        // Reduce over rows → row 0 of each column. scaler_tile[r] weights row r (see unpack note).
         for (uint32_t c = 0; c < tw; c++) {
-            float acc;
-            if constexpr (reduce_type == PoolType::MAX)
-                acc = -std::numeric_limits<float>::infinity();
-            else
-                acc = 0.0f;
-
-            for (uint32_t r = 0; r < th; r++) {
-                float val = src[r * 32 + c];
-                if constexpr (reduce_type == PoolType::MAX)
-                    acc = std::max(acc, val);
-                else
-                    acc += val;  // SUM and AVG both sum; scaler handles the 1/N
+            float result;
+            if constexpr (reduce_type == PoolType::MAX) {
+                float acc = -std::numeric_limits<float>::infinity();
+                for (uint32_t r = 0; r < th; r++)
+                    if (scaler_tile[r] != 0.0f) acc = std::max(acc, src[r * 32 + c]);
+                result = acc * scaler;
+            } else {  // SUM / AVG: fold the per-row scaler (scale + mask) into the sum
+                float acc = 0.0f;
+                for (uint32_t r = 0; r < th; r++)
+                    acc += src[r * 32 + c] * scaler_tile[r];
+                result = acc;
             }
-            float result = acc * scaler;
             if constexpr (reduce_type == PoolType::MAX) {
                 __emule_dst[idst][c] = fresh ? result : std::max(__emule_dst[idst][c], result);
             } else {
@@ -130,23 +129,20 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
         if (fresh)
             for (uint32_t c = tw; c < 32; c++) __emule_dst[idst][c] = 0.0f;
     } else if constexpr (reduce_dim == ReduceDim::REDUCE_ROW) {
-        // Reduce rows: for each row r, sum/max across all cols → result in col 0
+        // Reduce over columns → col 0 of each row. scaler_tile[c] weights column c (see unpack note).
         for (uint32_t r = 0; r < th; r++) {
-            float acc;
-            if constexpr (reduce_type == PoolType::MAX)
-                acc = -std::numeric_limits<float>::infinity();
-            else
-                acc = 0.0f;
-
-            for (uint32_t c = 0; c < tw; c++) {
-                float val = src[r * 32 + c];
-                if constexpr (reduce_type == PoolType::MAX)
-                    acc = std::max(acc, val);
-                else
-                    acc += val;
+            float result;
+            if constexpr (reduce_type == PoolType::MAX) {
+                float acc = -std::numeric_limits<float>::infinity();
+                for (uint32_t c = 0; c < tw; c++)
+                    if (scaler_tile[c] != 0.0f) acc = std::max(acc, src[r * 32 + c]);
+                result = acc * scaler;
+            } else {  // SUM / AVG: fold the per-column scaler (scale + mask) into the sum
+                float acc = 0.0f;
+                for (uint32_t c = 0; c < tw; c++)
+                    acc += src[r * 32 + c] * scaler_tile[c];
+                result = acc;
             }
-            // Result goes in column 0 of each row
-            float result = acc * scaler;
             if constexpr (reduce_type == PoolType::MAX) {
                 __emule_dst[idst][r * 32] = fresh ? result : std::max(__emule_dst[idst][r * 32], result);
             } else {
@@ -157,7 +153,15 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
         if (fresh)
             for (uint32_t r = th; r < 32; r++) __emule_dst[idst][r * 32] = 0.0f;
     } else {
-        // REDUCE_SCALAR: reduce the active region to a single value
+        // REDUCE_SCALAR: reduce the active region to a single value.
+        //
+        // Unlike ROW/COL above, this path uses only the uniform scaler (scaler_tile[0]),
+        // never a per-position mask — and that is faithful, not an oversight. Silicon
+        // restricts per-position masking to ROW/COL; it always feeds REDUCE_SCALAR a
+        // uniform, full-tile scaler (see ttnn/.../kernel_lib/reduce_helpers_dataflow.inl:
+        // static_assert "REDUCE_SCALAR only supports full 32x32 tiles", plus the
+        // "Unused for REDUCE_SCALAR (which always fills the full tile)" note). A masked
+        // partial-tile scalar reduce therefore cannot occur, so there is nothing to drop.
         float acc;
         if constexpr (reduce_type == PoolType::MAX)
             acc = -std::numeric_limits<float>::infinity();
