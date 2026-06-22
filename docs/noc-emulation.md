@@ -263,7 +263,7 @@ template <ProgrammableCoreType core_type = ProgrammableCoreType::TENSIX>
 class Semaphore {
     void up(uint32_t value);     // local atomic fetch_add
     void down(uint32_t value);   // spin-wait + atomic fetch_sub
-    void wait(uint32_t target);  // spin-wait until == target
+    void wait(uint32_t target);  // spin-wait until reached: >= target (count-up), == 0 (toggle)
     void wait_min(uint32_t v);   // spin-wait until ≥ v
     void set(uint32_t value);    // atomic store
     // ...
