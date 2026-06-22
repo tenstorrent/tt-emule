@@ -1,0 +1,270 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Runs tt-metal's per-arch post-commit ttnn lane under emule at the pinned SHA
+# and reports the pass rate + failure clustering. A growing coverage metric, NOT
+# a gate — every job is continue-on-error and the run never fails a merge.
+# Off-peak + 6 shards @ max-parallel 2 + concurrency lock: a gentle fleet
+# footprint after #189 ("pr-metal-regression is DDoSing our CI fleet").
+# Blackhole only today; wormhole is a one-line matrix add (see docs).
+# See docs/post-commit-sweep.md.
+
+name: Nightly Post-Commit Sweep
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # 02:00 UTC daily — off-peak, ahead of the 07/08 nightlies
+  workflow_dispatch: {}
+
+concurrency:
+  group: nightly-post-commit-sweep
+  cancel-in-progress: false
+
+env:
+  # MUST equal the length of the matrix.shard list in the `sweep` job below —
+  # round-robin sharding pairs SHARD_INDEX 1..N with SHARD_COUNT=N. Change both.
+  SHARD_COUNT: '6'
+
+jobs:
+  build:
+    name: Build tt-metal (pinned) against tt-emule main
+    runs-on: tt-ubuntu-2204-large-stable
+    timeout-minutes: 180
+    continue-on-error: true
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
+    outputs:
+      pin: ${{ steps.pin.outputs.sha }}
+    steps:
+      - name: Checkout tt-emule (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: tt-emule
+
+      - name: Resolve pinned tt-metal SHA
+        id: pin
+        shell: bash
+        run: |
+          SHA=$(grep -vE '^\s*(#|$)' tt-emule/tt-metal-pin.txt | head -1 | awk '{print $1}')
+          if [ -z "$SHA" ]; then
+            echo "::error::tt-metal-pin.txt has no SHA"; exit 1
+          fi
+          echo "Pinned tt-metal SHA: $SHA"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tt-metal at pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ steps.pin.outputs.sha }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Init required tt-metal submodules
+        shell: bash
+        run: |
+          cd tt-metal
+          git submodule update --init --depth=1 tt_metal/third_party/umd
+          git submodule update --init --depth=1 tt_metal/third_party/tracy
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: tt-metal-${{ steps.pin.outputs.sha }}-clang20-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            tt-metal-${{ steps.pin.outputs.sha }}-clang20-${{ runner.os }}-
+            tt-metal-${{ steps.pin.outputs.sha }}-clang20-
+
+      - name: Build
+        env:
+          TT_EMULE_DIR: ${{ github.workspace }}/tt-emule
+          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
+          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-build.sh
+
+      - name: Stage cluster descriptors with build artifact
+        shell: bash
+        run: |
+          mkdir -p tt-metal/build_emule/_cluster_descs
+          cp -r tt-metal/tt_metal/third_party/umd/tests/cluster_descriptor_examples \
+                tt-metal/build_emule/_cluster_descs/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweep-tt-metal-build-${{ github.run_id }}
+          path: tt-metal/build_emule/
+          retention-days: 1
+          if-no-files-found: error
+
+  sweep:
+    name: Sweep (${{ matrix.arch }}, shard ${{ matrix.shard }}/6)
+    needs: build
+    runs-on: tt-ubuntu-2204-xlarge-stable
+    timeout-minutes: 240
+    continue-on-error: true
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
+    strategy:
+      fail-fast: false
+      max-parallel: 2   # fleet policy: at most 2 xlarge runners at once (issue #189)
+      matrix:
+        arch: [blackhole]
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - name: Checkout tt-emule (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: tt-emule
+
+      - name: Checkout tt-metal at pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ needs.build.outputs.pin }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sweep-tt-metal-build-${{ github.run_id }}
+          path: tt-metal/build_emule/
+
+      - name: Restore executable bits on test binaries
+        shell: bash
+        run: |
+          chmod +x tt-metal/build_emule/test/tt_metal/unit_tests_* 2>/dev/null || true
+          chmod +x tt-metal/build_emule/test/ttnn/unit_tests_* 2>/dev/null || true
+
+      - name: Place cluster descriptors
+        shell: bash
+        run: |
+          mkdir -p tt-metal/tt_metal/third_party/umd/tests
+          cp -r tt-metal/build_emule/_cluster_descs/cluster_descriptor_examples \
+                tt-metal/tt_metal/third_party/umd/tests/
+
+      - name: Install SFPI toolchain
+        shell: bash
+        run: bash tt-metal/install_dependencies.sh --sfpi
+
+      - name: Run sweep shard
+        env:
+          TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
+          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
+          TT_EMULE_ARCH: ${{ matrix.arch }}
+          SHARD_INDEX:   ${{ matrix.shard }}
+          SHARD_COUNT:   ${{ env.SHARD_COUNT }}
+          GTEST_XML_DIR: ${{ runner.temp }}/sweep-xml
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-post-commit-sweep.sh
+
+      - name: Upload shard XML + logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweep-results-${{ matrix.arch }}-shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/sweep-xml/*
+          retention-days: 30
+          if-no-files-found: warn
+
+  report:
+    name: Aggregate + report (${{ matrix.arch }})
+    needs: [build, sweep]
+    if: ${{ always() }}
+    runs-on: tt-ubuntu-2204-large-stable
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [blackhole]
+    steps:
+      - name: Checkout tt-emule (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: tt-emule
+
+      - name: Checkout tt-metal at pinned SHA (manifest source)
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ needs.build.outputs.pin }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Download all shard results for this arch
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sweep-results-${{ matrix.arch }}-shard-*-${{ github.run_id }}
+          path: shard-artifacts
+          merge-multiple: true
+
+      - name: Aggregate + parse
+        id: parse
+        env:
+          ARCH: ${{ matrix.arch }}
+          PIN:  ${{ needs.build.outputs.pin }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          XML_DIR=shard-artifacts
+          OUT=report
+          mkdir -p "$OUT"
+          MANIFEST=tt-metal/tests/pipeline_reorg/ttnn-tests.yaml
+
+          # sweep.py needs PyYAML — use the toolchain venv python (has it),
+          # not the container's system python3.
+          VENV_PY=/opt/ttmlir-toolchain/venv/bin/python
+          # Re-derive the expected entry list (for truncation detection + sku).
+          "$VENV_PY" tt-emule/scripts/post_commit_sweep/sweep.py expand \
+            --arch "$ARCH" --manifest "$MANIFEST" --out "$OUT/expected.json" >/dev/null
+          SKU=$("$VENV_PY" -c "import json;print(json.load(open('$OUT/expected.json'))['sku'])")
+
+          python3 tt-emule/scripts/post_commit_sweep/parse_sweep_results.py \
+            --xml-dir "$XML_DIR" --log-dir "$XML_DIR" \
+            --arch "$ARCH" --sku "$SKU" --pin-sha "$PIN" \
+            --manifest "$MANIFEST" --tt-emule-dir tt-emule \
+            --expected-json "$OUT/expected.json" \
+            --out-exec "$OUT/exec.md" --out-dev "$OUT/dev.md" \
+            --out-headline "$OUT/headline.json" --out-summary "$OUT/summary.md"
+
+          # Render the compact summary into the Actions run summary page.
+          cat "$OUT/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweep-report-${{ matrix.arch }}-${{ github.run_id }}
+          path: report/*
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Notify Slack
+        if: ${{ always() }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.NIGHTLY_SLACK_WEBHOOK_URL }}
+          ARCH: ${{ matrix.arch }}
+        shell: bash
+        run: |
+          # Step-level env isn't visible to `if:`, so gate inside the step.
+          [ -n "$SLACK_WEBHOOK_URL" ] || { echo "no NIGHTLY_SLACK_WEBHOOK_URL secret; skipping Slack"; exit 0; }
+          headline=report/headline.json
+          [ -f "$headline" ] || { echo "no headline.json; skipping Slack"; exit 0; }
+          rate=$(python3 -c "import json;print(json.load(open('$headline'))['pass_rate']['of_executed_pct'])")
+          passing=$(python3 -c "import json;d=json.load(open('$headline'))['tests'];print(f\"{d['passing']}/{d['executed']}\")")
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          curl -sf -X POST -H 'Content-Type: application/json' \
+            --data "$(jq -n --arg t "tt-emule post-commit sweep ($ARCH): ${rate}% pass (${passing} executed)\n$url" '{text:$t}')" \
+            "$SLACK_WEBHOOK_URL" || echo "Slack post failed (non-fatal)"

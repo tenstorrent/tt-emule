@@ -58,6 +58,13 @@ focused reference; start here and follow the links.
   divide-by-zero behavior emule honors (quotient = all-ones, remainder =
   dividend); generic RISC-V semantics, not Quasar-specific.
 
+**CI / testing**
+- [post-commit-sweep.md](docs/post-commit-sweep.md) — the nightly post-commit
+  pass-rate sweep: runs tt-metal's per-arch post-commit ttnn lane under emule
+  and reports a growing pass-rate metric (not a gate). Manifest-entry
+  granularity, the pytest-9.0.3 collection-error pre-filter, fleet policy
+  (#189), local reproduction (`scripts/post_commit_sweep/`).
+
 **Integration & build**
 - [metal-integration.md](docs/metal-integration.md) — how emule injects into
   tt-metal (UMD chip, runtime activation, JIT runner, guards).
