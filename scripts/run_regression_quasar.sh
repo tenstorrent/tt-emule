@@ -50,8 +50,45 @@ _gtest_xml_args() {
     fi
 }
 
+# --- PR-tier (smoke) selection ---------------------------------------------
+# CI_TIER chooses which entries run on a given invocation:
+#   full      (default) every entry — on-push and full local runs
+#   pr        only entries in PR_TIER below — the lightweight PR gate. Quasar is
+#             structurally distinct from wormhole/blackhole (DFB instead of CBs,
+#             up-to-12-thread Neo, CSR thread-locals), so this smoke set is a
+#             tripwire on that subsystem: STRIDED DFBs (Multi-P/C), the DFB→
+#             compute bridge (Groups B and C), and RISCV atomics. All are basic
+#             1Sx1S / 1Sx4S topologies that pass — none of the known-failure
+#             4Sx4S / *Config / matmul-block entries
+#             (.github/known-failures-quasar.txt) are included. Every entry here
+#             is verified to match live gtest tests in the build (the Tier 3h/3i/
+#             3j LEGACY-binary entries are intentionally excluded — their filters
+#             reference a stale fixture name and match no tests; see the doc).
+#   deferred  the complement (entries NOT in PR_TIER) — what scripts/run_local_ci.sh
+#             runs; this set includes the known-failure entries, so the quasar
+#             allowlist still applies there.
+CI_TIER="${CI_TIER:-full}"
+PR_TIER=(
+    DMTest1xDFB1Sx1S
+    DMTest1xDFB1Sx4S
+    DMTensixTest1xDFB1Sx1S
+    TensixDMTest1xDFB1Sx1S
+    TestAtomicLoadStoreRISCV
+)
+_pr_tier_has() { local n="$1" e; for e in "${PR_TIER[@]}"; do [ "$e" = "$n" ] && return 0; done; return 1; }
+# Echo "skip" if the named entry must NOT run under the current CI_TIER.
+_tier_skip() {
+    case "$CI_TIER" in
+        full)     return 1 ;;
+        pr)       _pr_tier_has "$1" && return 1 || return 0 ;;
+        deferred) _pr_tier_has "$1" && return 0 || return 1 ;;
+        *) echo "ERROR: bad CI_TIER='$CI_TIER' (full|pr|deferred)" >&2; exit 2 ;;
+    esac
+}
+
 run_test() {
     local name="$1"; shift
+    if _tier_skip "$name"; then SKIP=$((SKIP + 1)); return; fi
     if [ ! -f "$1" ]; then
         echo "  FAIL: $name (binary not found: $1)"
         FAIL=$((FAIL + 1))
@@ -77,6 +114,7 @@ run_test() {
 
 run_test_verbose() {
     local name="$1"; shift
+    if _tier_skip "$name"; then SKIP=$((SKIP + 1)); return; fi
     if [ ! -f "$1" ]; then
         echo "  FAIL: $name (binary not found: $1)"
         FAIL=$((FAIL + 1))

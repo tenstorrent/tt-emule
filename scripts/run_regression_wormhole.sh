@@ -48,8 +48,39 @@ _gtest_xml_args() {
     fi
 }
 
+# --- PR-tier (smoke) selection ---------------------------------------------
+# CI_TIER chooses which entries run on a given invocation:
+#   full      (default) every entry — on-push and full local runs
+#   pr        only entries in PR_TIER below — the lightweight PR gate. Wormhole
+#             is a smoke arch on the PR gate (blackhole is the full arch), so
+#             these are skewed toward WH-specific divergence from BH: DRAM bank
+#             topology, tilize/format, plus a basic L1/JIT/NOC/reduce pulse.
+#   deferred  the complement (entries NOT in PR_TIER) — what scripts/run_local_ci.sh
+#             runs so a developer can cover everything trimmed from the PR gate.
+CI_TIER="${CI_TIER:-full}"
+PR_TIER=(
+    tilize_untilize
+    SimpleL1Buffer
+    SimpleDramBuffer
+    TensixL1Tile
+    DramUnaryDRAMChannels
+    DmLoopbackPacketSizes
+    ttnn_sum_last_dim_aligned
+)
+_pr_tier_has() { local n="$1" e; for e in "${PR_TIER[@]}"; do [ "$e" = "$n" ] && return 0; done; return 1; }
+# Echo "skip" if the named entry must NOT run under the current CI_TIER.
+_tier_skip() {
+    case "$CI_TIER" in
+        full)     return 1 ;;
+        pr)       _pr_tier_has "$1" && return 1 || return 0 ;;
+        deferred) _pr_tier_has "$1" && return 0 || return 1 ;;
+        *) echo "ERROR: bad CI_TIER='$CI_TIER' (full|pr|deferred)" >&2; exit 2 ;;
+    esac
+}
+
 run_test() {
     local name="$1"; shift
+    if _tier_skip "$name"; then SKIP=$((SKIP + 1)); return; fi
     if [ ! -f "$1" ]; then
         echo "  FAIL: $name (binary not found: $1)"
         FAIL=$((FAIL + 1))
@@ -75,6 +106,7 @@ run_test() {
 
 run_test_verbose() {
     local name="$1"; shift
+    if _tier_skip "$name"; then SKIP=$((SKIP + 1)); return; fi
     if [ ! -f "$1" ]; then
         echo "  FAIL: $name (binary not found: $1)"
         FAIL=$((FAIL + 1))

@@ -60,8 +60,55 @@ ENTRY_NUM=0
 PASS=0
 FAIL=0
 
+# --- PR-tier (smoke) selection ---------------------------------------------
+# CI_TIER chooses which entries run on a given invocation:
+#   full      (default) every entry — on-push and full local runs
+#   pr        only entries in PR_TIER below — the lightweight PR gate. One
+#             representative entry per op-class (data movement, basic
+#             functionality, eltwise unary/binary/compare, reduce, matmul,
+#             fused, pool), favouring small/fast entries and excluding the heavy
+#             whole-file runs (untilize, pad, to_memory_config, copy) and the
+#             nightly matmul-activations test.
+#   deferred  the complement (entries NOT in PR_TIER) — what scripts/run_local_ci.sh
+#             runs so a developer can cover everything trimmed from the PR gate.
+# Blackhole is the sole TTNN arch on the PR gate (it is also the full C++ arch),
+# so the smoke set lives here; wormhole TTNN runs on-push / locally only and
+# therefore carries no PR_TIER.
+CI_TIER="${CI_TIER:-full}"
+PR_TIER=(
+    dm_test_tilize
+    dm_test_repeat
+    dm_test_concat_5d
+    dm_test_permute_not_sharded
+    bf_test_to_and_from_device
+    bf_test_tilize_untilize_2D
+    elt_test_exp
+    elt_test_add
+    elt_test_mul
+    elt_test_unary_comp
+    reduce_test_argmax
+    reduce_test_reduction_mean
+    matmul_test_basic
+    matmul_test_linear
+    fused_test_softmax
+    pool_test_upsample_nearest_interleaved
+)
+_pr_tier_has() { local n="$1" e; for e in "${PR_TIER[@]}"; do [ "$e" = "$n" ] && return 0; done; return 1; }
+# Echo "skip" if the named entry must NOT run under the current CI_TIER.
+_tier_skip() {
+    case "$CI_TIER" in
+        full)     return 1 ;;
+        pr)       _pr_tier_has "$1" && return 1 || return 0 ;;
+        deferred) _pr_tier_has "$1" && return 0 || return 1 ;;
+        *) echo "ERROR: bad CI_TIER='$CI_TIER' (full|pr|deferred)" >&2; exit 2 ;;
+    esac
+}
+
 run_pytest() {
     local name="$1"; shift
+    # Tier filter first, before shard accounting: skipped entries don't consume
+    # shard slots (the PR smoke job runs unsharded, SHARD_COUNT=1, anyway).
+    if _tier_skip "$name"; then return; fi
     # Remaining args are passed straight to pytest: one or more test targets
     # (file or file::node) plus any flags (-k, --deselect). Passing multiple
     # node targets in a single invocation lets one file's curated subset run in
