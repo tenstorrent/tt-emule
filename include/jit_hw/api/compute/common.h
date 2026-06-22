@@ -235,8 +235,8 @@ namespace p_setadc {
 #endif
 
 // Silicon TENSIX stall/semaphore/config-write instruction macros — no-ops on
-// the x86 host. Defined in this common header (not just matmul_fused_act_emule.h)
-// so every compute kernel sees them; #ifndef-guarded against that other copy.
+// the x86 host. Single definition site for emule (other compute headers pull
+// them in via this one); #ifndef-guarded against the real silicon TTI headers.
 #ifndef TTI_STALLWAIT
 #define TTI_STALLWAIT(stall_mask, wait_kind) do { (void)(stall_mask); (void)(wait_kind); } while (0)
 #endif

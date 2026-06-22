@@ -1276,9 +1276,6 @@ files:
   summary: '`ckernel::` `custom_mm_block_init`/`custom_mm_block_init_short`; `namespace packer`/`semaphore`; `TTI_SEMWAIT`/`TTI_STALLWAIT`/`TT_SETC16` no-op macros (MatmulFusedAct kernel-body shim)'
   symbols:
   - {kind: namespace, name: ckernel}
-  - {kind: macro, name: TTI_SEMWAIT}
-  - {kind: macro, name: TTI_STALLWAIT}
-  - {kind: macro, name: TT_SETC16}
   - {kind: global, name: DEST_TARGET_REG_CFG_MATH_Offset_ADDR32}
   - {kind: namespace, name: packer}
   - {kind: function, name: get_packer_dest_offset}

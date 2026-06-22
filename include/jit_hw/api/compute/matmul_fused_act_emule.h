@@ -23,18 +23,8 @@
 
 namespace ckernel {
 
-// ---- TTI macros (no-ops in emule) ----
-// These are typically inline assembler intrinsics on silicon. In emule
-// we run on the x86 host so all timing/barrier semantics are no-ops.
-#ifndef TTI_SEMWAIT
-#define TTI_SEMWAIT(stall_mask, sem_addr, condition) do { (void)(stall_mask); (void)(sem_addr); (void)(condition); } while (0)
-#endif
-#ifndef TTI_STALLWAIT
-#define TTI_STALLWAIT(stall_mask, wait_kind) do { (void)(stall_mask); (void)(wait_kind); } while (0)
-#endif
-#ifndef TT_SETC16
-#define TT_SETC16(reg, val) do { (void)(reg); (void)(val); } while (0)
-#endif
+// TTI_SEMWAIT / TTI_STALLWAIT / TT_SETC16 (no-ops in emule) come from common.h
+// via the matmul.h include above — single definition site, not redefined here.
 
 // ---- Silicon firmware constants (referenced by TT_SETC16 sites) ----
 #ifndef DEST_TARGET_REG_CFG_MATH_Offset_ADDR32
