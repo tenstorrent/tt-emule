@@ -166,6 +166,10 @@ inline void fast_tilize_init_with_dt(uint32_t /*old_icb*/, uint32_t new_icb,
                                      uint32_t /*block_dst_tiles*/, uint32_t ocb) {
     tilize_init(new_icb, full_ct_dim, ocb);
 }
+// 3-arg form matching the promoted upstream signature (icb, full_dim, ocb).
+inline void fast_tilize_init_with_dt(uint32_t icb, uint32_t full_dim, uint32_t ocb) {
+    tilize_init(icb, full_dim, ocb);
+}
 template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim>
 inline void fast_tilize_init_with_dt_skip_remap(uint32_t /*old_icb*/, uint32_t new_icb,
                                                 uint32_t /*block_dst_tiles*/,

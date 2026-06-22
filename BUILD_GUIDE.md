@@ -10,7 +10,7 @@ A complete, step-by-step guide to building tt-emule and all its dependencies fro
 |------|--------|---------|
 | tt-emule | `main` | Software emulator library and regression scripts |
 | tt-metal | pinned SHA from `tt-metal-pin.txt` | Metal runtime with emulation support |
-| tt-mlir | pinned SHA from `tt-mlir-pin.txt` | MLIR compiler, needed for D2M regression tests |
+| tt-mlir | `main` | MLIR compiler, needed only for optional D2M regression (the PR D2M CI job is disabled) |
 
 ### Required Tools
 
@@ -62,17 +62,17 @@ git clone git@github.com:tenstorrent/tt-metal.git
 git clone git@github.com:tenstorrent/tt-mlir.git
 ```
 
-Check out the pinned commits for reproducibility. Read the SHA from the pin files so this stays correct as the pins move:
+Check out tt-metal at the pinned SHA for reproducibility (read it from the pin file so this stays correct as the pin moves). tt-mlir is no longer pinned — D2M is optional and tracks `main`, matching the nightly D2M workflow:
 
 ```bash
 cd "$ROOT/tt-metal"
 git checkout $(grep -vE '^\s*(#|$)' "$ROOT/tt-emule/tt-metal-pin.txt" | head -1)
 
-cd "$ROOT/tt-mlir"
-git checkout $(grep -vE '^\s*(#|$)' "$ROOT/tt-emule/tt-mlir-pin.txt" | head -1)
+cd "$ROOT/tt-mlir"   # only needed for optional D2M regression
+git checkout main
 ```
 
-Pinned SHAs match what CI uses; unpinned `main` risks ABI/UMD issues not yet in the known-failure allowlist.
+tt-metal's pinned SHA matches what CI uses; unpinned `main` risks ABI/UMD issues not yet in the known-failure allowlist.
 
 ---
 

@@ -23,8 +23,14 @@ Two consequences make the deep path pure-header:
   resolves to **emule's** `sfpi.h` (the real `runtime/sfpi/include` is *not* on
   the path). So the real math runs on emule's scalar-per-lane backend.
 - Because the tt-metal **source root** is on the path, a deep shim reaches the
-  real op via a root-relative include, e.g.
-  `#include "tt_metal/tt-llk/tt_llk_blackhole/common/inc/sfpu/ckernel_sfpu_sqrt.h"`.
+  real op via a root-relative include, e.g. sqrt's
+  `#include "tt_metal/hw/ckernels/blackhole/metal/llk_api/llk_sfpu/ckernel_sfpu_sqrt.h"`
+  (ops still in LLK live at `tt_metal/tt-llk/tt_llk_<arch>/common/inc/sfpu/...`).
+- When a real metal-layer header reaches a sibling via a `common/inc`-rooted
+  `#include "sfpu/<x>.h"` (no anchor on emule's `-I` set), a one-line forwarder at
+  `include/jit_hw/sfpu/<x>.h` (resolved first, since `jit_hw` leads `-I`) re-includes
+  the real per-arch header — see `include/jit_hw/sfpu/ckernel_sfpu_rsqrt_compat.h`,
+  pulled transitively by the metal-layer sqrt header.
 
 ## The sfpi backend (`include/jit_hw/sfpi.h`)
 

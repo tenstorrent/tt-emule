@@ -25,8 +25,16 @@ extern uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
 
 struct UnicastEndpoint {
     uint64_t get_noc_unicast_addr(uint32_t noc_x, uint32_t noc_y,
-                                   uint32_t addr, uint8_t noc) const {
-        return ::get_noc_addr(noc_x, noc_y, addr, noc);
+                                   uint32_t addr, uint8_t /*noc*/) const {
+        // addr is already a final NOC-local offset (e.g. decoded via NOC_LOCAL_ADDR_OFFSET in
+        // enhanced_noc_async_read, or a get_noc_addr_from_bank_id DRAM offset >2MB). Recombine
+        // raw (= silicon NOC_XY_ADDR) — do NOT route through get_noc_addr/__emule_addr_to_offset,
+        // which masks to 2MB in pool mode and corrupts DRAM offsets (see the __emule_addr_to_offset
+        // contract in dataflow_api.h). __emule_resolve_noc_addr applies the correct
+        // worker-slot-mask vs DRAM-raw handling.
+        return (uint64_t(noc_y & 0x3F) << (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) |
+               (uint64_t(noc_x & 0x3F) << NOC_ADDR_LOCAL_BITS) |
+               uint64_t(addr);
     }
 };
 
@@ -73,20 +81,33 @@ struct noc_traits_t<UnicastEndpoint> {
 
     // In emulation, resolve to host pointer for both AddressTypes —
     // the Noc class uses the result directly in memcpy.
+    // Mirrors the real noc_traits_t<UnicastEndpoint> (tt_metal api/dataflow/endpoints.h):
+    // a LOCAL_L1 endpoint (async_write source / async_read destination) returns the raw
+    // local L1 offset — emule's to_host_ptr<LOCAL_L1> then resolves it to the issuing
+    // core's own L1 (__emule_local_l1_to_ptr via __emule_bridge_l1), exactly the silicon
+    // contract. A NOC endpoint (remote source/dest) uses the caller-supplied coords.
+    // Only emule adaptation: the NOC branch resolves to a host pointer (silicon returns
+    // the raw NOC address for the NIU; emule's to_host_ptr<NOC> casts directly).
     template <Noc::AddressType AT>
     static uintptr_t src_addr(const UnicastEndpoint& src, const Noc& noc,
                                const src_args_type& args) {
-        uint64_t noc_addr = src.get_noc_unicast_addr(
-            args.noc_x, args.noc_y, args.addr, noc.get_noc_id());
-        return reinterpret_cast<uintptr_t>(__emule_resolve_noc_addr(noc_addr));
+        if constexpr (AT == Noc::AddressType::LOCAL_L1) {
+            return args.addr;
+        } else {
+            uint64_t noc_addr = src.get_noc_unicast_addr(args.noc_x, args.noc_y, args.addr, noc.get_noc_id());
+            return reinterpret_cast<uintptr_t>(__emule_resolve_noc_addr(noc_addr));
+        }
     }
 
     template <Noc::AddressType AT>
     static uintptr_t dst_addr(const UnicastEndpoint& dst, const Noc& noc,
                                const dst_args_type& args) {
-        uint64_t noc_addr = dst.get_noc_unicast_addr(
-            args.noc_x, args.noc_y, args.addr, noc.get_noc_id());
-        return reinterpret_cast<uintptr_t>(__emule_resolve_noc_addr(noc_addr));
+        if constexpr (AT == Noc::AddressType::LOCAL_L1) {
+            return args.addr;
+        } else {
+            uint64_t noc_addr = dst.get_noc_unicast_addr(args.noc_x, args.noc_y, args.addr, noc.get_noc_id());
+            return reinterpret_cast<uintptr_t>(__emule_resolve_noc_addr(noc_addr));
+        }
     }
 };
 

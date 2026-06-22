@@ -25,16 +25,13 @@ For **security** issues, do **not** open a public issue. See
 
 ### CI
 
-Two pipelines run on every PR:
+On every PR, **PR Regression** builds tt-metal against your PR's tt-emule
+and runs the gtest unit-test suite plus the ttnn pytests. It must be green
+before merge. New failures must either be fixed or added to the relevant
+known-failures allowlist with justification in the PR description.
 
-- **PR Regression** — builds tt-metal against your PR's tt-emule and runs
-  the gtest unit-tests suite.
-- **PR D2M Regression** — builds tt-mlir against your PR's tt-emule and
-  runs the D2M pytest suite.
-
-Both must be green before merge. New failures must either be fixed or
-added to `.github/known-failures.txt` / `.github/known-failures-d2m.txt`
-with justification in the PR description.
+(The **PR D2M Regression** pipeline is currently disabled; tt-mlir D2M is
+exercised warning-only by the nightly D2M upstream workflow.)
 
 ### Review
 

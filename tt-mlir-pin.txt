@@ -1,9 +1,0 @@
-# tt-mlir SHA pinned for D2M CI. Bump when adopting newer tt-mlir features.
-# The tt-metal SHA used by D2M is derived from this pin via
-# tt-mlir/third_party/CMakeLists.txt's TT_METAL_VERSION.
-#
-# Pinned to tt-mlir main. As of e1b9c980a, main supports
-# -DTTMLIR_TTMETAL_SOURCE_DIR=<path> so the CI can use a single,
-# pre-cloned tt-metal source tree for both build and test, and the
-# injector only needs to add tt-emule cmake args (not switch sources).
-8b8cccac358830a088f0c6a4b32d497a52eb069e

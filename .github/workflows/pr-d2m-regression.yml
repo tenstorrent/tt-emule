@@ -30,6 +30,12 @@ concurrency:
 jobs:
   build:
     name: Build tt-mlir+tt-metal against PR's tt-emule
+    # DISABLED for CI fleet reduction. The test job below is already disabled
+    # (see #54), so this 240-min build only produced an unused artifact on every
+    # PR. Gated off rather than deleted so the workflow stays in-tree for the
+    # future re-enable; re-enabling means restoring tt-mlir-pin.txt (or resolving
+    # tt-mlir dynamically as nightly-d2m-upstream.yml does).
+    if: ${{ false }}
     runs-on: tt-ubuntu-2204-large-stable
     timeout-minutes: 240
     container:

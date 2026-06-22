@@ -90,6 +90,7 @@ enum class RoundMode : uint8_t {
     Stochastic = 2,
     NearestEven = 3,
     RoundToNearestEven = 3,  // alias
+    Nearest = 4,
 };
 
 // SFPSHFT2 sub-vector shuffle modifiers — silicon: per-lane crossbar
