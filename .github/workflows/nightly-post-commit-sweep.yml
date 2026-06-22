@@ -14,7 +14,7 @@ name: Nightly Post-Commit Sweep
 
 on:
   schedule:
-    - cron: '0 2 * * *'   # 02:00 UTC daily — off-peak, ahead of the 07/08 nightlies
+    - cron: '30 3 * * *'   # 03:30 UTC daily — off-peak, ahead of the 07/08 nightlies
   workflow_dispatch: {}
 
 concurrency:
