@@ -209,7 +209,10 @@ run_pytest "bf_test_tilize_untilize_2D"    "$BF_TEST_DIR/test_tilize_untilize_2D
 run_pytest "bf_test_to_layout"             "$BF_TEST_DIR/test_to_layout.py" \
     -k 'test_int_untilize or test_tensor_to_tile_layout_shape_verification or test_to_from_01d or test_to_layout_low_perf or test_to_layout_pad_value_on_host or test_to_layout_page_error or test_to_layout_wide_tensor or test_untilize_w1 or test_untilize_w2 or test_untilize_w3 or test_untilize_w4 or test_wan22_failure'
 
-run_pytest "bf_test_to_memory_config"      "$BF_TEST_DIR/test_to_memory_config.py"  # promoted (#73 timeout-rerun): 542 passed, ~4.8 min
+# `large_row` excluded: those are upstream simulator-skips (the test guards on
+# TT_METAL_SIMULATOR) — 3.3 GB (160x5210112) reshards that emule runs on the host
+# CPU, pushing the file past the 900s entry timeout. Remaining 531 pass (~4 min).
+run_pytest "bf_test_to_memory_config"      "$BF_TEST_DIR/test_to_memory_config.py" -k 'not large_row'
 
 run_pytest "bf_test_copy"                  "$BF_TEST_DIR/test_copy.py"  # promoted (#73 timeout-rerun): 542 passed, ~4.3 min
 
