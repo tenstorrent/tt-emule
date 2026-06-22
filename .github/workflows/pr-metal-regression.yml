@@ -260,7 +260,7 @@ jobs:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 1
       matrix:
         arch: [wormhole]
         shard: [1, 2, 3, 4, 5]
@@ -327,7 +327,7 @@ jobs:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 1
       matrix:
         arch: [blackhole]
         shard: [1, 2, 3, 4, 5]
