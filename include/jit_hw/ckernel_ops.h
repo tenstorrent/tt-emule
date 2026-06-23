@@ -19,10 +19,16 @@
 #define TTI_SFPLOADI(lreg_ind, instr_mod0, imm16) ::sfpi::__emule_sfploadi((lreg_ind), (instr_mod0), (imm16))
 #endif
 
-// Raw-TTI SFP* instruction set for the Wormhole exp polynomial (SDPA's
-// calculate_exponential_polynomial, exp_approx_mode=false). All route to the
-// single deep-SFPU backend in sfpi.h (one LReg file + one CC mask). Genuinely-
-// unmodeled-but-reachable ops fail loud; true config/sync ops are no-ops.
+// Raw-TTI SFP* instruction set for the exp polynomial (SDPA's
+// calculate_exponential_polynomial, exp_approx_mode=false). The modeled ops
+// (SFPLOADI/SFPMAD/SFPADDI/SFP_STOCH_RND/SFPCAST/SFPSETEXP/SFPSETCC/SFPENCC/
+// SFPLOAD/SFPSTORE) have identical mod-bit semantics on Wormhole B0 and
+// Blackhole, so this one backend serves both arches' accurate path. The only
+// divergence is Blackhole's USE_SFPARECIP_INSTR fast path (SFPGT + NEGATE_VC
+// SFPMAD + SFPARECIP); those BH-only ops fail loud below (SDPA emits that block
+// only when USE_SFPARECIP_INSTR=true, which the accurate path leaves false).
+// All route to the single deep-SFPU backend in sfpi.h (one LReg file + one CC
+// mask). Genuinely-unmodeled-but-reachable ops fail loud; config/sync are no-ops.
 #ifndef TTI_SFPNOP
 #define TTI_SFPNOP             (::sfpi::__emule_sfp_nop())
 #endif

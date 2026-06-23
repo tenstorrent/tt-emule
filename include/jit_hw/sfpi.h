@@ -494,8 +494,15 @@ inline void __emule_sfploadi(unsigned dest, unsigned insmod, unsigned val) {
     }
 }
 
-// SFPMAD(a,b,c,d,mod): d = a*b + c, lanewise (mod 0; no NEGATE on WH).
-inline void __emule_sfp_mad(unsigned a, unsigned b, unsigned c, unsigned d, unsigned) {
+[[noreturn]] void __emule_sfpu_unsupported(const char* op);  // defined below; fail-loud convention
+
+// SFPMAD(a,b,c,d,mod1): d = a*b + c, lanewise. Only mod1=0 (no modifiers) is modeled.
+// The NEGATE_VA/VC modifiers (Blackhole) flip the sign of a/c before the FMA; they are
+// unmodeled, so fail loud rather than silently computing a*b+c. The exp polynomial uses
+// only mod1=0; the lone NEGATE_VC (mod1=2) call sits inside BH's SFPARECIP block, which
+// already fails loud at SFPGT before reaching here.
+inline void __emule_sfp_mad(unsigned a, unsigned b, unsigned c, unsigned d, unsigned mod1) {
+    if (mod1 != 0) __emule_sfpu_unsupported("SFPMAD mod1 != 0 (NEGATE modifier not modeled)");
     for (uint32_t i = 0; i < 32; ++i)
         if (__emule_sfpi_mask[i])
             __emule_sfp_wf(d, i, __emule_sfp_rf(a, i) * __emule_sfp_rf(b, i) + __emule_sfp_rf(c, i));
@@ -538,8 +545,13 @@ inline void __emule_sfp_stoch_rnd(int, int, int, unsigned src, unsigned dst, uns
         }
     }
 }
-// SFPCAST(r0, r1, mod): sign-magnitude int32 -> fp32 (mod 0).
-inline void __emule_sfp_cast(unsigned r0, unsigned r1, unsigned) {
+// SFPCAST(r0, r1, mod1): int32 -> fp32. emule models sign-magnitude int32 -> fp32 and
+// intentionally ignores mod1: every emule-run caller feeds sign-magnitude bits (the exp
+// path's SFP_STOCH_RND FP32_TO_INT8 output; the log path's setsgn input), so the nominal
+// mode selector (INT32_TO_FP32 vs SM32_TO_FP32) doesn't change the result here. A true
+// two's-complement int32 input would mis-decode negatives — no current caller produces
+// one; revisit (branch on mod1) if one appears.
+inline void __emule_sfp_cast(unsigned r0, unsigned r1, unsigned /*mod1*/) {
     for (uint32_t i = 0; i < 32; ++i) {
         if (!__emule_sfpi_mask[i]) continue;
         uint32_t b = __emule_sfp_ru(r1, i);

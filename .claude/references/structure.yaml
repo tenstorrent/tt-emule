@@ -617,6 +617,7 @@ files:
   - {kind: function, name: __emule_sfp_wf}
   - {kind: function, name: __emule_half_to_float_bits}
   - {kind: function, name: __emule_sfploadi}
+  - {kind: function, name: __emule_sfpu_unsupported}
   - {kind: function, name: __emule_sfp_mad}
   - {kind: function, name: __emule_sfp_addi}
   - {kind: function, name: __emule_sfp_round_ties_away}
@@ -666,7 +667,6 @@ files:
   - {kind: class, name: __vCRegInt}
   - {kind: global, name: vConstFloatPrgm0}
   - {kind: global, name: vConstIntPrgm0}
-  - {kind: function, name: __emule_sfpu_unsupported}
   - {kind: function, name: vec_swap}
   - {kind: function, name: subvec_transp}
   - {kind: using, name: RoundMode}
