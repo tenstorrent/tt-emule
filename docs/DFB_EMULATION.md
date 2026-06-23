@@ -50,8 +50,6 @@ class TileCounterArray {
     TileCounter& get(uint8_t neo_id, uint8_t counter_id);
     void inc_posted(uint8_t neo_id, uint8_t counter_id, uint32_t n);
     void inc_acked(uint8_t neo_id, uint8_t counter_id, uint32_t n);
-    void wait_free_space(uint8_t neo_id, uint8_t counter_id, uint32_t n);
-    void wait_occupancy(uint8_t neo_id, uint8_t counter_id, uint32_t n);
     void reset_all();
 };
 ```
@@ -77,7 +75,7 @@ struct DFBTCSlot {
 };
 ```
 
-Pointers are `uint32_t` rather than `uint8_t*` because kernel code addresses L1 as 32-bit values. The `advance_ptr` helper in `DataflowBuffer` wraps them modulo `[base_addr, limit)`.
+Pointers are `uint32_t` rather than `uint8_t*` because kernel code addresses L1 as 32-bit values. The `dfb_api.h` pointer helpers wrap them modulo `[base_addr, limit)`.
 
 ### 2.4 `EmuleDFBInterface` (`include/tt_emule/dfb_sync_state.hpp`)
 
@@ -156,41 +154,13 @@ The lock ensures the atomic increment and the condition variable notification ar
 
 Mirror of `inc_posted`, but increments `acked` and notifies `space_cv`. This wakes producers waiting for free space.
 
-**`wait_free_space(neo_id, counter_id, n)` — called by producer before writing**
+**Blocking for space / data — inline in `dfb_api.h`**
 
-```cpp
-void TileCounterArray::wait_free_space(uint8_t neo_id, uint8_t counter_id, uint32_t n) {
-    auto& tc = get(neo_id, counter_id);
-    std::unique_lock lk(tc.mu);
-    tc.space_cv.wait(lk, [&]{ return tc.free_space() >= n; });
-}
-```
+A producer's `dfb_reserve_back` blocks until the target TC has room; a consumer's `dfb_wait_front` blocks until it holds enough posted entries. Each takes the TC's `mu` and `wait_for`s (bounded by `TT_EMULE_DFB_TIMEOUT`, §7) on `space_cv` / `data_cv` respectively, re-checking `tc.free_space() >= n` / `tc.occupancy() >= n` under the lock. The mutex is always taken — there is no lockless fast path, because `occupancy()` and `free_space()` each read two independent atomics (`posted`, `acked`) non-atomically, which could underflow in MPMC scenarios.
 
-Always takes the mutex. A lockless fast path was removed because `occupancy()` and `free_space()` each read two independent atomics (`posted`, `acked`) non-atomically — in MPMC scenarios, the unsigned subtraction could underflow, causing a spurious return.
+### 3.3 The Drain Barrier: `dfb_finish()`
 
-**`wait_occupancy(neo_id, counter_id, n)` — called by consumer before reading**
-
-Same structure as `wait_free_space` but blocks on `data_cv` and waits for `occupancy() >= n`.
-
-### 3.3 The Drain Barrier: `finish()`
-
-`finish()` is called by a producer when it has pushed all its entries and wants to wait until all consumers have acknowledged them. It iterates over all TC slots and waits for `posted == acked` on each:
-
-```cpp
-void DataflowBuffer::finish() {
-    for (uint8_t i = 0; i < iface_.num_tcs_to_rr; ++i) {
-        auto& slot = iface_.tc_slots[i];
-        auto& tc = tc_array_.get(slot.neo_id, slot.counter_id);
-        if (tc.posted == 0 && tc.acked == 0) continue;  // already drained
-        std::unique_lock lk(tc.mu);
-        tc.space_cv.wait(lk, [&]{ return tc.posted == tc.acked; });
-    }
-}
-```
-
-`space_cv` is reused here because the drain condition is exactly what `inc_acked` signals. A fully drained TC (`posted == acked`) means all written entries have been consumed.
-
-The JIT path (`dfb_api.h:dfb_finish`) is identical in behavior but operates directly on `__emule_dfbs[dfb_id]` and `__emule_tc_array`.
+`dfb_finish(dfb_id)` (`dfb_api.h`) is called by a producer when it has pushed all its entries and wants to wait until all consumers have acknowledged them. It iterates over the interface's TC slots (`__emule_dfbs[dfb_id]`) and, for each non-drained TC, blocks on `space_cv` until `posted == acked`. `space_cv` is reused here because the drain condition is exactly what `inc_acked` signals — a fully drained TC (`posted == acked`) means all written entries have been consumed.
 
 ### 3.4 Why Both Atomics and a Mutex?
 
@@ -306,7 +276,7 @@ inline void dfb_reserve_back(uint32_t dfb_id, uint16_t n) {
 }
 ```
 
-The JIT path bypasses the `DataflowBuffer` class and implements the same logic inline to avoid any linkage dependency.
+These free functions operate directly on the TLS pointers (`__emule_dfbs` / `__emule_tc_array`) — there is no wrapper object — so the JIT-compiled kernel `.so` needs no `tt_emule` linkage.
 
 The `emulated_program_runner` sets these TLS variables per kernel thread (see §5). After the thread completes, the runner clears them back to `nullptr` to prevent stale pointers.
 

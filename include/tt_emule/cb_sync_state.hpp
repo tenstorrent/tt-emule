@@ -15,8 +15,7 @@
 // what fixes the pad_rm_sharded_stickwise race (see emule_cb_ptr.h).
 //
 // Consumed by JIT-compiled kernels via jit_hw/emule_cb_state.h
-// (__emule_cb_state / __emule_cbs) and by the host CircularBuffer wrapper used
-// by the tilize/dram_model host-only tests.
+// (__emule_cb_state / __emule_cbs).
 
 #include <atomic>
 #include <cstdint>
@@ -41,27 +40,11 @@ struct CBSyncState {
 // These manage ONLY the shared pages-occupied count + producer/consumer wakeups.
 // Per-RISC pointer advance lives in jit_hw/internal/emule_cb_ptr.h.
 
-inline void cb_sync_reserve(CBSyncState& cb, uint32_t n) {
-    // Fast path: lock-free check (safe for SPSC — only consumer decrements occupied)
-    if ((cb.num_pages - cb.occupied.load(std::memory_order_acquire)) >= n) return;
-    // Slow path: wait under lock
-    std::unique_lock<std::mutex> lk(cb.mu);
-    cb.space_cv.wait(lk, [&]{ return (cb.num_pages - cb.occupied.load(std::memory_order_relaxed)) >= n; });
-}
-
 inline void cb_sync_push(CBSyncState& cb, uint32_t n) {
     // Producer published n pages: bump the semaphore and wake a waiting consumer.
     std::unique_lock<std::mutex> lk(cb.mu);
     cb.occupied.fetch_add(n, std::memory_order_release);
     cb.data_cv.notify_one();
-}
-
-inline void cb_sync_wait(CBSyncState& cb, uint32_t n) {
-    // Fast path: lock-free check (safe for SPSC — only producer increments occupied)
-    if (cb.occupied.load(std::memory_order_acquire) >= n) return;
-    // Slow path: wait under lock
-    std::unique_lock<std::mutex> lk(cb.mu);
-    cb.data_cv.wait(lk, [&]{ return cb.occupied.load(std::memory_order_relaxed) >= n; });
 }
 
 inline void cb_sync_pop(CBSyncState& cb, uint32_t n) {

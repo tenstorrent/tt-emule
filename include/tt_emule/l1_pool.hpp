@@ -14,12 +14,11 @@ namespace tt_emule {
 /// L1Pool — allocates all worker L1 regions from a single contiguous MAP_32BIT
 /// mmap with power-of-2 aligned slots, enabling bitmask offset extraction.
 ///
-/// Each slot is 2 MB (next power of 2 above max L1: 1.5 MB on Blackhole).
-/// Offset extraction: `addr & SLOT_MASK` — one AND instruction, no TLS lookup.
+/// Each slot is 2 MB (next power of 2 above max L1: 1.5 MB on Blackhole), so
+/// callers extract an in-slot offset with a single `addr & (SLOT_SIZE-1)` mask.
 class L1Pool {
 public:
     static constexpr size_t SLOT_SIZE = 2 * 1024 * 1024;  // 2 MB
-    static constexpr size_t SLOT_MASK = SLOT_SIZE - 1;
 
     explicit L1Pool(size_t num_slots) : num_slots_(num_slots) {
         if (num_slots == 0) return;
@@ -59,9 +58,6 @@ public:
     }
 
     size_t num_slots() const { return num_slots_; }
-
-    /// Extract L1 offset from a host address via bitmask (one AND instruction).
-    static uint32_t to_offset(uint32_t addr) { return addr & static_cast<uint32_t>(SLOT_MASK); }
 
 private:
     size_t   num_slots_ = 0;

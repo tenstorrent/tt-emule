@@ -12,7 +12,6 @@
 #include <memory>
 #include <mutex>
 #include <condition_variable>
-#include <stdexcept>
 
 namespace tt_emule {
 
@@ -53,8 +52,6 @@ public:
         return counters_[neo_id * TILE_COUNTERS_PER_NEO + counter_id];
     }
 
-    uint32_t num_neos() const { return num_neos_; }
-
     void inc_posted(uint8_t neo_id, uint8_t counter_id, uint32_t n) {
         auto& tc = get(neo_id, counter_id);
         {
@@ -71,21 +68,6 @@ public:
             tc.acked.fetch_add(n, std::memory_order_release);
         }
         tc.space_cv.notify_all();
-    }
-
-    void wait_free_space(uint8_t neo_id, uint8_t counter_id, uint32_t n) {
-        auto& tc = get(neo_id, counter_id);
-        // Always take the mutex — lockless fast path removed because
-        // occupancy()/free_space() read two independent atomics non-atomically,
-        // risking unsigned underflow in MPMC scenarios.
-        std::unique_lock<std::mutex> lk(tc.mu);
-        tc.space_cv.wait(lk, [&] { return tc.free_space() >= n; });
-    }
-
-    void wait_occupancy(uint8_t neo_id, uint8_t counter_id, uint32_t n) {
-        auto& tc = get(neo_id, counter_id);
-        std::unique_lock<std::mutex> lk(tc.mu);
-        tc.data_cv.wait(lk, [&] { return tc.occupancy() >= n; });
     }
 
     void reset_all() {

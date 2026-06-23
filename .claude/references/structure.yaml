@@ -1,17 +1,15 @@
 files:
 - path: include/tt_emule/cb_sync_state.hpp
   section: include/tt_emule/
-  summary: '`struct CBSyncState` (shared geometry + `occupied` semaphore; per-RISC read/write pointers live in `jit_hw/internal/emule_cb_ptr.h`); semaphore-only `cb_sync_reserve`/`cb_sync_push`/`cb_sync_wait`/`cb_sync_pop`'
+  summary: '`struct CBSyncState` (shared geometry + `occupied` semaphore; per-RISC read/write pointers live in `jit_hw/internal/emule_cb_ptr.h`); semaphore-only `cb_sync_push`/`cb_sync_pop`'
   symbols:
   - {kind: namespace, name: tt_emule}
   - {kind: struct, name: CBSyncState}
-  - {kind: function, name: cb_sync_reserve}
   - {kind: function, name: cb_sync_push}
-  - {kind: function, name: cb_sync_wait}
   - {kind: function, name: cb_sync_pop}
 - path: include/tt_emule/device.hpp
   section: include/tt_emule/
-  summary: '`class Device : tt::tt_metal::IDevice`, `class Core`, `class MockAllocator`; `enum class HalMemType`, `CoreRole`, `BufferType`; `CoreCoord` (`struct` or `tt_xy_pair` alias, `#ifdef TT_EMULE_USE_XY_PAIR`)'
+  summary: '`class Core` (per-core L1/DRAM mmap, `CBSyncState[]`, DFB/tile-counter state); `enum class CoreRole`; `struct CoreCoord`'
   symbols:
   - {kind: namespace, name: tt_emule}
   - {kind: enum, name: CoreRole}
@@ -29,19 +27,13 @@ files:
   - {kind: struct, name: DFBSyncState}
 - path: include/tt_emule/l1_pool.hpp
   section: include/tt_emule/
-  summary: '`class L1Pool`; `SLOT_SIZE`, `SLOT_MASK`, `to_offset`, `num_slots`'
+  summary: '`class L1Pool`; `SLOT_SIZE`, `slot_ptr`, `num_slots`'
   symbols:
   - {kind: namespace, name: tt_emule}
   - {kind: class, name: L1Pool}
-- path: include/tt_emule/tile.hpp
-  section: include/tt_emule/
-  summary: '`class Tile`; `ROWS`/`COLS`/`NUM_ELEMENTS`/`SIZE_BYTES`; `operator+`/`+=`/`()`'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: class, name: Tile}
 - path: include/tt_emule/tile_counter.hpp
   section: include/tt_emule/
-  summary: '`struct TileCounter`, `class TileCounterArray`; `TILE_COUNTERS_PER_NEO`; inc_posted/inc_acked/wait_free_space/wait_occupancy/reset_all'
+  summary: '`struct TileCounter`, `class TileCounterArray`; `TILE_COUNTERS_PER_NEO`; inc_posted/inc_acked/reset_all'
   symbols:
   - {kind: namespace, name: tt_emule}
   - {kind: global, name: TILE_COUNTERS_PER_NEO}

@@ -12,7 +12,6 @@
 #include <memory>
 #include <cstdint>
 #include <stdexcept>
-#include <string>
 #include <sys/mman.h>
 
 namespace tt_emule {
@@ -24,9 +23,6 @@ struct CoreCoord {
     size_t x;
     size_t y;
     bool operator==(const CoreCoord& o) const { return x == o.x && y == o.y; }
-    std::string str() const {
-        return "(" + std::to_string(x) + "," + std::to_string(y) + ")";
-    }
 };
 
 class Core {
@@ -60,7 +56,6 @@ public:
     Core(const Core&) = delete;
     Core& operator=(const Core&) = delete;
 
-    CoreCoord coord() const { return coord_; }
     CoreRole  role()  const { return role_; }
 
     // Accepts uint64_t so DRAM banks (≤ 4 GB on BH, ≤ 2 GB on WH views) can be
@@ -138,8 +133,6 @@ public:
     }
 
     TileCounterArray* tile_counters() { return tile_counters_.get(); }
-
-    DFBSyncState* dfb_sync_array() { return dfb_sync_states_; }
 
     void init_dfb_sync(uint32_t idx, uint8_t* base, uint32_t entry_size,
                        uint32_t num_entries, uint32_t capacity) {

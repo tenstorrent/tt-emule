@@ -49,11 +49,11 @@ struct CBSyncState {
 geometry (`base`/`page_size`/`num_pages`/`page_mask`) and the pages-occupied
 **semaphore** (`occupied` + the two condvars) — the analog of the L1
 pages_received/acked counter. The read/write *pointers* are **not** here; they are
-per-RISC (§2b). Four semaphore-only free functions implement the protocol:
-`cb_sync_reserve` (wait for N free), `cb_sync_push` (bump `occupied`, notify
-consumer), `cb_sync_wait` (wait for N occupied), `cb_sync_pop` (drop `occupied`,
-notify producer). `occupied` is **atomic** so the SPSC fast path can probe it
-without taking the lock.
+per-RISC (§2b). Two semaphore-only free functions maintain the count:
+`cb_sync_push` (bump `occupied`, notify consumer) and `cb_sync_pop` (drop
+`occupied`, notify producer); producers/consumers block on the condvars via
+`jit_hw/emule_wait.h`. `occupied` is **atomic** so the SPSC fast path can probe
+it without taking the lock.
 
 ---
 
