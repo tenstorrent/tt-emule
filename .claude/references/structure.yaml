@@ -341,6 +341,7 @@ files:
   - {kind: macro, name: DM_DYNAMIC_NOC}
   - {kind: global, name: noc_mode}
   - {kind: function, name: tensix_sync}
+  - {kind: function, name: riscv_wait}
   - {kind: macro, name: ALWI}
   - {kind: macro, name: __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED}
   - {kind: function, name: compute_kernel_hw_startup}
@@ -1208,6 +1209,15 @@ files:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: gcd_tile_init}
   - {kind: function, name: gcd_tile}
+- path: include/jit_hw/api/compute/generic_moe_gate.h
+  section: include/jit_hw/api/compute/
+  summary: 'Emule model for the flat parameterized MoE gate (sibling of deepseek/glm/kimi): flat top-`num_selected_experts` of `num_total_experts` by bf16(act)+bf16(bias), scores gathered from act, optional
+    normalize (score*scale/(sum+eps)), optional zero_tail; writes DST[0]=scores / DST[1]=bit-packed indices at col 0 of rows 0..K-1 (the moe-gate pack-subrect contract)'
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: generic_moe_gate_init}
+  - {kind: global, name: num_total_experts}
+  - {kind: function, name: generic_moe_gate}
 - path: include/jit_hw/api/compute/glm_moe_gate.h
   section: include/jit_hw/api/compute/
   summary: '`ckernel::` `glm_moe_gate`, `glm_moe_gate_init` (Layer-1 PoR shadow; template `normalize`/`num_experts`/`is_32bit`)'
@@ -2707,6 +2717,10 @@ files:
   - {kind: function, name: deepseek_binary_dest_reuse_tiles_init}
   - {kind: global, name: binary_reuse_dest}
   - {kind: function, name: deepseek_binary_dest_reuse_tiles}
+- path: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/generic_moe_gate.h
+  section: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/
+  summary: Thin jit_hw shadow of blaze's generic_moe_gate compute header (shadows the silicon header that pulls the deepseek-moe-gate eltwise-binary + topk SFPU LLKs emule can't consume); routes to api/compute/generic_moe_gate.h.
+    blaze stays pristine.
 - path: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/glm_moe_gate.h
   section: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/
   summary: emule shadow for blaze's `glm_moe_gate` compute op → routes to the high-level `api/compute/glm_moe_gate.h` emule model

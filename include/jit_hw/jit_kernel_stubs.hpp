@@ -68,6 +68,13 @@ constexpr common_type_t<A, B> max(const A& a, const B& b) {
 // kernels call it directly from generated code (patched_kernel.cpp).
 inline void tensix_sync() {}
 
+// riscv_wait — silicon wall-clock busy-wait on BRISC/NCRISC (e.g. the
+// mcast op's posted-multicast "safety delay", blaze/ops/mcast/kernels/op.hpp).
+// emule is single-threaded with deterministic mcast ordering, so there is
+// nothing to wait on → no-op. `unsigned` (not uint32_t) avoids depending on
+// <cstdint> being included this early in the wrapper.
+inline void riscv_wait(unsigned /*cycles*/) {}
+
 // ALWI — silicon's "always inline" attribute used in tt-metal kernel
 // headers (ttnn/kernel_lib/tilize_helpers.hpp etc.) that don't pull in
 // api/compute/common.h before declaring ALWI-prefixed prototypes.
