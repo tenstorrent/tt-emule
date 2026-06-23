@@ -11,12 +11,11 @@ set -euo pipefail
 #   1   — host-only (no device, no env vars)
 #   3b  — DFB Multi-P/C STRIDED (quasar_Q1.yaml)
 #   3c  — DFB Compute Bridge Tests — DM→Tensix and Tensix→DM (quasar_Q1.yaml)
-#   3d  — DFB Multi-DFB Pipeline (quasar_Q1.yaml)
 #   3e  — DFB BLOCKED Consumer (quasar_Q1.yaml)
 #   3f  — DFB Multi-Core (quasar_Q1.yaml)
 #   3g  — DFB Config Validation (quasar_Q1.yaml)
 #   3h  — Quasar Compute Kernel Tests (quasar_Q1.yaml)
-#   3i  — Quasar Semaphore Tests (quasar_Q1.yaml)
+#   3i  — Quasar DM Loopback (quasar_Q1.yaml)
 #   3j  — Simple DM + RISC-V Atomics (quasar_Q1.yaml)
 #
 # Required env:
@@ -247,13 +246,6 @@ run_test "TensixDMTest1xDFB4Sx2S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx2S/ImplicitSyncTrue"
 
 # ===========================================================================
-# Tier 3d: DFB Multi-DFB Pipeline (Group D) — REMOVED
-# ===========================================================================
-# DMTensixDMTest{2xDFB1Sx1S,1xDFB2Sx1S1xDFB1Sx2S,1xDFB4Sx1S1xDFB1Sx4S} no longer
-# exist in unit_tests_api (removed upstream, no successor under any fixture), so
-# these entries are dropped rather than repointed.
-
-# ===========================================================================
 # Tier 3e: DFB BLOCKED Consumer
 # ===========================================================================
 echo ""
@@ -344,14 +336,11 @@ run_test "QuasarMatmulBlockDemo" "$INTEGRATION_BIN" \
     --gtest_filter="MeshDispatchFixture.QuasarMatmulBlock"
 
 # ===========================================================================
-# Tier 3i: Quasar Semaphore Tests
+# Tier 3i: Quasar DM Loopback
 # ===========================================================================
 echo ""
 echo "== Tier 3i: Quasar DM Loopback =="
 
-# QuasarComputeKernelSemaphores / QuasarDmAndComputeKernelSemaphores were removed
-# upstream; current quasar semaphore coverage is QuasarMultiSemaphorePipeline /
-# QuasarMultipleClustersMultiSemaphorePipeline (not wired here — separate task).
 run_test "DmLoopback" "$LEGACY_BIN" \
     --gtest_filter="QuasarMeshDeviceSingleCardFixture.DmLoopback"
 
