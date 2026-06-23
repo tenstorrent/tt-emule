@@ -50,23 +50,14 @@ _gtest_xml_args() {
     fi
 }
 
-# --- PR-tier (smoke) selection ---------------------------------------------
-# CI_TIER chooses which entries run on a given invocation:
-#   full      (default) every entry — on-push and full local runs
-#   pr        only entries in PR_TIER below — the lightweight PR gate. Quasar is
-#             structurally distinct from wormhole/blackhole (DFB instead of CBs,
-#             up-to-12-thread Neo, CSR thread-locals), so this smoke set is a
-#             tripwire on that subsystem: STRIDED DFBs (Multi-P/C), the DFB→
-#             compute bridge (Groups B and C), and RISCV atomics. All are basic
-#             1Sx1S / 1Sx4S topologies that pass — none of the known-failure
-#             4Sx4S / *Config / matmul-block entries
-#             (.github/known-failures-quasar.txt) are included. Every entry here
-#             is verified to match live gtest tests in the build (the Tier 3h/3i/
-#             3j LEGACY-binary entries are intentionally excluded — their filters
-#             reference a stale fixture name and match no tests; see the doc).
-#   deferred  the complement (entries NOT in PR_TIER) — what scripts/run_local_ci.sh
-#             runs; this set includes the known-failure entries, so the quasar
-#             allowlist still applies there.
+# CI_TIER selects which entries run: full (all, default) | pr (only PR_TIER) |
+# deferred (the rest). See ci-regression-all.sh / docs/ci-test-tiers.md.
+# PR_TIER is the quasar C++ smoke set for the PR gate — a tripwire on quasar's
+# distinct DFB/Neo subsystem (STRIDED DFBs, the DFB→compute bridge, RISCV
+# atomics), all live-and-passing 1Sx1S/1Sx4S topologies. The Tier 3h/3i/3j
+# LEGACY-binary entries are excluded: their committed filters use a stale
+# fixture name (MeshDeviceSingleCardFixture.* vs QuasarMeshDeviceSingleCardFixture.*)
+# and match no tests.
 CI_TIER="${CI_TIER:-full}"
 PR_TIER=(
     DMTest1xDFB1Sx1S
@@ -76,7 +67,7 @@ PR_TIER=(
     TestAtomicLoadStoreRISCV
 )
 _pr_tier_has() { local n="$1" e; for e in "${PR_TIER[@]}"; do [ "$e" = "$n" ] && return 0; done; return 1; }
-# Echo "skip" if the named entry must NOT run under the current CI_TIER.
+# Return 0 (skip this entry) when CI_TIER excludes it.
 _tier_skip() {
     case "$CI_TIER" in
         full)     return 1 ;;

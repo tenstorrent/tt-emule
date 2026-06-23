@@ -48,15 +48,11 @@ _gtest_xml_args() {
     fi
 }
 
-# --- PR-tier (smoke) selection ---------------------------------------------
-# CI_TIER chooses which entries run on a given invocation:
-#   full      (default) every entry — on-push and full local runs
-#   pr        only entries in PR_TIER below — the lightweight PR gate. Wormhole
-#             is a smoke arch on the PR gate (blackhole is the full arch), so
-#             these are skewed toward WH-specific divergence from BH: DRAM bank
-#             topology, tilize/format, plus a basic L1/JIT/NOC/reduce pulse.
-#   deferred  the complement (entries NOT in PR_TIER) — what scripts/run_local_ci.sh
-#             runs so a developer can cover everything trimmed from the PR gate.
+# CI_TIER selects which entries run: full (all, default) | pr (only PR_TIER) |
+# deferred (the rest). See ci-regression-all.sh / docs/ci-test-tiers.md.
+# PR_TIER is the wormhole C++ smoke set for the PR gate — skewed to WH-specific
+# divergence from blackhole (the full arch): DRAM bank topology, tilize/format,
+# plus a basic L1/JIT/NOC/reduce pulse.
 CI_TIER="${CI_TIER:-full}"
 PR_TIER=(
     tilize_untilize
@@ -68,7 +64,7 @@ PR_TIER=(
     ttnn_sum_last_dim_aligned
 )
 _pr_tier_has() { local n="$1" e; for e in "${PR_TIER[@]}"; do [ "$e" = "$n" ] && return 0; done; return 1; }
-# Echo "skip" if the named entry must NOT run under the current CI_TIER.
+# Return 0 (skip this entry) when CI_TIER excludes it.
 _tier_skip() {
     case "$CI_TIER" in
         full)     return 1 ;;
