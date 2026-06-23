@@ -2704,6 +2704,10 @@ files:
 - path: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/add_rsqrt.h
   section: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/
   summary: emule shadow for blaze's `add_rsqrt` compute op → routes to `api/compute/eltwise_unary/add_rsqrt.h` (bypasses TRISC_MATH SFPU LLK)
+- path: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/custom_mm.h
+  section: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/
+  summary: Thin jit_hw shadow of blaze's custom_mm compute header (whose custom_mm_block_* bodies expand to the raw custom-mm LLK state machine + dense-pack cfg_reg_rmw_tensix stride RMW emule can't consume);
+    routes to the api/compute/matmul_fused_act_emule.h model. blaze stays pristine.
 - path: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/deepseek_moe_gate.h
   section: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/
   summary: emule shadow for blaze's `deepseek_moe_gate` compute op → routes to the high-level `api/compute/deepseek_moe_gate.h` emule model
