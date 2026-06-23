@@ -42,3 +42,9 @@ constexpr uint32_t MEM_ZEROS_BASE = 0xE180;
 constexpr uint32_t MEM_ZEROS_BASE = 0x3280;
 #  endif
 #endif
+
+// Quasar-only: TRISC (compute) cores per Neo. Mirrors the real
+// tt-2xx/quasar/dev_mem_map.h; compute kernels index per-thread state with it.
+#if defined(ARCH_QUASAR) && !defined(NUM_TRISC_CORES)
+#  define NUM_TRISC_CORES 4
+#endif

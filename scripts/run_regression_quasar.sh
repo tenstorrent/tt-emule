@@ -247,17 +247,11 @@ run_test "TensixDMTest1xDFB4Sx2S_IS" "$API_BIN" \
     --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx2S/ImplicitSyncTrue"
 
 # ===========================================================================
-# Tier 3d: DFB Multi-DFB Pipeline (Group D)
+# Tier 3d: DFB Multi-DFB Pipeline (Group D) — REMOVED
 # ===========================================================================
-echo ""
-echo "== Tier 3d: DFB Multi-DFB Pipeline (Group D) =="
-
-run_test "DMTensixDMTest2xDFB1Sx1S" "$API_BIN" \
-    --gtest_filter="MeshDeviceFixture.DMTensixDMTest2xDFB1Sx1S"
-run_test "DMTensixDMTest1xDFB2Sx1S1xDFB1Sx2S" "$API_BIN" \
-    --gtest_filter="MeshDeviceFixture.DMTensixDMTest1xDFB2Sx1S1xDFB1Sx2S"
-run_test "DMTensixDMTest1xDFB4Sx1S1xDFB1Sx4S" "$API_BIN" \
-    --gtest_filter="MeshDeviceFixture.DMTensixDMTest1xDFB4Sx1S1xDFB1Sx4S"
+# DMTensixDMTest{2xDFB1Sx1S,1xDFB2Sx1S1xDFB1Sx2S,1xDFB4Sx1S1xDFB1Sx4S} no longer
+# exist in unit_tests_api (removed upstream, no successor under any fixture), so
+# these entries are dropped rather than repointed.
 
 # ===========================================================================
 # Tier 3e: DFB BLOCKED Consumer
@@ -332,14 +326,14 @@ echo ""
 echo "== Tier 3h: Quasar Compute Kernel Tests =="
 
 run_test "QuasarComputeKernelMultipleThreads" "$LEGACY_BIN" \
-    --gtest_filter="MeshDeviceSingleCardFixture.QuasarComputeKernelMultipleThreads"
+    --gtest_filter="QuasarMeshDeviceSingleCardFixture.QuasarComputeKernelMultipleThreads"
 run_test "QuasarComputeKernelSingleThread" "$LEGACY_BIN" \
-    --gtest_filter="MeshDeviceSingleCardFixture.QuasarComputeKernelSingleThread"
+    --gtest_filter="QuasarMeshDeviceSingleCardFixture.QuasarComputeKernelSingleThread"
 run_test "QuasarCreateMultipleComputeKernelsSingleCluster" "$LEGACY_BIN" \
-    --gtest_filter="MeshDeviceSingleCardFixture.QuasarCreateMultipleComputeKernelsSingleCluster"
+    --gtest_filter="QuasarMeshDeviceSingleCardFixture.QuasarCreateMultipleComputeKernelsSingleCluster"
 
 run_test "QuasarComputeKernelTLS" "$LEGACY_BIN" \
-    --gtest_filter="MeshDeviceSingleCardFixture.QuasarComputeKernelTLS"
+    --gtest_filter="QuasarMeshDeviceSingleCardFixture.QuasarComputeKernelTLS"
 
 run_test "QuasarMatmulBlock" "$INTEGRATION_BIN" \
     --gtest_filter="MeshDispatchFixture.TensixMatmulBlock"
@@ -353,14 +347,13 @@ run_test "QuasarMatmulBlockDemo" "$INTEGRATION_BIN" \
 # Tier 3i: Quasar Semaphore Tests
 # ===========================================================================
 echo ""
-echo "== Tier 3i: Quasar Semaphore Tests =="
+echo "== Tier 3i: Quasar DM Loopback =="
 
-run_test "QuasarComputeKernelSemaphores" "$LEGACY_BIN" \
-    --gtest_filter="MeshDeviceSingleCardFixture.QuasarComputeKernelSemaphores"
-run_test "QuasarDmAndComputeKernelSemaphores" "$LEGACY_BIN" \
-    --gtest_filter="MeshDeviceSingleCardFixture.QuasarDmAndComputeKernelSemaphores"
+# QuasarComputeKernelSemaphores / QuasarDmAndComputeKernelSemaphores were removed
+# upstream; current quasar semaphore coverage is QuasarMultiSemaphorePipeline /
+# QuasarMultipleClustersMultiSemaphorePipeline (not wired here — separate task).
 run_test "DmLoopback" "$LEGACY_BIN" \
-    --gtest_filter="MeshDeviceSingleCardFixture.DmLoopback"
+    --gtest_filter="QuasarMeshDeviceSingleCardFixture.DmLoopback"
 
 # ===========================================================================
 # Tier 3j: Simple DM + RISC-V Atomics
@@ -369,7 +362,7 @@ echo ""
 echo "== Tier 3j: Simple DM + RISCV Atomics =="
 
 run_test "SingleDmL1Write" "$LEGACY_BIN" \
-    --gtest_filter="MeshDeviceSingleCardFixture.SingleDmL1Write"
+    --gtest_filter="QuasarMeshDeviceSingleCardFixture.SingleDmL1Write"
 run_test "TestAtomicLoadStoreRISCV" "$LEGACY_BIN" \
     --gtest_filter="RISCVAtomicsFixture.TestAtomicLoadStoreRISCV"
 run_test "TestAtomicAddFetchRISCV" "$LEGACY_BIN" \
