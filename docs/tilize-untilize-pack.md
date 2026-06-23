@@ -93,7 +93,12 @@ via `llk_pack.h::llk_pack`).
 
 `fast_tilize_*` is a delegation alias on WH (and on BH where the HW
 fast-tilize path is conceptually equivalent to the regular path for
-emule, since the difference on silicon is just packer scheduling).
+emule, since the difference on silicon is just packer scheduling). The
+`_with_dt` / `_with_dt_skip_remap` variants take the **3-arg** silicon
+signature `(icb, full_dim, ocb)` (`tt_metal/hw/inc/api/compute/tilize.h:330`)
+— they forward the runtime `full_dim` straight to `tilize_init`; on silicon
+they additionally reconfig SrcA/SrcB data formats, which emule does implicitly
+(CB format is read per-call). `conv_bmm_tilize.cpp:106` is the sole caller.
 
 ## Pack
 

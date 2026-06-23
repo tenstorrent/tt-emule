@@ -35,6 +35,7 @@ POOL_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/pool"
 TENSOR_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/tensor"
 PCA_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/per_core_allocation"
 BENCH_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/benchmarks"
+CONV_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/conv"
 
 GTEST_XML_DIR="${GTEST_XML_DIR:-}"
 [ -n "$GTEST_XML_DIR" ] && mkdir -p "$GTEST_XML_DIR"
@@ -476,6 +477,9 @@ run_pytest "matmul_test_basic" "$MATMUL_TEST_DIR/test_matmul.py" \
 # tile_w=16) pytest.skip the way they do on silicon, instead of running garbage.
 # On Blackhole most tiny-tile matmul tests skip via @skip_for_blackhole (#31385).
 LLK_ASSERTS=1 run_pytest "matmul_test_tiny_tile" "$MATMUL_TEST_DIR/test_matmul.py" -k tiny_tile
+
+run_pytest "conv_test_conv1d"               "$CONV_TEST_DIR/test_conv1d.py"
+run_pytest "conv_test_prepare_conv_weights" "$CONV_TEST_DIR/test_prepare_conv_weights.py"
 
 echo ""
 echo "========================================"

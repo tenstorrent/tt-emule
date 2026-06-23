@@ -80,6 +80,9 @@ constexpr uint32_t STALL_CFG = 1u << 16;
 constexpr uint32_t STALL_TDMA = 1u << 17;
 constexpr uint32_t STALL_ON_ZERO = 1u << 18;
 constexpr uint32_t STALL_ON_MAX = 1u << 19;
+// TTI_STALLWAIT is a no-op in emule, so the value only needs to be distinct
+// (silicon's is 0x20).
+constexpr uint32_t STALL_THCON = 1u << 20;
 }  // namespace p_stall
 
 // state_configure lives in the silicon compute-kernel sentinel header alongside
