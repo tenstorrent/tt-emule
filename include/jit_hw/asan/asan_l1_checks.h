@@ -30,6 +30,8 @@ extern thread_local const uint64_t* __emule_l1_tensor_ranges;
 extern thread_local uint32_t __emule_l1_tensor_ranges_count;
 extern thread_local const uint64_t* __emule_l1_padding_ranges;
 extern thread_local uint32_t __emule_l1_padding_ranges_count;
+extern thread_local const uint64_t* __emule_l1_host_ranges;
+extern thread_local uint32_t __emule_l1_host_ranges_count;
 extern thread_local uint64_t* __emule_l1_resolved_ranges;
 extern thread_local uint32_t* __emule_l1_resolved_ranges_count;
 extern thread_local uint32_t __emule_l1_resolved_ranges_capacity;
@@ -116,6 +118,15 @@ inline void __emule_asan_check_oob_tensor(uint32_t l1_off) {
         }
     }
     if (!in_tensor) {
+        // Raw L1 the host designated via WriteToDeviceL1/ReadFromDeviceL1 is valid
+        // data outside the Buffer allocator; accept it but DON'T record it as a
+        // resolved tensor (it must stay invisible to Object Intent)
+        for (uint32_t i = 0; i < __emule_l1_host_ranges_count; ++i) {
+            uint64_t packed = __emule_l1_host_ranges[i];
+            if (l1_off >= static_cast<uint32_t>(packed >> 32) && l1_off < static_cast<uint32_t>(packed)) {
+                return;
+            }
+        }
         __emule_asan_panic(
                 "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
                 l1_off);

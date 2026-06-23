@@ -697,14 +697,11 @@ inline uint32_t get_semaphore(uint32_t semaphore_id) {
 // Atomic helpers for semaphore operations.
 // volatile reads are unreliable at -O3; use std::atomic for cross-thread visibility.
 inline std::atomic<uint32_t>* __emule_sem_atomic(volatile tt_l1_ptr uint32_t* sem_addr) {
-    // sem_addr may be a raw firmware L1 offset cast straight to a pointer (e.g.
-    // a constexpr receiver-semaphore offset) rather than an absolute host
-    // pointer from get_semaphore() / l1_alloc().  Route it through the same
-    // offset-vs-absolute disambiguation every other dataflow path uses so the
-    // semaphore lands in the relocated L1 pool instead of dereferencing a bare
-    // offset.  Absolute pointers (>= l1_base) pass through unchanged.
+    // Plain translation (offset-vs-absolute disambiguation only), NOT the
+    // sanitizer chokepoint: this is the legitimate semaphore API, which the
+    // checks must exempt. See docs/ASAN.md §6.
     uint32_t addr32 = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(const_cast<uint32_t*>(sem_addr)));
-    return reinterpret_cast<std::atomic<uint32_t>*>(__emule_local_l1_to_ptr(addr32));
+    return reinterpret_cast<std::atomic<uint32_t>*>(__emule_l1_translate(addr32));
 }
 
 // Set semaphore value (local L1 store).

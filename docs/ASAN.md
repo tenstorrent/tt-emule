@@ -80,7 +80,7 @@ Three per-device registries in `tt-metal/tt_metal/impl/emulation/emule_live_rang
 |---|---|---|
 | `LiveL1Ranges` | `(start, end)` of every allocated L1 buffer | `Buffer::allocate_impl` / `deallocate_impl` |
 | `LiveDramRanges` | Same for DRAM buffers | Buffer alloc/dealloc |
-| `LiveL1PaddingRanges` | `[logical_end, physical_end)` for buffers with declared logical size | `Buffer::set_logical_size` / `deallocate_impl` |
+| `LiveL1PaddingRanges` | `[logical_end, physical_end)` for buffers with declared logical size | `emule::register_logical_size` / `deallocate_impl` |
 
 All three expose `snapshot(device_id)` returning `std::vector<uint64_t>`
 of packed `(low << 32) | high` pairs. Packed uint64 is the on-wire
@@ -105,6 +105,7 @@ The host populates these thread-locals before each kernel invocation
 | `__emule_dram_unreserved_base` | DRAM equivalent of l1_unreserved_base |
 | `__emule_dram_tensor_ranges` / `_count` | Packed live-DRAM extents (OOB-DRAM input) |
 | `__emule_l1_padding_ranges` / `_count` | Packed padding regions (Padding Violation input) |
+| `__emule_l1_host_ranges` / `_count` | Packed raw-L1 regions poked via `WriteToDeviceL1`/`ReadFromDeviceL1` — extra valid extents for the OOB check (§4), excluded from Object Intent |
 | `__emule_sem_l1_range_start` / `_end` | Reserved Semaphore region bounds |
 | `__emule_cb_boundary_strict` | Gate for CB Boundary Violation |
 | `__emule_cb_reserved_pages[32]` | Per-CB write-window size (CB Boundary input); updated by `cb_reserve_back`/`cb_push_back` |
@@ -205,6 +206,25 @@ Checks run in this order inside `__emule_local_l1_to_ptr`:
    `[sem_l1_range_start, sem_l1_range_end)`. Sem accesses are supposed
    to go through `noc_semaphore_*` APIs; a raw pointer dereference
    bypasses the atomic NoC ops and races.
+
+   **The semaphore API itself is exempt from the chokepoint.** The
+   free-function API (`noc_semaphore_set/wait/wait_min`) reaches L1 via
+   `__emule_sem_atomic` (`api/dataflow/dataflow_api.h`); it calls the plain
+   `__emule_l1_translate` (offset-vs-absolute disambiguation only), **not**
+   `__emule_local_l1_to_ptr`. This is required: the chokepoint cannot tell a
+   valid `noc_semaphore_wait()` from a stray scalar write once both arrive as the
+   same address, so routing the API through it false-positives. A firmware-offset
+   semaphore (e.g. a constexpr receiver-semaphore offset, which `__emule_sem_atomic`
+   explicitly supports) is *neither* a live tensor *nor*, in general, inside the
+   sem range — so it would trip the **OOB** check (§4), not the semaphore check;
+   verified by `atomic_semaphore_receiver.cpp` aborting with `noc_semaphore_wait`
+   on the stack before this exemption. The exemption also makes the free-function
+   path consistent with the `Semaphore` class path (`noc_semaphore.h`), which
+   already operates on its cached pointer without the chokepoint. The check still
+   fires on RAW derefs into the sem region (anything that bypasses the sem API and
+   flows through `__emule_local_l1_to_ptr` directly — e.g. `l1_arg_ptr` arithmetic
+   or an explicit pointer cast in a compute kernel), which is exactly what
+   `test_semaphore_write.cpp` exercises.
 2. **CB Boundary Violation** — `l1_addr` inside one of the
    `__emule_cbs[i].base + cb_size` ranges. If yes, check whether the
    access page is inside the active write window
@@ -220,6 +240,24 @@ Checks run in this order inside `__emule_local_l1_to_ptr`:
    the matched packed `(start, end)` to `__emule_l1_resolved_ranges`
    (deduplicated by linear scan, capped at capacity) — this feeds the
    Object Intent check below.
+
+   *Host-poked raw L1.* A tensor miss is not an immediate abort: the offset
+   is first checked against `__emule_l1_host_ranges` — raw L1 the host
+   designated via `WriteToDeviceL1`/`ReadFromDeviceL1` (the DM micro-benchmarks
+   poke scratch at `DEFAULT_UNRESERVED` and hand the bare address to a kernel,
+   so it is valid but absent from `LiveL1Ranges`). A hit returns; a miss
+   aborts as before. These ranges are deliberately a **separate** array: a
+   hit is **not** recorded into `__emule_l1_resolved_ranges` and the regions
+   are never snapshotted by Object Intent (§12), so a host-NOC write into a
+   poked region can't be mis-flagged. The acceptance is precise — only the
+   exact poked `[start, end)` — so an overrun past it still aborts. Host side:
+   `LiveL1HostPokeRanges` in `[metal] emule_live_ranges.{hpp,cpp}`, populated from
+   two places: (1) the poke APIs `WriteToDeviceL1`/`ReadFromDeviceL1` in
+   `[metal] host_api/tt_metal.cpp` register the exact range they touch (precise,
+   general); (2) the DM-test helper `get_l1_address_and_size()` registers the whole
+   unreserved-L1 scratch extent it hands out, covering raw-L1 outputs the host only
+   reads back *after* launch (which (1) can't see in time). See the metal-side
+   SANITIZER_CHECKS.md "Host-poked L1 regions" for the full rationale.
 4. **Tensor Padding Violation** — scan `__emule_l1_padding_ranges` for
    any entry whose `[logical_end, physical_end)` contains `l1_addr`.
    If matched, abort.
