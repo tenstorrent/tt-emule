@@ -17,12 +17,13 @@
 // produces correctly-masked reduce output in its DST model, so these are no-ops.
 
 #include <cstdint>
-#include "jit_hw/llk_types.h"  // ReduceDim
+#include "jit_hw/llk_types.h"  // ReduceDim, PackMode
 
 namespace ckernel {
 
-// Mirrors ckernel::PackMode (tt_llk .../common/inc/ckernel_defs.h).
-enum class PackMode : std::uint8_t { Default = 0, Untilize = 1, Tilize = 2 };
+// PackMode is the single ckernel::PackMode defined in llk_types.h (included above);
+// do not redefine it here — a second definition is an ODR redefinition for any TU
+// that includes both (e.g. softmax / layernorm_sharded compute kernels).
 
 template <ReduceDim reduce_dim, PackMode pack_mode = PackMode::Default>
 inline void llk_pack_reduce_mask_config(uint32_t /*ocb*/) {}

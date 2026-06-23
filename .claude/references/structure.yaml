@@ -244,11 +244,8 @@ files:
   - {kind: global, name: STALL_TDMA}
   - {kind: global, name: STALL_ON_ZERO}
   - {kind: global, name: STALL_ON_MAX}
-<<<<<<< HEAD
   - {kind: global, name: STALL_THCON}
-=======
   - {kind: global, name: STALL_SYNC}
->>>>>>> 67e4348 (jit_hw/sfpu: SDPA softmax single-tile now bit-exact (Issue 3) — exp face-coverage + init-scale + first-column recip row coverage)
   - {kind: function, name: t6_semaphore_wait_on_zero}
   - {kind: function, name: t6_semaphore_wait_on_max}
   - {kind: enum, name: SfpuType}
@@ -1382,7 +1379,6 @@ files:
   summary: empty shim (pragma-once only)
   symbols:
   - {kind: namespace, name: ckernel}
-  - {kind: enum, name: PackMode}
   - {kind: function, name: llk_pack_reduce_mask_config}
   - {kind: function, name: llk_pack_reduce_mask_clear}
 - path: include/jit_hw/api/compute/pack_untilize.h
@@ -2720,11 +2716,9 @@ files:
 - path: include/jit_hw/tt_metal/fabric/hw/inc/mesh/api.h
   section: include/jit_hw/tt_metal/fabric/hw/inc/mesh/
   summary: fabric include-path shim → `jit_hw/__emule_fabric_stubs.h` (multichip fabric out of scope)
-<<<<<<< HEAD
 - path: include/jit_hw/sfpu/ckernel_sfpu_rsqrt_compat.h
   section: include/jit_hw/sfpu/
   summary: forwarder → real per-arch `sfpu/ckernel_sfpu_rsqrt_compat.h` so the metal-layer `ckernel_sfpu_sqrt.h` include resolves on emule's JIT -I set
-=======
 - path: include/jit_hw/cpp/ttnn/kernel_lib/dest_helpers.hpp
   section: include/jit_hw/cpp/ttnn/kernel_lib/
   summary: Redirect shim — resolves the upstream `cpp/ttnn/kernel_lib/dest_helpers.hpp` include (only valid under -I ttnn/) to the real header reachable under emule's -I ttnn/cpp/.
@@ -2737,4 +2731,3 @@ files:
 - path: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/sdpa_streaming_qktv.hpp
   section: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/
   summary: Redirect shim — resolves the upstream `cpp/ttnn/.../sdpa_streaming_qktv.hpp` include to the real (portable C++) header under emule's -I ttnn/cpp/.
->>>>>>> 67e4348 (jit_hw/sfpu: SDPA softmax single-tile now bit-exact (Issue 3) — exp face-coverage + init-scale + first-column recip row coverage)
