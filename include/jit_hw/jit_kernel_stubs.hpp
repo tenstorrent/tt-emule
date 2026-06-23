@@ -31,6 +31,11 @@
 // the real std::min/std::max, so there is no ambiguity and no behavior change.
 // Faithful in result (the same value silicon computes); the kernel source is
 // unchanged. Lives in the JIT preamble (included before every kernel).
+// Adding these to namespace std is formally [namespace.std] UB; accepted deliberately
+// because the toolchain is pinned (clang-20 + libstdc++) and there is no conforming way
+// to satisfy a *qualified* std::min(size_t, uint32_t) call without editing the pristine
+// upstream kernel. The integral-only, different-type SFINAE keeps the blast radius to
+// exactly the host/target size_t-width mismatch and never shadows a same-type call.
 #include <algorithm>
 #include <type_traits>
 namespace std {

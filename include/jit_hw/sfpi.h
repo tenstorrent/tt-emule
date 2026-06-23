@@ -457,10 +457,13 @@ inline uint32_t __emule_half_to_float_bits(uint16_t h) {  // IEEE binary16 -> bi
     return sign | ((exp + 112u) << 23) | (mant << 13);
 }
 
-// SFPLOADI — build/patch an LReg from a 16-bit immediate (uniform across lanes,
-// unconditional on silicon). One complete loader covering all six
-// SFPLOADI_MOD0_* cases (sfpi_constants.h): used by both the LUT-init path
-// (UPPER/LOWER/USHORT) and the exp polynomial (FLOATB).
+// SFPLOADI — build/patch an LReg from a 16-bit immediate (the immediate is uniform
+// across lanes). Writeback is CC-predicated (see the detailed note below): outside any
+// v_if the CC mask is all-true so every lane is written, but inside an SFPSETCC region
+// only the matched lanes load — the exp underflow handler relies on this
+// (compute_common.hpp: "LREG2 = 0 ONLY for lanes where LREG1 == 0"). One complete loader
+// covering all six SFPLOADI_MOD0_* cases (sfpi_constants.h): used by both the LUT-init
+// path (UPPER/LOWER/USHORT) and the exp polynomial (FLOATB).
 inline void __emule_sfploadi(unsigned dest, unsigned insmod, unsigned val) {
     if (dest >= 16 || dest == 9 || dest == 10) return;  // bounds + read-only consts
     // SFPLOADI writeback is CC-predicated on silicon: the exp polynomial relies on
@@ -585,10 +588,15 @@ template <typename F, typename A>
 inline void __emule_sfp_load(unsigned vd, F, A, int imm) {
     float* base = __emule_sfpi_active_dst();
     const uint32_t addr = ::__emule_sfpi_cursor + static_cast<uint32_t>(imm);
-    for (uint32_t i = 0; i < 32; ++i) {
-        float f = base[__emule_sfpi_lane_index(addr, i)];
-        uint32_t b; std::memcpy(&b, &f, 4); __emule_sfp_wu(vd, i, b);
-    }
+    // CC-predicated, like SFPSTORE: on WH/BH the FP16/FP32-mode SFPLOAD writes only
+    // enabled lanes, so a masked-off lane keeps its prior LReg contents (a v_if-guarded
+    // DEST reload must not clobber inactive lanes). The INT32_ALL all-lanes bypass is
+    // not modeled (no emule kernel issues it inside a live CC).
+    for (uint32_t i = 0; i < 32; ++i)
+        if (__emule_sfpi_mask[i]) {
+            float f = base[__emule_sfpi_lane_index(addr, i)];
+            uint32_t b; std::memcpy(&b, &f, 4); __emule_sfp_wu(vd, i, b);
+        }
 }
 template <typename F, typename A>
 inline void __emule_sfp_store(unsigned vc, F, A, int imm) {
