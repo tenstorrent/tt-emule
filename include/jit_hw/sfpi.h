@@ -447,14 +447,21 @@ inline void __emule_sfp_wf(unsigned idx, uint32_t lane, float f) {
 }
 inline uint32_t __emule_half_to_float_bits(uint16_t h) {  // IEEE binary16 -> binary32
     uint32_t sign = uint32_t(h & 0x8000u) << 16;
-    uint32_t exp = (h >> 10) & 0x1Fu, mant = h & 0x3FFu;
+    int exp = static_cast<int>((h >> 10) & 0x1Fu);  // signed: goes negative while normalizing
+    uint32_t mant = h & 0x3FFu;
+    // exp + 112 rebiases the fp16 exponent (bias 15) to fp32 (bias 127); 112 = 127 - 15.
     if (exp == 0) {
         if (mant == 0) return sign;
-        exp = 1; while (!(mant & 0x400u)) { mant <<= 1; --exp; } mant &= 0x3FFu;
-        return sign | ((exp + 112u) << 23) | (mant << 13);
+        // Normalize the subnormal: shift the mantissa up to the implicit-1 bit, decrementing
+        // exp (down to -9 for the smallest subnormal). exp + 112 stays >= 0 throughout, so the
+        // fp32 exponent field is always valid — no unsigned wraparound (exp is signed here).
+        exp = 1;
+        while (!(mant & 0x400u)) { mant <<= 1; --exp; }
+        mant &= 0x3FFu;
+        return sign | (static_cast<uint32_t>(exp + 112) << 23) | (mant << 13);
     }
-    if (exp == 0x1Fu) return sign | 0x7F800000u | (mant << 13);  // inf / nan
-    return sign | ((exp + 112u) << 23) | (mant << 13);
+    if (exp == 0x1F) return sign | 0x7F800000u | (mant << 13);  // inf / nan
+    return sign | (static_cast<uint32_t>(exp + 112) << 23) | (mant << 13);
 }
 
 // SFPLOADI — build/patch an LReg from a 16-bit immediate (the immediate is uniform
