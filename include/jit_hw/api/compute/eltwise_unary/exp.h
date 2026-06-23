@@ -17,10 +17,79 @@ enum class InputClamping : uint8_t {
 // VectorMode lives in ckernel::; see api/compute/vector_mode.h.
 #include "jit_hw/api/compute/vector_mode.h"
 
-// Raw-TTI compile-only surface (TTI_SFP* / addr_mod_t / p_sfpu LREGs /
-// InstrModLoadStore) for kernels whose never-instantiated branches reference it
-// (e.g. SDPA's calculate_exponential_polynomial). Parse-only; never executed.
-#include "jit_hw/ckernel_tti_stubs.h"
+// Raw-Tensix SFPU surface for kernels whose (possibly never-instantiated) branches
+// reference it — e.g. SDPA's `calculate_exponential_polynomial` (exp_approx_mode=false).
+// The TTI_SFP* instruction *semantics* live in the sfpi backend (`sfpi.h`'s
+// `__emule_sfp_*` on the single `__emule_lreg` + `__emule_sfpi_mask`) and are bound
+// to the macros in `ckernel_ops.h`; only the ckernel scaffolding the kernel
+// references by name lives here.
+#include "jit_hw/sfpi.h"
+#include "jit_hw/ckernel_ops.h"
+
+// M_LN2: the exp polynomial declares `constexpr float M_LN2` as a local; glibc's
+// <cmath> #defines M_LN2, which would mangle that declaration. Undef to restore the
+// silicon (bare-metal) condition.
+#ifdef M_LN2
+#undef M_LN2
+#endif
+
+// p_sfpu register indices (LCONST_0 = LReg9 = 0.0, LCONST_1 = LReg10 = 1.0 — the
+// read-only constant regs honored by the sfpi.h SFP* backend accessors).
+namespace p_sfpu {
+constexpr std::uint32_t LREG0 = 0, LREG1 = 1, LREG2 = 2, LREG3 = 3,
+                        LREG4 = 4, LREG5 = 5, LREG6 = 6, LREG7 = 7;
+constexpr std::uint32_t LCONST_0 = 9, LCONST_1 = 10;
+}  // namespace p_sfpu
+
+namespace ckernel {
+// DEST/Src address-mode programming constants + descriptor (config-only on silicon;
+// DST addressing is driven explicitly by SFPLOAD/SFPSTORE + INCRWC via the sfpi cursor).
+constexpr std::uint8_t ADDR_MOD_0 = 0, ADDR_MOD_1 = 1, ADDR_MOD_2 = 2, ADDR_MOD_3 = 3,
+                       ADDR_MOD_4 = 4, ADDR_MOD_5 = 5, ADDR_MOD_6 = 6, ADDR_MOD_7 = 7;
+struct addr_mod_t {
+    struct incr_t { std::int16_t incr = 0; };
+    incr_t srca{};
+    incr_t srcb{};
+    incr_t dest{};
+    void set(std::uint32_t /*mod_index*/) const {}
+};
+// SFPLOAD/SFPSTORE data-format modifier. Values mirror upstream llk_defs.h.
+enum class InstrModLoadStore : std::uint8_t {
+    DEFAULT       = 0,
+    FP16A         = 1,
+    FP16B         = 2,
+    FP32          = 3,
+    INT32         = 4,
+    INT8          = 5,
+    LO16          = 6,
+    HI16          = 7,
+    INT32_2S_COMP = 12,
+    INT8_2S_COMP  = 13,
+    LO16_ONLY     = 14,
+    HI16_ONLY     = 15,
+};
+struct p_setrwc {
+    constexpr static std::uint32_t CLR_NONE = 0x0;
+    constexpr static std::uint32_t CR_D     = 0x4;
+    constexpr static std::uint32_t SET_D    = 0x4;
+};
+// math:: addr-mode base programming — emule's hook that aims the sfpi cursor at the
+// DST region for the raw-TTI direct-SFPU path (recip_tile_first_column_wh_idst0_direct).
+namespace math {
+inline void set_addr_mod_base() {
+    ::__emule_sfpi_dst_base = &__emule_dst[0][0];
+    ::__emule_sfpi_cursor = 0;
+    ::sfpi::__emule_sfpi_mask.fill(true);
+    ::sfpi::__emule_sfp_cc_active = false;  // fresh CC scope (defensive; SFPENCC clears it)
+    ::__emule_sfpi_first_col_mode = true;
+}
+inline void clear_addr_mod_base() {
+    ::__emule_sfpi_dst_base = nullptr;
+    ::__emule_sfpi_cursor = 0;
+    ::__emule_sfpi_first_col_mode = false;
+}
+}  // namespace math
+}  // namespace ckernel
 
 // SFPU functor dispatcher `_llk_math_eltwise_unary_sfpu_params_` used by SDPA's
 // first-column exp/recip/softplus helpers. Functional: it points the sfpi cursor at
