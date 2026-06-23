@@ -16,6 +16,13 @@
 
 namespace ckernel {
 
+// batched_qk_norm calls ckernel::sfpu::init_add_rsqrt<APPROX>() before the tile
+// op; the LLK init only programs SFPU config regs, so it is a no-op here.
+namespace sfpu {
+template <bool APPROX = false>
+inline void init_add_rsqrt() {}
+}  // namespace sfpu
+
 ALWI void add_rsqrt_tile_init() {}
 
 // vec_mode is `auto` so the op accepts both the scoped `VectorMode::RC` enum

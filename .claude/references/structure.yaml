@@ -1525,6 +1525,8 @@ files:
   summary: emule model for the fused add+rsqrt SFPU tile op (`rsqrt(x + addend)`, RMSNorm `rsqrt(variance+eps)`); addend is the float's bit-rep
   symbols:
   - {kind: namespace, name: ckernel}
+  - {kind: namespace, name: sfpu}
+  - {kind: function, name: init_add_rsqrt}
   - {kind: function, name: add_rsqrt_tile_init}
   - {kind: function, name: add_rsqrt_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/addcdiv.h
@@ -2106,6 +2108,14 @@ files:
   - {kind: function, name: llk_math_mul_reduce_scalar}
   - {kind: function, name: llk_math_mul_reduce_scalar_clear_dvalid}
   - {kind: function, name: mul_reduce_scalar_tile}
+- path: include/jit_hw/api/compute/experimental/pack_block.h
+  section: include/jit_hw/api/compute/experimental/
+  summary: Emule shadow for the Blackhole block-contiguous tiny-tile pack; the real header routes to llk_pack_block_contiguous{,_mop_config} (only declared under TRISC_PACK, but PACK(x)=x references them),
+    so it models pack_block_contiguous as the existing pack_tile_block DST->CB worker and pack_block_contiguous_init as a no-op.
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: pack_block_contiguous_init}
+  - {kind: function, name: pack_block_contiguous}
 - path: include/jit_hw/api/compute/experimental/semaphore.h
   section: include/jit_hw/api/compute/experimental/
   summary: '`ckernel::Semaphore`'
@@ -2479,6 +2489,39 @@ files:
   - {kind: macro, name: RISCV_DEBUG_REG_WALL_CLOCK_H}
   - {kind: function, name: flush_l2_cache_line}
   - {kind: function, name: flush_l2_cache_range}
+- path: include/jit_hw/internal/sfpu_instr.h
+  section: include/jit_hw/internal/
+  summary: Raw SFPU-instruction emulation layer (TTI_SFPLOAD/STORE/MUL/ADD/MOV/SHFT2 on a 32-lane float LReg file) for batched_qk_norm, which hand-writes a Tensix SFPU stream inline in its op.hpp. Models
+    the Blackhole ADDR_MOD_7 zero-increment DST addressing (datum-unit base+imm decode to row-major __emule_dst), SFP{MUL,ADD}=VD=VA*VB+VC, and the rotate-right-by-1 8-lane sub-vector SFPSHFT2; also defines
+    p_sfpu LREG/LCONST tags, get_dest_buffer_base, and functional TT_SETC16.
+  symbols:
+  - {kind: namespace, name: p_sfpu}
+  - {kind: global, name: LREG0}
+  - {kind: global, name: LREG4}
+  - {kind: global, name: LCONST_0}
+  - {kind: global, name: LCONST_1}
+  - {kind: global, name: ADDR_MOD_7}
+  - {kind: global, name: DEST_TARGET_REG_CFG_MATH_Offset_ADDR32}
+  - {kind: global, name: __emule_sfpu_dst_origin}
+  - {kind: global, name: __emule_sfpu_dest_offset}
+  - {kind: function, name: __emule_sfpu_bind_dst}
+  - {kind: function, name: __emule_sfpu_rd}
+  - {kind: function, name: __emule_sfpu_dst_ptr}
+  - {kind: function, name: __emule_sfpload}
+  - {kind: function, name: __emule_sfpstore}
+  - {kind: function, name: __emule_sfpmad}
+  - {kind: function, name: __emule_sfpmov}
+  - {kind: function, name: __emule_sfpshft2_ror1}
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: get_dest_buffer_base}
+  - {kind: macro, name: TT_SETC16}
+  - {kind: macro, name: TTI_STALLWAIT}
+  - {kind: macro, name: TTI_SFPLOAD}
+  - {kind: macro, name: TTI_SFPSTORE}
+  - {kind: macro, name: TTI_SFPMUL}
+  - {kind: macro, name: TTI_SFPADD}
+  - {kind: macro, name: TTI_SFPMOV}
+  - {kind: macro, name: TTI_SFPSHFT2}
 - path: include/jit_hw/internal/dataflow/dataflow_api_addrgen.h
   section: include/jit_hw/internal/dataflow/
   summary: '`struct InterleavedAddrGen`, `InterleavedAddrGenFast`, `InterleavedPow2AddrGen`; `namespace interleaved_addr_gen`; `NUM_DRAM_BANKS`/`NUM_L1_BANKS`/`NOC_XY_ADDR`/`DRAM_ALIGNMENT`/`L1_ALIGNMENT`
@@ -2670,6 +2713,15 @@ files:
 - path: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/kimi_moe_gate.h
   section: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/
   summary: emule shadow for blaze's `kimi_moe_gate` compute op → routes to the high-level `api/compute/kimi_moe_gate.h` emule model
+- path: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/sdpa.h
+  section: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/
+  summary: Emule shadow for blaze compute_kernel_api/sdpa.h. The real header pulls the custom-MM / deepseek-hw-startup / llk_math_sdpa_* chain emule cannot consume; batched_qk_norm needs only sdpa_reduce_row_init
+    (modeled as binding the SFPU DST origin) plus internal/sfpu_instr.h. Also defines TRISC_MATH so batched_qk_norm op.hpp's TRISC_MATH-gated SFPU helper namespace is compiled into emule's unified-thread
+    build (scoped to sdpa-including ops; the curated gate does not include sdpa.h).
+  symbols:
+  - {kind: macro, name: TRISC_MATH}
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: sdpa_reduce_row_init}
 - path: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/topk_xl.h
   section: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/
   summary: emule shadow for blaze's `topk_xl` compute op → routes to the high-level `api/compute/topk_xl.h` emule model (bitonic TopK)
