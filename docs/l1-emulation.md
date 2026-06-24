@@ -48,7 +48,6 @@ uint32_t  l1_base_ = 0;                   // l1_ truncated to 32 bits, for kerne
 size_t    l1_size_ = 0;                   // worker L1 / DRAM bank size, from SoC descriptor
 CoreRole  role_    = CoreRole::WORKER;
 CBSyncState     cb_sync_states_[MAX_CBS] = {};
-DstRegisterFile dst_;
 ```
 
 Integrated builds set `l1_size_` from `metal_SocDescriptor` at chip
@@ -70,23 +69,20 @@ L1 alignment is `L1_ALIGNMENT` (16 bytes), injected as a JIT define from
 
 ## 3. Address resolution
 
-Two host-mmap layouts exist; the address *encoding* is identical, only the
-offset conversion differs:
-
-- **bridge_l1 mode (default / standalone).** Each `Core` has its own mmap. A
-  thread-local `__emule_bridge_l1` holds this thread's core's L1 base; an L1
-  offset is `addr - __emule_bridge_l1`.
-- **L1Pool mode (`TT_EMULE_USE_L1_POOL`).** A single contiguous `MAP_32BIT` mmap
-  with 2 MB-aligned slots serves every core (`include/tt_emule/l1_pool.hpp`:
-  `SLOT_SIZE = 2 MB`, `SLOT_MASK = SLOT_SIZE - 1`, `to_offset(addr) = addr &
-  SLOT_MASK`). The tt-metal integration (`SWEmuleChip::worker_pool_`) builds with
-  this mode; the offset is a single bitmask `addr & 0x1FFFFF`.
+A single contiguous `MAP_32BIT` mmap with 2 MB-aligned slots serves every core
+(`include/tt_emule/l1_pool.hpp`: `SLOT_SIZE = 2 MB`). The tt-metal integration
+(`SWEmuleChip::worker_pool_`, built with `TT_EMULE_USE_L1_POOL`) owns this pool,
+so encoding a host pointer to an L1 offset is a single bitmask
+`addr & (SLOT_SIZE - 1)` (i.e., `addr & 0x1FFFFF`).
+A thread-local `__emule_bridge_l1` holds the current thread's core L1 base, used
+when *decoding* a firmware-style offset back to a host pointer (see
+`__emule_local_l1_to_ptr` below).
 
 Translation helpers:
 
 | Helper | Role | Where |
 |---|---|---|
-| `__emule_addr_to_offset(addr)` | **Encode**: host pointer → L1 offset. `addr & 0x1FFFFF` under L1Pool, else `addr - bridge_l1` (TLS). | `include/jit_hw/api/dataflow/dataflow_api.h` |
+| `__emule_addr_to_offset(addr)` | **Encode**: host pointer → L1 offset (`addr & 0x1FFFFF`). | `include/jit_hw/api/dataflow/dataflow_api.h` |
 | `__emule_local_l1_to_ptr(l1_addr)` | Kernel-side dual path: if `l1_addr >= l1_base` treat as an absolute host pointer, else add to `__emule_bridge_l1`. | `include/jit_hw/jit_kernel_stubs.hpp` |
 | `__emule_resolve_noc_addr(noc_addr)` | **Decode**: NOC xy + lower-`NOC_ADDR_LOCAL_BITS` (36) offset → owning `Core` → `l1_ptr(offset)`. WORKER offsets are masked with `L1_SLOT_MASK 0x1FFFFF`. | `tt-metal/.../emulated_program_runner.cpp` |
 | `__emule_local_l1_ptr(offset)` | `extern "C"` legacy fast path (offset → host ptr); most paths now go through the resolver. | `tt-metal/.../emulated_program_runner.cpp` |

@@ -90,20 +90,13 @@ inline bool __emule_debug_multicast() {
 // Extract L1 offset from a host address using bitmask.
 // L1Pool allocates worker slots at 2 MB alignment, so addr & 0x1FFFFF
 // gives the offset within the slot — one AND instruction, no TLS lookup.
-// Standalone builds (without L1Pool) fall back to TLS subtraction.
 //
 // IMPORTANT: This must only be called at NOC address construction time
 // (get_noc_addr, get_noc_multicast_addr) where the input is a host L1
 // pointer.  It must NOT be applied to firmware-style offsets like DRAM
 // bank addresses from get_noc_addr_from_bank_id (which can exceed 2MB).
 inline uint32_t __emule_addr_to_offset(uint32_t addr) {
-#ifdef TT_EMULE_USE_L1_POOL
     return addr & 0x1FFFFF;  // SLOT_MASK = 2 MB - 1
-#else
-    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
-    if (addr >= l1_base) return addr - l1_base;
-    return addr;
-#endif
 }
 
 // Inverse of __emule_addr_to_offset: convert a uint32_t L1 address (which
@@ -926,7 +919,7 @@ inline void noc_semaphore_inc_multicast(
 // ---- CB interface (silicon-mirrored LocalCBInterface + get_local_cb_interface) ----
 #include "internal/cb_interface.h"
 
-// ---- Standalone NOC address helpers (matching firmware) ----
+// ---- NOC address helpers (matching firmware) ----
 
 inline uint64_t get_dram_noc_addr(
     const uint32_t id, const uint32_t page_size,

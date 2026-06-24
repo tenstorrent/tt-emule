@@ -127,10 +127,10 @@ compiler), `dlopen`s it, and launches the per-core threads against
 `SWEmuleChip`-owned memory. Full detail in
 [metal-integration.md](docs/metal-integration.md).
 
-**Codebase layout.** Host-side types live in `include/tt_emule/` (`Device`,
-`Core`, `L1Pool`, `CBSyncState`, `DstRegisterFile`, tile-counter/DFB types); the
-JIT kernel surface in `include/jit_hw/` (`api/compute/`, `api/dataflow/`,
-`api/tensor/`, `internal/`, `experimental/`); host glue in `src/`. For the
+**Codebase layout.** Host-side types live in `include/tt_emule/` (`Core`,
+`L1Pool`, `CBSyncState`, tile-counter/DFB types) and are consumed header-only by
+tt-metal and UMD; the JIT kernel surface is in `include/jit_hw/` (`api/compute/`,
+`api/dataflow/`, `api/tensor/`, `internal/`, `experimental/`). For the
 authoritative file/symbol index see [.claude/references/structure.yaml](.claude/references/structure.yaml).
 
 ---

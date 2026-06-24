@@ -99,13 +99,12 @@ inline void compute_kernel_hw_startup(uint32_t a, uint32_t b, uint32_t) { comput
 // Forward declarations matching kernel_runner.cpp definitions.
 // The main executable exports these with -rdynamic; the JIT .so resolves them
 // at dlopen() time.
-namespace tt_emule { class Core; class Device; }
+namespace tt_emule { class Core; }
 // Per-thread L1 pointers set by the runner's kernel-launch lambda.
 // nullptr = no args for this RISC.
 extern thread_local uint32_t* __rt_args;
 extern thread_local uint32_t* __common_rt_args;
 extern thread_local tt_emule::Core*       __core;
-extern thread_local tt_emule::Device*     __device;
 
 // C-linkage bridge functions — resolve at dlopen time to the host process's
 // implementations, avoiding ABI mismatch with Device layout.

@@ -4,8 +4,8 @@
 
 #pragma once
 // Circular buffer state for JIT-compiled kernels.
-// __emule_cb_state is now an alias for tt_emule::CBSyncState — single source
-// of truth for CB FIFO state shared between standalone and JIT paths.
+// __emule_cb_state is an alias for tt_emule::CBSyncState — the single source
+// of truth for CB FIFO state used by JIT-compiled kernels.
 
 #include "tt_emule/cb_sync_state.hpp"
 
