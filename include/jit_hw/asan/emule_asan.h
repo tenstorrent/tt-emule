@@ -4,28 +4,18 @@
 
 #pragma once
 
-// Unified diagnostic trace for every emule [ASAN ERROR]. When a sanitizer is
-// about to abort, it calls __emule_asan_panic() instead of abort(): that prints
-//   - which kernel + core/processor the failure happened on (when in kernel
-//     context), and
-//   - a symbolized backtrace — for frames inside a JIT'd kernel .so this resolves
-//     to kernel-source file:line (the kernel is built with -g under ASAN; see
-//     jit_compile_kernel) via llvm-symbolizer / addr2line.
-//
-// __emule_asan_panic is a single real (non-inline, extern "C") symbol: kernel
-// .so files and the host-API translation unit only see the *declaration* and
-// resolve it at link/dlopen (like the other __emule_* symbols), so neither has
-// to pull <execinfo.h>/<dlfcn.h> or the tt-emule include path. The *definition*
-// is emitted by the one runtime TU that defines EMULE_ASAN_IMPLEMENTATION before
-// including this header (emulated_program_runner.cpp for libtt_metal, and
-// kernel_runner.cpp for the standalone tt-emule runtime).
+// Master switch (__emule_asan_enabled) + the unified [ASAN ERROR] diagnostic
+// trace: __emule_asan_panic() prints kernel/core context + a symbolized
+// backtrace and aborts. It is one real extern "C" symbol, defined out-of-line by
+// the single runtime TU that sets EMULE_ASAN_IMPLEMENTATION; everyone else sees
+// only the declaration and resolves it at dlopen. See docs/ASAN.md
+// "Diagnostic trace".
 
 #include <cstdint>
 #include <cstdlib>
 
-// Master ASAN switch (TT_METAL_EMULE_ASAN). Cached in a per-launch thread_local;
-// see ASAN.md "Master switch" for why caching here is safe (and required for the
-// hot L1 chokepoint).
+// Master ASAN switch (TT_METAL_EMULE_ASAN), cached in a per-launch thread_local.
+// See docs/ASAN.md "Master switch".
 inline bool __emule_asan_enabled() {
     static thread_local int cached = -1;
     if (cached < 0) {
@@ -40,10 +30,8 @@ inline bool __emule_asan_enabled() {
 extern thread_local const char* __emule_kernel_name;
 
 // Report one [ASAN ERROR] and abort. `fmt`/args are the printf-style error line
-// (printed verbatim, so existing message text and test regexes are unchanged);
-// the unified context+backtrace follows. The whole report is emitted under one
-// lock, exactly once, even when every core-thread trips a check at the same time
-// (see the definition). Pass nullptr to print only the context+backtrace.
+// (printed verbatim); the context+backtrace follows. Pass nullptr for
+// context+backtrace only. Serialized so only one report prints under load.
 extern "C" [[noreturn]] void __emule_asan_panic(const char* fmt, ...);
 
 #ifdef EMULE_ASAN_IMPLEMENTATION
@@ -73,19 +61,15 @@ extern thread_local uint8_t __processor_id;
 extern thread_local uint8_t __emule_neo_id;
 extern thread_local uint8_t __emule_trisc_id;
 
-// Resolve one instruction address (as a module + file-relative offset) to a
-// "func at file:line" string using llvm-symbolizer (preferred — matches the
-// clang toolchain), falling back to addr2line. Both are asked for inline frames
-// and pretty-printed; the multi-line result is flattened to one line with " <- "
-// between inlined frames. Returns false if neither tool resolved real debug info.
+// Resolve one (module, file-relative offset) to a "func at file:line" string,
+// flattening inlined frames onto one line with " <- ". Returns false if no real
+// debug info was found.
 static bool __emule_asan_symbolize(const char* module, uintptr_t file_offset, char* out, size_t out_sz) {
     if (module == nullptr || module[0] == '\0' || out_sz == 0) {
         return false;
     }
-    // The JIT dlopen's the kernel from a temporary "<hash>.so.tmp.<pid>" that is
-    // atomically renamed to "<hash>.so" right after load, so dladdr hands back a
-    // path that no longer exists. If the reported module is gone, strip the
-    // ".tmp.<pid>" suffix to recover the real, on-disk .so for the symbolizer.
+    // dladdr may report the JIT's transient "<hash>.so.tmp.<pid>" (renamed to
+    // "<hash>.so" right after load); if that path is gone, strip the suffix.
     char modbuf[1024];
     std::snprintf(modbuf, sizeof(modbuf), "%s", module);
     if (access(modbuf, R_OK) != 0) {
@@ -98,9 +82,8 @@ static bool __emule_asan_symbolize(const char* module, uintptr_t file_offset, ch
         }
     }
     module = modbuf;
-    // Prefer llvm-symbolizer (reads clang's DWARF5; GNU addr2line cannot and only
-    // yields "??:?"). The unversioned binary is often absent, so try the
-    // clang-toolchain-versioned names too. addr2line is a last-ditch fallback.
+    // Prefer llvm-symbolizer (reads clang's DWARF5; addr2line only yields "??:?"),
+    // trying versioned names; addr2line is the last-ditch fallback.
     const char* tools[] = {
         "llvm-symbolizer --obj=\"%s\" --pretty-print --inlines --demangle 0x%lx 2>/dev/null",
         "llvm-symbolizer-20 --obj=\"%s\" --pretty-print --inlines --demangle 0x%lx 2>/dev/null",
@@ -154,12 +137,11 @@ static bool __emule_asan_symbolize(const char* module, uintptr_t file_offset, ch
     return false;
 }
 
-// Collapse balanced template-argument lists <...> to <> so frames stay readable
-// (kernel NoC frames otherwise carry pages of TensorAccessor<...> spew). The
-// " <- " inlined-frame separator is a '<' followed by '-', which is left intact.
+// Collapse balanced template-arg lists <...> to <> so frames stay readable
+// (TensorAccessor<...> spew). The " <- " inline-frame separator ('<' then '-')
+// is left intact. In-place; only drops chars, so the write cursor never outruns
+// the read cursor.
 static void __emule_asan_collapse_angles(char* s) {
-    // In-place; only ever drops characters, so the write cursor never outruns the
-    // read cursor. Keeps the outermost '<' and '>' and elides everything between.
     char* w = s;
     int depth = 0;
     for (const char* r = s; *r != '\0'; ++r) {
@@ -251,23 +233,11 @@ static void __emule_asan_print_trace() {
     std::fflush(stderr);
 }
 
-// Decide what happens to the core dump the imminent abort() would trigger, per the
-// TT_METAL_EMULE_ASAN_ALLOW_CORE env var. Called once, by the thread holding the panic
-// lock, so a multi-core kernel bug never spawns more than one dump.
-//
-// Unset (default): mark the process non-dumpable (PR_SET_DUMPABLE=0). The emulated
-// process maps GB-scale L1+DRAM, so each abort would otherwise dump a ~1.4 GB core; on
-// hosts whose core_pattern pipes to a crash handler (e.g. apport), `ulimit -c 0`/RLIMIT_CORE
-// is IGNORED, but PR_SET_DUMPABLE=0 the kernel honors regardless. So the suite is safe to
-// run anywhere with no LD_PRELOAD shim or external setup, and the trace above already
-// captures what a core would.
-//
-// Set (opt-in debugging): write a real core of this process via gcore, to
-// ./emule_asan_core.<pid> in the CWD. We dump it ourselves rather than rely on the kernel's
-// global core_pattern because that pipe (apport) silently drops cores from non-package
-// binaries. gdb/gcore chatter is silenced so the ASAN report stays readable. Best-effort:
-// if gcore is missing or ptrace is restricted, the process is left dumpable so a plain-file
-// core_pattern still produces a core, and we say so.
+// Decide the fate of the core dump the imminent abort() would trigger, per
+// TT_METAL_EMULE_ASAN_ALLOW_CORE. Unset (default): mark the process non-dumpable
+// (PR_SET_DUMPABLE=0) so the ~1.4 GB L1+DRAM core is suppressed even where
+// `ulimit -c 0` is ignored. Set: self-dump via gcore to ./emule_asan_core.<pid>
+// (best-effort). Called once, under the panic lock. See docs/ASAN.md "Core dumps".
 static void __emule_asan_handle_coredump() {
 #if defined(__linux__)
     if (std::getenv("TT_METAL_EMULE_ASAN_ALLOW_CORE") == nullptr) {
@@ -302,17 +272,11 @@ static void __emule_asan_handle_coredump() {
 }
 
 extern "C" [[noreturn]] void __emule_asan_panic(const char* fmt, ...) {
-    // emule runs one thread per core, so when a kernel bug hits every core they
-    // all trip the check at once. Serialize: the first thread prints exactly one
-    // full report (error line + context + backtrace) and aborts, which tears
-    // down the whole process; every other thread blocks on this lock until that
-    // abort kills it, so nothing interleaves and only ONE error is ever emitted.
-    // The error line is printed here (not at the check site) precisely so the
-    // lock covers it too.
+    // Serialize: the winning thread prints one full report and aborts (tearing
+    // down the process) while every other core thread blocks here, so only ONE
+    // error is ever emitted. The error line prints here, under the lock.
     static std::mutex panic_mu;
     panic_mu.lock();  // intentionally never unlocked — the winner aborts while holding it
-    // Suppress (default) or self-dump (TT_METAL_EMULE_ASAN_ALLOW_CORE) the core that the
-    // abort() below would trigger. Done under the lock so only the winning thread acts.
     __emule_asan_handle_coredump();
     if (fmt != nullptr) {
         va_list ap;

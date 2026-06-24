@@ -514,11 +514,13 @@ inline void __emule_model_first_read_latency() {
     }
 }
 
-// Clears the pending-NOC-reads counter so subsequent publication points
-// (cb_push_back, semaphore inc) won't flag a missing-barrier race. In emule
-// the underlying reads are synchronous memcpys, so there's nothing to actually
-// wait for — but the contract must still be observed for parity with silicon.
-inline void noc_async_read_barrier(uint8_t noc = noc_index) { __emule_pending_noc_reads = 0; __emule_model_first_read_latency(); }
+// Clears the pending-NOC-reads counter (the NoC Barrier Missing check reads it
+// in cb_pop_front; see docs/ASAN.md) and models first-input-read latency. The
+// reads themselves are synchronous memcpys, so there's nothing to wait for.
+inline void noc_async_read_barrier(uint8_t noc = noc_index) {
+    __emule_pending_noc_reads = 0;
+    __emule_model_first_read_latency();
+}
 inline void noc_async_write_barrier(uint8_t noc = noc_index) {}
 inline void noc_async_writes_flushed(uint8_t noc = noc_index) {}
 inline void noc_async_posted_writes_flushed(uint8_t noc = noc_index) {}

@@ -14,15 +14,10 @@
 // dispatch, a BH JIT kernel built with the WH header would compute wrong
 // NOC commands.
 
-// The real per-arch header below is the authoritative, UNGUARDED definer of
-// these NOC/alignment macros. emule's fallback shims (dataflow_api_addrgen.h,
-// dataflow_api.h) #ifndef-define them for builds without the arch header, and
-// are pulled in transitively (via jit_kernel_stubs.hpp) *before* this wrapper —
-// so their fallback definitions are already in scope and the arch header's
-// (textually different but semantically equal, e.g. 0x3Fu == NOC_NODE_ID_MASK)
-// redefinitions would trip -Wmacro-redefined. Drop the fallbacks first so the
-// silicon-truth header wins. (The bumped tt-metal pin's arch header newly
-// defines these — see /uplift.) #undef of an undefined macro is a no-op.
+// Drop emule's #ifndef fallback shims (pulled in transitively before this
+// wrapper) so the authoritative, UNGUARDED per-arch header below wins without
+// tripping -Wmacro-redefined on the semantically-equal redefinition. #undef of
+// an undefined macro is a no-op.
 #undef NOC_UNICAST_ADDR_X
 #undef NOC_UNICAST_ADDR_Y
 #undef NOC_XY_ADDR

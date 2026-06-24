@@ -474,6 +474,16 @@ header is self-contained (libc/POSIX only) so it compiles into both kernel `.so`
 files and libtt_metal. New checks get the trace for free — just call
 `__emule_asan_panic()` after the `fprintf`.
 
+`__emule_asan_panic` is a single real (non-inline, `extern "C"`) symbol. Kernel
+`.so` files and the host-API translation unit see only the *declaration* and
+resolve it at link/dlopen (like the other `__emule_*` runner symbols), so they
+don't pull in `<execinfo.h>`/`<dlfcn.h>` or the tt-emule include path. The one
+out-of-line *definition* is emitted by whichever runtime TU defines
+`EMULE_ASAN_IMPLEMENTATION` before including the header — `emulated_program_runner.cpp`
+for libtt_metal, `kernel_runner.cpp` for the standalone tt-emule runtime. The
+report is emitted under one mutex (taken, never released) so that when a kernel
+bug trips every core thread at once, exactly one full report prints and aborts.
+
 ### Core dumps (`TT_METAL_EMULE_ASAN_ALLOW_CORE`)
 
 Before printing, `__emule_asan_panic` calls `__emule_asan_handle_coredump()` (its

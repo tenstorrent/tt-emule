@@ -142,14 +142,14 @@ inline int __emule_cb_timeout_sec() {
 
 inline void cb_reserve_back(
     uint32_t cb_id, uint32_t n,
-    const char* __site_file = __builtin_FILE(), uint32_t __site_line = __builtin_LINE()) {
+    const char* site_file = __builtin_FILE(), uint32_t site_line = __builtin_LINE()) {
     auto& cb = __emule_cbs[cb_id];
     // ASAN: Dirty-CB site/flag, always-on Reservation Overflow check, reserve
     // window. (__emule_pack_offset is intentionally NOT reset here — it is reset
     // by cb_push_back; silicon pack.h: the sequential pack write pointer "is reset
     // after cb_push_back", so a reserve_back without an intervening push keeps
     // advancing, as the multi-core topk final kernel needs.)
-    __emule_asan_cb_on_reserve(cb_id, n, __site_file, __site_line);
+    __emule_asan_cb_on_reserve(cb_id, n, site_file, site_line);
     // This thread produces cb_id (see __emule_cb_self_produce_mask).
     __emule_cb_self_produce_mask |= (1u << cb_id);
     // Lock-free fast path (safe for SPSC — only consumer decrements occupied).
@@ -215,10 +215,10 @@ inline void cb_push_back(uint32_t cb_id, uint32_t n) {
 
 inline void cb_wait_front(
     uint32_t cb_id, uint32_t n,
-    const char* __site_file = __builtin_FILE(), uint32_t __site_line = __builtin_LINE()) {
+    const char* site_file = __builtin_FILE(), uint32_t site_line = __builtin_LINE()) {
     auto& cb = __emule_cbs[cb_id];
     // ASAN: record site, mark wait outstanding, grow the waited window (max()).
-    __emule_asan_cb_on_wait(cb_id, n, __site_file, __site_line);
+    __emule_asan_cb_on_wait(cb_id, n, site_file, site_line);
     if (n > cb.num_pages) {
         fprintf(stderr, "EMULE BUG: cb_wait_front(cb_id=%u, n=%u) requests more than capacity "
                 "(num_pages=%u, page_size=%u) [phys (%u,%u) logical (%u,%u)]\n",
@@ -283,14 +283,14 @@ inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
 // kernel location rather than this overload's line.
 inline void cb_reserve_back(
     uint32_t cb_id, int32_t n,
-    const char* __site_file = __builtin_FILE(), uint32_t __site_line = __builtin_LINE()) {
-    cb_reserve_back(cb_id, static_cast<uint32_t>(n), __site_file, __site_line);
+    const char* site_file = __builtin_FILE(), uint32_t site_line = __builtin_LINE()) {
+    cb_reserve_back(cb_id, static_cast<uint32_t>(n), site_file, site_line);
 }
 inline void cb_push_back(uint32_t cb_id, int32_t n)    { cb_push_back(cb_id, static_cast<uint32_t>(n)); }
 inline void cb_wait_front(
     uint32_t cb_id, int32_t n,
-    const char* __site_file = __builtin_FILE(), uint32_t __site_line = __builtin_LINE()) {
-    cb_wait_front(cb_id, static_cast<uint32_t>(n), __site_file, __site_line);
+    const char* site_file = __builtin_FILE(), uint32_t site_line = __builtin_LINE()) {
+    cb_wait_front(cb_id, static_cast<uint32_t>(n), site_file, site_line);
 }
 inline void cb_pop_front(uint32_t cb_id, int32_t n)    { cb_pop_front(cb_id, static_cast<uint32_t>(n)); }
 
