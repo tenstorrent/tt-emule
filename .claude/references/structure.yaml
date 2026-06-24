@@ -689,6 +689,7 @@ files:
   - {kind: function, name: _init_sfpu_reciprocal_}
   - {kind: function, name: _reciprocal_compat_}
   - {kind: function, name: sfpu_reciprocal_init}
+  - {kind: function, name: sfpu_reciprocal_iter}
   - {kind: function, name: _ckernel_sfpu_exp_accurate_}
   - {kind: function, name: calculate_softplus_body}
 - path: include/jit_hw/stream_io_map.h
@@ -1106,7 +1107,12 @@ files:
   summary: '`ckernel::` `square_tile`/`sigmoid_tile`/`sign_tile`/`signbit_tile`/`signbit_tile_int32`/`silu_tile`/`log_tile`/`log_with_base_tile`/`exp2_tile`/`expm1_tile`/`power_tile`/`power_iterative_tile`/`tiled_prod_tile`/`unary_max_tile`/`unary_min_tile`/`unary_max_int32_tile`/`unary_min_int32_tile`/`unary_max_uint32_tile`/`unary_min_uint32_tile`/`alt_complex_rotate90_tile`
     (+`_init`), `silu_tile_pack`/`silu_tile_init_pack`, `sfpu_reduce_init`, `topk_tile_init`; `namespace __emule_topk`; `struct RowView`'
   symbols:
+  - {kind: macro, name: DST_SYNC_MODE}
   - {kind: namespace, name: ckernel}
+  - {kind: function, name: _sfpu_check_}
+  - {kind: macro, name: _SFPU_EXPAND}
+  - {kind: macro, name: SFPU_UNARY_CALL}
+  - {kind: macro, name: SFPU_UNARY_CALL_NO_TEMPLATE_ARGS}
   - {kind: function, name: square_tile_init}
   - {kind: function, name: square_tile}
   - {kind: function, name: exp2_tile_init}
@@ -2731,3 +2737,10 @@ files:
 - path: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/sdpa_streaming_qktv.hpp
   section: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/
   summary: Redirect shim — resolves the upstream `cpp/ttnn/.../sdpa_streaming_qktv.hpp` include to the real (portable C++) header under emule's -I ttnn/cpp/.
+- path: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/sliding_window_geometry.hpp
+  section: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/
+  summary: Redirect shim — resolves the upstream `cpp/ttnn/.../sliding_window_geometry.hpp` include (SDPA reader/compute K-loop bound geometry) to the real portable header under emule's -I ttnn/cpp/.
+- path: include/jit_hw/experimental/llk_sfpu/ckernel_sfpu_sdpa.h
+  section: include/jit_hw/experimental/llk_sfpu/
+  summary: emule shadow of the raw-TTI SDPA SFPU header — verbatim silicon first-column helpers (exp polynomial/recip/softplus/fused-max-sub-exp, calculate_binop_with_scalar) over emule's sfpi+ckernel_ops
+    substrate instead of the uncompilable raw exp/recip/converter LLK headers.

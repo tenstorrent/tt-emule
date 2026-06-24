@@ -179,6 +179,21 @@ inline void llk_pack(uint32_t tile_idx, uint32_t ocb) {
     else __llk_pack_tiled(tile_idx, ocb);
 }
 
+// PackMode + explicit-output-slot overload (SDPA streaming sdpa_pack_tile_ooo):
+// DST[dst] → CB[cb] at output tile slot idx. Mirrors pack_tile<true>'s
+// explicit-offset path — honours __emule_pack_width and advances
+// __emule_pack_offset[cb] so a following cb_push_back stays consistent.
+template <int AccumMode, bool Untilize, ckernel::PackMode Mode>
+inline void llk_pack(uint32_t dst, uint32_t cb, uint32_t idx) {
+    const uint32_t w = __emule_pack_width[cb] ? __emule_pack_width[cb] : 1;
+    __emule_dst_check(dst + w - 1, "llk_pack<PackMode>");
+    for (uint32_t t = 0; t < w; ++t) {
+        __emule_compute::pack_dst_to_buf(
+            __emule_compute::cb_write_ptr_at(cb, idx + t), dst + t, cb);
+    }
+    if (idx + w > __emule_pack_offset[cb]) __emule_pack_offset[cb] = idx + w;
+}
+
 template <int AccumMode>
 inline void llk_math_dest_section_done() {}
 

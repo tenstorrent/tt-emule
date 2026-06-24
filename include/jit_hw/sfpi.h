@@ -1054,6 +1054,16 @@ inline ::sfpi::vFloat _reciprocal_compat_(const ::sfpi::vFloat& in) {
 template <bool APPROX = false>
 inline void sfpu_reciprocal_init() {}
 
+// Newton-Raphson reciprocal refinement step (ckernel_sfpu_recip.h). ITERATIONS
+// selects the NR iteration count on silicon; emule computes the exact reciprocal
+// directly. Used by SDPA's calculate_recip_first_column<legacy_compat=false>.
+template <int ITERATIONS = 1>
+inline ::sfpi::vFloat sfpu_reciprocal_iter(const ::sfpi::vFloat& in) {
+    ::sfpi::vFloat r;
+    for (uint32_t i = 0; i < 32; ++i) r.v[i] = 1.0f / in.v[i];
+    return r;
+}
+
 // exp(val * scale), scale = bf16-decoded from exp_base_scale_factor's low 16 bits
 // (silicon: `val * sfpi::sFloat16b(exp_base_scale_factor)` then exp). emule uses
 // std::exp (more accurate than silicon's exp_21f polynomial). The SDPA softmax

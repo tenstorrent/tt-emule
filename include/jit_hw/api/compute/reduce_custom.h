@@ -20,7 +20,7 @@
 namespace ckernel {
 
 template <uint32_t block_ct_dim, bool respect_trigger = false>
-ALWI void reduce_block_max_row_init() {}
+ALWI void reduce_block_max_row_init(uint32_t ocb) {}
 
 // Per-row MAX across block_ct_dim consecutive tiles of icb starting at row_start_index,
 // scaled by icb_scaler, into DST[idst] (REDUCE_ROW layout: col 0 of each row). reduce_tile
@@ -42,7 +42,7 @@ ALWI void reduce_block_max_row_uninit(uint32_t icb) {}
 // pair in a thread_local, mirroring that config-then-execute handoff.
 static thread_local uint32_t __emule_reduce_block_ct_dim = 1;
 
-ALWI void reduce_block_max_row_init_runtime(uint32_t block_ct_dim, bool respect_trigger = false) {
+ALWI void reduce_block_max_row_init_runtime(uint32_t ocb, uint32_t block_ct_dim, bool respect_trigger = false) {
     __emule_reduce_block_ct_dim = block_ct_dim;
 }
 
