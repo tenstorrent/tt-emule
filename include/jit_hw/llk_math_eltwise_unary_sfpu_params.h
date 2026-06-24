@@ -45,6 +45,9 @@ inline void _llk_math_eltwise_unary_sfpu_params_(
     VM vector_mode,
     Args... params) {
     const bool is_col = (static_cast<int>(vector_mode) == static_cast<int>(ckernel::VectorMode::C));
+    // DST-slot contract before we take its address (matches the __emule_dst_check used
+    // by pack_tile / functors; SFPU_UNARY_CALL's _sfpu_check_ defers the real bound here).
+    __emule_dst_check(dst_idx, "_llk_math_eltwise_unary_sfpu_params_");
     // __emule_sfpi_dst_base / _cursor / _first_col_mode are global scope; mask is in sfpi::.
     ::__emule_sfpi_dst_base = &__emule_dst[dst_idx][0];
     ::__emule_sfpi_cursor = 0;

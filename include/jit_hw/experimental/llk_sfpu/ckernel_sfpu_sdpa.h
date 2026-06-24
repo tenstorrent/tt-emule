@@ -302,6 +302,8 @@ inline void calculate_binop_with_scalar(uint32_t param) {
             } else if constexpr (BINOP_MODE == MUL) {
                 result.v[i] = v * parameter;
             } else if constexpr (BINOP_MODE == DIV) {
+                // Multiply, not divide: silicon (ckernel_sfpu_binop_with_unary.h) computes
+                // the reciprocal host-side and passes 1/scalar down, so DIV == MUL here.
                 result.v[i] = v * parameter;
             } else if constexpr (BINOP_MODE == RSUB) {
                 result.v[i] = parameter - v;
