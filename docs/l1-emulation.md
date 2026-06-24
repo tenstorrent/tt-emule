@@ -70,10 +70,10 @@ L1 alignment is `L1_ALIGNMENT` (16 bytes), injected as a JIT define from
 ## 3. Address resolution
 
 A single contiguous `MAP_32BIT` mmap with 2 MB-aligned slots serves every core
-(`include/tt_emule/l1_pool.hpp`: `SLOT_SIZE = 2 MB`, `SLOT_MASK = SLOT_SIZE - 1`,
-`to_offset(addr) = addr & SLOT_MASK`). The tt-metal integration
+(`include/tt_emule/l1_pool.hpp`: `SLOT_SIZE = 2 MB`). The tt-metal integration
 (`SWEmuleChip::worker_pool_`, built with `TT_EMULE_USE_L1_POOL`) owns this pool,
-so encoding a host pointer to an L1 offset is a single bitmask `addr & 0x1FFFFF`.
+so encoding a host pointer to an L1 offset is a single bitmask
+`addr & (SLOT_SIZE - 1)` (i.e., `addr & 0x1FFFFF`).
 A thread-local `__emule_bridge_l1` holds the current thread's core L1 base, used
 when *decoding* a firmware-style offset back to a host pointer (see
 `__emule_local_l1_to_ptr` below).
