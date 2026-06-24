@@ -111,6 +111,10 @@
 #include "api/compute/eltwise_unary/mish.h"
 #endif
 
+#if SFPU_OP_TANHSHRINK_INCLUDE
+#include "api/compute/eltwise_unary/tanhshrink.h"
+#endif
+
 #if SFPU_OP_IDENTITY_INCLUDE
 #include "api/compute/eltwise_unary/identity.h"
 #endif

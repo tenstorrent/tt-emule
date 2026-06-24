@@ -1,95 +1,20 @@
 files:
-- path: src/host_api.cpp
-  section: src/
-  summary: '`tt_emule::` free fns: `CreateDevice`, `CloseDevice`, `CreateProgram`, `CreateCommandQueue`, `SetRuntimeArgs`, `CreateBuffer`, `EnqueueWriteBuffer`/`EnqueueReadBuffer`/`EnqueueProgram`/`Finish`
-    (Device + CommandQueue overloads); `detail::` `LaunchProgram`, `ReadFromDeviceL1`/`WriteToDeviceL1`, `ReadFromDeviceDRAMChannel`/`WriteToDeviceDRAMChannel`'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: function, name: Device}
-  - {kind: function, name: dram_}
-  - {kind: function, name: dram_bump_}
-  - {kind: function, name: core_}
-  - {kind: function, name: alloc_}
-  - {kind: function, name: allocator_}
-  - {kind: function, name: allocator_impl_}
-  - {kind: function, name: sub_device_ids_}
-  - {kind: function, name: sub_device_stall_group_}
-  - {kind: function, name: ~Device}
-  - {kind: function, name: CreateDevice}
-  - {kind: function, name: CloseDevice}
-  - {kind: function, name: CreateProgram}
-  - {kind: function, name: SetRuntimeArgs}
-  - {kind: function, name: CreateCircularBuffer}
-  - {kind: function, name: CreateDataflowBuffer}
-  - {kind: function, name: CreateBuffer}
-  - {kind: function, name: EnqueueWriteBuffer}
-  - {kind: function, name: EnqueueReadBuffer}
-  - {kind: function, name: Finish}
-  - {kind: function, name: CreateCommandQueue}
-  - {kind: function, name: EnqueueProgram}
-  - {kind: namespace, name: detail}
-  - {kind: function, name: LaunchProgram}
-  - {kind: function, name: ReadFromDeviceL1}
-  - {kind: function, name: WriteToDeviceL1}
-  - {kind: function, name: WriteToDeviceDRAMChannel}
-  - {kind: function, name: ReadFromDeviceDRAMChannel}
-- path: src/kernel_runner.cpp
-  section: src/
-  summary: '`EnqueueProgram`; `extern "C" __emule_dram_ptr`; thread_locals `__rt_args`, `__core`, `__device`, `__processor_id`, `__emule_tc_array`, `__emule_dfbs`; anon-ns `build_dfb_interfaces`'
-  symbols:
-  - {kind: global, name: __rt_args}
-  - {kind: global, name: __core}
-  - {kind: global, name: __device}
-  - {kind: global, name: __processor_id}
-  - {kind: global, name: __emule_tc_array}
-  - {kind: global, name: __emule_dfbs}
-  - {kind: global, name: __emule_self}
-  - {kind: extern_c, name: __emule_dram_ptr}
-  - {kind: namespace, name: tt_emule}
-  - {kind: function, name: EnqueueProgram}
-- path: include/tt_emule/buffer.hpp
-  section: include/tt_emule/
-  summary: '`class Buffer`; fwd `enum class BufferType`'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: fwd, name: Device}
-  - {kind: enum, name: BufferType}
-  - {kind: class, name: Buffer}
 - path: include/tt_emule/cb_sync_state.hpp
   section: include/tt_emule/
   summary: '`struct CBSyncState` (shared geometry + `occupied` semaphore; per-RISC read/write pointers live in `jit_hw/internal/emule_cb_ptr.h`); semaphore-only `cb_sync_reserve`/`cb_sync_push`/`cb_sync_wait`/`cb_sync_pop`'
   symbols:
   - {kind: namespace, name: tt_emule}
   - {kind: struct, name: CBSyncState}
-  - {kind: function, name: cb_sync_reserve}
   - {kind: function, name: cb_sync_push}
-  - {kind: function, name: cb_sync_wait}
   - {kind: function, name: cb_sync_pop}
-- path: include/tt_emule/circular_buffer.hpp
-  section: include/tt_emule/
-  summary: '`class CircularBuffer` (reserve_back/push_back/wait_front/pop_front/get_write_ptr/get_read_ptr)'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: class, name: CircularBuffer}
-- path: include/tt_emule/dataflow_buffer.hpp
-  section: include/tt_emule/
-  summary: '`class DataflowBuffer` (reserve_back/push_back/wait_front/pop_front/finish/get_write_ptr/get_read_ptr/get_id)'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: class, name: DataflowBuffer}
 - path: include/tt_emule/device.hpp
   section: include/tt_emule/
   summary: '`class Device : tt::tt_metal::IDevice`, `class Core`, `class MockAllocator`; `enum class HalMemType`, `CoreRole`, `BufferType`; `CoreCoord` (`struct` or `tt_xy_pair` alias, `#ifdef TT_EMULE_USE_XY_PAIR`)'
   symbols:
   - {kind: namespace, name: tt_emule}
-  - {kind: enum, name: HalMemType}
   - {kind: enum, name: CoreRole}
-  - {kind: using, name: CoreCoord}
   - {kind: struct, name: CoreCoord}
   - {kind: class, name: Core}
-  - {kind: enum, name: BufferType}
-  - {kind: class, name: MockAllocator}
-  - {kind: class, name: Device}
 - path: include/tt_emule/dfb_sync_state.hpp
   section: include/tt_emule/
   summary: '`struct DFBTCSlot`, `EmuleDFBInterface`, `DFBSyncState`; `MAX_DFBS`, `MAX_TC_SLOTS_PER_DFB`'
@@ -100,76 +25,12 @@ files:
   - {kind: struct, name: DFBTCSlot}
   - {kind: struct, name: EmuleDFBInterface}
   - {kind: struct, name: DFBSyncState}
-- path: include/tt_emule/dst_register_file.hpp
-  section: include/tt_emule/
-  summary: '`class DstRegisterFile`; `enum class State {IDLE,ACQUIRED,COMMITTED,PACKING}`; acquire/commit/wait/release'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: class, name: DstRegisterFile}
-- path: include/tt_emule/host_api.hpp
-  section: include/tt_emule/
-  summary: 'decls: `CloseDevice`, `SetRuntimeArgs`, `EnqueueWriteBuffer`/`EnqueueReadBuffer`/`EnqueueProgram`/`Finish`; `struct CommandQueue`; `using KernelHandle`; `namespace detail` L1/DRAM r/w, `LaunchProgram`,
-    `WriteToBuffer`/`ReadFromBuffer`'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: using, name: KernelHandle}
-  - {kind: struct, name: CommandQueue}
-  - {kind: function, name: CreateDevice}
-  - {kind: function, name: CloseDevice}
-  - {kind: function, name: CreateCommandQueue}
-  - {kind: function, name: CreateProgram}
-  - {kind: function, name: SetRuntimeArgs}
-  - {kind: function, name: CreateCircularBuffer}
-  - {kind: function, name: CreateDataflowBuffer}
-  - {kind: function, name: CreateBuffer}
-  - {kind: function, name: EnqueueWriteBuffer}
-  - {kind: function, name: EnqueueReadBuffer}
-  - {kind: function, name: EnqueueProgram}
-  - {kind: function, name: Finish}
-  - {kind: namespace, name: detail}
-  - {kind: function, name: LaunchProgram}
-  - {kind: function, name: ReadFromDeviceL1}
-  - {kind: function, name: WriteToDeviceL1}
-  - {kind: function, name: WriteToDeviceDRAMChannel}
-  - {kind: function, name: ReadFromDeviceDRAMChannel}
-  - {kind: function, name: WriteToBuffer}
-  - {kind: function, name: ReadFromBuffer}
 - path: include/tt_emule/l1_pool.hpp
   section: include/tt_emule/
   summary: '`class L1Pool`; `SLOT_SIZE`, `SLOT_MASK`, `to_offset`, `num_slots`'
   symbols:
   - {kind: namespace, name: tt_emule}
   - {kind: class, name: L1Pool}
-- path: include/tt_emule/program.hpp
-  section: include/tt_emule/
-  summary: '`class Program`; `struct KernelDescriptor`, `DataMovementConfig`, `ComputeConfig`, `QuasarDataMovementConfig`, `QuasarComputeConfig`, `CircularBufferConfig`, `DataflowBufferConfig`; `enum class
-    KernelType`, `DataMovementProcessor`, `NOC`, `NOC_MODE`, `MathFidelity`, `UnpackToDestMode`, `AccessPattern`; `using KernelFn`/`CBHandle`/`DFBHandle`'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: using, name: KernelFn}
-  - {kind: enum, name: KernelType}
-  - {kind: enum, name: DataMovementProcessor}
-  - {kind: enum, name: NOC}
-  - {kind: enum, name: NOC_MODE}
-  - {kind: enum, name: MathFidelity}
-  - {kind: enum, name: UnpackToDestMode}
-  - {kind: enum, name: AccessPattern}
-  - {kind: struct, name: DataMovementConfig}
-  - {kind: struct, name: ComputeConfig}
-  - {kind: struct, name: QuasarDataMovementConfig}
-  - {kind: struct, name: QuasarComputeConfig}
-  - {kind: struct, name: KernelDescriptor}
-  - {kind: using, name: CBHandle}
-  - {kind: using, name: DFBHandle}
-  - {kind: struct, name: DataflowBufferConfig}
-  - {kind: struct, name: CircularBufferConfig}
-  - {kind: class, name: Program}
-- path: include/tt_emule/tile.hpp
-  section: include/tt_emule/
-  summary: '`class Tile`; `ROWS`/`COLS`/`NUM_ELEMENTS`/`SIZE_BYTES`; `operator+`/`+=`/`()`'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: class, name: Tile}
 - path: include/tt_emule/tile_counter.hpp
   section: include/tt_emule/
   summary: '`struct TileCounter`, `class TileCounterArray`; `TILE_COUNTERS_PER_NEO`; inc_posted/inc_acked/wait_free_space/wait_occupancy/reset_all'
@@ -1954,6 +1815,13 @@ files:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: tanh_derivative_tile_init}
   - {kind: function, name: tanh_derivative_tile}
+- path: include/jit_hw/api/compute/eltwise_unary/tanhshrink.h
+  section: include/jit_hw/api/compute/eltwise_unary/
+  summary: '`tanhshrink_tile`/`tanhshrink_tile_init` — SFPU shim for tanhshrink(x) = x - tanh(x) (libm shadow over DST)'
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: tanhshrink_tile_init}
+  - {kind: function, name: tanhshrink_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/threshold.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `threshold_tile` (+`_init`)'

@@ -1,7 +1,0 @@
-# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
-#
-# SPDX-License-Identifier: Apache-2.0
-
-add_subdirectory(tilize)
-add_subdirectory(dram)
-add_subdirectory(cb_ptr)

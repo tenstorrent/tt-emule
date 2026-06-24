@@ -86,7 +86,7 @@ Per-core / per-RISC thread runs JIT-compiled kernel_main()
 | Add a consumer op to emule scope | Point 3: append to consumer's `__EMULE_JIT_MODE` allowlist header | consumer-defined |
 | Fix a per-op silicon-specific pattern | Point 4: `#ifdef __EMULE_JIT_MODE` patch in consumer op header | consumer-defined |
 | Reimplement an op's TRISC body for emule | Point 4: semantic rewrite under `__EMULE_JIT_MODE` | same |
-| How L1 memory is allocated per core | Point 5: `Core` constructor in `tt_emule::Device` | `include/tt_emule/device.hpp` |
+| How L1 memory is allocated per core | Point 5: `Core` constructor (mmap'd L1), invoked by `SWEmuleChip` | `include/tt_emule/device.hpp` |
 | How `write_to_device` lands in L1 | Point 5: `SWEmulatedChip::write_to_device` | `${TT_METAL_DIR}/tt_metal/third_party/umd/device/chip/sw_emule_chip.cpp` |
 | Make a host bridge function visible to JIT kernels | Point 2 (decl) + Point 1 (def): `extern "C"` in `jit_kernel_stubs.hpp`, def in `emulated_program_runner.cpp` | both |
 
@@ -132,7 +132,6 @@ the symbols).
 extern thread_local uint8_t* __emule_bridge_l1;     // current core's L1 base
 extern thread_local __emule_cb_state* __emule_cbs;  // current core's CBSyncState[]
 extern thread_local tt_emule::Core*   __core;
-extern thread_local tt_emule::Device* __device;
 extern thread_local std::vector<uint32_t> __rt_args;
 ```
 

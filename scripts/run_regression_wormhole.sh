@@ -140,7 +140,7 @@ for t in construct contains intersects merge; do
     fi
 done
 
-run_test "dst_capacity_bf16"  "$API_BIN" --gtest_filter="DstStandalone.*:DstJitBF16.*"
+run_test "dst_capacity_bf16"  "$API_BIN" --gtest_filter="DstJitBF16.*"
 run_test "dst_capacity_fp32"  "$API_BIN" --gtest_filter="DstJitFP32.*"
 
 # ===========================================================================

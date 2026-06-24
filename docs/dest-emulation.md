@@ -55,10 +55,6 @@ unpack boundary**, never during intermediate compute — a deliberate simplifica
 - `tile_regs_commit()` / `tile_regs_wait()` / `tile_regs_release()` — no-ops
   (the MATH↔PACK handoff is vacuous on one thread).
 
-The host-side `DstRegisterFile` (`include/tt_emule/dst_register_file.hpp`) wraps
-a real `IDLE/ACQUIRED/COMMITTED/PACKING` state machine with mutex/CV; it is used
-by the standalone wrapper, not the JIT kernel path.
-
 **Fresh/dirty tracking** (`common_globals.h`): because acquire zeros DEST,
 `reduce_tile<MAX/MIN>` starting from 0 would clamp all-negative inputs. So a
 per-slot *fresh* flag (`__emule_dst_take_fresh`) lets the first write to a slot

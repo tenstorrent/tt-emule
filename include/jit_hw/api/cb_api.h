@@ -71,8 +71,8 @@ constexpr uint8_t pack_src_format[32]   = {};  // DST-side (fp32) stub
 // get_width()) via the EMULE_TILE_R_DIM / EMULE_TILE_C_DIM defines — the analog
 // of EMULE_TILE_SIZES. Thin tiles (e.g. Tile([1,16])) report their true active
 // region so reduce_tile bounds its iteration instead of assuming 32×32. The
-// fallback below is the standard full 32×32 tile (used by the standalone JIT
-// path, which doesn't emit these defines).
+// fallback below is the standard full 32×32 tile (used by TUs that don't emit
+// these defines, e.g. a compute kernel with no CB metadata).
 #ifdef EMULE_TILE_R_DIM
 constexpr uint8_t unpack_tile_r_dim[32] = { EMULE_TILE_R_DIM };
 #else

@@ -5,41 +5,11 @@
 cmake_minimum_required(VERSION 3.16)
 project(tt_emule CXX)
 
-if(NOT DEFINED PROJECT_IS_TOP_LEVEL)
-    if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
-        set(PROJECT_IS_TOP_LEVEL TRUE)
-    else()
-        set(PROJECT_IS_TOP_LEVEL FALSE)
-    endif()
-endif()
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Threads REQUIRED)
-
-# Optionally enable ThreadSanitizer in Debug builds
-if(PROJECT_IS_TOP_LEVEL AND CMAKE_BUILD_TYPE STREQUAL "Debug")
-    add_compile_options(-fsanitize=thread -g -O1)
-    add_link_options(-fsanitize=thread)
-endif()
-
-# ---- Core emulator library ----
-add_library(tt_emule_lib STATIC
-    src/host_api.cpp
-    src/kernel_runner.cpp
-)
-
-target_include_directories(tt_emule_lib PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-)
-
-target_compile_definitions(tt_emule_lib PRIVATE
-    TT_EMULE_JIT_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/include/jit_hw"
-)
-
-target_link_libraries(tt_emule_lib PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+# tt-emule is consumed header-only: tt-metal and tt-umd link tt-emule::headers
+# and JIT-compile kernels against include/jit_hw. There is no compiled library.
 
 # ---- INTERFACE header-only target (for consumers that only need includes) ----
 add_library(tt_emule_headers INTERFACE)
@@ -58,9 +28,8 @@ set_target_properties(tt_emule_headers PROPERTIES
 # ---- Install rules ----
 include(GNUInstallDirs)
 
-install(TARGETS tt_emule_lib tt_emule_headers
+install(TARGETS tt_emule_headers
     EXPORT tt-emule-targets
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 install(DIRECTORY include/tt_emule
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
@@ -71,9 +40,3 @@ install(EXPORT tt-emule-targets
     NAMESPACE tt-emule::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/tt-emule
 )
-
-# ---- Tests ----
-if(PROJECT_IS_TOP_LEVEL)
-    enable_testing()
-    add_subdirectory(tests)
-endif()

@@ -6,12 +6,7 @@ tt-emule provides software emulation of Tenstorrent Quasar hardware for host-sid
 
 ## 1. Overview
 
-tt-emule supports two execution paths:
-
-- **Standalone path**: Kernels are native C++ functions linked directly against tt-emule. Tests under `tests/`. State accessed via `__core` and `__dfb_ifaces` thread-locals.
-- **JIT path**: Kernels are compiled from source at runtime (g++), loaded via `dlopen`. Integrates with real tt-metal host APIs (`CreateDataflowBuffer`, `LaunchProgram`). State accessed via `__emule_dfbs` and `__emule_tc_array` thread-locals set by `emulated_program_runner.cpp`.
-
-The JIT path is the primary use case. It allows upstream device kernels to run unmodified (modulo CSR patching) against real tt-metal host APIs, so host-side code exercises the same paths as on silicon.
+tt-emule runs kernels through a single JIT path: kernels are compiled from source at runtime (g++), loaded via `dlopen`, and integrate with the real tt-metal host APIs. State is accessed via the `__emule_dfbs` and `__emule_tc_array` thread-locals set by `emulated_program_runner.cpp`. This lets upstream device kernels run unmodified (modulo CSR patching) against real tt-metal host APIs, so host-side code exercises the same paths as on silicon.
 
 ---
 
@@ -57,8 +52,7 @@ Both `__emule_neo_id` and `__emule_trisc_id` are set by the program runner befor
 
 - 4 MB shared between all 12 cores in a Neo (8 DM + 4 compute engines)
 - Emulated as a bump allocator on the host heap (`Core::l1_alloc()`)
-- Standalone path: 1 MB default (sufficient for current test sizes)
-- JIT path: size from SOC YAML (4 MB for Quasar via `SWEmulatedChip`)
+- L1 size comes from the SOC YAML (4 MB for Quasar via `SWEmulatedChip`)
 - Bridge DFBs (compute kernel connecting input and output DFBs) share L1 backing store via `dim_key` deduplication — models the hardware register file passthrough
 
 **Firmware L1 address translation:** Device kernels reference L1 via firmware-range offsets (e.g., `0x1000`). `__emule_local_l1_to_ptr()` distinguishes these from host pointers and translates via `__emule_bridge_l1`. NOC operations use this translation.
@@ -292,8 +286,7 @@ These failures will resolve once the wraparound + DFB-config fixes upstream and 
 
 | File | Role |
 |------|------|
-| `src/kernel_runner.cpp` | Standalone path: `build_dfb_interfaces()`, `EnqueueProgram` |
-| `src/jit_kernel.cpp` | JIT compilation (g++) |
+| `tt-metal/.../emulated_program_runner.cpp` | JIT compilation (g++), per-core thread launch, DFB interface setup |
 | `include/tt_emule/device.hpp` | `Core` — owns L1, TileCounterArray, DFBSyncState |
 | `include/tt_emule/tile_counter.hpp` | `TileCounter`, `TileCounterArray` |
 | `include/tt_emule/dfb_sync_state.hpp` | `EmuleDFBInterface`, `DFBSyncState` |

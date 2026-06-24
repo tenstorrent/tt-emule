@@ -50,8 +50,6 @@ class TileCounterArray {
     TileCounter& get(uint8_t neo_id, uint8_t counter_id);
     void inc_posted(uint8_t neo_id, uint8_t counter_id, uint32_t n);
     void inc_acked(uint8_t neo_id, uint8_t counter_id, uint32_t n);
-    void wait_free_space(uint8_t neo_id, uint8_t counter_id, uint32_t n);
-    void wait_occupancy(uint8_t neo_id, uint8_t counter_id, uint32_t n);
     void reset_all();
 };
 ```
@@ -77,7 +75,7 @@ struct DFBTCSlot {
 };
 ```
 
-Pointers are `uint32_t` rather than `uint8_t*` because kernel code addresses L1 as 32-bit values. The `advance_ptr` helper in `DataflowBuffer` wraps them modulo `[base_addr, limit)`.
+Pointers are `uint32_t` rather than `uint8_t*` because kernel code addresses L1 as 32-bit values. The `dfb_api.h` pointer helpers wrap them modulo `[base_addr, limit)`.
 
 ### 2.4 `EmuleDFBInterface` (`include/tt_emule/dfb_sync_state.hpp`)
 
@@ -121,10 +119,6 @@ struct DFBSyncState {
 };
 ```
 
-### 2.6 `DataflowBuffer` (`include/tt_emule/dataflow_buffer.hpp`)
-
-The kernel-facing object in the standalone path. Constructed ephemerally per API call from an `EmuleDFBInterface&` and the shared `TileCounterArray&`. The JIT path skips this class entirely and operates directly on the TLS pointers via inline free functions.
-
 ---
 
 ## 3. Tile Counter Synchronization Deep Dive
@@ -160,41 +154,13 @@ The lock ensures the atomic increment and the condition variable notification ar
 
 Mirror of `inc_posted`, but increments `acked` and notifies `space_cv`. This wakes producers waiting for free space.
 
-**`wait_free_space(neo_id, counter_id, n)` — called by producer before writing**
+**Blocking for space / data — inline in `dfb_api.h`**
 
-```cpp
-void TileCounterArray::wait_free_space(uint8_t neo_id, uint8_t counter_id, uint32_t n) {
-    auto& tc = get(neo_id, counter_id);
-    std::unique_lock lk(tc.mu);
-    tc.space_cv.wait(lk, [&]{ return tc.free_space() >= n; });
-}
-```
+A producer's `dfb_reserve_back` blocks until the target TC has room; a consumer's `dfb_wait_front` blocks until it holds enough posted entries. Each takes the TC's `mu` and `wait_for`s (bounded by `TT_EMULE_DFB_TIMEOUT`, §7) on `space_cv` / `data_cv` respectively, re-checking `tc.free_space() >= n` / `tc.occupancy() >= n` under the lock. The mutex is always taken — there is no lockless fast path, because `occupancy()` and `free_space()` each read two independent atomics (`posted`, `acked`) non-atomically, which could underflow in MPMC scenarios.
 
-Always takes the mutex. A lockless fast path was removed because `occupancy()` and `free_space()` each read two independent atomics (`posted`, `acked`) non-atomically — in MPMC scenarios, the unsigned subtraction could underflow, causing a spurious return.
+### 3.3 The Drain Barrier: `dfb_finish()`
 
-**`wait_occupancy(neo_id, counter_id, n)` — called by consumer before reading**
-
-Same structure as `wait_free_space` but blocks on `data_cv` and waits for `occupancy() >= n`.
-
-### 3.3 The Drain Barrier: `finish()`
-
-`finish()` is called by a producer when it has pushed all its entries and wants to wait until all consumers have acknowledged them. It iterates over all TC slots and waits for `posted == acked` on each:
-
-```cpp
-void DataflowBuffer::finish() {
-    for (uint8_t i = 0; i < iface_.num_tcs_to_rr; ++i) {
-        auto& slot = iface_.tc_slots[i];
-        auto& tc = tc_array_.get(slot.neo_id, slot.counter_id);
-        if (tc.posted == 0 && tc.acked == 0) continue;  // already drained
-        std::unique_lock lk(tc.mu);
-        tc.space_cv.wait(lk, [&]{ return tc.posted == tc.acked; });
-    }
-}
-```
-
-`space_cv` is reused here because the drain condition is exactly what `inc_acked` signals. A fully drained TC (`posted == acked`) means all written entries have been consumed.
-
-The JIT path (`dfb_api.h:dfb_finish`) is identical in behavior but operates directly on `__emule_dfbs[dfb_id]` and `__emule_tc_array`.
+`dfb_finish(dfb_id)` (`dfb_api.h`) is called by a producer when it has pushed all its entries and wants to wait until all consumers have acknowledged them. It iterates over the interface's TC slots (`__emule_dfbs[dfb_id]`) and, for each non-drained TC, blocks on `space_cv` until `posted == acked`. `space_cv` is reused here because the drain condition is exactly what `inc_acked` signals — a fully drained TC (`posted == acked`) means all written entries have been consumed.
 
 ### 3.4 Why Both Atomics and a Mutex?
 
@@ -238,72 +204,7 @@ TC assignment uses `P*C` counter scheme: `counter_id = counter_base + p*C + c`. 
 
 ## 5. Program Lifecycle
 
-The DFB lifecycle differs between the two execution paths. The standalone path (tt-emule `EnqueueProgram`) and the JIT/Metal path (`emulated_program_runner` in tt-metal) each set up `EmuleDFBInterface` objects in subtly different ways.
-
-### 5.1 Standalone Path: Host Setup
-
-```cpp
-CreateDataflowBuffer(program, DataflowBufferConfig{
-    .dfb_index = 0,
-    .entry_size = 1024,
-    .num_entries = 8,
-    .producer_risc_mask = 0x01,  // DM0
-    .num_producers = 1,
-    .consumer_risc_mask = 0x02,  // DM1
-    .num_consumers = 1,
-    .producer_access_pattern = STRIDED,
-    .consumer_access_pattern = STRIDED,
-});
-```
-
-RISC masks are set manually; `BindDataflowBufferToProducerConsumerKernels` is not used in the standalone path. The config is stored in `Program::dfb_configs_`. No memory is allocated yet.
-
-### 5.2 Standalone Path: `EnqueueProgram` DFB Initialization
-
-`src/kernel_runner.cpp:EnqueueProgram()` handles DFB setup in two phases before launching threads:
-
-**Phase A: TC and sync state initialization**
-
-For each `DataflowBufferConfig`:
-1. Allocate `entry_size * num_entries` bytes from `Core::l1_alloc()`.
-2. Call `core.init_dfb_sync(dfb_index, base, entry_size, num_entries, capacity)` to populate `DFBSyncState`.
-3. Compute `M = max(num_producers, num_consumers)` and `capacity = num_entries / M`. For each of the `M` TC slots (counter IDs spaced by `dfb_index * MAX_TC_SLOTS_PER_DFB`): set `tc.capacity = capacity` and reset `posted`/`acked` to 0.
-
-**Phase B: `build_dfb_interfaces()`**
-
-Constructs the per-thread `EmuleDFBInterface` arrays. For each `DataflowBufferConfig` and each kernel descriptor:
-- Check whether `processor_id`'s bit is set in `producer_risc_mask` or `consumer_risc_mask`. Threads not in either mask get `active = false`.
-- If producer p: `num_tcs_to_rr = M/P`; fill `M/P` `DFBTCSlot`s with TC indices `{p + k*P}`, `counter_id = counter_base + tc_idx`, initial `wr_ptr/rd_ptr = base + tc_idx * entry_size`. `counter_base = dfb_index * MAX_TC_SLOTS_PER_DFB`.
-- If consumer c: `num_tcs_to_rr = M/C`; fill `M/C` `DFBTCSlot`s with TC indices `{c + k*C}`, same counter_base spacing, initial `rd_ptr/wr_ptr = base + tc_idx * entry_size`.
-
-### 5.3 Standalone Path: Thread Launch and Barrier
-
-A `std::barrier` with count equal to `num_kernels` ensures all threads have received their TLS pointers before any of them begin kernel execution:
-
-```cpp
-std::barrier init_barrier(num_threads);
-for (size_t i = 0; i < num_threads; ++i) {
-    threads.emplace_back([&, i]() {
-        __processor_id    = kd.processor_id;
-        __dfb_ifaces      = dfb_iface_per_thread[i].data();
-        __emule_dfbs      = dfb_iface_per_thread[i].data();
-        __emule_tc_array  = core.tile_counters();
-
-        init_barrier.arrive_and_wait();  // all threads sync here
-        kd.fn();                          // kernel runs after barrier
-    });
-}
-```
-
-This replicates the hardware barrier where all RISCs synchronize after `setup_local_dfb_interfaces()` completes.
-
-### 5.4 Standalone Path: Teardown
-
-After all threads join, `core.reset_dfb_sync()` clears the `DFBSyncState` array. CB state is also reset. The `TileCounterArray` is not destroyed (it persists in `Core`) but its counters were zeroed at the start of Phase A. The per-thread `EmuleDFBInterface` arrays are local to `EnqueueProgram` and are destroyed on return.
-
-### 5.5 JIT/Metal Path: `emulated_program_runner` DFB Setup
-
-The JIT path lives in `tt_metal/impl/emulation/emulated_program_runner.cpp` and integrates with the real tt-metal host APIs. Several key differences from the standalone path:
+DFB setup happens in `tt_metal/impl/emulation/emulated_program_runner.cpp`, which integrates with the real tt-metal host APIs.
 
 **Host setup uses `BindDataflowBufferToProducerConsumerKernels`:**
 
@@ -317,7 +218,7 @@ experimental::dfb::BindDataflowBufferToProducerConsumerKernels(
 
 **Per-thread TC assignment:**
 
-The runner applies the same STRIDED TC assignment algorithm as the standalone `build_dfb_interfaces()`: `M = max(P, C)`, `stride_size = M * entry_size`, producer p owns TC slots `{p + k*P}`, consumer c owns `{c + k*C}`. Key implementation details:
+The runner uses this STRIDED TC assignment algorithm: `M = max(P, C)`, `stride_size = M * entry_size`, producer p owns TC slots `{p + k*P}`, consumer c owns `{c + k*C}`. Key implementation details:
 
 1. **Multi-bank DRAM**: `NUM_DRAM_BANKS` is set to the real architecture channel count (Quasar=2, WH=6, BH=8). All bank NOC coordinates are registered in `__emule_core_map` so multi-bank interleaving works correctly.
 2. **Multi-thread spawning**: `QuasarDataMovementKernel` — one thread per DM processor via `get_dm_processors()`. `QuasarComputeKernel` — one thread per compute engine (groups of 4 TRISCs into 1 thread via `get_compute_processors()`).
@@ -356,31 +257,11 @@ The patched source is written to a temp file and compiled in place of the origin
 
 **No `std::barrier`:**
 
-The JIT runner does not use a `std::barrier`. Threads on the same core are launched sequentially and each runs to completion before the next starts. This is a difference from the standalone path, which launches all threads simultaneously with a barrier to synchronize DFB setup.
+The runner does not use a `std::barrier`. Threads on the same core are launched sequentially and each runs to completion before the next starts.
 
 ---
 
-## 6. Two API Paths
-
-tt-emule supports two usage modes that share the same underlying synchronization infrastructure but differ in how kernels are compiled and how state is accessed.
-
-### 6.1 Standalone Path (`include/kernel_api/dfb_dataflow_api.hpp`)
-
-Used by tests under `tests/` that link tt-emule directly. Kernels are native C++ functions (type `KernelFn = std::function<void()>`). State is reached via the `__core` and `__dfb_ifaces` thread-locals:
-
-```cpp
-inline void dfb_reserve_back(uint32_t dfb_id, uint16_t n) {
-    auto* tc = __core->tile_counters();
-    auto& iface = __dfb_ifaces[dfb_id];
-    if (!iface.active) return;
-    tt_emule::DataflowBuffer dfb(iface, *tc, static_cast<uint16_t>(dfb_id));
-    dfb.reserve_back(n);
-}
-```
-
-A temporary `DataflowBuffer` is constructed per call. This is safe because `DataflowBuffer` holds references, not copies.
-
-### 6.2 JIT Path (`include/jit_hw/api/dfb_api.h`)
+## 6. Kernel API (`include/jit_hw/api/dfb_api.h`)
 
 Used by tests in tt-metal (`test_dfb_emulation.cpp`) that JIT-compile upstream device kernels. Kernels are compiled from source `.cpp` at runtime and loaded with `dlopen`. The kernel `.so` cannot link against `tt_emule` symbols directly; it calls inline free functions that read thread-local pointers set by the runner:
 
@@ -395,9 +276,9 @@ inline void dfb_reserve_back(uint32_t dfb_id, uint16_t n) {
 }
 ```
 
-The JIT path bypasses the `DataflowBuffer` class and implements the same logic inline to avoid any linkage dependency.
+These free functions operate directly on the TLS pointers (`__emule_dfbs` / `__emule_tc_array`) — there is no wrapper object — so the JIT-compiled kernel `.so` needs no `tt_emule` linkage.
 
-The `emulated_program_runner` sets these TLS variables per kernel thread (see §5.5). After the thread completes, the runner clears them back to `nullptr` to prevent stale pointers.
+The `emulated_program_runner` sets these TLS variables per kernel thread (see §5). After the thread completes, the runner clears them back to `nullptr` to prevent stale pointers.
 
 All 72 DFB tests in `test_dataflow_buffer.cpp` pass:
 
@@ -412,7 +293,7 @@ All tests use the real tt-metal host APIs: `CreateDataflowBuffer`, `BindDataflow
 
 ## 7. Timeout and Hang Detection
 
-The JIT path wraps every blocking wait with `std::condition_variable::wait_for`:
+Every blocking wait is wrapped with `std::condition_variable::wait_for`:
 
 ```cpp
 if (!tc.space_cv.wait_for(lk,
@@ -426,8 +307,6 @@ if (!tc.space_cv.wait_for(lk,
 
 The timeout defaults to 120 seconds and can be overridden with the `TT_EMULE_DFB_TIMEOUT` environment variable. On expiry, the process aborts with a diagnostic message identifying the specific DFB and TC involved.
 
-The standalone path (via `DataflowBuffer` and `TileCounterArray`) uses `wait` without a timeout. Hangs there require `TT_EMULE_DFB_TIMEOUT` to be surfaced via the JIT path, or manual debugging.
-
 ---
 
 ## 8. Known Limitations and Remaining Gaps
@@ -438,23 +317,13 @@ Hardware `finish()` has two behaviors: DM waits for `posted == acked` (drain), w
 
 **TODO: No test exercises TRISC `finish()` in isolation.**
 
-### 8.2 `BindDataflowBufferToProducerConsumerKernels` not wired in standalone path
-
-In the standalone path, RISC masks must be set manually in `DataflowBufferConfig`. The upstream `BindDataflowBufferToProducerConsumerKernels` host API is used correctly in the JIT/Metal path (§5.5) but is not available to tt-emule's `CreateDataflowBuffer` / `EnqueueProgram` directly.
-
-### 8.3 dfb_index bounds
+### 8.2 dfb_index bounds
 
 With `neo_id=0` (current default), the maximum number of DFBs per program is `TILE_COUNTERS_PER_NEO / MAX_TC_SLOTS_PER_DFB = 8`. Counter IDs are spaced by `MAX_TC_SLOTS_PER_DFB` (4) per DFB to prevent cross-DFB collision. A `std::out_of_range` exception is thrown if `dfb_index >= 8`. Multi-NEO spreading (distributing DFBs across neo_ids) would be needed for >8 DFBs.
 
-### 8.4 L1 architecture
+### 8.3 L1 architecture
 
 The 4 MB L1 is shared between all 12 cores in a Neo (8 DM processors + 4 compute engines). The emulation models this correctly with a single `Core` object per Neo that all threads access. This is documented here for architectural clarity — the emulation's shared-memory model naturally reflects the hardware's shared L1.
-
-### 8.5 Standalone path has no timeout on blocking waits
-
-The JIT path (`dfb_api.h`) wraps all blocking waits with `wait_for` and a configurable timeout (default 120s, `TT_EMULE_DFB_TIMEOUT`). The standalone path (`DataflowBuffer` via `TileCounterArray`) uses `wait` without any timeout, so hung standalone tests block indefinitely.
-
-**TODO: No test exercises standalone path timeout behavior.**
 
 ---
 
@@ -464,17 +333,9 @@ The JIT path (`dfb_api.h`) wraps all blocking waits with `wait_for` and a config
 |------|------|
 | `include/tt_emule/tile_counter.hpp` | `TileCounter`, `TileCounterArray` |
 | `include/tt_emule/dfb_sync_state.hpp` | `DFBTCSlot`, `EmuleDFBInterface`, `DFBSyncState` |
-| `include/tt_emule/dataflow_buffer.hpp` | `DataflowBuffer` (standalone kernel object) |
 | `include/tt_emule/device.hpp` | `Core` — owns `TileCounterArray` and `DFBSyncState[32]` |
-| `include/tt_emule/program.hpp` | `DataflowBufferConfig`, `AccessPattern`, `QuasarDM/QuasarCompute`, `processor_id` |
-| `include/tt_emule/host_api.hpp` | `CreateDataflowBuffer`, Quasar `CreateKernel` |
-| `src/host_api.cpp` | Implementation of above |
-| `src/kernel_runner.cpp` | `build_dfb_interfaces()`, `EnqueueProgram` DFB setup, `std::barrier` |
 | `include/jit_hw/emule_dfb_state.h` | TLS declarations: `__emule_dfbs`, `__emule_tc_array` |
 | `include/jit_hw/api/dfb_api.h` | JIT DFB free functions with timeout detection |
 | `include/jit_hw/experimental/dataflow_buffer.h` | `experimental::DataflowBuffer` class (JIT wrapper) |
-| `include/kernel_api/dfb_dataflow_api.hpp` | Standalone DFB free functions |
-| `tests/dfb_passthrough/` | Standalone end-to-end test: 1 DM producer + 1 DM consumer, 8×1 KB entries |
-| `tests/dfb_multi_consumer/` | Standalone 1P-4C STRIDED test |
 | *(tt-metal)* `tt_metal/impl/emulation/emulated_program_runner.cpp` | JIT path: DFB L1 alloc, shared-backing for bridges, per-thread interface construction, `__processor_id` TLS, `mhartid` CSR patching |
 | *(tt-metal)* `tests/tt_metal/tt_metal/api/dataflow_buffer/test_dataflow_buffer.cpp` | 72 STRIDED + BLOCKED DFB tests (all P/C combinations, both ImplicitSync modes) |

@@ -99,7 +99,7 @@ inline void compute_kernel_hw_startup(uint32_t a, uint32_t b, uint32_t) { comput
 // Forward declarations matching kernel_runner.cpp definitions.
 // The main executable exports these with -rdynamic; the JIT .so resolves them
 // at dlopen() time.
-namespace tt_emule { class Core; class Device; }
+namespace tt_emule { class Core; }
 
 // C-linkage bridge functions — resolve at dlopen time to the host process's
 // implementations, avoiding ABI mismatch with Device layout.

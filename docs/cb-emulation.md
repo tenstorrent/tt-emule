@@ -49,11 +49,11 @@ struct CBSyncState {
 geometry (`base`/`page_size`/`num_pages`/`page_mask`) and the pages-occupied
 **semaphore** (`occupied` + the two condvars) — the analog of the L1
 pages_received/acked counter. The read/write *pointers* are **not** here; they are
-per-RISC (§2b). Four semaphore-only free functions implement the protocol:
-`cb_sync_reserve` (wait for N free), `cb_sync_push` (bump `occupied`, notify
-consumer), `cb_sync_wait` (wait for N occupied), `cb_sync_pop` (drop `occupied`,
-notify producer). `occupied` is **atomic** so the SPSC fast path can probe it
-without taking the lock.
+per-RISC (§2b). Two semaphore-only free functions maintain the count:
+`cb_sync_push` (bump `occupied`, notify consumer) and `cb_sync_pop` (drop
+`occupied`, notify producer); producers/consumers block on the condvars via
+`jit_hw/emule_wait.h`. `occupied` is **atomic** so the SPSC fast path can probe
+it without taking the lock.
 
 ---
 
@@ -106,13 +106,6 @@ The JIT compute/dataflow surface (`include/jit_hw/api/cb_api.h`) over the per-co
   pull that costs ~1 s of JIT parse. `TT_EMULE_WAIT_TIMEOUT=1` restores bounded
   `cv.wait_for` + a per-op deadlock diagnostic; `TT_EMULE_CB_TIMEOUT` sets the
   wait-front timeout.
-
-A header-only `tt_emule::CircularBuffer` wrapper in
-`include/tt_emule/circular_buffer.hpp` still exists from the pre-integration era
-when emule shipped a standalone test harness; it owns its own storage around a
-`CBSyncState` plus its own read/write indices (it is single-threaded, so it does
-not use the per-RISC `local_cb` path of §2b). It is no longer exercised by the
-regression suite — the JIT-compiled path drives `Core::cb_sync_states_[]` directly.
 
 ---
 
