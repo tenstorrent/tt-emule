@@ -313,6 +313,7 @@ files:
   - {kind: macro, name: MEM_L1_UNCACHED_BASE}
   - {kind: global, name: MEM_ZEROS_SIZE}
   - {kind: global, name: MEM_ZEROS_BASE}
+  - {kind: macro, name: NUM_TRISC_CORES}
 - path: include/jit_hw/emule_cb_state.h
   section: include/jit_hw/
   summary: '`using __emule_cb_state = tt_emule::CBSyncState`; `extern thread_local __emule_cbs`'
