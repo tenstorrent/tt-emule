@@ -2008,6 +2008,13 @@ files:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: tanh_derivative_tile_init}
   - {kind: function, name: tanh_derivative_tile}
+- path: include/jit_hw/api/compute/eltwise_unary/tanhshrink.h
+  section: include/jit_hw/api/compute/eltwise_unary/
+  summary: '`tanhshrink_tile`/`tanhshrink_tile_init` — SFPU shim for tanhshrink(x) = x - tanh(x) (libm shadow over DST)'
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: tanhshrink_tile_init}
+  - {kind: function, name: tanhshrink_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/threshold.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `threshold_tile` (+`_init`)'
