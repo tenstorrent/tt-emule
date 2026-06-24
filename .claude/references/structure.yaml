@@ -52,6 +52,8 @@ files:
   - {kind: global, name: __emule_l1_tensor_ranges_count}
   - {kind: global, name: __emule_l1_padding_ranges}
   - {kind: global, name: __emule_l1_padding_ranges_count}
+  - {kind: global, name: __emule_l1_host_ranges}
+  - {kind: global, name: __emule_l1_host_ranges_count}
   - {kind: global, name: __emule_l1_resolved_ranges}
   - {kind: global, name: __emule_l1_resolved_ranges_count}
   - {kind: global, name: __emule_l1_resolved_ranges_capacity}
@@ -2658,6 +2660,8 @@ files:
   - {kind: global, name: __emule_l1_tensor_ranges_count}
   - {kind: global, name: __emule_l1_padding_ranges}
   - {kind: global, name: __emule_l1_padding_ranges_count}
+  - {kind: global, name: __emule_l1_host_ranges}
+  - {kind: global, name: __emule_l1_host_ranges_count}
   - {kind: global, name: __emule_l1_resolved_ranges}
   - {kind: global, name: __emule_l1_resolved_ranges_count}
   - {kind: global, name: __emule_l1_resolved_ranges_capacity}
