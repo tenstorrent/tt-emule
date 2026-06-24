@@ -4,13 +4,14 @@
 
 #pragma once
 #include <cstdint>
+#include "jit_hw/internal/emule_thread_ctx.h"
 
 // emule shim for the per-arch firmware `dev_mem_map.h`.  Two purposes:
 //
 // 1. `MEM_L1_UNCACHED_BASE` — silicon kernels cast L1 offsets to pointers via
 //    `(void*)(addr + MEM_L1_UNCACHED_BASE)`.  On silicon, that constant is the
 //    fixed L1 base.  In emule, L1 is heap memory mmap'd per-core, so we
-//    redirect to the per-thread `__emule_bridge_l1` pointer that the runner
+//    redirect to the per-thread `__emule_self->bridge_l1` pointer that the runner
 //    sets before each kernel launch.
 //
 // 2. `MEM_ZEROS_BASE` / `MEM_ZEROS_SIZE` — the firmware-reserved L1 zeros
@@ -23,8 +24,7 @@
 //      BH: tt_metal/hw/inc/internal/tt-1xx/blackhole/dev_mem_map.h
 //      Q:  tt_metal/hw/inc/internal/tt-2xx/quasar/dev_mem_map.h
 
-extern thread_local uint8_t* __emule_bridge_l1;
-#define MEM_L1_UNCACHED_BASE ((uintptr_t)__emule_bridge_l1)
+#define MEM_L1_UNCACHED_BASE ((uintptr_t)__emule_self->bridge_l1)
 
 // MEM_ZEROS_SIZE is typed `int` to match upstream's `#define MEM_ZEROS_SIZE 512`
 // (defaults to int).  `std::min(bytes, MEM_ZEROS_SIZE)` where `bytes` is int

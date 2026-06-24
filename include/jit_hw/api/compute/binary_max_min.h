@@ -17,12 +17,12 @@ ALWI void binary_min_uint32_tile_init() {}
 
 ALWI void binary_max_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[odst][i] = std::max(__emule_dst[idst0][i], __emule_dst[idst1][i]);
+        __emule_compute_ctx().dst[odst][i] = std::max(__emule_compute_ctx().dst[idst0][i], __emule_compute_ctx().dst[idst1][i]);
 }
 
 ALWI void binary_min_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[odst][i] = std::min(__emule_dst[idst0][i], __emule_dst[idst1][i]);
+        __emule_compute_ctx().dst[odst][i] = std::min(__emule_compute_ctx().dst[idst0][i], __emule_compute_ctx().dst[idst1][i]);
 }
 
 template<DataFormat Fmt = DataFormat::Int32>
@@ -47,10 +47,10 @@ template<DataFormat Fmt = DataFormat::UInt32>
 ALWI void binary_max_uint32_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
         uint32_t a, b;
-        std::memcpy(&a, &__emule_dst[idst0][i], 4);
-        std::memcpy(&b, &__emule_dst[idst1][i], 4);
+        std::memcpy(&a, &__emule_compute_ctx().dst[idst0][i], 4);
+        std::memcpy(&b, &__emule_compute_ctx().dst[idst1][i], 4);
         uint32_t r = a > b ? a : b;
-        std::memcpy(&__emule_dst[odst][i], &r, 4);
+        std::memcpy(&__emule_compute_ctx().dst[odst][i], &r, 4);
     }
 }
 
@@ -58,10 +58,10 @@ template<DataFormat Fmt = DataFormat::UInt32>
 ALWI void binary_min_uint32_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
         uint32_t a, b;
-        std::memcpy(&a, &__emule_dst[idst0][i], 4);
-        std::memcpy(&b, &__emule_dst[idst1][i], 4);
+        std::memcpy(&a, &__emule_compute_ctx().dst[idst0][i], 4);
+        std::memcpy(&b, &__emule_compute_ctx().dst[idst1][i], 4);
         uint32_t r = a < b ? a : b;
-        std::memcpy(&__emule_dst[odst][i], &r, 4);
+        std::memcpy(&__emule_compute_ctx().dst[odst][i], &r, 4);
     }
 }
 

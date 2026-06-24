@@ -20,7 +20,7 @@ template <bool legacy_compat = true>
 ALWI void recip_tile(uint32_t idst, int /*vector_mode*/ = (int)VectorMode::RC) {
     __emule_dst_check(idst, "recip_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = 1.0f / __emule_dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = 1.0f / __emule_compute_ctx().dst[idst][i];
 }
 
 } // namespace ckernel

@@ -14,14 +14,12 @@ namespace ckernel {
 
 // Persists across cumprod_tile calls so multi-tile chains (NWH order,
 // first=false on H!=0) accumulate.
-static thread_local float __emule_cumprod_acc[__EMULE_TILE_ELEMS] = {};
-static thread_local bool __emule_cumprod_acc_initialized = false;
 
 inline void __emule_cumprod_reset_acc() {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        __emule_cumprod_acc[i] = 1.0f;
+        __emule_compute_ctx().cumprod_acc[i] = 1.0f;
     }
-    __emule_cumprod_acc_initialized = true;
+    __emule_compute_ctx().cumprod_acc_initialized = true;
 }
 
 ALWI void cumprod_tile_init() {
@@ -30,12 +28,12 @@ ALWI void cumprod_tile_init() {
 
 ALWI void cumprod_tile(uint32_t idst, bool first = true) {
     __emule_dst_check(idst, "cumprod_tile");
-    if (first || !__emule_cumprod_acc_initialized) {
+    if (first || !__emule_compute_ctx().cumprod_acc_initialized) {
         __emule_cumprod_reset_acc();
     }
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        __emule_cumprod_acc[i] *= __emule_dst[idst][i];
-        __emule_dst[idst][i] = __emule_cumprod_acc[i];
+        __emule_compute_ctx().cumprod_acc[i] *= __emule_compute_ctx().dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = __emule_compute_ctx().cumprod_acc[i];
     }
 }
 

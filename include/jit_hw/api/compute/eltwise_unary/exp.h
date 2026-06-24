@@ -38,7 +38,7 @@ ALWI void exp_tile(uint32_t idst, int vector_mode = (int)VectorMode::RC,
                    uint16_t scale = p_sfpu::kCONST_1_FP16B) {
     __emule_dst_check(idst, "exp_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::exp(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::exp(__emule_compute_ctx().dst[idst][i]);
 }
 
 } // namespace ckernel

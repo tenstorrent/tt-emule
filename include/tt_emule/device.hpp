@@ -8,6 +8,7 @@
 #include "dfb_sync_state.hpp"
 #include "tile_counter.hpp"
 #include "dst_register_file.hpp"
+#include "jit_hw/internal/emule_core_state.h"  // tt_emule::CoreState (per-core coords)
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -90,6 +91,10 @@ public:
     }
 
     DstRegisterFile& dst() { return dst_; }
+
+    // Per-core NOC / logical coordinates. The per-thread ctx borrows a pointer
+    // via __emule_self->core; all RISC threads on this core share these.
+    CoreState& core_state() { return core_state_; }
 
     // Accepts uint64_t so DRAM banks (≤ 4 GB on BH, ≤ 2 GB on WH views) can be
     // addressed without uint32 truncation. Loud bounds check converts what was
@@ -216,6 +221,7 @@ private:
     size_t    l1_bump_ = 0;
     std::array<std::shared_ptr<CircularBuffer>, MAX_CBS> cbs_;
     DstRegisterFile dst_;
+    CoreState core_state_;  // per-core NOC/logical coords (see emule_thread_ctx.h)
     CBSyncState cb_sync_states_[MAX_CBS] = {};
     // Quasar DFB state
     std::unique_ptr<TileCounterArray> tile_counters_;

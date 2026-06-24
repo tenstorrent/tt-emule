@@ -7,6 +7,7 @@
 // Matches the real tt-metal enum values we need.
 #include <cstdint>
 #include "tt-metalium/circular_buffer_constants.h"  // NUM_CIRCULAR_BUFFERS (32 WH / 64 BH)
+#include "jit_hw/internal/emule_thread_ctx.h"
 
 enum class DataFormat : uint8_t {
     Float32   = 0,
@@ -40,7 +41,6 @@ enum class DataFormat : uint8_t {
 // pack_tile, reset to 0 on cb_push_back (the batch commit — matching silicon
 // pack.h, which resets the sequential pack pointer after cb_push_back, NOT on
 // cb_reserve_back; a run of reserve_back calls with no push keeps advancing).
-static thread_local uint32_t __emule_pack_offset[NUM_CIRCULAR_BUFFERS] = {};
 
 // Per-DST-slot "fresh since acquire" flag.  Set true by tile_regs_acquire,
 // cleared by any op that writes meaningful values into the slot (copy_tile,
@@ -55,12 +55,10 @@ static thread_local uint32_t __emule_pack_offset[NUM_CIRCULAR_BUFFERS] = {};
 // max-accumulating; subsequent calls within the same acquire cycle (or after
 // a copy_tile load of a running accumulator) see fresh=false and use the
 // existing accumulator semantics.
-static thread_local bool __emule_dst_fresh[16] = {true, true, true, true, true, true, true, true,
-                                                  true, true, true, true, true, true, true, true};
 
 inline void __emule_dst_mark_dirty(uint32_t slot) {
     if (slot < 16) {
-        __emule_dst_fresh[slot] = false;
+        __emule_compute_ctx().dst_fresh[slot] = false;
     }
 }
 
@@ -68,7 +66,7 @@ inline bool __emule_dst_take_fresh(uint32_t slot) {
     if (slot >= 16) {
         return false;
     }
-    bool was_fresh = __emule_dst_fresh[slot];
-    __emule_dst_fresh[slot] = false;
+    bool was_fresh = __emule_compute_ctx().dst_fresh[slot];
+    __emule_compute_ctx().dst_fresh[slot] = false;
     return was_fresh;
 }

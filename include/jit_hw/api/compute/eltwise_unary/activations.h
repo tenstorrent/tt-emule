@@ -5,7 +5,7 @@
 #pragma once
 #include "jit_hw/api/compute/common.h"
 // Emulator stubs for activation / absolute-value tile operations.
-// DST is __emule_dst[][] (float array); operations are host-side math.
+// DST is __emule_compute_ctx().dst[][] (float array); operations are host-side math.
 
 #include <algorithm>
 #include <cmath>
@@ -19,7 +19,7 @@ ALWI void abs_tile_init() {}
 ALWI void abs_tile(uint32_t idst) {
     __emule_dst_check(idst, "abs_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::fabs(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::fabs(__emule_compute_ctx().dst[idst][i]);
 }
 
 ALWI void abs_tile_int32(uint32_t idst) {
@@ -37,8 +37,8 @@ ALWI void hardsigmoid_tile_init() {}
 ALWI void hardsigmoid_tile(uint32_t idst) {
     __emule_dst_check(idst, "hardsigmoid_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
-        __emule_dst[idst][i] = std::clamp((x + 3.0f) / 6.0f, 0.0f, 1.0f);
+        float x = __emule_compute_ctx().dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = std::clamp((x + 3.0f) / 6.0f, 0.0f, 1.0f);
     }
 }
 // Pack-thread variant: upstream dispatches the same SFPU LLK via PACK() for
@@ -52,8 +52,8 @@ ALWI void softsign_tile_init() {}
 ALWI void softsign_tile(uint32_t idst) {
     __emule_dst_check(idst, "softsign_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
-        __emule_dst[idst][i] = x / (1.0f + std::fabs(x));
+        float x = __emule_compute_ctx().dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = x / (1.0f + std::fabs(x));
     }
 }
 
@@ -70,8 +70,8 @@ ALWI void celu_tile(uint32_t idst, uint32_t alpha, uint32_t alpha_recip) {
     std::memcpy(&a, &alpha, sizeof(float));
     std::memcpy(&ar, &alpha_recip, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
-        __emule_dst[idst][i] = std::max(0.0f, x) + std::min(0.0f, a * (std::exp(x * ar) - 1.0f));
+        float x = __emule_compute_ctx().dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = std::max(0.0f, x) + std::min(0.0f, a * (std::exp(x * ar) - 1.0f));
     }
 }
 
@@ -83,10 +83,10 @@ ALWI void softshrink_tile(uint32_t idst, uint32_t param0) {
     float lambda;
     std::memcpy(&lambda, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
-        if (x > lambda)       __emule_dst[idst][i] = x - lambda;
-        else if (x < -lambda) __emule_dst[idst][i] = x + lambda;
-        else                  __emule_dst[idst][i] = 0.0f;
+        float x = __emule_compute_ctx().dst[idst][i];
+        if (x > lambda)       __emule_compute_ctx().dst[idst][i] = x - lambda;
+        else if (x < -lambda) __emule_compute_ctx().dst[idst][i] = x + lambda;
+        else                  __emule_compute_ctx().dst[idst][i] = 0.0f;
     }
 }
 
@@ -98,8 +98,8 @@ ALWI void hardshrink_tile(uint32_t idst, uint32_t param0) {
     float lambda;
     std::memcpy(&lambda, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
-        __emule_dst[idst][i] = (std::fabs(x) > lambda) ? x : 0.0f;
+        float x = __emule_compute_ctx().dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = (std::fabs(x) > lambda) ? x : 0.0f;
     }
 }
 

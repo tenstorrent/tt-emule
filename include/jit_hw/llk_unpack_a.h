@@ -16,18 +16,18 @@ inline void _llk_unpack_tilize_(Args&&...) {}
 inline void llk_unpack_tilize(uint32_t, uint32_t, uint32_t, uint32_t) {}
 
 inline void llk_unpack_tilize_block(uint32_t icb, uint32_t block_c, uint32_t start_tile_idx) {
-    __llk_unpack_src_cb = icb;
-    __llk_unpack_start_tile_idx = start_tile_idx;
-    __llk_unpack_block_c = block_c;
-    __llk_unpack_current_tile = 0;
+    __emule_compute_ctx().llk_unpack_src_cb = icb;
+    __emule_compute_ctx().llk_unpack_start_tile_idx = start_tile_idx;
+    __emule_compute_ctx().llk_unpack_block_c = block_c;
+    __emule_compute_ctx().llk_unpack_current_tile = 0;
 }
 
 inline void llk_unpack_untilize(uint32_t icb, uint32_t block_c, uint32_t start_tile_idx) {
-    __llk_unpack_src_cb = icb;
-    __llk_unpack_start_tile_idx = start_tile_idx;
-    __llk_unpack_block_c = block_c;
-    __llk_unpack_current_tile = 0;
-    __llk_pack_block_c = block_c;
+    __emule_compute_ctx().llk_unpack_src_cb = icb;
+    __emule_compute_ctx().llk_unpack_start_tile_idx = start_tile_idx;
+    __emule_compute_ctx().llk_unpack_block_c = block_c;
+    __emule_compute_ctx().llk_unpack_current_tile = 0;
+    __emule_compute_ctx().llk_pack_block_c = block_c;
 }
 
 // ---- llk_unpack_A: general-purpose tile unpack (no-op in emulation) ----

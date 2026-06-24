@@ -10,6 +10,3 @@
 #include "tt_emule/cb_sync_state.hpp"
 
 using __emule_cb_state = tt_emule::CBSyncState;
-
-// Thread-local pointer to per-core CB state array (32 entries).
-extern thread_local __emule_cb_state* __emule_cbs;

@@ -16,18 +16,19 @@
 #include <cstdlib>
 #include <mutex>
 
-// Forward declarations for hang diagnostics (defined in jit_kernel_stubs.hpp).
+// __emule_self + per-core CoreState (logical coords). my_x/my_y stay silicon-named
+// runner-set globals (read by unmodified upstream); cb_api.h is pulled by the
+// preamble before they're declared there, so re-declare them locally.
+#include "jit_hw/internal/emule_thread_ctx.h"
 extern thread_local uint8_t my_x[2];
 extern thread_local uint8_t my_y[2];
-extern thread_local uint32_t __emule_logical_x;
-extern thread_local uint32_t __emule_logical_y;
 
 // cb_addr_shift (16-byte fifo-pointer encoding) is defined in emule_cb_ptr.h.
 
 // Bitmask of CBs THIS thread consumes (set in cb_wait_front). cb_reserve_back
 // uses it to detect "self-recycled" CBs the same compute thread both produces
-// and consumes (see cb_reserve_back). Thread_local — fresh per kernel launch.
-inline thread_local uint32_t __emule_cb_self_consume_mask = 0;
+// and consumes (see cb_reserve_back). Lives in __emule_self->cb_self_consume_mask
+// — fresh per kernel launch.
 
 // ---- Constexpr tile metadata arrays (populated by JIT defines) ----
 // EMULE_TILE_SIZES is defined by the JIT compiler as a comma-separated list of
@@ -115,15 +116,15 @@ inline int __emule_cb_timeout_sec() {
 }
 
 inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
-    auto& cb = __emule_cbs[cb_id];
+    auto& cb = __emule_self->cbs[cb_id];
     if (n > cb.num_pages) {
         fprintf(stderr, "EMULE BUG: cb_reserve_back(cb_id=%u, n=%u) requests more than capacity "
                 "(num_pages=%u, page_size=%u) [phys (%u,%u) logical (%u,%u)]\n",
                 cb_id, n, cb.num_pages, cb.page_size,
-                my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+                my_x[0], my_y[0], __emule_self->core->logical_x, __emule_self->core->logical_y);
         std::abort();
     }
-    // __emule_pack_offset is reset by cb_push_back, NOT here. Per silicon
+    // __emule_compute_ctx().pack_offset is reset by cb_push_back, NOT here. Per silicon
     // pack.h, the sequential pack write pointer "is reset after cb_push_back",
     // so reserve_back calls without an intervening push_back keep advancing —
     // required by the multi-core topk final kernel (reserve_back(1) per tile +
@@ -136,7 +137,7 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
     // no other thread frees space — blocking would deadlock the in-place bitonic
     // recycle (wait_front; pack_tile<true>; reserve_back; pop_front; push_back).
     // emule runs compute single-threaded; silicon overlaps UNPACK/PACK.
-    if ((__emule_cb_self_consume_mask >> cb_id) & 1u) {
+    if ((__emule_self->cb_self_consume_mask >> cb_id) & 1u) {
         return;
     }
     std::unique_lock<std::mutex> lk(cb.mu);
@@ -148,7 +149,7 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
                 "(set TT_EMULE_CB_TIMEOUT=<secs> to adjust)\n",
                 cb_id, n, __emule_cb_timeout_sec(),
                 cb.occupied.load(), cb.num_pages, cb.page_size,
-                my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+                my_x[0], my_y[0], __emule_self->core->logical_x, __emule_self->core->logical_y);
         std::abort();
     }
 }
@@ -157,24 +158,24 @@ inline void cb_push_back(uint32_t cb_id, uint32_t n) {
     // Advance this thread's own write pointer (mirrors the per-RISC write ptr on
     // silicon), then bump the shared occupied semaphore.
     __emule_cb_advance_wr(cb_id, n);
-    tt_emule::cb_sync_push(__emule_cbs[cb_id], n);
+    tt_emule::cb_sync_push(__emule_self->cbs[cb_id], n);
     // Reset the PACK auto-advance offset on batch commit (see cb_reserve_back).
-    __emule_pack_offset[cb_id] = 0;
+    __emule_compute_ctx().pack_offset[cb_id] = 0;
     // Bridge CB→DFB: update tile counters so DM's dfb_wait_front sees compute's output.
     // cb.mu already released; now safe to acquire tc.mu (consistent lock ordering).
-    if (__emule_dfbs && __emule_tc_array && __emule_dfbs[cb_id].active) {
-        auto& iface = __emule_dfbs[cb_id];
+    if (__emule_self->dfbs && __emule_self->tc_array && __emule_self->dfbs[cb_id].active) {
+        auto& iface = __emule_self->dfbs[cb_id];
         if (iface.broadcast_tc) {
             for (uint8_t i = 0; i < iface.num_tcs_to_rr; ++i) {
                 auto& slot = iface.tc_slots[i];
-                __emule_tc_array->inc_posted(slot.neo_id, slot.counter_id, n);
+                __emule_self->tc_array->inc_posted(slot.neo_id, slot.counter_id, n);
                 slot.wr_ptr += static_cast<uint32_t>(n) * iface.stride_size;
                 if (slot.wr_ptr >= slot.limit)
                     slot.wr_ptr = slot.base_addr + (slot.wr_ptr - slot.limit);
             }
         } else {
             auto& slot = iface.tc_slots[iface.tc_idx];
-            __emule_tc_array->inc_posted(slot.neo_id, slot.counter_id, n);
+            __emule_self->tc_array->inc_posted(slot.neo_id, slot.counter_id, n);
             slot.wr_ptr += static_cast<uint32_t>(n) * iface.stride_size;
             if (slot.wr_ptr >= slot.limit)
                 slot.wr_ptr = slot.base_addr + (slot.wr_ptr - slot.limit);
@@ -185,18 +186,18 @@ inline void cb_push_back(uint32_t cb_id, uint32_t n) {
 }
 
 inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
-    auto& cb = __emule_cbs[cb_id];
+    auto& cb = __emule_self->cbs[cb_id];
     if (n > cb.num_pages) {
         fprintf(stderr, "EMULE BUG: cb_wait_front(cb_id=%u, n=%u) requests more than capacity "
                 "(num_pages=%u, page_size=%u) [phys (%u,%u) logical (%u,%u)]\n",
                 cb_id, n, cb.num_pages, cb.page_size,
-                my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+                my_x[0], my_y[0], __emule_self->core->logical_x, __emule_self->core->logical_y);
         std::abort();
     }
     // Mark this CB as consumed-by-this-thread so a later cb_reserve_back on it
     // (the in-place recycle idiom) does not block waiting on a non-existent
-    // other consumer. See __emule_cb_self_consume_mask.
-    __emule_cb_self_consume_mask |= (1u << cb_id);
+    // other consumer. See __emule_self->cb_self_consume_mask.
+    __emule_self->cb_self_consume_mask |= (1u << cb_id);
     // Lock-free fast path (safe for SPSC — only producer increments occupied)
     if (cb.occupied.load(std::memory_order_acquire) >= n) return;
     std::unique_lock<std::mutex> lk(cb.mu);
@@ -208,7 +209,7 @@ inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
                 "(set TT_EMULE_CB_TIMEOUT=<secs> to adjust)\n",
                 cb_id, n, __emule_cb_timeout_sec(),
                 cb.occupied.load(), cb.num_pages, cb.page_size,
-                my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+                my_x[0], my_y[0], __emule_self->core->logical_x, __emule_self->core->logical_y);
         std::abort();
     }
 }
@@ -217,12 +218,12 @@ inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
     // Advance this thread's own read pointer (mirrors the per-RISC read ptr on
     // silicon), then drop the shared occupied semaphore.
     __emule_cb_advance_rd(cb_id, n);
-    tt_emule::cb_sync_pop(__emule_cbs[cb_id], n);
+    tt_emule::cb_sync_pop(__emule_self->cbs[cb_id], n);
     // Bridge CB→DFB: update tile counter acked so DM's dfb_reserve_back sees freed space.
-    if (__emule_dfbs && __emule_tc_array && __emule_dfbs[cb_id].active) {
-        auto& iface = __emule_dfbs[cb_id];
+    if (__emule_self->dfbs && __emule_self->tc_array && __emule_self->dfbs[cb_id].active) {
+        auto& iface = __emule_self->dfbs[cb_id];
         auto& slot = iface.tc_slots[iface.tc_idx];
-        __emule_tc_array->inc_acked(slot.neo_id, slot.counter_id, n);
+        __emule_self->tc_array->inc_acked(slot.neo_id, slot.counter_id, n);
         slot.rd_ptr += static_cast<uint32_t>(n) * iface.stride_size;
         if (slot.rd_ptr >= slot.limit)
             slot.rd_ptr = slot.base_addr + (slot.rd_ptr - slot.limit);

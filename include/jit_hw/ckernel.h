@@ -7,10 +7,7 @@
 // ThreadId and mailbox ops are now in jit_kernel_stubs.hpp.
 // CSR emulation (NEO_ID, TRISC_ID) for Quasar compute kernels.
 #include <cstdint>
-
-// TLS variables set by the kernel runner before kernel launch.
-extern thread_local uint8_t __emule_neo_id;
-extern thread_local uint8_t __emule_trisc_id;
+#include "jit_hw/internal/emule_thread_ctx.h"
 
 namespace ckernel {
 enum class CSR : uint32_t {
@@ -22,10 +19,10 @@ template <CSR csr>
 inline uint32_t csr_read();
 
 template <>
-inline uint32_t csr_read<CSR::NEO_ID>() { return __emule_neo_id; }
+inline uint32_t csr_read<CSR::NEO_ID>() { return __emule_self->neo_id; }
 
 template <>
-inline uint32_t csr_read<CSR::TRISC_ID>() { return __emule_trisc_id; }
+inline uint32_t csr_read<CSR::TRISC_ID>() { return __emule_self->trisc_id; }
 
 // Hardware semaphore stubs. Silicon uses these to synchronize between
 // UNPACK/MATH/PACK RISCs via T6 hardware semaphores. Emule runs all three

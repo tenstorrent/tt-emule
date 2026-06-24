@@ -44,10 +44,10 @@ ALWI void softplus_tile(uint32_t idst, uint32_t beta, uint32_t beta_reciprocal, 
     constexpr float SOFTPLUS_POLY_BOUNDARY = 5.0f;
 
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
+        float x = __emule_compute_ctx().dst[idst][i];
         float t = beta_f * x;
         if (t > threshold_f) {
-            __emule_dst[idst][i] = x;
+            __emule_compute_ctx().dst[idst][i] = x;
             continue;
         }
 
@@ -71,7 +71,7 @@ ALWI void softplus_tile(uint32_t idst, uint32_t beta, uint32_t beta_reciprocal, 
 
         float tmax = (t > 0.0f) ? t : 0.0f;
         float sp = tmax + residual;
-        __emule_dst[idst][i] = beta_reciprocal_f * sp;
+        __emule_compute_ctx().dst[idst][i] = beta_reciprocal_f * sp;
     }
 }
 

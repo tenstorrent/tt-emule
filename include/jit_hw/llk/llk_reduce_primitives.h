@@ -29,16 +29,9 @@ constexpr int MM_THROTTLE = 0;
 #define MATH_FIDELITY ckernel::MathFidelity::HiFi4
 #endif
 
-// Bridges UNPACK's tile selection across to MATH on the same host thread.
-// Real HW splits these across cores; emule serializes them, and llk_math_matmul
-// reads what llk_unpack_AB_matmul wrote.
-struct __emule_matmul_bridge {
-    uint32_t in0_cb  = 0;
-    uint32_t in1_cb  = 0;
-    uint32_t in0_idx = 0;
-    uint32_t in1_idx = 0;
-};
-inline thread_local __emule_matmul_bridge __emule_matmul_state;
+// Bridges UNPACK's tile selection across to MATH on the same host thread
+// (struct __emule_matmul_bridge + the state live in ComputeThreadCtx, reached
+// via __emule_compute_ctx().matmul_state).
 
 inline void state_configure(uint32_t /*in1_cb*/, uint32_t /*in0_cb*/) {}
 
@@ -64,7 +57,7 @@ inline void llk_math_reconfig_data_format_srcb(uint32_t /*old_or_new*/ = 0, uint
 inline void llk_math_reconfig_remap(const bool /*remap_enable*/) {}
 
 inline void llk_unpack_AB_matmul(uint32_t in0_cb, uint32_t in1_cb, uint32_t in0_idx, uint32_t in1_idx) {
-    __emule_matmul_state = {in0_cb, in1_cb, in0_idx, in1_idx};
+    __emule_compute_ctx().matmul_state = {in0_cb, in1_cb, in0_idx, in1_idx};
 }
 
 // Forward decl: ckernel::matmul_tiles is defined in jit_hw/api/compute/matmul.h,
@@ -79,10 +72,10 @@ void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb, uint32_t in0_tile, uint32_t 
 template <ckernel::MathFidelity Fidelity, int Throttle, typename... Args>
 inline void llk_math_matmul(uint32_t idst, Args... /*ignored*/) {
     ckernel::matmul_tiles(
-        __emule_matmul_state.in0_cb,
-        __emule_matmul_state.in1_cb,
-        __emule_matmul_state.in0_idx,
-        __emule_matmul_state.in1_idx,
+        __emule_compute_ctx().matmul_state.in0_cb,
+        __emule_compute_ctx().matmul_state.in1_cb,
+        __emule_compute_ctx().matmul_state.in0_idx,
+        __emule_compute_ctx().matmul_state.in1_idx,
         idst);
 }
 

@@ -25,6 +25,7 @@
 
 #include "jit_hw/api/dataflow/noc.h"  // Noc, noc_traits_t, DataflowBufferArgs
 #include "api/lock.h"                  // RAII Lock — reachable via tt_metal/hw/inc/
+#include "jit_hw/internal/emule_thread_ctx.h"  // __emule_self->dfbs (Quasar path)
 
 #ifndef ARCH_QUASAR
 #include "jit_hw/api/cb_api.h"                  // get_tile_size/hw/dataformat
@@ -91,7 +92,7 @@ public:
     // ----------------------------------------------------------------
 
     uint32_t get_entry_size()  const { return dfb_get_entry_size(dfb_id_); }
-    uint32_t get_stride_size() const { return __emule_dfbs[dfb_id_].stride_size; }
+    uint32_t get_stride_size() const { return __emule_self->dfbs[dfb_id_].stride_size; }
 
     void reserve_back(uint16_t n) { dfb_reserve_back(dfb_id_, n); }
     void push_back(uint16_t n)    { dfb_push_back(dfb_id_, n); }

@@ -375,20 +375,26 @@ kernel.
 | `__emule_dram_ptr` | `emulated_program_runner.cpp` | DRAM-offset fast path (not on the resolver path) |
 | `__emule_multicast_write` | `emulated_program_runner.cpp` | Every multicast write / semaphore set_multicast |
 
-### 8.2 Thread-local state
+### 8.2 Per-thread context state
 
-Set by the program runner per emulated core, read by the JIT kernel:
+Most of these are now fields of the per-thread execution context (a `ComputeThreadCtx`
+/ `DatamovementThreadCtx`, reached via the single `thread_local ThreadCommonCtx*
+__emule_self`), set by the program runner in the launch prologue and read by the
+JIT kernel — see [state-tiers.md](state-tiers.md). The exception is `my_x`/`my_y`,
+which stay runner-set `thread_local` globals because they are silicon-named symbols
+read by unmodified upstream code; the emule-only logical coordinates moved to the
+per-core `CoreState` (reached as `__emule_self->core->logical_x/y`).
 
-| TLS | Type | Set by | Read by |
+| State | Type | Home | Read by |
 |---|---|---|---|
-| `__emule_bridge_l1` | `uint8_t*` | program runner per-core | every L1 conversion |
-| `__emule_logical_x` / `_y` | `uint32_t` | program runner per-core | debug prints, `get_absolute_logical_*` |
-| `my_x[2]`, `my_y[2]` | `uint8_t` | program runner per-core | `get_noc_addr(addr, noc)` 2-arg overload |
-| `__emule_cbs` | `__emule_cb_state*` | program runner per-program | every CB API |
-| `__emule_dfbs` | `__emule_dfb_iface*` | program runner per-program (Quasar) | every DFB API |
+| `__emule_self->bridge_l1` | `uint8_t*` | `ThreadCommonCtx` | every L1 conversion |
+| `__emule_self->core->logical_x` / `_y` | `uint32_t` | per-core `CoreState` | debug prints, `get_absolute_logical_*` |
+| `my_x[2]`, `my_y[2]` | `uint8_t` | runner-set global (silicon-named) | `get_noc_addr(addr, noc)` 2-arg overload |
+| `__emule_self->cbs` | `CBSyncState*` | `ThreadCommonCtx` | every CB API |
+| `__emule_self->dfbs` | `EmuleDFBInterface*` | `ThreadCommonCtx` (Quasar) | every DFB API |
 
-(`noc_index` / `noc_mode` are not TLS — they're per-kernel compile-time constants
-from host-emitted JIT defines; see §8.3.)
+(`noc_index` / `noc_mode` are not context state — they're per-kernel compile-time
+constants from host-emitted JIT defines; see §8.3.)
 
 ### 8.3 Per-NOC state
 
@@ -399,22 +405,25 @@ only**; the transfer path is single (see Section 1). A kernel that
 interleaves set_state calls on both NOCs must read back independent
 caches, or it gets silently wrong data.
 
-Per-NOC TLS / globals in emule today:
+The per-NOC cmd-buf caches are fields of `DatamovementThreadCtx` (the NOC is a
+data-movement role; reached via `__emule_datamovement_ctx().<field>[noc]` — see
+[state-tiers.md](state-tiers.md)). `my_x`/`my_y` stay runner-set globals
+(silicon-named) and the bank tables are per-chip (runtime-injected, shared).
 
-| TLS / global | Type | Indexed by | Used by |
+| State | Type | Home / indexed by | Used by |
 |---|---|---|---|
-| `my_x` / `my_y` | `uint8_t[2]` | `noc & 1` | `get_noc_addr(addr, noc)` |
-| `dram_bank_to_noc_xy` | per-arch table | `[noc][bank]` | DRAM bank → NOC coords |
-| `l1_bank_to_noc_xy` | per-arch table | `[noc][bank]` | L1 bank → NOC coords |
-| `__emule_noc_trid_state::shard_noc_addr_base` | `uint64_t[2]` | `noc & 1` | TRID-tagged stateful reads |
-| `__emule_noc_trid_state::shard_size` | `uint32_t[2]` | `noc & 1` | same |
-| `__emule_noc_trid_state::shard_vc` | `uint32_t[2]` | `noc & 1` | same |
-| `__emule_one_packet_state_size` | `uint32_t[2]` | `noc & 1` | `noc_async_read_one_packet_{set,with}_state` |
-| `__emule_write_one_packet_state_dst` | `uint64_t[2]` | `noc & 1` | `noc_async_write_one_packet_{set,with}_state` |
-| `__emule_write_one_packet_state_size` | `uint32_t[2]` | `noc & 1` | same |
-| `__emule_dw_st` | `__emule_dw_state[2]` | `noc & 1` | `noc_inline_dw_write_{set,with}_state` |
-| `__emule_noc_cached_size` | `uint32_t[NUM_NOCS]` | `noc_id_` | `Noc::{set_async_read_state, async_read_with_state, set_async_write_state, async_write_with_state}` transfer size |
-| `__emule_noc_cached_write_dst` | `uintptr_t[NUM_NOCS]` | `noc_id_` | `Noc::{set_async_write_state, async_write_with_state}` resolved dst |
+| `my_x` / `my_y` | `uint8_t[2]` | runner-set global · `noc & 1` | `get_noc_addr(addr, noc)` |
+| `dram_bank_to_noc_xy` | per-arch table | per-chip · `[noc][bank]` | DRAM bank → NOC coords |
+| `l1_bank_to_noc_xy` | per-arch table | per-chip · `[noc][bank]` | L1 bank → NOC coords |
+| `shard_noc_addr_base` | `uint64_t[2]` | `DatamovementThreadCtx` · `noc & 1` | TRID-tagged stateful reads |
+| `shard_size` | `uint32_t[2]` | `DatamovementThreadCtx` · `noc & 1` | same |
+| `shard_vc` | `uint32_t[2]` | `DatamovementThreadCtx` · `noc & 1` | same |
+| `one_packet_state_size` | `uint32_t[2]` | `DatamovementThreadCtx` · `noc & 1` | `noc_async_read_one_packet_{set,with}_state` |
+| `write_one_packet_state_dst` | `uint64_t[2]` | `DatamovementThreadCtx` · `noc & 1` | `noc_async_write_one_packet_{set,with}_state` |
+| `write_one_packet_state_size` | `uint32_t[2]` | `DatamovementThreadCtx` · `noc & 1` | same |
+| `dw_st` | `__emule_dw_state[2]` | `DatamovementThreadCtx` · `noc & 1` | `noc_inline_dw_write_{set,with}_state` |
+| `noc_cached_size` | `uint32_t[NUM_NOCS]` | `DatamovementThreadCtx` · `noc_id_` | `Noc::{set_async_read_state, async_read_with_state, set_async_write_state, async_write_with_state}` transfer size |
+| `noc_cached_write_dst` | `uintptr_t[NUM_NOCS]` | `DatamovementThreadCtx` · `noc_id_` | `Noc::{set_async_write_state, async_write_with_state}` resolved dst |
 
 `noc_index` and `noc_mode` are **faithful per-kernel** compile-time constants —
 `constexpr uint8_t noc_index = NOC_INDEX; noc_mode = NOC_MODE;` in

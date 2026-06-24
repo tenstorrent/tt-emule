@@ -43,6 +43,7 @@ files:
   - {kind: global, name: __processor_id}
   - {kind: global, name: __emule_tc_array}
   - {kind: global, name: __emule_dfbs}
+  - {kind: global, name: __emule_self}
   - {kind: extern_c, name: __emule_dram_ptr}
   - {kind: namespace, name: tt_emule}
   - {kind: function, name: EnqueueProgram}
@@ -206,8 +207,6 @@ files:
   section: include/jit_hw/
   summary: '`enum class CSR`; `namespace ckernel`; `csr_read<>` specializations'
   symbols:
-  - {kind: global, name: __emule_neo_id}
-  - {kind: global, name: __emule_trisc_id}
   - {kind: namespace, name: ckernel}
   - {kind: enum, name: CSR}
   - {kind: function, name: csr_read}
@@ -309,7 +308,6 @@ files:
   section: include/jit_hw/
   summary: macros `MEM_L1_UNCACHED_BASE`; `NUM_TRISC_CORES`/`NUM_DM_CORES`/`MEM_ZEROS_*` constants
   symbols:
-  - {kind: global, name: __emule_bridge_l1}
   - {kind: macro, name: MEM_L1_UNCACHED_BASE}
   - {kind: global, name: MEM_ZEROS_SIZE}
   - {kind: global, name: MEM_ZEROS_BASE}
@@ -318,15 +316,11 @@ files:
   summary: '`using __emule_cb_state = tt_emule::CBSyncState`; `extern thread_local __emule_cbs`'
   symbols:
   - {kind: using, name: __emule_cb_state}
-  - {kind: global, name: __emule_cbs}
 - path: include/jit_hw/emule_dfb_state.h
   section: include/jit_hw/
   summary: '`using __emule_dfb_iface = tt_emule::EmuleDFBInterface`; `extern thread_local __emule_dfbs`, `__emule_tc_array`'
   symbols:
   - {kind: using, name: __emule_dfb_iface}
-  - {kind: global, name: __emule_dfbs}
-  - {kind: global, name: __emule_tc_array}
-  - {kind: global, name: __processor_id}
 - path: include/jit_hw/emule_wait.h
   section: include/jit_hw/
   summary: '`__emule_cv_wait` (cv.wait by default; `cv.wait_for`+`<chrono>` under `EMULE_WAIT_TIMEOUT`)'
@@ -352,26 +346,14 @@ files:
   - {kind: enum, name: SrcOrder}
   - {kind: function, name: compute_kernel_hw_startup}
   - {kind: namespace, name: tt_emule}
-  - {kind: global, name: __rt_args}
-  - {kind: global, name: __common_rt_args}
-  - {kind: global, name: __core}
-  - {kind: global, name: __device}
   - {kind: extern_c, name: __emule_dram_ptr}
   - {kind: extern_c, name: __emule_noc_resolve}
-  - {kind: global, name: __emule_bridge_l1}
   - {kind: macro, name: __EMULE_LOCAL_L1_TO_PTR_DEFINED}
   - {kind: function, name: __emule_local_l1_to_ptr}
   - {kind: global, name: bank_to_dram_offset}
   - {kind: global, name: bank_to_l1_offset}
   - {kind: global, name: my_x}
   - {kind: global, name: my_y}
-  - {kind: global, name: __emule_logical_x}
-  - {kind: global, name: __emule_logical_y}
-  - {kind: global, name: __processor_id}
-  - {kind: global, name: __emule_neo_id}
-  - {kind: global, name: __emule_trisc_id}
-  - {kind: global, name: __emule_num_threads}
-  - {kind: global, name: __emule_my_thread_id}
   - {kind: macro, name: tt_l1_ptr}
   - {kind: macro, name: NOC_INDEX}
   - {kind: macro, name: NOC_MODE}
@@ -453,7 +435,6 @@ files:
   - {kind: function, name: llk_math_dest_section_done}
   - {kind: function, name: llk_pack_dest_section_done}
   - {kind: function, name: llk_pack_init}
-  - {kind: global, name: __emule_pack_rows_num}
   - {kind: function, name: llk_pack_rows_init}
   - {kind: function, name: llk_pack_rows_uninit}
   - {kind: function, name: _llk_pack_rows_}
@@ -551,10 +532,6 @@ files:
   summary: '`namespace sfpi`; `enum class RoundMode`/`LRegs`; TLS `__emule_sfpi_dst_base`/`__emule_sfpi_cursor`; `SFPSHFT2_*` constants (SFPU vector-API shim)'
   symbols:
   - {kind: macro, name: sfpi_inline}
-  - {kind: global, name: __EMULE_SFPI_LANES}
-  - {kind: global, name: __EMULE_SFPI_TILE_ELEMS}
-  - {kind: global, name: __emule_sfpi_dst_base}
-  - {kind: global, name: __emule_sfpi_cursor}
   - {kind: namespace, name: sfpi}
   - {kind: enum, name: RoundMode}
   - {kind: global, name: SFPSHFT2_MOD1_SUBVEC_SHFLROR1}
@@ -564,27 +541,20 @@ files:
   - {kind: fwd, name: vUInt}
   - {kind: class, name: vFloat}
   - {kind: class, name: vInt}
-  - {kind: class, name: vUInt}
   - {kind: function, name: __emule_sfpu_finalize}
   - {kind: function, name: __emule_sfpu_mad}
   - {kind: struct, name: vCond}
   - {kind: function, name: v_and}
   - {kind: function, name: v_or}
   - {kind: function, name: v_not}
-  - {kind: global, name: __emule_sfpi_mask}
-  - {kind: struct, name: __MaskFrame}
-  - {kind: global, name: __emule_sfpi_frames}
-  - {kind: global, name: __emule_sfpi_frame_depth}
   - {kind: function, name: __emule_sfpi_push_if}
   - {kind: function, name: __emule_sfpi_elseif}
   - {kind: function, name: __emule_sfpi_else}
   - {kind: function, name: __emule_sfpi_endif}
-  - {kind: global, name: __emule_sfpi_dst_fallback}
   - {kind: function, name: __emule_sfpi_active_dst}
   - {kind: class, name: DstRegLane}
   - {kind: class, name: DstReg}
   - {kind: global, name: dst_reg}
-  - {kind: global, name: __emule_lreg}
   - {kind: struct, name: LRegFile}
   - {kind: global, name: l_reg}
   - {kind: function, name: __emule_sfploadi}
@@ -615,7 +585,6 @@ files:
   - {kind: class, name: sFloat16a}
   - {kind: class, name: vFloat16b}
   - {kind: function, name: convert}
-  - {kind: global, name: __emule_prgm_creg}
   - {kind: class, name: __vCRegFloat}
   - {kind: class, name: __vCRegInt}
   - {kind: global, name: vConstFloatPrgm0}
@@ -632,6 +601,16 @@ files:
   - {kind: function, name: _sfpu_exp_}
   - {kind: function, name: _sfpu_reciprocal_}
   - {kind: function, name: _init_sfpu_reciprocal_}
+- path: include/jit_hw/sfpi_types.h
+  section: include/jit_hw/
+  summary: SFPI value type vUInt + __MaskFrame + the grouped SfpuState struct held by ComputeThreadCtx; dependency-free so the thread ctx can carry SFPU state by value.
+  symbols:
+  - {kind: global, name: __EMULE_SFPI_LANES}
+  - {kind: global, name: __EMULE_SFPI_TILE_ELEMS}
+  - {kind: namespace, name: sfpi}
+  - {kind: class, name: vUInt}
+  - {kind: struct, name: __MaskFrame}
+  - {kind: struct, name: SfpuState}
 - path: include/jit_hw/stream_io_map.h
   section: include/jit_hw/
   summary: stub of silicon stream I/O map (empty; no stream engine)
@@ -679,9 +658,6 @@ files:
   symbols:
   - {kind: global, name: my_x}
   - {kind: global, name: my_y}
-  - {kind: global, name: __emule_logical_x}
-  - {kind: global, name: __emule_logical_y}
-  - {kind: global, name: __emule_cb_self_consume_mask}
   - {kind: global, name: unpack_tile_size}
   - {kind: global, name: unpack_src_format}
   - {kind: global, name: pack_dst_format}
@@ -716,7 +692,6 @@ files:
   section: include/jit_hw/api/
   summary: '`CoreLocalMem<T, AddressType>`; `CORE_LOCAL_MEM_RAW_OFFSET_THRESHOLD`; `noc_traits_t<CoreLocalMem<>>` specialization'
   symbols:
-  - {kind: global, name: __emule_bridge_l1}
   - {kind: global, name: CORE_LOCAL_MEM_RAW_OFFSET_THRESHOLD}
   - {kind: class, name: CoreLocalMem}
   - {kind: struct, name: noc_traits_t}
@@ -738,8 +713,6 @@ files:
   section: include/jit_hw/api/
   summary: '`get_num_threads`, `get_my_thread_id`'
   symbols:
-  - {kind: global, name: __emule_num_threads}
-  - {kind: global, name: __emule_my_thread_id}
   - {kind: function, name: get_num_threads}
   - {kind: function, name: get_my_thread_id}
 - path: include/jit_hw/api/rt_arg.h
@@ -952,14 +925,6 @@ files:
   - {kind: global, name: __EMULE_DST_TILES_FP32}
   - {kind: global, name: __EMULE_TILE_ELEMS}
   - {kind: global, name: __EMULE_DST_BYTES}
-  - {kind: global, name: __emule_l1_acc_enabled}
-  - {kind: global, name: __emule_dest_accum_en}
-  - {kind: global, name: __emule_pack_relu_mode}
-  - {kind: global, name: __emule_pack_relu_threshold}
-  - {kind: global, name: __emule_pack_x_end}
-  - {kind: global, name: __emule_pack_face_r_dim}
-  - {kind: global, name: __emule_pack_num_faces}
-  - {kind: global, name: __emule_pack_num_tiles}
   - {kind: function, name: __emule_pack_subrect_active}
   - {kind: function, name: __emule_reset_pack_subrect}
   - {kind: namespace, name: p_setadc}
@@ -972,7 +937,6 @@ files:
   - {kind: macro, name: TT_SETC16}
   - {kind: function, name: _llk_pack_mop_config_}
   - {kind: function, name: __emule_apply_pack_relu}
-  - {kind: global, name: __emule_src_scratch}
   - {kind: function, name: __emule_dst_active_tiles}
   - {kind: function, name: __emule_dst_check}
   - {kind: function, name: __emule_dst_load_i32}
@@ -1035,8 +999,6 @@ files:
   summary: '`enum class DataFormat`; DST dirty/fresh tracking globals'
   symbols:
   - {kind: enum, name: DataFormat}
-  - {kind: global, name: __emule_pack_offset}
-  - {kind: global, name: __emule_dst_fresh}
   - {kind: function, name: __emule_dst_mark_dirty}
   - {kind: function, name: __emule_dst_take_fresh}
 - path: include/jit_hw/api/compute/compute_kernel_api.h
@@ -1118,8 +1080,6 @@ files:
   summary: '`ckernel::` `cumprod_tile`, `cumprod_tile_init`; TLS `__emule_cumprod_acc`/`__emule_cumprod_acc_initialized`, `__emule_cumprod_reset_acc`'
   symbols:
   - {kind: namespace, name: ckernel}
-  - {kind: global, name: __emule_cumprod_acc}
-  - {kind: global, name: __emule_cumprod_acc_initialized}
   - {kind: function, name: __emule_cumprod_reset_acc}
   - {kind: function, name: cumprod_tile_init}
   - {kind: function, name: cumprod_tile}
@@ -1128,7 +1088,6 @@ files:
   summary: '`ckernel::` `cumsum_tile`, `cumsum_tile_init`; TLS `__emule_cumsum_acc`'
   symbols:
   - {kind: namespace, name: ckernel}
-  - {kind: global, name: __emule_cumsum_acc}
   - {kind: function, name: cumsum_tile_init}
   - {kind: function, name: cumsum_tile}
 - path: include/jit_hw/api/compute/deepseek_moe_gate.h
@@ -1196,9 +1155,6 @@ files:
   summary: '`ckernel::` `ema_init`, `ema_clear_previous_output`, `ema_tile`; TLS `__emule_ema_alpha`/`__emule_ema_beta`/`__emule_ema_prev` (exponential moving average SFPU op)'
   symbols:
   - {kind: namespace, name: ckernel}
-  - {kind: global, name: __emule_ema_alpha}
-  - {kind: global, name: __emule_ema_beta}
-  - {kind: global, name: __emule_ema_prev}
   - {kind: function, name: ema_init}
   - {kind: function, name: ema_clear_previous_output}
   - {kind: function, name: ema_tile}
@@ -1344,9 +1300,6 @@ files:
   summary: '`ckernel::` `quant_tile`, `dequant_tile`, `requant_tile` (+`_init`)'
   symbols:
   - {kind: namespace, name: ckernel}
-  - {kind: global, name: __emule_quant_zero_point}
-  - {kind: global, name: __emule_requant_zero_point}
-  - {kind: global, name: __emule_dequant_zero_point}
   - {kind: function, name: quant_tile_init}
   - {kind: function, name: quant_tile}
   - {kind: function, name: requant_tile_init}
@@ -1483,8 +1436,6 @@ files:
   summary: '`ckernel::` `welford_init`, `welford_reinit`, `welford_clear`; TLS `__emule_welford_mean`/`__emule_welford_m2`/`__emule_welford_count`, `__emule_welford_clear`'
   symbols:
   - {kind: namespace, name: ckernel}
-  - {kind: global, name: __emule_welford_mean}
-  - {kind: global, name: __emule_welford_m2}
   - {kind: global, name: __EMULE_WELFORD_MAX_GROUPS}
   - {kind: function, name: __emule_welford_clear}
   - {kind: enum, name: WelfordInitMode}
@@ -1665,7 +1616,6 @@ files:
   summary: '`ckernel::` `dropout_tile`, `dropout_kernel_init`; TLS `__emule_dropout_rng_state`, `__emule_dropout_next` (xorshift32)'
   symbols:
   - {kind: namespace, name: ckernel}
-  - {kind: global, name: __emule_dropout_rng_state}
   - {kind: function, name: __emule_dropout_next}
   - {kind: function, name: dropout_kernel_init}
   - {kind: function, name: dropout_tile}
@@ -2144,14 +2094,7 @@ files:
   - {kind: function, name: noc_async_write}
   - {kind: function, name: noc_async_read_one_packet}
   - {kind: function, name: noc_async_write_one_packet}
-  - {kind: global, name: __emule_one_packet_state_size}
-  - {kind: namespace, name: __emule_noc_trid_state}
-  - {kind: global, name: shard_noc_addr_base}
-  - {kind: global, name: shard_size}
-  - {kind: global, name: shard_vc}
   - {kind: function, name: noc_async_read_one_packet_with_state}
-  - {kind: global, name: __emule_write_one_packet_state_dst}
-  - {kind: global, name: __emule_write_one_packet_state_size}
   - {kind: function, name: noc_async_write_one_packet_set_state}
   - {kind: function, name: noc_async_write_one_packet_with_state}
   - {kind: function, name: noc_async_write_multicast}
@@ -2199,8 +2142,6 @@ files:
   - {kind: function, name: get_dram_noc_addr}
   - {kind: function, name: get_l1_noc_addr}
   - {kind: function, name: dram_barrier}
-  - {kind: struct, name: __emule_dw_state}
-  - {kind: global, name: __emule_dw_st}
   - {kind: function, name: __emule_dw_write_be}
   - {kind: function, name: noc_inline_dw_write}
   - {kind: function, name: noc_inline_mcast_dw_write}
@@ -2251,8 +2192,6 @@ files:
   - {kind: enum, name: NocOptions}
   - {kind: function, name: has_flag}
   - {kind: struct, name: NocOptVals}
-  - {kind: global, name: __emule_noc_cached_size}
-  - {kind: global, name: __emule_noc_cached_write_dst}
   - {kind: class, name: Noc}
 - path: include/jit_hw/api/dataflow/noc_semaphore.h
   section: include/jit_hw/api/dataflow/
@@ -2260,7 +2199,6 @@ files:
     ProgrammableCoreType` (guarded — may also be defined in `dataflow_api.h`)'
   symbols:
   - {kind: extern_c, name: __emule_resolve_noc_addr}
-  - {kind: global, name: __emule_bridge_l1}
   - {kind: macro, name: PROGRAMMABLE_CORE_TYPE_DEFINED}
   - {kind: enum, name: ProgrammableCoreType}
   - {kind: class, name: Semaphore}
@@ -2360,8 +2298,6 @@ files:
     `__emule_cb_base16`/`__emule_cb_span16`. Geometry comes from the shared `CBSyncState`; `occupied` there stays the cross-RISC semaphore.'
   symbols:
   - {kind: global, name: cb_addr_shift}
-  - {kind: struct, name: LocalCBInterface}
-  - {kind: global, name: __emule_local_cb}
   - {kind: function, name: __emule_cb_base16}
   - {kind: function, name: __emule_cb_span16}
   - {kind: function, name: __emule_cb_view_init}
@@ -2370,6 +2306,34 @@ files:
   - {kind: function, name: __emule_cb_rd_addr}
   - {kind: function, name: __emule_cb_advance_wr}
   - {kind: function, name: __emule_cb_advance_rd}
+- path: include/jit_hw/internal/emule_core_state.h
+  section: include/jit_hw/internal/
+  summary: Per-core CoreState (logical coords); minimal dependency-free header so device.hpp/umd embeds it without parsing the kernel-only thread ctx.
+  symbols:
+  - {kind: namespace, name: tt_emule}
+  - {kind: struct, name: CoreState}
+- path: include/jit_hw/internal/emule_thread_ctx.h
+  section: include/jit_hw/internal/
+  summary: 'Per-thread (per-RISC) execution context: ThreadCommonCtx base + ComputeThreadCtx/DatamovementThreadCtx, the __emule_self pointer, and the typed accessors.'
+  symbols:
+  - {kind: namespace, name: tt_emule}
+  - {kind: fwd, name: Core}
+  - {kind: fwd, name: Device}
+  - {kind: fwd, name: CBSyncState}
+  - {kind: fwd, name: EmuleDFBInterface}
+  - {kind: fwd, name: TileCounterArray}
+  - {kind: struct, name: LocalCBInterface}
+  - {kind: global, name: __EMULE_CTX_MAX_CBS}
+  - {kind: struct, name: __emule_dw_state}
+  - {kind: struct, name: __emule_matmul_bridge}
+  - {kind: enum, name: ReluType}
+  - {kind: struct, name: ThreadCommonCtx}
+  - {kind: struct, name: ComputeThreadCtx}
+  - {kind: struct, name: DatamovementThreadCtx}
+  - {kind: global, name: __emule_self}
+  - {kind: macro, name: ASSERT}
+  - {kind: function, name: __emule_compute_ctx}
+  - {kind: function, name: __emule_datamovement_ctx}
 - path: include/jit_hw/internal/firmware_common.h
   section: include/jit_hw/internal/
   summary: '`WAYPOINT` macro; cache-op stubs'
@@ -2390,15 +2354,6 @@ files:
   - {kind: function, name: get_output_narrow_tile}
   - {kind: function, name: get_output_face_r_dim}
   - {kind: function, name: get_output_num_faces}
-  - {kind: global, name: __llk_unpack_src_cb}
-  - {kind: global, name: __llk_unpack_start_tile_idx}
-  - {kind: global, name: __llk_unpack_block_c}
-  - {kind: global, name: __llk_unpack_current_tile}
-  - {kind: global, name: __llk_unpack_is_tilize}
-  - {kind: global, name: __llk_pack_offset}
-  - {kind: global, name: __llk_pack_is_untilize}
-  - {kind: global, name: __llk_pack_block_c}
-  - {kind: global, name: __llk_matmul_transpose}
 - path: include/jit_hw/internal/mod_div_lib.h
   section: include/jit_hw/internal/
   summary: '`mulsi3`; `fast_udiv_<N>` for N = 7, 12, 20, 48, 56, 63, 70, 72, 80, 94, 108, 110, 117, 120, 124, 126, 130, 140'
@@ -2507,8 +2462,6 @@ files:
   - {kind: enum, name: ReduceDim}
   - {kind: global, name: MM_THROTTLE}
   - {kind: macro, name: MATH_FIDELITY}
-  - {kind: struct, name: __emule_matmul_bridge}
-  - {kind: global, name: __emule_matmul_state}
   - {kind: function, name: state_configure}
   - {kind: function, name: llk_math_matmul_init}
   - {kind: function, name: llk_unpack_AB_matmul_init}

@@ -6,10 +6,10 @@
 // existing `#include "api/compute/common.h"` callers continue to see the
 // symbols.
 //
-// Dependencies: __emule_dst (thread_local DST tile array),
+// Dependencies: __emule_compute_ctx().dst (thread_local DST tile array),
 // __EMULE_TILE_ELEMS, and __emule_dst_active_tiles() must be visible at
 // the point of inclusion. They live in common.h; reg_api.h is included
-// by common.h after those definitions are in scope. The __emule_dst_fresh[]
+// by common.h after those definitions are in scope. The __emule_compute_ctx().dst_fresh[]
 // flag array is pulled in via common_globals.h.
 
 #include "jit_hw/api/compute/common_globals.h"
@@ -29,8 +29,8 @@ ALWI void tile_regs_acquire() {
     // first use rather than max-accumulate against the zero-init.
     uint32_t active = __emule_dst_active_tiles();
     for (uint32_t s = 0; s < active; s++) {
-        std::memset(__emule_dst[s], 0, sizeof(__emule_dst[s]));
-        __emule_dst_fresh[s] = true;
+        std::memset(__emule_compute_ctx().dst[s], 0, sizeof(__emule_compute_ctx().dst[s]));
+        __emule_compute_ctx().dst_fresh[s] = true;
     }
 }
 ALWI void tile_regs_commit()  {}

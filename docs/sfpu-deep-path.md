@@ -36,17 +36,22 @@ Two consequences make the deep path pure-header:
 
 A real `_calculate_<op>_` iterates `for (d<iters) { v=dst_reg[0]; …; dst_reg[0]=…; dst_reg++; }`
 over 32-lane windows of the DST tile. emule models each `vFloat`/`vInt`/`vUInt`
-as a 32-lane `std::array` and steps a thread-local cursor.
+as a 32-lane `std::array` and steps a per-thread cursor. All sfpi state — the DST
+window (`dst_base` + `cursor`), the predication mask + frame stack, the LReg file,
+and the programmable const regs — is grouped into one struct, `sfpi::SfpuState`
+(`include/jit_hw/sfpi_types.h`), held by `ComputeThreadCtx` and reached via
+`__emule_compute_ctx().sfpu` (the per-thread state tier — see
+[state-tiers.md](state-tiers.md)).
 
 Load-bearing semantics (validated against silicon behavior):
 
 - **Lane-masked register assignment** — `vFloat`/`vInt`/`vUInt` `operator=` blends
-  against the active `v_if` lane mask (`__emule_sfpi_mask`). On silicon an sfpi
+  against the active `v_if` lane mask (`SfpuState::mask`). On silicon an sfpi
   local *is* a register, so a write inside `v_if(...)` only updates active lanes
   (e.g. sqrt's final `v_if(x<0){ y=NaN; }` must not touch positive lanes). This is
   the substance of the old `TODO(#102)`.
 - **Programmable constants** — `vConstFloatPrgm0..2` / `vConstIntPrgm0..2` alias the
-  same three slots (`__emule_prgm_creg[3]`); set in an op's `_init_`, read in its
+  same three slots (`SfpuState::prgm_creg`); set in an op's `_init_`, read in its
   `_calculate_`.
 - **`int32_to_float` is sign-magnitude** (SFPCAST IntFloat), not two's-complement —
   callers pass sign-magnitude (e.g. `setsgn(~exp+1, 1)` in log).
@@ -88,7 +93,8 @@ var is the tt-metal sister change (PR tenstorrent/tt-metal#46945).
 Each shadowed op's `eltwise_unary/<op>.h` carries a guarded branch whose
 *else*-branch is the untouched layer-1 default; the deep branch delegates to the
 real silicon calculate via `__emule_deep::run_unary_sfpu` (`internal/deep_sfpu.h`),
-which points the sfpi cursor at `__emule_dst[idst]` for the call. Policy lives in
+which points the sfpi window (`SfpuState::dst_base`) at `__emule_compute_ctx().dst[idst]`
+for the call. Policy lives in
 `api/compute/eltwise_unary/deep_sfpu_registry.h`. Ops with **no** shadow are
 intended to engage the deep path automatically (deep arm of
 `sfpu_split_includes.h` — not yet wired; the per-op override above is the
@@ -108,7 +114,7 @@ coefficient bit-patterns into LRegs via `SFPLOADI` (through
 `lut()` (3-entry `SFPLUT`) / `lut2()` (6-entry `SFPLUTFP32`) which read those
 LRegs. Emule provides:
 
-- `sfpi.h`: `l_reg[LRegN]` backed by 32-lane `vUInt __emule_lreg[16]`, the
+- `sfpi.h`: `l_reg[LRegN]` backed by the 32-lane `vUInt SfpuState::lreg[16]`, the
   `__emule_sfploadi` writer, and faithful `lut`/`lut2` evaluators
   (`__lut8_to_fp32` / `__lut16_to_fp32` decoders, `Abs(x)` range buckets, and
   `VD = a·Abs(x) + c` with sign-retain) — exact per tt-isa-documentation.

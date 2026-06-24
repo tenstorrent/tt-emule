@@ -22,8 +22,8 @@ ALWI void logsigmoid_tile(uint32_t idst_in0, uint32_t idst_in1, uint32_t idst_ou
     __emule_dst_check(idst_out, "logsigmoid_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
         // idst_in1 already holds exp(-x) per the upstream binary-SFPU contract.
-        float exp_neg_x = __emule_dst[idst_in1][i];
-        __emule_dst[idst_out][i] = -std::log1p(exp_neg_x);
+        float exp_neg_x = __emule_compute_ctx().dst[idst_in1][i];
+        __emule_compute_ctx().dst[idst_out][i] = -std::log1p(exp_neg_x);
     }
 }
 

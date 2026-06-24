@@ -61,19 +61,22 @@ without taking the lock.
 
 On silicon each RISC (DMR / DMW / Tensix) owns its **own** per-CB read and write
 pointer registers — a `push_back` on the writer RISC advances only *that* RISC's
-write pointer. Emule models this in
-[`include/jit_hw/internal/emule_cb_ptr.h`](../include/jit_hw/internal/emule_cb_ptr.h):
+write pointer. Emule models this with a per-CB `LocalCBInterface` ring-pointer
+array that lives in the per-thread state tier — `ThreadCommonCtx::local_cb[]`
+(in [`include/jit_hw/internal/emule_thread_ctx.h`](../include/jit_hw/internal/emule_thread_ctx.h),
+the shared base because a CB's producer and consumer are often different RISC
+roles; see [state-tiers.md](state-tiers.md)). The accessors in
+[`include/jit_hw/internal/emule_cb_ptr.h`](../include/jit_hw/internal/emule_cb_ptr.h)
+reach it through the context:
 
 ```cpp
-inline thread_local LocalCBInterface __emule_local_cb[NUM_CIRCULAR_BUFFERS]{};
+// __emule_self->local_cb[cb] — one LocalCBInterface per CB, per RISC thread
 ```
 
-a per-thread (= per-RISC, since each kernel runs on its own host thread) copy of
-silicon's `LocalCBInterface` register file. `__emule_cb_{wr,rd}_addr(cb, off)` and
-`__emule_cb_advance_{wr,rd}(cb, n)` read/advance *this thread's* `fifo_{wr,rd}_ptr`
-(geometry — base / page_size / ring wrap — still comes from the shared
-`CBSyncState`). `thread_local` zero-initialises per launch, mirroring silicon's
-per-RISC register reset at kernel start.
+`__emule_cb_{wr,rd}_addr(cb, off)` and `__emule_cb_advance_{wr,rd}(cb, n)`
+read/advance *this thread's* `fifo_{wr,rd}_ptr` (geometry — base / page_size /
+ring wrap — still comes from the shared `CBSyncState`). The context is allocated
+fresh per launch, mirroring silicon's per-RISC register reset at kernel start.
 
 ---
 
@@ -108,7 +111,7 @@ A header-only `tt_emule::CircularBuffer` wrapper in
 `include/tt_emule/circular_buffer.hpp` still exists from the pre-integration era
 when emule shipped a standalone test harness; it owns its own storage around a
 `CBSyncState` plus its own read/write indices (it is single-threaded, so it does
-not use the per-RISC `__emule_local_cb` path). It is no longer exercised by the
+not use the per-RISC `local_cb` path of §2b). It is no longer exercised by the
 regression suite — the JIT-compiled path drives `Core::cb_sync_states_[]` directly.
 
 ---

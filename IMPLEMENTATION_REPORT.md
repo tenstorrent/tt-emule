@@ -59,6 +59,9 @@ focused reference; start here and follow the links.
   dividend); generic RISC-V semantics, not Quasar-specific.
 
 **Integration & build**
+- [state-tiers.md](docs/state-tiers.md) — how mutable state is partitioned into
+  per-chip / per-core / per-thread tiers; the per-thread execution context
+  (`__emule_self` → `ComputeThreadCtx` / `DatamovementThreadCtx`) and `CoreState`.
 - [metal-integration.md](docs/metal-integration.md) — how emule injects into
   tt-metal (UMD chip, runtime activation, JIT runner, guards).
 - [BUILD_GUIDE.md](BUILD_GUIDE.md) / [GETTING_STARTED.md](GETTING_STARTED.md) —

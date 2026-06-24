@@ -22,34 +22,34 @@ ALWI void round_tile(uint32_t idst, int32_t decimals) {
     __emule_dst_check(idst, "round_tile");
     float scale = std::pow(10.0f, (float)decimals);
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
-        __emule_dst[idst][i] = std::nearbyint(x * scale) / scale;
+        float x = __emule_compute_ctx().dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = std::nearbyint(x * scale) / scale;
     }
 }
 
 ALWI void trunc_tile(uint32_t idst) {
     __emule_dst_check(idst, "trunc_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::trunc(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::trunc(__emule_compute_ctx().dst[idst][i]);
 }
 
 ALWI void ceil_tile(uint32_t idst) {
     __emule_dst_check(idst, "ceil_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::ceil(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::ceil(__emule_compute_ctx().dst[idst][i]);
 }
 
 ALWI void floor_tile(uint32_t idst) {
     __emule_dst_check(idst, "floor_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::floor(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::floor(__emule_compute_ctx().dst[idst][i]);
 }
 
 ALWI void frac_tile(uint32_t idst) {
     __emule_dst_check(idst, "frac_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
-        __emule_dst[idst][i] = x - std::trunc(x);
+        float x = __emule_compute_ctx().dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = x - std::trunc(x);
     }
 }
 

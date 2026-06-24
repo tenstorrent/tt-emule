@@ -23,9 +23,9 @@
 #include <sched.h>
 #include <unistd.h>
 #include "jit_hw/api/dataflow/noc.h"
+#include "jit_hw/internal/emule_thread_ctx.h"
 
 extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
-extern thread_local uint8_t* __emule_bridge_l1;
 
 // ---- ProgrammableCoreType stub ----
 // Normally defined in tt-metal arch headers. In emulation all cores are
@@ -51,7 +51,7 @@ public:
     explicit Semaphore(uint32_t semaphore_id)
         : local_l1_addr_(get_semaphore(semaphore_id)) {
         l1_offset_ = static_cast<uint32_t>(
-            local_l1_addr_ - reinterpret_cast<uintptr_t>(__emule_bridge_l1));
+            local_l1_addr_ - reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
     }
 
     // ---- Local operations ----

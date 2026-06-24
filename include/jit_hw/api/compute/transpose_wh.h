@@ -23,8 +23,8 @@ inline void transpose_wh_tile(uint32_t icb, uint32_t itile, uint32_t dst_idx) {
     float temp[1024];
     for (uint32_t r = 0; r < 32; r++)
         for (uint32_t c = 0; c < 32; c++)
-            temp[c * 32 + r] = __emule_dst[dst_idx][r * 32 + c];
-    std::memcpy(__emule_dst[dst_idx], temp, sizeof(temp));
+            temp[c * 32 + r] = __emule_compute_ctx().dst[dst_idx][r * 32 + c];
+    std::memcpy(__emule_compute_ctx().dst[dst_idx], temp, sizeof(temp));
 }
 
 }  // namespace ckernel

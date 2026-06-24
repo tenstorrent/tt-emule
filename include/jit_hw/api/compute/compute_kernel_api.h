@@ -35,8 +35,8 @@ ALWI void square_tile_init() {}
 ALWI void square_tile(uint32_t idst) {
     __emule_dst_check(idst, "square_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
-        __emule_dst[idst][i] = x * x;
+        float x = __emule_compute_ctx().dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = x * x;
     }
 }
 
@@ -45,7 +45,7 @@ ALWI void exp2_tile_init() {}
 ALWI void exp2_tile(uint32_t idst) {
     __emule_dst_check(idst, "exp2_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::exp2(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::exp2(__emule_compute_ctx().dst[idst][i]);
 }
 
 // --- expm1 (e^x - 1) ---
@@ -53,7 +53,7 @@ ALWI void expm1_tile_init() {}
 ALWI void expm1_tile(uint32_t idst) {
     __emule_dst_check(idst, "expm1_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::expm1(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::expm1(__emule_compute_ctx().dst[idst][i]);
 }
 
 // --- log ---
@@ -63,7 +63,7 @@ template <bool fast_and_approx = false>
 ALWI void log_tile(uint32_t idst) {
     __emule_dst_check(idst, "log_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::log(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::log(__emule_compute_ctx().dst[idst][i]);
 }
 
 // --- power (x^exponent_packed_float) ---
@@ -79,7 +79,7 @@ ALWI void power_tile(uint32_t idst, uint32_t exponent_packed = 0) {
     float exponent;
     std::memcpy(&exponent, &exponent_packed, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::pow(__emule_dst[idst][i], exponent);
+        __emule_compute_ctx().dst[idst][i] = std::pow(__emule_compute_ctx().dst[idst][i], exponent);
 }
 
 // --- sigmoid (1 / (1 + e^-x)) ---
@@ -89,8 +89,8 @@ template <VectorMode vector_mode = VectorMode::RC, uint32_t sigmoid_mode = 0>
 ALWI void sigmoid_tile(uint32_t idst) {
     __emule_dst_check(idst, "sigmoid_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
-        __emule_dst[idst][i] = 1.0f / (1.0f + std::exp(-x));
+        float x = __emule_compute_ctx().dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = 1.0f / (1.0f + std::exp(-x));
     }
 }
 
@@ -99,8 +99,8 @@ ALWI void sign_tile_init() {}
 ALWI void sign_tile(uint32_t idst) {
     __emule_dst_check(idst, "sign_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
-        __emule_dst[idst][i] = (x > 0.0f) - (x < 0.0f);
+        float x = __emule_compute_ctx().dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = (x > 0.0f) - (x < 0.0f);
     }
 }
 
@@ -112,10 +112,10 @@ ALWI void heaviside_tile(uint32_t idst, uint32_t param0) {
     float value;
     std::memcpy(&value, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
-        if (x < 0.0f) { __emule_dst[idst][i] = 0.0f; }
-        else if (x > 0.0f) { __emule_dst[idst][i] = 1.0f; }
-        else { __emule_dst[idst][i] = value; }
+        float x = __emule_compute_ctx().dst[idst][i];
+        if (x < 0.0f) { __emule_compute_ctx().dst[idst][i] = 0.0f; }
+        else if (x > 0.0f) { __emule_compute_ctx().dst[idst][i] = 1.0f; }
+        else { __emule_compute_ctx().dst[idst][i] = value; }
     }
 }
 
@@ -124,7 +124,7 @@ ALWI void signbit_tile_init() {}
 ALWI void signbit_tile(uint32_t idst) {
     __emule_dst_check(idst, "signbit_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::signbit(__emule_dst[idst][i]) ? 1.0f : 0.0f;
+        __emule_compute_ctx().dst[idst][i] = std::signbit(__emule_compute_ctx().dst[idst][i]) ? 1.0f : 0.0f;
 }
 
 // --- signbit int32 (1 if value negative, else 0) ---
@@ -146,7 +146,7 @@ ALWI void log_with_base_tile(uint32_t idst, uint32_t base_scale) {
     float scale;
     std::memcpy(&scale, &base_scale, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::log(__emule_dst[idst][i]) * scale;
+        __emule_compute_ctx().dst[idst][i] = std::log(__emule_compute_ctx().dst[idst][i]) * scale;
 }
 
 // --- power_iterative (x^n, n a non-negative integer via iterative multiply) ---
@@ -154,10 +154,10 @@ ALWI void power_iterative_tile_init() {}
 ALWI void power_iterative_tile(uint32_t idst, uint32_t param0) {
     __emule_dst_check(idst, "power_iterative_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
+        float x = __emule_compute_ctx().dst[idst][i];
         float result = 1.0f;
         for (uint32_t k = 0; k < param0; k++) result *= x;
-        __emule_dst[idst][i] = result;
+        __emule_compute_ctx().dst[idst][i] = result;
     }
 }
 
@@ -168,8 +168,8 @@ ALWI void tiled_prod_tile(uint32_t idst) {
     __emule_dst_check(idst, "tiled_prod_tile");
     float result = 1.0f;
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        result *= __emule_dst[idst][i];
-        __emule_dst[idst][i] = result;
+        result *= __emule_compute_ctx().dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = result;
     }
 }
 
@@ -180,7 +180,7 @@ ALWI void unary_max_tile(uint32_t idst, uint32_t param0) {
     float val;
     std::memcpy(&val, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::max(__emule_dst[idst][i], val);
+        __emule_compute_ctx().dst[idst][i] = std::max(__emule_compute_ctx().dst[idst][i], val);
 }
 
 ALWI void unary_min_tile_init() {}
@@ -189,7 +189,7 @@ ALWI void unary_min_tile(uint32_t idst, uint32_t param0) {
     float val;
     std::memcpy(&val, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::min(__emule_dst[idst][i], val);
+        __emule_compute_ctx().dst[idst][i] = std::min(__emule_compute_ctx().dst[idst][i], val);
 }
 
 // --- unary_max / unary_min (int32, param0 is the int32 value) ---
@@ -235,10 +235,10 @@ ALWI void alt_complex_rotate90_tile(uint32_t idst) {
     __emule_dst_check(idst, "alt_complex_rotate90_tile");
     for (uint32_t base = 0; base < __EMULE_TILE_ELEMS; base += 64) {
         for (uint32_t j = 0; j < 32; j++) {
-            float a = __emule_dst[idst][base + j];
-            float b = __emule_dst[idst][base + 32 + j];
-            __emule_dst[idst][base + j] = -b;
-            __emule_dst[idst][base + 32 + j] = a;
+            float a = __emule_compute_ctx().dst[idst][base + j];
+            float b = __emule_compute_ctx().dst[idst][base + 32 + j];
+            __emule_compute_ctx().dst[idst][base + j] = -b;
+            __emule_compute_ctx().dst[idst][base + 32 + j] = a;
         }
     }
 }
@@ -248,8 +248,8 @@ ALWI void silu_tile_init() {}
 ALWI void silu_tile(uint32_t idst) {
     __emule_dst_check(idst, "silu_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
-        __emule_dst[idst][i] = x / (1.0f + std::exp(-x));
+        float x = __emule_compute_ctx().dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = x / (1.0f + std::exp(-x));
     }
 }
 // Upstream routes the same SFPU LLK on the PACK thread to overlap activation
@@ -288,20 +288,20 @@ namespace __emule_topk {
 // Sort the 64 datums of column `c` from tiles A (idst) ∪ B (idst+1) (+ index
 // tiles idst+2/idst+3), top-32 → A, bottom-32 → B. `descending` = largest-first.
 inline void merge_split_col(uint32_t idst, uint32_t c, bool descending) {
-    uint32_t* idxA = reinterpret_cast<uint32_t*>(&__emule_dst[idst + 2][0]);
-    uint32_t* idxB = reinterpret_cast<uint32_t*>(&__emule_dst[idst + 3][0]);
+    uint32_t* idxA = reinterpret_cast<uint32_t*>(&__emule_compute_ctx().dst[idst + 2][0]);
+    uint32_t* idxB = reinterpret_cast<uint32_t*>(&__emule_compute_ctx().dst[idst + 3][0]);
     std::pair<float, uint32_t> tmp[64];
     for (uint32_t r = 0; r < 32; ++r) {
-        tmp[r]      = {__emule_dst[idst][r * 32 + c],     idxA[r * 32 + c]};
-        tmp[32 + r] = {__emule_dst[idst + 1][r * 32 + c], idxB[r * 32 + c]};
+        tmp[r]      = {__emule_compute_ctx().dst[idst][r * 32 + c],     idxA[r * 32 + c]};
+        tmp[32 + r] = {__emule_compute_ctx().dst[idst + 1][r * 32 + c], idxB[r * 32 + c]};
     }
     std::stable_sort(tmp, tmp + 64, [descending](const auto& x, const auto& y) {
         return descending ? (x.first > y.first) : (x.first < y.first);
     });
     for (uint32_t r = 0; r < 32; ++r) {
-        __emule_dst[idst][r * 32 + c]     = tmp[r].first;
+        __emule_compute_ctx().dst[idst][r * 32 + c]     = tmp[r].first;
         idxA[r * 32 + c]                  = tmp[r].second;
-        __emule_dst[idst + 1][r * 32 + c] = tmp[32 + r].first;
+        __emule_compute_ctx().dst[idst + 1][r * 32 + c] = tmp[32 + r].first;
         idxB[r * 32 + c]                  = tmp[32 + r].second;
     }
 }
@@ -309,14 +309,14 @@ inline void merge_split_col(uint32_t idst, uint32_t c, bool descending) {
 // Sort the 32 datums of a SINGLE value tile (idst) + index tile (idst+2) along
 // column `c`. `descending` selects largest-first.
 inline void sort_col(uint32_t idst, uint32_t c, bool descending) {
-    uint32_t* idx = reinterpret_cast<uint32_t*>(&__emule_dst[idst + 2][0]);
+    uint32_t* idx = reinterpret_cast<uint32_t*>(&__emule_compute_ctx().dst[idst + 2][0]);
     std::pair<float, uint32_t> tmp[32];
-    for (uint32_t r = 0; r < 32; ++r) tmp[r] = {__emule_dst[idst][r * 32 + c], idx[r * 32 + c]};
+    for (uint32_t r = 0; r < 32; ++r) tmp[r] = {__emule_compute_ctx().dst[idst][r * 32 + c], idx[r * 32 + c]};
     std::stable_sort(tmp, tmp + 32, [descending](const auto& x, const auto& y) {
         return descending ? (x.first > y.first) : (x.first < y.first);
     });
     for (uint32_t r = 0; r < 32; ++r) {
-        __emule_dst[idst][r * 32 + c] = tmp[r].first;
+        __emule_compute_ctx().dst[idst][r * 32 + c] = tmp[r].first;
         idx[r * 32 + c]               = tmp[r].second;
     }
 }

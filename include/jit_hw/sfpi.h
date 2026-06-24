@@ -15,8 +15,8 @@
 // dst_reg is the most subtle part: silicon's `sfpi::dst_reg[k]` is a
 // per-lane reference into a 32-lane slice of the DST tile; `dst_reg++`
 // advances the implicit "current slice" by one 32-lane group. emule
-// emulates this with a thread-local cursor (`__emule_sfpi_cursor`)
-// indexing into `__emule_dst[__emule_sfpi_idst][cursor..cursor+32]`.
+// emulates this with a per-thread cursor (`SfpuState::cursor`) indexing into
+// the active DST tile (`SfpuState::dst_base`), reached via __emule_compute_ctx().
 //
 // Iteration pattern (matches upstream sfpu kernels like calculate_clamped_silu_gate):
 //   for (d = 0; d < ITERATIONS; d++) {
@@ -50,21 +50,12 @@
 #define sfpi_inline inline
 #endif
 
-// `__emule_dst` is defined in api/compute/common.h as `static thread_local`
-// (one copy per TU). emule's JIT model is single-TU per kernel, so accessing
-// it from this header inside a TU that also includes common.h works — but
-// sfpi.h is sometimes included BEFORE common.h. Workaround: declare a
-// thread-local cursor pointer that callers (or common.h) set to
-// &__emule_dst[idst][0]. The DstReg accessors use this pointer.
-static constexpr uint32_t __EMULE_SFPI_LANES = 32;
-static constexpr uint32_t __EMULE_SFPI_TILE_ELEMS = 1024;
-
-// Pointer to the active DST tile's elements (set on tile_regs_acquire/wait
-// boundaries, or implicitly by `__emule_sfpi_set_idst()`). Null until set.
-inline thread_local float* __emule_sfpi_dst_base = nullptr;
-// 32-lane window cursor: which 32-element slice of the active DST tile
-// the next sfpi::dst_reg[k] load/store will hit.
-inline thread_local uint32_t __emule_sfpi_cursor = 0;
+// All SFPU/sfpi per-thread state — the active-DST window (base + 32-lane cursor),
+// the predication mask stack, the LReg file, and the programmable const regs — is
+// grouped into one struct (sfpi::SfpuState) held by ComputeThreadCtx and reached
+// via __emule_compute_ctx().sfpu. __EMULE_SFPI_LANES / __EMULE_SFPI_TILE_ELEMS and
+// the vUInt / __MaskFrame types are defined in sfpi_types.h (pulled in here).
+#include "jit_hw/internal/emule_thread_ctx.h"
 
 namespace sfpi {
 
@@ -89,7 +80,7 @@ inline constexpr uint32_t SFPSHFT2_MOD1_SUBVEC_SHFLROR1 = 0;
 enum class LRegs : uint8_t {
     LReg0 = 0, LReg1 = 1, LReg2 = 2, LReg3 = 3,
     LReg4 = 4, LReg5 = 5, LReg6 = 6, LReg7 = 7,
-    // LReg8..15 back the full SFPU register file (storage is __emule_lreg[16]);
+    // LReg8..15 back the full SFPU register file (storage is SfpuState::lreg[16]);
     // LReg11..14 are the programmable-constant slots (also exposed as the
     // vConstFloatPrgm*/vConstIntPrgm* views).
     LReg8 = 8, LReg9 = 9, LReg10 = 10, LReg11 = 11,
@@ -115,7 +106,7 @@ public:
 
     // Lane-masked copy assignment: an sfpi local is a register, so a write
     // inside v_if(...) updates only active lanes. Defined out-of-line below
-    // (__emule_sfpi_mask is declared later in this header).
+    // (reads SfpuState::mask via __emule_compute_ctx()).
     vFloat(const vFloat&) = default;
     vFloat& operator=(const vFloat& o);
 
@@ -140,16 +131,8 @@ public:
     vInt& operator|=(const vInt& o) { for (uint32_t i = 0; i < 32; ++i) v[i] |= o.v[i]; return *this; }
 };
 
-class vUInt {
-public:
-    std::array<uint32_t, __EMULE_SFPI_LANES> v{};
-    constexpr vUInt() = default;
-    constexpr vUInt(uint32_t x) { for (auto& lane : v) lane = x; }
-    constexpr vUInt(int32_t x) { for (auto& lane : v) lane = static_cast<uint32_t>(x); }
-    // Lane-masked copy assignment (see vFloat note).
-    vUInt(const vUInt&) = default;
-    vUInt& operator=(const vUInt& o);
-};
+// vUInt is defined in sfpi_types.h (it backs SfpuState::lreg); its lane-masked
+// operator= is defined below, after __emule_compute_ctx() is visible.
 
 // ---- Fidelity knob: centralized SFPU result finalization ----
 //
@@ -220,68 +203,55 @@ inline vCond v_or(const vCond& a, const vCond& b) { vCond r; for (uint32_t i = 0
 inline vCond v_not(const vCond& a) { vCond r; for (uint32_t i = 0; i < 32; ++i) r.mask[i] = !a.mask[i]; return r; }
 
 // ---- Predication stack (v_if / v_elseif / v_else / v_endif) ----
-
-// Active lane mask — initially all-true. v_if pushes a new mask = (current AND cond).
-inline thread_local std::array<bool, __EMULE_SFPI_LANES> __emule_sfpi_mask = {
-    true, true, true, true, true, true, true, true,
-    true, true, true, true, true, true, true, true,
-    true, true, true, true, true, true, true, true,
-    true, true, true, true, true, true, true, true,
-};
-
-struct __MaskFrame {
-    std::array<bool, __EMULE_SFPI_LANES> outer;   // outer scope mask
-    std::array<bool, __EMULE_SFPI_LANES> taken;   // OR of all branch conds matched so far
-};
-
-inline thread_local __MaskFrame __emule_sfpi_frames[16];
-inline thread_local int __emule_sfpi_frame_depth = 0;
+// The active lane mask + frame stack live in SfpuState (mask defaults all-true).
 
 inline void __emule_sfpi_push_if(const vCond& c) {
-    auto& f = __emule_sfpi_frames[__emule_sfpi_frame_depth++];
-    f.outer = __emule_sfpi_mask;
+    auto& sfpu = __emule_compute_ctx().sfpu;
+    auto& f = sfpu.frames[sfpu.frame_depth++];
+    f.outer = sfpu.mask;
     for (uint32_t i = 0; i < 32; ++i) {
         f.taken[i] = c.mask[i];
-        __emule_sfpi_mask[i] = f.outer[i] && c.mask[i];
+        sfpu.mask[i] = f.outer[i] && c.mask[i];
     }
 }
 
 inline void __emule_sfpi_elseif(const vCond& c) {
-    auto& f = __emule_sfpi_frames[__emule_sfpi_frame_depth - 1];
+    auto& sfpu = __emule_compute_ctx().sfpu;
+    auto& f = sfpu.frames[sfpu.frame_depth - 1];
     for (uint32_t i = 0; i < 32; ++i) {
         bool fresh = c.mask[i] && !f.taken[i];
-        __emule_sfpi_mask[i] = f.outer[i] && fresh;
+        sfpu.mask[i] = f.outer[i] && fresh;
         f.taken[i] = f.taken[i] || c.mask[i];
     }
 }
 
 inline void __emule_sfpi_else() {
-    auto& f = __emule_sfpi_frames[__emule_sfpi_frame_depth - 1];
+    auto& sfpu = __emule_compute_ctx().sfpu;
+    auto& f = sfpu.frames[sfpu.frame_depth - 1];
     for (uint32_t i = 0; i < 32; ++i) {
-        __emule_sfpi_mask[i] = f.outer[i] && !f.taken[i];
+        sfpu.mask[i] = f.outer[i] && !f.taken[i];
     }
 }
 
 inline void __emule_sfpi_endif() {
-    auto& f = __emule_sfpi_frames[--__emule_sfpi_frame_depth];
-    __emule_sfpi_mask = f.outer;
+    auto& sfpu = __emule_compute_ctx().sfpu;
+    auto& f = sfpu.frames[--sfpu.frame_depth];
+    sfpu.mask = f.outer;
 }
 
-// ---- dst_reg: thread-local cursor into __emule_sfpi_dst_base ----
+// ---- dst_reg: window into SfpuState::dst_base ----
 //
-// __emule_sfpi_dst_base points to the active DST tile's element-0;
-// __emule_sfpi_cursor is the 32-lane window offset (advanced by dst_reg++).
-// If callers forget to set the base, the shim falls back to a per-thread
-// scratch tile so reads/writes don't segfault.
-
-inline thread_local float __emule_sfpi_dst_fallback[__EMULE_SFPI_TILE_ELEMS] = {};
-
+// sfpu.dst_base points to the active DST tile's element-0; sfpu.cursor is the
+// 32-lane window offset (advanced by dst_reg++). If callers forget to set the
+// base, the shim falls back to a per-thread scratch tile so reads/writes don't
+// segfault.
 inline float* __emule_sfpi_active_dst() {
-    return __emule_sfpi_dst_base ? __emule_sfpi_dst_base : __emule_sfpi_dst_fallback;
+    auto& sfpu = __emule_compute_ctx().sfpu;
+    return sfpu.dst_base ? sfpu.dst_base : sfpu.dst_fallback;
 }
 
 class DstRegLane {
-    uint32_t lane_offset_;  // offset from __emule_sfpi_cursor; usually 0
+    uint32_t lane_offset_;  // offset from sfpu.cursor; usually 0
 public:
     constexpr DstRegLane(uint32_t off) : lane_offset_(off) {}
 
@@ -289,8 +259,9 @@ public:
     operator vFloat() const {
         vFloat r;
         float* base = __emule_sfpi_active_dst();
+        const uint32_t cursor = __emule_compute_ctx().sfpu.cursor;
         for (uint32_t i = 0; i < 32; ++i) {
-            r.v[i] = base[__emule_sfpi_cursor + lane_offset_ * 32 + i];
+            r.v[i] = base[cursor + lane_offset_ * 32 + i];
         }
         return r;
     }
@@ -298,8 +269,9 @@ public:
     operator vInt() const {
         vInt r;
         float* base = __emule_sfpi_active_dst();
+        const uint32_t cursor = __emule_compute_ctx().sfpu.cursor;
         for (uint32_t i = 0; i < 32; ++i) {
-            float f = base[__emule_sfpi_cursor + lane_offset_ * 32 + i];
+            float f = base[cursor + lane_offset_ * 32 + i];
             int32_t bits;
             std::memcpy(&bits, &f, sizeof(bits));
             r.v[i] = bits;
@@ -315,21 +287,23 @@ public:
     // yet wired. Identity when the macro is unset (byte-identical baseline).
     DstRegLane& operator=(const vFloat& x) {
         float* base = __emule_sfpi_active_dst();
+        auto& sfpu = __emule_compute_ctx().sfpu;
         for (uint32_t i = 0; i < 32; ++i) {
-            if (__emule_sfpi_mask[i]) {
-                base[__emule_sfpi_cursor + lane_offset_ * 32 + i] = __emule_sfpu_finalize(x.v[i]);
+            if (sfpu.mask[i]) {
+                base[sfpu.cursor + lane_offset_ * 32 + i] = __emule_sfpu_finalize(x.v[i]);
             }
         }
         return *this;
     }
     DstRegLane& operator=(const vInt& x) {
         float* base = __emule_sfpi_active_dst();
+        auto& sfpu = __emule_compute_ctx().sfpu;
         for (uint32_t i = 0; i < 32; ++i) {
-            if (__emule_sfpi_mask[i]) {
+            if (sfpu.mask[i]) {
                 int32_t bits = x.v[i];
                 float f;
                 std::memcpy(&f, &bits, sizeof(f));
-                base[__emule_sfpi_cursor + lane_offset_ * 32 + i] = f;
+                base[sfpu.cursor + lane_offset_ * 32 + i] = f;
             }
         }
         return *this;
@@ -341,21 +315,20 @@ class DstReg {
 public:
     DstRegLane operator[](int i) const { return DstRegLane(static_cast<uint32_t>(i)); }
     // dst_reg++ : silicon advances the implicit slice pointer by 32 lanes.
-    DstReg& operator++() { __emule_sfpi_cursor += 32; return *this; }
-    DstReg operator++(int) { DstReg t = *this; __emule_sfpi_cursor += 32; return t; }
+    DstReg& operator++() { __emule_compute_ctx().sfpu.cursor += 32; return *this; }
+    DstReg operator++(int) { DstReg t = *this; __emule_compute_ctx().sfpu.cursor += 32; return t; }
 };
 
 inline DstReg dst_reg;
 
 // l_reg[LRegs::LRegN] — silicon: direct access to an SFPU LReg. Emule backs
-// LReg0..15 with thread-local 32-lane bit storage (vUInt). The coefficient
+// LReg0..15 with the SfpuState::lreg 32-lane bit storage (vUInt). The coefficient
 // LUTs (tanh/sigmoid) load packed FP16/INT bit patterns into LRegs via SFPLOADI
 // (see the jit_hw ckernel_ops.h shim), then lut()/lut2() read them. l_reg is
 // vUInt-typed — the only emule users (the LUT ops) treat it as raw bits.
-inline thread_local vUInt __emule_lreg[16] = {};
 struct LRegFile {
-    vUInt& operator[](LRegs idx) { return __emule_lreg[static_cast<uint8_t>(idx)]; }
-    const vUInt& operator[](LRegs idx) const { return __emule_lreg[static_cast<uint8_t>(idx)]; }
+    vUInt& operator[](LRegs idx) { return __emule_compute_ctx().sfpu.lreg[static_cast<uint8_t>(idx)]; }
+    const vUInt& operator[](LRegs idx) const { return __emule_compute_ctx().sfpu.lreg[static_cast<uint8_t>(idx)]; }
 };
 inline LRegFile l_reg;
 
@@ -365,12 +338,13 @@ inline LRegFile l_reg;
 //   10 -> write lower 16, keep upper;  8 -> write upper 16, keep lower
 inline void __emule_sfploadi(unsigned dest, unsigned insmod, unsigned val) {
     if (dest >= 16) return;
-    uint32_t cur = __emule_lreg[dest].v[0];
+    auto& lreg = __emule_compute_ctx().sfpu.lreg;
+    uint32_t cur = lreg[dest].v[0];
     if (insmod == 2)       cur = val & 0xFFFFu;
     else if (insmod == 10) cur = (cur & 0xFFFF0000u) | (val & 0xFFFFu);
     else if (insmod == 8)  cur = (cur & 0x0000FFFFu) | ((val & 0xFFFFu) << 16);
     else                   cur = val;
-    for (uint32_t i = 0; i < 32; ++i) __emule_lreg[dest].v[i] = cur;
+    for (uint32_t i = 0; i < 32; ++i) lreg[dest].v[i] = cur;
 }
 
 // ---- Constants ----
@@ -453,17 +427,20 @@ struct Converter {
 // On silicon an sfpi local IS an SFPU register; a write inside v_if(...)
 // updates only active lanes. The dst_reg store path is already masked;
 // these make plain vReg-to-vReg assignment masked too. (Defined here, after
-// __emule_sfpi_mask is declared above.)
+// __emule_compute_ctx() / SfpuState::mask are visible.)
 inline vFloat& vFloat::operator=(const vFloat& o) {
-    for (uint32_t i = 0; i < 32; ++i) if (__emule_sfpi_mask[i]) v[i] = o.v[i];
+    auto& mask = __emule_compute_ctx().sfpu.mask;
+    for (uint32_t i = 0; i < 32; ++i) if (mask[i]) v[i] = o.v[i];
     return *this;
 }
 inline vInt& vInt::operator=(const vInt& o) {
-    for (uint32_t i = 0; i < 32; ++i) if (__emule_sfpi_mask[i]) v[i] = o.v[i];
+    auto& mask = __emule_compute_ctx().sfpu.mask;
+    for (uint32_t i = 0; i < 32; ++i) if (mask[i]) v[i] = o.v[i];
     return *this;
 }
 inline vUInt& vUInt::operator=(const vUInt& o) {
-    for (uint32_t i = 0; i < 32; ++i) if (__emule_sfpi_mask[i]) v[i] = o.v[i];
+    auto& mask = __emule_compute_ctx().sfpu.mask;
+    for (uint32_t i = 0; i < 32; ++i) if (mask[i]) v[i] = o.v[i];
     return *this;
 }
 
@@ -557,14 +534,16 @@ inline vFloat abs(const vFloat& v) {
 // clamp, e.g. ckernel_sfpu_exp.h). vec_max_min is the swapped variant.
 // Honors the active lane mask (a silicon SFPSWAP inside v_if is predicated).
 inline void vec_min_max(vFloat& a, vFloat& b) {
-    for (uint32_t i = 0; i < 32; ++i) if (__emule_sfpi_mask[i]) {
+    auto& mask = __emule_compute_ctx().sfpu.mask;
+    for (uint32_t i = 0; i < 32; ++i) if (mask[i]) {
         float lo = a.v[i] < b.v[i] ? a.v[i] : b.v[i];
         float hi = a.v[i] < b.v[i] ? b.v[i] : a.v[i];
         a.v[i] = lo; b.v[i] = hi;
     }
 }
 inline void vec_max_min(vFloat& a, vFloat& b) {
-    for (uint32_t i = 0; i < 32; ++i) if (__emule_sfpi_mask[i]) {
+    auto& mask = __emule_compute_ctx().sfpu.mask;
+    for (uint32_t i = 0; i < 32; ++i) if (mask[i]) {
         float hi = a.v[i] > b.v[i] ? a.v[i] : b.v[i];
         float lo = a.v[i] > b.v[i] ? b.v[i] : a.v[i];
         a.v[i] = hi; b.v[i] = lo;
@@ -681,23 +660,22 @@ inline ToType convert(const vFloat& val, RoundMode = RoundMode::NearestEven) {
 
 // ---- Programmable constant registers (LReg12-14 / CREG PRGM1-3) ----
 // vConstFloatPrgmN and vConstIntPrgmN alias the SAME three bit-storage slots
-// (set in an op's _init_, read in its _calculate_). Same kernel thread runs
-// both, so a thread_local backing store is consistent across the boundary.
-inline thread_local uint32_t __emule_prgm_creg[3] = {0, 0, 0};
+// (SfpuState::prgm_creg) — set in an op's _init_, read in its _calculate_. Same
+// kernel thread runs both, so the per-thread store is consistent across them.
 class __vCRegFloat {
     int idx_;
 public:
     constexpr __vCRegFloat(int i) : idx_(i) {}
-    const __vCRegFloat& operator=(float f) const { uint32_t b; std::memcpy(&b, &f, 4); __emule_prgm_creg[idx_] = b; return *this; }
-    operator vFloat() const { float f; std::memcpy(&f, &__emule_prgm_creg[idx_], 4); return vFloat(f); }
+    const __vCRegFloat& operator=(float f) const { uint32_t b; std::memcpy(&b, &f, 4); __emule_compute_ctx().sfpu.prgm_creg[idx_] = b; return *this; }
+    operator vFloat() const { float f; std::memcpy(&f, &__emule_compute_ctx().sfpu.prgm_creg[idx_], 4); return vFloat(f); }
 };
 class __vCRegInt {
     int idx_;
 public:
     constexpr __vCRegInt(int i) : idx_(i) {}
-    const __vCRegInt& operator=(int32_t v) const { __emule_prgm_creg[idx_] = static_cast<uint32_t>(v); return *this; }
-    const __vCRegInt& operator=(uint32_t v) const { __emule_prgm_creg[idx_] = v; return *this; }
-    operator vInt() const { int32_t v; std::memcpy(&v, &__emule_prgm_creg[idx_], 4); return vInt(v); }
+    const __vCRegInt& operator=(int32_t v) const { __emule_compute_ctx().sfpu.prgm_creg[idx_] = static_cast<uint32_t>(v); return *this; }
+    const __vCRegInt& operator=(uint32_t v) const { __emule_compute_ctx().sfpu.prgm_creg[idx_] = v; return *this; }
+    operator vInt() const { int32_t v; std::memcpy(&v, &__emule_compute_ctx().sfpu.prgm_creg[idx_], 4); return vInt(v); }
 };
 inline const __vCRegFloat vConstFloatPrgm0{0}, vConstFloatPrgm1{1}, vConstFloatPrgm2{2};
 inline const __vCRegInt   vConstIntPrgm0{0},   vConstIntPrgm1{1},   vConstIntPrgm2{2};
@@ -717,9 +695,9 @@ inline const __vCRegInt   vConstIntPrgm0{0},   vConstIntPrgm1{1},   vConstIntPrg
 // vec_swap: unconditional element-wise swap of two vectors (SFPSWAP). This is
 // lane-local, so it is modeled faithfully (mask-aware). The conditional SFPSWAP
 // modes are vec_min_max / vec_max_min (above).
-inline void vec_swap(vFloat& a, vFloat& b) { for (uint32_t i = 0; i < 32; ++i) if (__emule_sfpi_mask[i]) { float t = a.v[i]; a.v[i] = b.v[i]; b.v[i] = t; } }
-inline void vec_swap(vInt& a, vInt& b)     { for (uint32_t i = 0; i < 32; ++i) if (__emule_sfpi_mask[i]) { int32_t t = a.v[i]; a.v[i] = b.v[i]; b.v[i] = t; } }
-inline void vec_swap(vUInt& a, vUInt& b)   { for (uint32_t i = 0; i < 32; ++i) if (__emule_sfpi_mask[i]) { uint32_t t = a.v[i]; a.v[i] = b.v[i]; b.v[i] = t; } }
+inline void vec_swap(vFloat& a, vFloat& b) { auto& mask = __emule_compute_ctx().sfpu.mask; for (uint32_t i = 0; i < 32; ++i) if (mask[i]) { float t = a.v[i]; a.v[i] = b.v[i]; b.v[i] = t; } }
+inline void vec_swap(vInt& a, vInt& b)     { auto& mask = __emule_compute_ctx().sfpu.mask; for (uint32_t i = 0; i < 32; ++i) if (mask[i]) { int32_t t = a.v[i]; a.v[i] = b.v[i]; b.v[i] = t; } }
+inline void vec_swap(vUInt& a, vUInt& b)   { auto& mask = __emule_compute_ctx().sfpu.mask; for (uint32_t i = 0; i < 32; ++i) if (mask[i]) { uint32_t t = a.v[i]; a.v[i] = b.v[i]; b.v[i] = t; } }
 
 // subvec_transp: SFPTRANSP — cross-sub-vector transpose of 4 registers. The
 // exact lane permutation is not yet modeled; fail loud until an op needs it.

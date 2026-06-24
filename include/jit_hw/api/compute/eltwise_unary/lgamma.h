@@ -70,9 +70,9 @@ ALWI void lgamma_stirling_tile_init() {}
 ALWI void lgamma_stirling_tile(uint32_t idst) {
     __emule_dst_check(idst, "lgamma_stirling_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
+        float x = __emule_compute_ctx().dst[idst][i];
         float z = (x < 0.5f) ? (1.0f - x) : x;
-        __emule_dst[idst][i] = lgamma_eval_z(z);
+        __emule_compute_ctx().dst[idst][i] = lgamma_eval_z(z);
     }
 }
 
@@ -85,9 +85,9 @@ ALWI void lgamma_stirling_float_tile(uint32_t idst0, uint32_t idst1, uint32_t id
     __emule_dst_check(idst1, "lgamma_stirling_float_tile");
     __emule_dst_check(idst2, "lgamma_stirling_float_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst0][i];
+        float x = __emule_compute_ctx().dst[idst0][i];
         float z = (x < 0.5f) ? (1.0f - x) : x;
-        __emule_dst[idst2][i] = lgamma_eval_z(z);
+        __emule_compute_ctx().dst[idst2][i] = lgamma_eval_z(z);
     }
 }
 
@@ -105,11 +105,11 @@ ALWI void lgamma_adjusted_tile(uint32_t idst0, uint32_t idst1, uint32_t idst2, u
     __emule_dst_check(idst3, "lgamma_adjusted_tile");
     constexpr float ln_pi = 1.1447298858f;
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x            = __emule_dst[idst2][i];
-        float res_stirling = __emule_dst[idst0][i];
-        float log_sin_pi_x = __emule_dst[idst1][i];
+        float x            = __emule_compute_ctx().dst[idst2][i];
+        float res_stirling = __emule_compute_ctx().dst[idst0][i];
+        float log_sin_pi_x = __emule_compute_ctx().dst[idst1][i];
         float reflection_adj = ln_pi - log_sin_pi_x;
-        __emule_dst[idst3][i] = (x < 0.5f) ? (reflection_adj - res_stirling) : res_stirling;
+        __emule_compute_ctx().dst[idst3][i] = (x < 0.5f) ? (reflection_adj - res_stirling) : res_stirling;
     }
 }
 

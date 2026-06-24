@@ -85,7 +85,7 @@ inline void tensix_sync() {}
 // happens in api/compute/compute_kernel_hw_startup.h for kernels that
 // explicitly include it.
 // Guard so that api/compute/compute_kernel_hw_startup.h (which has its own
-// definition with real reset of __llk_pack_offset / __emule_l1_acc_enabled)
+// definition with real reset of __llk_pack_offset / __emule_compute_ctx().l1_acc_enabled)
 // doesn't double-define. First-included wins.
 #ifndef __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED
 #define __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED
@@ -100,22 +100,16 @@ inline void compute_kernel_hw_startup(uint32_t a, uint32_t b, uint32_t) { comput
 // The main executable exports these with -rdynamic; the JIT .so resolves them
 // at dlopen() time.
 namespace tt_emule { class Core; class Device; }
-// Per-thread L1 pointers set by the runner's kernel-launch lambda.
-// nullptr = no args for this RISC.
-extern thread_local uint32_t* __rt_args;
-extern thread_local uint32_t* __common_rt_args;
-extern thread_local tt_emule::Core*       __core;
-extern thread_local tt_emule::Device*     __device;
 
 // C-linkage bridge functions — resolve at dlopen time to the host process's
 // implementations, avoiding ABI mismatch with Device layout.
 extern "C" uint8_t* __emule_dram_ptr(uint64_t offset);
 extern "C" uint8_t* __emule_noc_resolve(uint32_t x, uint32_t y, uint64_t addr);
 
-// L1 bridge pointer — host pointer to L1 memory start.
-// Used to convert between uint32_t L1 "addresses" (really: truncated pointers
-// from mmap'd-below-4GB L1) and real host pointers.
-extern thread_local uint8_t* __emule_bridge_l1;
+// Per-thread execution context (provides `__emule_self` + per-core CoreState with
+// the logical coords). Included here (ahead of the helpers below that read through
+// it) so every kernel header sees it.
+#include "jit_hw/internal/emule_thread_ctx.h"
 
 // Translate a raw L1 firmware offset (or already-absolute host pointer) to a
 // host uint8_t*.  Available to ALL JIT kernels so the l1_arg_ptr regex patch in
@@ -123,11 +117,11 @@ extern thread_local uint8_t* __emule_bridge_l1;
 #ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED
 #define __EMULE_LOCAL_L1_TO_PTR_DEFINED
 inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
-    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
+    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
     if (l1_addr >= l1_base) {
         return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
     }
-    return __emule_bridge_l1 + l1_addr;
+    return __emule_self->bridge_l1 + l1_addr;
 }
 #endif
 
@@ -140,24 +134,10 @@ extern int32_t bank_to_dram_offset[NUM_DRAM_BANKS];
 extern uint16_t l1_bank_to_noc_xy[2][NUM_L1_BANKS];
 extern int32_t bank_to_l1_offset[NUM_L1_BANKS];
 
-// Per-core NOC coordinates (set per kernel thread by program runner).
+// NOC coordinate globals — silicon-named, read directly by unmodified upstream
+// firmware/kernels, so they stay as runner-set thread_local globals (not migrated).
 extern thread_local uint8_t my_x[2];
 extern thread_local uint8_t my_y[2];
-
-// Per-core logical coordinates (for D2M get_absolute_logical_x/y).
-extern thread_local uint32_t __emule_logical_x;
-extern thread_local uint32_t __emule_logical_y;
-
-// Processor ID — substitutes RISC-V mhartid CSR in emulation.
-extern thread_local uint8_t __processor_id;
-
-// CSR emulation: NEO engine ID and TRISC core ID within engine.
-extern thread_local uint8_t __emule_neo_id;
-extern thread_local uint8_t __emule_trisc_id;
-
-// Thread ID: number of compute/DM engines and this engine's index.
-extern thread_local uint32_t __emule_num_threads;
-extern thread_local uint32_t __emule_my_thread_id;
 
 // tt_l1_ptr: type qualifier for L1 pointers. On real HW, this adds volatile.
 // In emulation, L1 is normal host memory — the qualifier is empty.
@@ -180,18 +160,18 @@ constexpr uint8_t noc_index = NOC_INDEX;
 constexpr uint8_t noc_mode = NOC_MODE;
 
 static inline uintptr_t get_arg_addr(int arg_idx) {
-    return reinterpret_cast<uintptr_t>(&__rt_args[arg_idx]);
+    return reinterpret_cast<uintptr_t>(&__emule_self->rt_args[arg_idx]);
 }
 
 static inline uintptr_t get_common_arg_addr(int arg_idx) {
-    return reinterpret_cast<uintptr_t>(&__common_rt_args[arg_idx]);
+    return reinterpret_cast<uintptr_t>(&__emule_self->common_rt_args[arg_idx]);
 }
 
 template<typename T = uint32_t>
 inline T get_arg_val(int arg_idx) {
     static_assert(sizeof(T) <= sizeof(uint32_t));
     T val;
-    std::memcpy(&val, &__rt_args[arg_idx], sizeof(T));
+    std::memcpy(&val, &__emule_self->rt_args[arg_idx], sizeof(T));
     return val;
 }
 
@@ -199,7 +179,7 @@ template<typename T = uint32_t>
 inline T get_common_arg_val(int arg_idx) {
     static_assert(sizeof(T) <= sizeof(uint32_t));
     T val;
-    std::memcpy(&val, &__common_rt_args[arg_idx], sizeof(T));
+    std::memcpy(&val, &__emule_self->common_rt_args[arg_idx], sizeof(T));
     return val;
 }
 
@@ -234,7 +214,7 @@ inline T get_common_arg_val(int arg_idx) {
 #ifndef __EMULE_GET_SEMAPHORE_DEFINED
 #define __EMULE_GET_SEMAPHORE_DEFINED
 inline uint32_t get_semaphore(uint32_t semaphore_id) {
-    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
+    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
     return l1_base + EMULE_SEM_BASE + semaphore_id * EMULE_SEM_ALIGN;
 }
 #endif

@@ -20,7 +20,7 @@ ALWI void atan2_binary_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     __emule_dst_check(idst1, "atan2_binary_tile.x");
     __emule_dst_check(odst, "atan2_binary_tile.out");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; ++i) {
-        __emule_dst[odst][i] = std::atan2(__emule_dst[idst0][i], __emule_dst[idst1][i]);
+        __emule_compute_ctx().dst[odst][i] = std::atan2(__emule_compute_ctx().dst[idst0][i], __emule_compute_ctx().dst[idst1][i]);
     }
 }
 ALWI void atan2_binary_tile_init() {}

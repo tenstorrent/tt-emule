@@ -5,7 +5,7 @@
 #pragma once
 // JIT dataflow API — self-contained implementation for JIT-compiled kernels.
 // Uses uint32_t L1 addresses (truncated host pointers from mmap'd-below-4GB L1)
-// and __emule_cbs for circular buffer state.
+// and __emule_self->cbs for circular buffer state.
 //
 // Address translation model:
 //   Encode: __emule_addr_to_offset(addr) — bitmask extracts L1 offset from host ptr
@@ -100,7 +100,7 @@ inline uint32_t __emule_addr_to_offset(uint32_t addr) {
 #ifdef TT_EMULE_USE_L1_POOL
     return addr & 0x1FFFFF;  // SLOT_MASK = 2 MB - 1
 #else
-    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
+    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
     if (addr >= l1_base) return addr - l1_base;
     return addr;
 #endif
@@ -112,17 +112,17 @@ inline uint32_t __emule_addr_to_offset(uint32_t addr) {
 //
 // l1_alloc() returns l1_base_ + bump  (>= l1_base, always a valid host ptr).
 // Firmware HAL addresses (e.g. 0x19520) are offsets into the L1 buffer.
-// We distinguish by comparing against __emule_bridge_l1's numeric address.
+// We distinguish by comparing against __emule_self->bridge_l1's numeric address.
 #ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED
 #define __EMULE_LOCAL_L1_TO_PTR_DEFINED
 inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
-    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
+    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
     if (l1_addr >= l1_base) {
         // Already an absolute host pointer (from l1_alloc / CB / DFB).
         return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
     }
     // Firmware L1 offset — translate via bridge pointer.
-    return __emule_bridge_l1 + l1_addr;
+    return __emule_self->bridge_l1 + l1_addr;
 }
 #endif
 
@@ -153,8 +153,8 @@ inline uint32_t worker_logical_row_to_virtual_row[64] = {
 // Guarded to avoid conflict with compute/common.h if both are included.
 #ifndef __EMULE_GET_LOGICAL_COORDS_DEFINED
 #define __EMULE_GET_LOGICAL_COORDS_DEFINED
-inline uint32_t get_absolute_logical_x() { return __emule_logical_x; }
-inline uint32_t get_absolute_logical_y() { return __emule_logical_y; }
+inline uint32_t get_absolute_logical_x() { return __emule_self->core->logical_x; }
+inline uint32_t get_absolute_logical_y() { return __emule_self->core->logical_y; }
 #endif
 
 // ---- NOC address encoding (matches real firmware) ----
@@ -249,7 +249,7 @@ FORCE_INLINE void noc_async_read_page(
         fprintf(stderr, "EMULE WARN: noc_async_read_page failed to resolve addr 0x%llx "
                 "[from phys (%u,%u) logical (%u,%u)]\n",
                 (unsigned long long)noc_addr, my_x[0], my_y[0],
-                __emule_logical_x, __emule_logical_y);
+                __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
 }
 
@@ -280,7 +280,7 @@ FORCE_INLINE void noc_async_write_page(
         fprintf(stderr, "EMULE WARN: noc_async_write_page failed to resolve addr 0x%llx "
                 "[from phys (%u,%u) logical (%u,%u)]\n",
                 (unsigned long long)noc_addr, my_x[0], my_y[0],
-                __emule_logical_x, __emule_logical_y);
+                __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
 }
 
@@ -318,7 +318,7 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
         fprintf(stderr, "EMULE DBG: noc_async_read src_core=(%u,%u) offset=0x%x size=%u resolved=%p "
                 "[from logical (%u,%u)]\n",
                 nx, ny, off, size, (void*)src,
-                __emule_logical_x, __emule_logical_y);
+                __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
     if (src) {
         std::memcpy(dst, src, size);
@@ -326,7 +326,7 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
         fprintf(stderr, "EMULE WARN: noc_async_read failed to resolve addr 0x%llx "
                 "[from phys (%u,%u) logical (%u,%u)]\n",
                 (unsigned long long)src_noc_addr, my_x[0], my_y[0],
-                __emule_logical_x, __emule_logical_y);
+                __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
 }
 
@@ -348,7 +348,7 @@ inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
                     "[from phys (%u,%u) logical (%u,%u)]\n",
                     (void*)src, src_local_l1_addr, (void*)dst,
                     (unsigned long long)dst_noc_addr, size,
-                    my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+                    my_x[0], my_y[0], __emule_self->core->logical_x, __emule_self->core->logical_y);
         }
         return;
     }
@@ -383,15 +383,10 @@ inline void noc_async_write_one_packet(uint32_t src_local_l1_addr, uint64_t dst_
 // Per-NOC: silicon has independent NOC_TARG_ADDR/SIZE on (noc, read_cmd_buf);
 // emule mirrors that with [2] caches so set_state(noc=0) and set_state(noc=1)
 // don't clobber each other.
-inline thread_local uint32_t __emule_one_packet_state_size[2] = {0, 0};
-// Per-NOC set_state/with_state base (coords + size). Declared here so the
-// one_packet with_state forms below can reconstruct full addrs; the trid /
-// multi-packet readers further down reuse the same caches.
-namespace __emule_noc_trid_state {
-inline thread_local uint64_t shard_noc_addr_base[2] = {0, 0};
-inline thread_local uint32_t shard_size[2] = {0, 0};
-inline thread_local uint32_t shard_vc[2] = {0, 0};
-}
+// Per-NOC set_state/with_state state (size + base coords + vc) lives in
+// DatamovementThreadCtx (one_packet_state_size / shard_noc_addr_base /
+// shard_size / shard_vc); the trid / multi-packet readers further down reuse
+// the same caches.
 template <bool inc_num_issued = true, bool use_vc = false>
 inline void noc_async_read_one_packet_with_state(uint64_t src_noc_addr,
                                                  uint32_t dst_local_l1_addr,
@@ -400,11 +395,11 @@ inline void noc_async_read_one_packet_with_state(uint64_t src_noc_addr,
     // Silicon's with_state updates only NOC_TARG_ADDR_LO (the source L1 offset)
     // and reuses the coords programmed by set_state. The arg is an offset, not a
     // full addr — OR in the saved base's upper coords (mirrors noc_async_read_with_state).
-    const uint64_t upper = __emule_noc_trid_state::shard_noc_addr_base[noc & 1]
+    const uint64_t upper = __emule_datamovement_ctx().shard_noc_addr_base[noc & 1]
                          & 0xFFFFFFFF00000000ULL;
     const uint64_t full_src = upper | uint64_t(__emule_addr_to_offset(src_noc_addr));
     noc_async_read(full_src, dst_local_l1_addr,
-                   __emule_one_packet_state_size[noc & 1], noc);
+                   __emule_datamovement_ctx().one_packet_state_size[noc & 1], noc);
 }
 
 // Write-side counterpart used by sharded writer kernels (e.g.
@@ -412,15 +407,13 @@ inline void noc_async_read_one_packet_with_state(uint64_t src_noc_addr,
 // NOC address + packet size per (noc, write_cmd_buf); emule mirrors the
 // per-NOC split with [2] caches and uses noc_async_write for the actual
 // transfer.
-inline thread_local uint64_t __emule_write_one_packet_state_dst[2] = {0, 0};
-inline thread_local uint32_t __emule_write_one_packet_state_size[2] = {0, 0};
 template <bool posted = false>
 inline void noc_async_write_one_packet_set_state(uint64_t dst_noc_addr,
                                                  uint32_t size,
                                                  uint8_t noc = noc_index,
                                                  uint8_t /*vc*/ = 0) {
-    __emule_write_one_packet_state_dst[noc & 1] = dst_noc_addr;
-    __emule_write_one_packet_state_size[noc & 1] = size;
+    __emule_datamovement_ctx().write_one_packet_state_dst[noc & 1] = dst_noc_addr;
+    __emule_datamovement_ctx().write_one_packet_state_size[noc & 1] = size;
 }
 template <bool posted = false>
 inline void noc_async_write_one_packet_with_state(uint32_t src_local_l1_addr,
@@ -429,10 +422,10 @@ inline void noc_async_write_one_packet_with_state(uint32_t src_local_l1_addr,
     // Silicon's with_state updates NOC_RET_ADDR_LO (the dest L1 offset) per call
     // and reuses the dest coords programmed by set_state. The 2nd arg is an offset,
     // not a full addr — OR in the saved base's upper coords (symmetric to the read).
-    const uint64_t upper = __emule_write_one_packet_state_dst[noc & 1] & 0xFFFFFFFF00000000ULL;
+    const uint64_t upper = __emule_datamovement_ctx().write_one_packet_state_dst[noc & 1] & 0xFFFFFFFF00000000ULL;
     const uint64_t full_dst = upper | uint64_t(__emule_addr_to_offset(dst_local_l1_addr));
     noc_async_write(src_local_l1_addr, full_dst,
-                    __emule_write_one_packet_state_size[noc & 1], noc);
+                    __emule_datamovement_ctx().write_one_packet_state_size[noc & 1], noc);
 }
 // Silicon adds `enable_noc_tracing` (and `posted` for write) template args
 // that control event-record / posted-vs-acked semantics. Both are no-ops in
@@ -468,7 +461,7 @@ inline void noc_async_write_multicast(
         fprintf(stderr, "EMULE DBG: noc_async_write_multicast (%u,%u)->(%u,%u) offset=0x%x size=%u num_dests=%u "
                 "[from logical (%u,%u)]\n",
                 x_start, y_start, x_end, y_end, off, size, num_dests,
-                __emule_logical_x, __emule_logical_y);
+                __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     __emule_multicast_write(dst_mcast_noc_addr, src, size, /*include_self=*/false);
@@ -488,7 +481,7 @@ inline void noc_async_write_multicast_loopback_src(
         fprintf(stderr, "EMULE DBG: noc_async_write_multicast_loopback_src (%u,%u)->(%u,%u) offset=0x%x size=%u num_dests=%u "
                 "[from logical (%u,%u)]\n",
                 x_start, y_start, x_end, y_end, off, size, num_dests,
-                __emule_logical_x, __emule_logical_y);
+                __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     __emule_multicast_write(dst_mcast_noc_addr, src, size, /*include_self=*/true);
@@ -610,19 +603,20 @@ FORCE_INLINE void noc_async_write_one_packet_with_trid_with_state(
 #ifndef NOC_CLEAR_OUTSTANDING_REQ_MASK
 #define NOC_CLEAR_OUTSTANDING_REQ_MASK 0u
 #endif
-// __emule_noc_trid_state is declared earlier (above noc_async_read_one_packet_with_state).
+// The per-NOC trid/shard state lives in DatamovementThreadCtx (shard_noc_addr_base /
+// shard_size / shard_vc).
 
 template <bool inline_src = true>
 FORCE_INLINE void noc_async_read_one_packet_set_state(
     uint64_t src_noc_addr, uint32_t size, uint32_t vc = 0, uint8_t noc = noc_index) {
-    __emule_noc_trid_state::shard_noc_addr_base[noc & 1] = src_noc_addr;
-    __emule_noc_trid_state::shard_size[noc & 1] = size;
-    __emule_noc_trid_state::shard_vc[noc & 1] = vc;
+    __emule_datamovement_ctx().shard_noc_addr_base[noc & 1] = src_noc_addr;
+    __emule_datamovement_ctx().shard_size[noc & 1] = size;
+    __emule_datamovement_ctx().shard_vc[noc & 1] = vc;
     // The plain (non-trid) noc_async_read_one_packet_with_state reads the
-    // transfer size from __emule_one_packet_state_size[noc & 1], not the per-noc
+    // transfer size from one_packet_state_size[noc & 1], not the per-noc
     // shard_size[] above. Both are kept in sync so the non-trid with_state
     // call sees the same size that was just programmed.
-    __emule_one_packet_state_size[noc & 1] = size;
+    __emule_datamovement_ctx().one_packet_state_size[noc & 1] = size;
 }
 
 FORCE_INLINE void noc_async_read_set_trid(uint32_t /*trid*/, uint8_t /*noc*/ = 0) {
@@ -644,8 +638,8 @@ FORCE_INLINE void noc_async_read_one_packet_with_state_with_trid(
     // pointer (from l1_alloc / CB APIs); __emule_addr_to_offset canonicalizes
     // both to the proper L1 offset so the OR with the cached upper coords
     // doesn't corrupt the high bits of the reconstructed noc addr.
-    uint64_t base = __emule_noc_trid_state::shard_noc_addr_base[noc & 1];
-    uint32_t size = __emule_noc_trid_state::shard_size[noc & 1];
+    uint64_t base = __emule_datamovement_ctx().shard_noc_addr_base[noc & 1];
+    uint32_t size = __emule_datamovement_ctx().shard_size[noc & 1];
     uint32_t l1_off = __emule_addr_to_offset(shard_base_l1 + shard_offset);
     uint64_t src_noc = (base & 0xFFFFFFFF00000000ULL) | uint64_t(l1_off);
     uint8_t* src = __emule_resolve_noc_addr(src_noc);
@@ -660,7 +654,7 @@ FORCE_INLINE void noc_async_read_one_packet_with_state_with_trid(
 // counter. Emule: store src in the per-NOC shard cache for the upper-coord
 // reconstruction; counter is no-op (no in-flight transactions).
 inline void noc_async_read_set_state(uint64_t src_noc_addr, uint8_t noc = noc_index) {
-    __emule_noc_trid_state::shard_noc_addr_base[noc & 1] = src_noc_addr;
+    __emule_datamovement_ctx().shard_noc_addr_base[noc & 1] = src_noc_addr;
 }
 template <bool inc_num_issued = true>
 inline void noc_async_read_with_state(
@@ -669,7 +663,7 @@ inline void noc_async_read_with_state(
     // Canonicalize src — it can be either a firmware-style L1 offset or a
     // truncated host pointer in emule; __emule_addr_to_offset normalizes both
     // to a proper L1 offset so the OR with cached upper coords is well-formed.
-    uint64_t upper = __emule_noc_trid_state::shard_noc_addr_base[noc & 1]
+    uint64_t upper = __emule_datamovement_ctx().shard_noc_addr_base[noc & 1]
                    & 0xFFFFFFFF00000000ULL;
     uint64_t full_src = upper | uint64_t(__emule_addr_to_offset(src_local_l1_addr));
     noc_async_read(full_src, dst_local_l1_addr, size, noc);
@@ -697,7 +691,7 @@ inline void noc_async_read_inc_num_issued(uint32_t /*num_issued_reads_inc*/,
 #ifndef __EMULE_GET_SEMAPHORE_DEFINED
 #define __EMULE_GET_SEMAPHORE_DEFINED
 inline uint32_t get_semaphore(uint32_t semaphore_id) {
-    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
+    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
     return l1_base + EMULE_SEM_BASE + semaphore_id * EMULE_SEM_ALIGN;
 }
 #endif
@@ -728,7 +722,7 @@ inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t v
         fprintf(stderr, "EMULE DBG: noc_semaphore_wait(%p, %u) current=%u "
                 "[from logical (%u,%u)]\n",
                 (void*)sem_addr, val, atom->load(std::memory_order_acquire),
-                __emule_logical_x, __emule_logical_y);
+                __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
     // Wait until the semaphore reaches `val`. For a monotonic handshake counter
     // (val >= 1), "reached" means `>= val`, not exact equality: emule's
@@ -751,7 +745,7 @@ inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t v
             fprintf(stderr, "EMULE HANG: noc_semaphore_wait(%p, %u) stuck at %u after %llu spins "
                     "[phys (%u,%u) logical (%u,%u)]\n",
                     (void*)sem_addr, val, atom->load(std::memory_order_relaxed), (unsigned long long)spins,
-                    my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+                    my_x[0], my_y[0], __emule_self->core->logical_x, __emule_self->core->logical_y);
             std::abort();
         }
     }
@@ -764,7 +758,7 @@ inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32
         fprintf(stderr, "EMULE DBG: noc_semaphore_wait_min(%p, %u) current=%u "
                 "[from logical (%u,%u)]\n",
                 (void*)sem_addr, min_val, atom->load(std::memory_order_acquire),
-                __emule_logical_x, __emule_logical_y);
+                __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
     uint64_t spins = 0;
     while (atom->load(std::memory_order_acquire) < min_val) {
@@ -779,7 +773,7 @@ inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32
             fprintf(stderr, "EMULE HANG: noc_semaphore_wait_min(%p, %u) stuck at %u after %llu spins "
                     "[phys (%u,%u) logical (%u,%u)]\n",
                     (void*)sem_addr, min_val, atom->load(std::memory_order_relaxed), (unsigned long long)spins,
-                    my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+                    my_x[0], my_y[0], __emule_self->core->logical_x, __emule_self->core->logical_y);
             std::abort();
         }
     }
@@ -811,7 +805,7 @@ inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc,
         fprintf(stderr, "EMULE DBG: noc_semaphore_inc target_core=(%u,%u) offset=0x%x incr=%u resolved=%p "
                 "[from logical (%u,%u)]\n",
                 noc_x, noc_y, offset, incr, (void*)ptr,
-                __emule_logical_x, __emule_logical_y);
+                __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
     if (ptr) {
         __atomic_fetch_add(reinterpret_cast<uint32_t*>(ptr), incr, __ATOMIC_SEQ_CST);
@@ -819,7 +813,7 @@ inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc,
         fprintf(stderr, "EMULE WARN: noc_semaphore_inc failed to resolve addr 0x%llx "
                 "(target core (%u,%u) offset 0x%x) [from phys (%u,%u) logical (%u,%u)]\n",
                 (unsigned long long)noc_addr, noc_x, noc_y, offset,
-                my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
+                my_x[0], my_y[0], __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
 }
 
@@ -846,7 +840,7 @@ inline void noc_semaphore_set_multicast(
         fprintf(stderr, "EMULE DBG: noc_semaphore_set_multicast (%u,%u)->(%u,%u) offset=0x%x val=%u num_dests=%u "
                 "[from logical (%u,%u)]\n",
                 x_start, y_start, x_end, y_end, off, sem_val, num_dests,
-                __emule_logical_x, __emule_logical_y);
+                __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t), /*include_self=*/false);
@@ -867,7 +861,7 @@ inline void noc_semaphore_set_multicast_loopback_src(
         fprintf(stderr, "EMULE DBG: noc_semaphore_set_multicast_loopback_src (%u,%u)->(%u,%u) offset=0x%x val=%u num_dests=%u "
                 "[from logical (%u,%u)]\n",
                 x_start, y_start, x_end, y_end, off, sem_val, num_dests,
-                __emule_logical_x, __emule_logical_y);
+                __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t), /*include_self=*/true);
@@ -960,15 +954,10 @@ inline void dram_barrier() {}  // No-op in emulation
 
 // ---- NOC inline direct-write (32-bit value to remote L1) ----
 
-// Thread-local state for the set_state / with_state API pair.
-struct __emule_dw_state {
-    uint64_t addr = 0;
-    uint32_t val = 0;
-};
-// Per-NOC: silicon has independent NOC_TARG_ADDR/AT_DATA on (noc, write_at_cmd_buf);
-// emule mirrors that with a [2] cache so set_state(noc=0) and set_state(noc=1)
-// don't clobber each other.
-inline thread_local __emule_dw_state __emule_dw_st[2];
+// Per-NOC set_state/with_state cache (__emule_dw_state dw_st[2]) for the inline
+// direct-write API pair lives in DatamovementThreadCtx. Silicon has independent
+// NOC_TARG_ADDR/AT_DATA on (noc, write_at_cmd_buf); the [2] cache keeps
+// set_state(noc=0) and set_state(noc=1) from clobbering each other.
 
 // Apply byte-enable mask and write 32-bit value to a resolved host pointer.
 inline void __emule_dw_write_be(uint8_t* dst, uint32_t val, uint8_t be) {
@@ -1049,9 +1038,9 @@ inline void noc_inline_dw_write_set_state(
     uint8_t cmd_buf = write_at_cmd_buf,
     uint8_t noc = noc_index,
     uint8_t vc = NOC_UNICAST_WRITE_VC) {
-    __emule_dw_st[noc & 1].addr = addr;
+    __emule_datamovement_ctx().dw_st[noc & 1].addr = addr;
     if constexpr (set_val) {
-        __emule_dw_st[noc & 1].val = val;
+        __emule_datamovement_ctx().dw_st[noc & 1].val = val;
     }
 }
 
@@ -1067,19 +1056,21 @@ inline void noc_inline_dw_write_with_state(
     uint32_t val, uint32_t addr = 0, uint8_t cmd_buf = write_at_cmd_buf, uint8_t noc = noc_index) {
     if constexpr (update_addr_lo) {
         // Replace the lower 32 bits of the address (the L1 offset).
-        __emule_dw_st[noc & 1].addr = (__emule_dw_st[noc & 1].addr & ~uint64_t(0xFFFFFFFF)) | addr;
+        __emule_datamovement_ctx().dw_st[noc & 1].addr =
+            (__emule_datamovement_ctx().dw_st[noc & 1].addr & ~uint64_t(0xFFFFFFFF)) | addr;
     }
     if constexpr (update_addr_hi) {
         // Replace the upper 32 bits of the address (the target core NOC coords).
-        __emule_dw_st[noc & 1].addr = (__emule_dw_st[noc & 1].addr & uint64_t(0xFFFFFFFF))
-                                   | (uint64_t(addr) << 32);
+        __emule_datamovement_ctx().dw_st[noc & 1].addr =
+            (__emule_datamovement_ctx().dw_st[noc & 1].addr & uint64_t(0xFFFFFFFF))
+            | (uint64_t(addr) << 32);
     }
     if constexpr (update_val) {
-        __emule_dw_st[noc & 1].val = val;
+        __emule_datamovement_ctx().dw_st[noc & 1].val = val;
     }
-    uint8_t* dst = __emule_resolve_noc_addr(__emule_dw_st[noc & 1].addr);
+    uint8_t* dst = __emule_resolve_noc_addr(__emule_datamovement_ctx().dw_st[noc & 1].addr);
     if (dst) {
-        __emule_dw_write_be(dst, __emule_dw_st[noc & 1].val, 0xF);
+        __emule_dw_write_be(dst, __emule_datamovement_ctx().dw_st[noc & 1].val, 0xF);
     }
 }
 

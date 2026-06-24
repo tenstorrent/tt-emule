@@ -56,8 +56,8 @@ inline void apply(uint32_t icb0, uint32_t icb1, uint32_t itile0, uint32_t itile1
             for (uint32_t c = 0; c < tw0; ++c) {
                 uint32_t b_r, b_c; bsrc(r, c, b_r, b_c);
                 float v = op(tile_a[r * 32u + c], tile_b[b_r * 32u + b_c]);
-                if constexpr (acc_to_dest) __emule_dst[idst][r * 32u + c] += v;
-                else                       __emule_dst[idst][r * 32u + c] = v;
+                if constexpr (acc_to_dest) __emule_compute_ctx().dst[idst][r * 32u + c] += v;
+                else                       __emule_compute_ctx().dst[idst][r * 32u + c] = v;
             }
         return;
     }
@@ -82,9 +82,9 @@ inline void apply(uint32_t icb0, uint32_t icb1, uint32_t itile0, uint32_t itile1
             uint32_t b_r, b_c; bsrc(r, c, b_r, b_c);
             float v = op(load_a(r, c), load_b(b_r, b_c));
             if constexpr (acc_to_dest) {
-                __emule_dst[idst][r * 32u + c] += v;
+                __emule_compute_ctx().dst[idst][r * 32u + c] += v;
             } else {
-                __emule_dst[idst][r * 32u + c] = v;
+                __emule_compute_ctx().dst[idst][r * 32u + c] = v;
             }
         }
     }

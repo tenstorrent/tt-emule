@@ -35,8 +35,8 @@ ALWI void isclose_binary_tile(uint32_t idst0, uint32_t idst1, uint32_t odst,
     std::memcpy(&atol, &atol_bits, sizeof(float));
     std::memcpy(&rtol, &rtol_bits, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; ++i) {
-        const float a = __emule_dst[idst0][i];
-        const float b = __emule_dst[idst1][i];
+        const float a = __emule_compute_ctx().dst[idst0][i];
+        const float b = __emule_compute_ctx().dst[idst1][i];
         const bool a_nan = std::isnan(a);
         const bool b_nan = std::isnan(b);
         float r;
@@ -47,7 +47,7 @@ ALWI void isclose_binary_tile(uint32_t idst0, uint32_t idst1, uint32_t odst,
         } else {
             r = (std::fabs(a - b) <= atol + rtol * std::fabs(b)) ? 1.0f : 0.0f;
         }
-        __emule_dst[odst][i] = r;
+        __emule_compute_ctx().dst[odst][i] = r;
     }
 }
 ALWI void isclose_binary_tile_init() {}

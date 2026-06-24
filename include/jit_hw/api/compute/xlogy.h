@@ -11,9 +11,9 @@ ALWI void xlogy_binary_tile_init() {}
 
 ALWI void xlogy_binary_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst0][i];
-        float y = __emule_dst[idst1][i];
-        __emule_dst[odst][i] = (x == 0.f) ? 0.f : x * std::log(y);
+        float x = __emule_compute_ctx().dst[idst0][i];
+        float y = __emule_compute_ctx().dst[idst1][i];
+        __emule_compute_ctx().dst[odst][i] = (x == 0.f) ? 0.f : x * std::log(y);
     }
 }
 

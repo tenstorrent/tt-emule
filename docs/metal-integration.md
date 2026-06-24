@@ -89,12 +89,16 @@ Misses compile in parallel.
 
 **Execution — direct Core memory, no copies.** Collect kernels per logical core
 from `ProgramImpl` → compile misses → resolve to function pointers → launch all
-cores concurrently. Per core: `get_core(xy)`, init CB sync, init semaphores at
-HAL-derived addresses, set the per-thread bridge TLS
-(`__emule_bridge_l1`, `__emule_bridge_dram`, `__emule_cbs`, `__emule_core_map`;
-Quasar adds `__emule_dfbs`, `__emule_tc_array`, `__emule_neo_id`,
-`__emule_trisc_id`), launch reader+compute+writer (WH/BH) or per-DM/per-engine
-threads (Quasar), join. No copy-back.
+cores concurrently. Per kernel thread: `get_core(xy)`, init CB sync, init
+semaphores at HAL-derived addresses, then **allocate the per-thread execution
+context** matching the kernel's RISC type (`new ComputeThreadCtx` for the fused
+compute thread, `new DatamovementThreadCtx` for each DM thread) and set the single
+`thread_local ThreadCommonCtx* __emule_self`. Identity / handles (`bridge_l1`,
+`bridge_dram`, `cbs`, `core_map`; Quasar adds `dfbs`, `tc_array`, `neo_id`,
+`trisc_id`) and the per-core `CoreState*` are written **through** that context —
+it is the single source of truth for the thread (see
+[state-tiers.md](state-tiers.md)). Then launch reader+compute+writer (WH/BH) or
+per-DM/per-engine threads (Quasar), join. No copy-back.
 
 **Semaphore init.** `emule_sem_base = hal.get_dev_addr(TENSIX, KERNEL_CONFIG) +
 prog_config.sem_offset`, passed as `EMULE_SEM_BASE`; each sem at

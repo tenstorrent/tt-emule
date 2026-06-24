@@ -32,7 +32,7 @@ ALWI void xielu_tile(uint32_t idst, uint32_t alpha_p, uint32_t alpha_n) {
     constexpr float kEps = -1e-6f;  // LLK's vConstFloatPrgm1
 
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
+        float x = __emule_compute_ctx().dst[idst][i];
         float beta_mul_x = kBeta * x;
         float y;
         if (x > 0.0f) {
@@ -46,7 +46,7 @@ ALWI void xielu_tile(uint32_t idst, uint32_t alpha_p, uint32_t alpha_n) {
             float exp_term = std::expm1(arg) - x;
             y = an * exp_term + beta_mul_x;
         }
-        __emule_dst[idst][i] = y;
+        __emule_compute_ctx().dst[idst][i] = y;
     }
 }
 

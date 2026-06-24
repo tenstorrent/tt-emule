@@ -22,15 +22,20 @@ nfaces / pack-untilize pipeline this references), [cb-emulation.md](cb-emulation
 
 There are no separate UNPACK / MATH / PACK TRISC threads in emule — all three
 collapse onto one host thread (the `PACK(x) x` / `MATH(x) x` / `UNPACK(x) x`
-macros are identity). DEST is a **thread-local `float` array, always fp32
-row-major**, regardless of the configured HW data format:
+macros are identity). DEST is a **per-compute-thread `float` array, always fp32
+row-major**, regardless of the configured HW data format. It is a member of
+`ComputeThreadCtx` (the per-thread state tier — see
+[state-tiers.md](state-tiers.md)), reached via the typed accessor:
 
 ```cpp
-// include/jit_hw/api/compute/common.h
+// include/jit_hw/api/compute/common.h — capacity constants
 static constexpr uint32_t __EMULE_DST_TILES      = 16;    // bf16 SyncFull ceiling
 static constexpr uint32_t __EMULE_DST_TILES_FP32 = 8;     // fp32 SyncFull ceiling
 static constexpr uint32_t __EMULE_TILE_ELEMS     = 1024;  // 32x32 floats/tile
-static thread_local float __emule_dst[__EMULE_DST_TILES][__EMULE_TILE_ELEMS];
+
+// include/jit_hw/internal/emule_thread_ctx.h — storage
+struct ComputeThreadCtx /* ... */ { float dst[16][1024]; bool dst_fresh[16]; /* ... */ };
+// reached as __emule_compute_ctx().dst[idst][elem]
 ```
 
 A single fp32 store per element is a unified internal representation: bf16 inputs

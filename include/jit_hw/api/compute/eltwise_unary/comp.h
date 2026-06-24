@@ -18,7 +18,7 @@ ALWI void unary_eq_tile(uint32_t idst, uint32_t param0) {
     float val;
     std::memcpy(&val, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = (__emule_dst[idst][i] == val) ? 1.0f : 0.0f;
+        __emule_compute_ctx().dst[idst][i] = (__emule_compute_ctx().dst[idst][i] == val) ? 1.0f : 0.0f;
 }
 
 ALWI void unary_eq_tile_int32(uint32_t idst, uint32_t param0) {
@@ -36,7 +36,7 @@ ALWI void unary_ne_tile(uint32_t idst, uint32_t param0) {
     float val;
     std::memcpy(&val, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = (__emule_dst[idst][i] != val) ? 1.0f : 0.0f;
+        __emule_compute_ctx().dst[idst][i] = (__emule_compute_ctx().dst[idst][i] != val) ? 1.0f : 0.0f;
 }
 
 ALWI void unary_ne_tile_int32(uint32_t idst, uint32_t param0) {
@@ -54,7 +54,7 @@ ALWI void unary_gt_tile(uint32_t idst, uint32_t param0) {
     float val;
     std::memcpy(&val, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = (__emule_dst[idst][i] > val) ? 1.0f : 0.0f;
+        __emule_compute_ctx().dst[idst][i] = (__emule_compute_ctx().dst[idst][i] > val) ? 1.0f : 0.0f;
 }
 
 ALWI void unary_gt_tile_int32(uint32_t idst, uint32_t param0) {
@@ -72,7 +72,7 @@ ALWI void unary_ge_tile(uint32_t idst, uint32_t param0) {
     float val;
     std::memcpy(&val, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = (__emule_dst[idst][i] >= val) ? 1.0f : 0.0f;
+        __emule_compute_ctx().dst[idst][i] = (__emule_compute_ctx().dst[idst][i] >= val) ? 1.0f : 0.0f;
 }
 
 ALWI void unary_ge_tile_int32(uint32_t idst, uint32_t param0) {
@@ -90,7 +90,7 @@ ALWI void unary_lt_tile(uint32_t idst, uint32_t param0) {
     float val;
     std::memcpy(&val, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = (__emule_dst[idst][i] < val) ? 1.0f : 0.0f;
+        __emule_compute_ctx().dst[idst][i] = (__emule_compute_ctx().dst[idst][i] < val) ? 1.0f : 0.0f;
 }
 
 ALWI void unary_lt_tile_int32(uint32_t idst, uint32_t param0) {
@@ -108,7 +108,7 @@ ALWI void unary_le_tile(uint32_t idst, uint32_t param0) {
     float val;
     std::memcpy(&val, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = (__emule_dst[idst][i] <= val) ? 1.0f : 0.0f;
+        __emule_compute_ctx().dst[idst][i] = (__emule_compute_ctx().dst[idst][i] <= val) ? 1.0f : 0.0f;
 }
 
 ALWI void unary_le_tile_int32(uint32_t idst, uint32_t param0) {
@@ -126,7 +126,7 @@ ALWI void gtz_tile_init() {}
 
 ALWI void gtz_tile(uint32_t idst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = (__emule_dst[idst][i] > 0.0f) ? 1.0f : 0.0f;
+        __emule_compute_ctx().dst[idst][i] = (__emule_compute_ctx().dst[idst][i] > 0.0f) ? 1.0f : 0.0f;
 }
 
 ALWI void gtz_tile_int32(uint32_t idst) {
@@ -141,7 +141,7 @@ ALWI void ltz_tile_init() {}
 
 ALWI void ltz_tile(uint32_t idst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = (__emule_dst[idst][i] < 0.0f) ? 1.0f : 0.0f;
+        __emule_compute_ctx().dst[idst][i] = (__emule_compute_ctx().dst[idst][i] < 0.0f) ? 1.0f : 0.0f;
 }
 
 ALWI void ltz_tile_int32(uint32_t idst) {
@@ -156,7 +156,7 @@ ALWI void gez_tile_init() {}
 
 ALWI void gez_tile(uint32_t idst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = (__emule_dst[idst][i] >= 0.0f) ? 1.0f : 0.0f;
+        __emule_compute_ctx().dst[idst][i] = (__emule_compute_ctx().dst[idst][i] >= 0.0f) ? 1.0f : 0.0f;
 }
 
 ALWI void gez_tile_int32(uint32_t idst) {
@@ -171,7 +171,7 @@ ALWI void lez_tile_init() {}
 
 ALWI void lez_tile(uint32_t idst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = (__emule_dst[idst][i] <= 0.0f) ? 1.0f : 0.0f;
+        __emule_compute_ctx().dst[idst][i] = (__emule_compute_ctx().dst[idst][i] <= 0.0f) ? 1.0f : 0.0f;
 }
 
 ALWI void lez_tile_int32(uint32_t idst) {
@@ -186,7 +186,7 @@ ALWI void eqz_tile_init() {}
 
 ALWI void eqz_tile(uint32_t idst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = (__emule_dst[idst][i] == 0.0f) ? 1.0f : 0.0f;
+        __emule_compute_ctx().dst[idst][i] = (__emule_compute_ctx().dst[idst][i] == 0.0f) ? 1.0f : 0.0f;
 }
 
 ALWI void eqz_tile_int32(uint32_t idst) {
@@ -215,7 +215,7 @@ ALWI void nez_tile_init() {}
 
 ALWI void nez_tile(uint32_t idst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = (__emule_dst[idst][i] != 0.0f) ? 1.0f : 0.0f;
+        __emule_compute_ctx().dst[idst][i] = (__emule_compute_ctx().dst[idst][i] != 0.0f) ? 1.0f : 0.0f;
 }
 
 ALWI void nez_tile_int32(uint32_t idst) {

@@ -8,10 +8,12 @@
 #include "tt_emule/circular_buffer.hpp"
 #include "tt_emule/dfb_sync_state.hpp"
 #include "tt_emule/tile_counter.hpp"
+#include "jit_hw/internal/emule_thread_ctx.h"
 #include <thread>
 #include <vector>
 #include <barrier>
 #include <stdexcept>
+#include <memory>
 
 // Thread-local context consumed by JIT kernel stubs in include/jit_hw/.
 thread_local std::vector<uint32_t> __rt_args;
@@ -22,6 +24,11 @@ thread_local uint8_t               __processor_id = 0;
 // DFB thread-locals consumed by jit_hw/cb_api.h and jit_hw/dfb_api.h.
 thread_local tt_emule::TileCounterArray*  __emule_tc_array = nullptr;
 thread_local tt_emule::EmuleDFBInterface* __emule_dfbs     = nullptr;
+
+// Per-thread execution context — single source of truth for thread-local state,
+// specialized by RISC type (see jit_hw/internal/emule_thread_ctx.h). Global scope
+// to match the `extern thread_local ::__emule_self` the JIT headers declare.
+thread_local ThreadCommonCtx* __emule_self = nullptr;
 
 extern "C" uint8_t* __emule_dram_ptr(uint64_t offset) {
     return __device->dram_ptr(offset);
@@ -255,6 +262,19 @@ void EnqueueProgram(Device& device, Program& program, bool /*blocking*/) {
             __core         = &core;
             __device       = &device;
             __processor_id = kd.processor_id;
+
+            // Per-thread execution context — single source of truth (emule_thread_ctx.h).
+            const bool emule_is_compute =
+                (kd.type == tt_emule::KernelType::Compute ||
+                 kd.type == tt_emule::KernelType::QuasarCompute);
+            std::unique_ptr<ThreadCommonCtx> emule_ctx =
+                emule_is_compute
+                    ? std::unique_ptr<ThreadCommonCtx>(new ComputeThreadCtx())
+                    : std::unique_ptr<ThreadCommonCtx>(new DatamovementThreadCtx());
+            __emule_self = emule_ctx.get();
+            // Standalone harness leaves per-core coords at their default (0),
+            // matching the prior behavior (it never set my_x/my_y/logical).
+            emule_ctx->core = &core.core_state();
 
             if (has_dfbs) {
                 __emule_dfbs     = dfb_iface_per_thread[i].data();
