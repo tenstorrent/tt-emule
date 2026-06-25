@@ -48,8 +48,8 @@ CLEAR_CACHE=0
 REQUESTED=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --tier)        TIER="$2"; shift 2 ;;
-        -j)            JOBS="$2"; shift 2 ;;
+        --tier)        [ "$#" -ge 2 ] || { echo "ERROR: --tier requires an argument" >&2; exit 2; }; TIER="$2"; shift 2 ;;
+        -j)            [ "$#" -ge 2 ] || { echo "ERROR: -j requires an argument" >&2; exit 2; }; JOBS="$2"; shift 2 ;;
         --fail-fast)   FAIL_FAST=1; shift ;;
         --clear-cache) CLEAR_CACHE=1; shift ;;
         -h|--help)     usage 0 ;;
@@ -185,6 +185,9 @@ run_category() {
     else
         printf '  [%s] FAIL (%ss) — see %s\n' "$cat" "$dur" "$log"
     fi
+    # Result lives in the .status file; always exit 0 so the pool's `wait -n`
+    # reflects "slot freed", not pass/fail.
+    return 0
 }
 
 # --- build the work queue (skip categories that are no-ops under this tier) --
@@ -216,8 +219,11 @@ for item in "${QUEUE[@]}"; do
     run_category "$cat" "$tier" &
     running=$((running + 1))
     if [ "$running" -ge "$JOBS" ]; then
-        wait -n 2>/dev/null || wait
-        running=$((running - 1))
+        # `wait -n` (bash >=4.3) frees a single slot. Older bash has no `wait -n`,
+        # so fall back to waiting for the whole batch and reset the counter to
+        # match — batched rather than rolling, but never exceeds -j. (run_category
+        # always exits 0, so a `then` here means a slot freed, not a passing test.)
+        if wait -n 2>/dev/null; then running=$((running - 1)); else wait; running=0; fi
         [ "$FAIL_FAST" = 1 ] && any_failed && aborted=1
     fi
 done
