@@ -2189,6 +2189,7 @@ files:
   - {kind: extern_c, name: __emule_fiber_park_locked}
   - {kind: extern_c, name: __emule_fiber_wake}
   - {kind: extern_c, name: __emule_fiber_yield}
+  - {kind: extern_c, name: __emule_fiber_read_latency}
   - {kind: extern_c, name: __emule_fiber_note_publish}
   - {kind: function, name: __emule_fiber_wait}
 - path: include/jit_hw/internal/emule_thread_ctx.h

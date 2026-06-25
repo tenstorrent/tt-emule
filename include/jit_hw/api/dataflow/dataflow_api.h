@@ -495,24 +495,20 @@ inline void noc_async_write_multicast_one_packet(
 
 // ---- Barriers ----
 
-// WORKAROUND (not robust — see .claude/skills/workarounds/SKILL.md, WA-1): models
-// silicon's first-input-read latency (NOC round-trip to DRAM) before a core can
-// emit cross-core output. Emule reads are instant, which can let peers race ahead
-// of a reducer's ungated prologue (e.g., argmax resets done_sem at k=0), clobbering
-// an early increment and hanging the wait. We add a small one-time per-thread delay
-// on the first read barrier to restore typical ordering and to yield the host
-// scheduler so a starved reducer can run its prologue. The real fix belongs in the
-// argmax multi-core kernel (its k=0 path relies on NOC latency, not a handshake);
-// remove this once that lands.
+// Model silicon's NOC read latency: on hardware a core that issues a read stalls at
+// the read barrier for the round-trip, during which other cores progress. Emule reads
+// are instant, so a kernel that relies on that ordering instead of a handshake can race
+// — e.g. argmax's first reduction iteration, where the reducer resets done_sem in its
+// prologue and workers must not increment it until after the reset. We reproduce the
+// ordering by latency-parking the fiber on its FIRST read barrier (per-fiber one-shot):
+// the scheduler releases latency-parked fibers only at quiescence, i.e. after every other
+// runnable core has run — so the reducer's quick local reset always lands first. See
+// docs/fiber-engine.md. A worker's cross-core output (its done_sem.up) comes after this
+// barrier, so one park per fiber suffices.
 inline void __emule_model_first_read_latency() {
-    static thread_local bool first_read = true;
-    if (first_read) {
-        first_read = false;
-        // Under fibers: yield the worker so a starved reducer fiber can run its
-        // prologue, instead of usleep(200) which would stall the whole worker (and
-        // not actually schedule the reducer — it's a fiber on the same worker).
-        // (The gate is per-worker, not per-fiber; revisit with the argmax fix.)
-        __emule_fiber_yield();
+    if (__emule_self->read_latency_pending) {
+        __emule_self->read_latency_pending = false;
+        __emule_fiber_read_latency();
     }
 }
 

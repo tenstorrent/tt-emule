@@ -277,18 +277,36 @@ All three must produce identical pass/fail tallies. Confirm the OS-thread count 
 env and is **not** part of the JIT cache key, so a warm cache is reused across K values.
 `TT_EMULE_FIBER_LOG_N=1` logs each program's fiber count (the per-program N).
 
-**Known K>1 limitation — argmax.** The multi-core argmax kernel's `k=0` path relies on NOC
-read *latency* rather than a semaphore handshake (`dataflow_api.h` `__emule_model_first_read_latency`,
-to be removed once the upstream argmax handshake lands). emule's NOC is zero-latency, so that
-ordering cannot be faked consistently across worker counts: a `usleep` would stall the single
-worker at K=1 (self-deadlock), so the latency model yields the fiber instead — which does not
-reproduce the cross-core ordering at K>1, where argmax can deadlock. The default K=1 is
-unaffected; this is an op-level fragility, not a scheduler defect (every handshake-synchronized
-op is bit-identical across K).
+---
+
+## 8. NOC read-latency model
+
+A few kernels lean on **NOC read latency** for cross-core ordering instead of a semaphore
+handshake. The canonical case is the multi-core argmax reader: on its *first* reduction
+iteration it skips the `start_sem` handshake (later iterations use it), so the reducer's
+`done_sem.set(0)` reset must land before any worker's `done_sem.up()`. On silicon that always
+holds — every core stalls at its read barrier for the NOC round-trip while the reducer's quick
+local reset runs first. emule reads are an instant memcpy, so without modeling the latency a
+worker could `up()` before the reset (clobbering the increment, hanging the exact-match wait)
+at any worker count > 1.
+
+emule reproduces the ordering deterministically: on a fiber's **first** `noc_async_read_barrier`
+(`__emule_model_first_read_latency` → the `__emule_fiber_read_latency` bridge), the fiber is
+**latency-parked** — deferred as lowest-priority "in-flight" work via `FiberScheduler::
+latency_park()`. The scheduler releases all latency-parked fibers (back to ready) only at the
+**quiescence point** — exactly where it would otherwise declare a tier-1 deadlock (§6) — i.e.
+after every other runnable core has had its turn. So the reducer's reset (a quick store *before*
+its own read barrier) always precedes the release, which precedes every worker's post-barrier
+`up()`. This is timer-free (no wall-clock heuristic), deterministic, and reuses the park/wake
+machinery; it is a per-fiber one-shot (a worker's cross-core output comes after its first read
+barrier, so one park suffices) and **always on** (no env knob). It withholds only the reader's
+forward progress, never data (the read already completed), so a normal reader→CB→compute→writer
+pipeline still drains — the reader is released at the quiescence point that would otherwise
+deadlock. The diagnostic dump (§6) reports "N fiber(s) in read-latency flight".
 
 ---
 
-## 8. Multichip readiness (forward note, not scope)
+## 9. Multichip readiness (forward note, not scope)
 
 The engine is single-chip but designed not to block multichip
 ([`multichip/pillar0-fiber-engine.md`](multichip/pillar0-fiber-engine.md)):

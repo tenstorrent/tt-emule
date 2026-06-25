@@ -43,6 +43,12 @@ void __emule_fiber_wake(const void* key);
 // parking (where a thread previously spun/slept to let a peer run).
 void __emule_fiber_yield(void);
 
+// Model NOC read latency: defer the current fiber as lowest-priority "in-flight"
+// work, released only when the scheduler reaches quiescence (every other runnable
+// core has run). Reproduces the silicon ordering a few kernels lean on at their
+// first read barrier (e.g. argmax). See docs/fiber-engine.md.
+void __emule_fiber_read_latency(void);
+
 // Tier-2 watchdog: note genuine forward progress (data published — cb_push /
 // dfb_push page counts). Fiber completions are counted by the scheduler itself.
 void __emule_fiber_note_publish(unsigned pages);

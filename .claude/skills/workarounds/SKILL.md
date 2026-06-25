@@ -42,19 +42,26 @@ to removal.
 `__emule_model_first_read_latency()` (called from `noc_async_read_barrier` /
 `noc_async_read_barrier_with_trid`).
 
-**What it does:** the first `noc_async_read_barrier` on each DM thread sleeps a
-fixed ~200 µs (`usleep(200)`, once per thread). It is a stand-in for the
-NOC/DRAM read latency that emule's instant-memcpy reads collapse to zero.
+**What it does:** on a fiber's **first** `noc_async_read_barrier`,
+`__emule_model_first_read_latency()` defers the fiber via the fiber scheduler's
+**latency park** (`FiberScheduler::latency_park()`): the fiber is held as
+lowest-priority "in-flight" work and released only at the scheduler's quiescence
+point (where it would otherwise declare a tier-1 deadlock) — i.e. after every other
+runnable core has run. It is a stand-in for the NOC/DRAM read latency that emule's
+instant-memcpy reads collapse to zero. (Earlier it was a `usleep(200)`, then a
+one-shot `__emule_fiber_yield()`; both were timing/scheduling heuristics that did
+not hold at fiber worker count > 1 — see [fiber-engine.md](../../../docs/fiber-engine.md) §8.)
 
-**Why it is a workaround (not robust, bends a rule):**
-- It is a **timing heuristic**, not a guarantee. It works because 200 µs greatly
-  exceeds a reducer core's prologue time and because sleeping threads cede their
-  cores; under pathological host scheduling (a reducer thread starved past the
-  window) it could still race. It has held over repeated runs on a 64-core host,
-  but it is not a correctness invariant.
-- It **masks a latent kernel race rather than surfacing it**, which is the exact
-  thing `.claude/CLAUDE.md` says emule should *not* do. emule was correctly
-  exposing a real kernel fragility; this hack hides it.
+**Why it still belongs here (residual non-ideal, though no longer a timing hack):**
+- The mechanism itself is now **deterministic** (no wall-clock, no race) and is a
+  faithful model of "a read completes after the other runnable cores have run", so it
+  is *not* a timing heuristic and works at any worker count.
+- But it exists only to support a kernel that **leans on NOC latency instead of a
+  handshake** — emule is compensating for a non-strict kernel rather than the kernel
+  being correct on its own. And the model is a pragmatic **per-fiber one-shot** (latency
+  is modeled on the *first* read barrier per fiber, not every read), which is sufficient
+  because argmax is the only kernel that relies on read-latency ordering today, but is
+  not the fully-faithful "every read has latency".
 
 **Real root cause (kernel, not emule):**
 `tt-metal/ttnn/cpp/ttnn/operations/reduction/argmax/device/kernels/reader_argmax_interleaved_multicore.cpp`,
@@ -78,8 +85,9 @@ on timing — either drop/guard the redundant `k == 0` `done_sem` reset (the
 semaphore is already zero-initialized by the dispatcher), or extend the
 `start_sem` gate to `k == 0` so the reset → release → increment ordering is
 explicit. Once the kernel is timing-independent, delete
-`__emule_model_first_read_latency()` and revert `noc_async_read_barrier` to a
-no-op.
+`__emule_model_first_read_latency()`'s body (and, if nothing else needs the
+mechanism, `FiberScheduler::latency_park()` + the quiescence-release hook) and revert
+`noc_async_read_barrier` to a no-op.
 
 **Related (not itself a workaround):** the startup barrier in
 `tt-metal …/emulated_program_runner.cpp::launch_cores` (merged as metal #47346,
