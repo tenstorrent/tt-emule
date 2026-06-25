@@ -111,6 +111,7 @@ PR_TIER=(
     fused_test_rms_norm
     elt_test_broadcast_to
     elt_test_sqrt
+    sdpa_test_prefill
 )
 _pr_tier_has() { local n="$1" e; for e in "${PR_TIER[@]}"; do [ "$e" = "$n" ] && return 0; done; return 1; }
 # Return 0 (skip this entry) when CI_TIER excludes it.
