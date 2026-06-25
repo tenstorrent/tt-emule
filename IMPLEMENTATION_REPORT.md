@@ -59,6 +59,11 @@ focused reference; start here and follow the links.
   dividend); generic RISC-V semantics, not Quasar-specific.
 
 **Integration & build**
+- [fiber-engine.md](docs/fiber-engine.md) — the execution engine: per-(core,RISC)
+  kernels run on cooperatively-scheduled `ucontext` fibers over a runtime-sized
+  worker pool (env `TT_EMULE_FIBER_WORKERS`); park/wake at sync points, the
+  extern-C bridge, the lost-wakeup guard, hang detection, and why fibers are pinned.
+  The home of emule's concurrency model (cb/noc/dfb link here).
 - [state-tiers.md](docs/state-tiers.md) — how mutable state is partitioned into
   per-chip / per-core / per-thread tiers; the per-thread execution context
   (`__emule_self` → `ComputeThreadCtx` / `DatamovementThreadCtx`) and `CoreState`.

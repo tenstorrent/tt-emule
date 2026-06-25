@@ -6,7 +6,7 @@ This document describes how tt-emule models Quasar Dataflow Buffers (DFBs) — t
 
 ## 1. Background: Why DFBs Differ from CBs
 
-On Wormhole, a Circular Buffer (CB) is a simple SPSC (single-producer, single-consumer) FIFO. One DM kernel writes tiles in, one compute kernel reads them out. The synchronization state is a single atomic `occupied` counter plus a mutex and two condition variables.
+On Wormhole, a Circular Buffer (CB) is a simple SPSC (single-producer, single-consumer) FIFO. One DM kernel writes tiles in, one compute kernel reads them out. The synchronization state is a single atomic `occupied` counter; producers/consumers park and wake on it through the fiber engine ([cb-emulation.md](cb-emulation.md), [fiber-engine.md](fiber-engine.md)).
 
 On Quasar, a single Tensix has **24 logical processors**: 8 Data Movement (DM0–DM7) plus 4 Neo compute clusters × 4 RISC slots (E0_MATH0 through E3_MATH3). All 24 processors share one 4 MB L1. A DFB must therefore support **multiple producers and multiple consumers** (MPMC) on the same buffer. A single atomic `occupied` counter is insufficient for this.
 
@@ -25,9 +25,9 @@ struct TileCounter {
     std::atomic<uint32_t> posted{0};       // incremented by producer after writing
     std::atomic<uint32_t> acked{0};        // incremented by consumer after reading
     uint32_t capacity{0};                  // set at init; constant during a program
-    std::mutex mu;
-    std::condition_variable space_cv;      // producer blocks here when full
-    std::condition_variable data_cv;       // consumer blocks here when empty
+    std::mutex mu;                         // unused under the fiber engine — retained
+    std::condition_variable space_cv;      // for ABI (struct-size stability). dfb_*
+    std::condition_variable data_cv;       // park on &tc; inc_posted/inc_acked wake it.
 
     uint32_t occupancy() const;            // posted - acked
     uint32_t free_space() const;           // capacity - occupancy
@@ -37,7 +37,7 @@ struct TileCounter {
 
 Key points:
 - `occupancy` and `free_space` are derived from two independent monotonically-increasing counters. They never go negative because the emulation enforces that `acked <= posted` and `occupancy <= capacity` via the blocking waits.
-- The mutex guards both atomics for condition variable signaling only. The atomics use `memory_order_acquire/release` so they can be read locklessly for the fast path before taking the mutex.
+- `posted`/`acked` use `memory_order_acquire/release`. The `mu`/`space_cv`/`data_cv` fields predate the fiber engine and are no longer used on the fiber path (waits park on `&tc`); they remain only so the struct's size stays stable for any TU that embeds it.
 - `capacity` is the number of entries this TC can hold at once. `capacity = num_entries / M` where `M = max(num_producers, num_consumers)`. For 1P-1C, M=1 so capacity equals `num_entries`.
 
 ### 2.2 `TileCounterArray` (`include/tt_emule/tile_counter.hpp`)
@@ -143,28 +143,29 @@ A producer may only call `push_back` after `reserve_back` confirms `free_space >
 ```cpp
 void TileCounterArray::inc_posted(uint8_t neo_id, uint8_t counter_id, uint32_t n) {
     auto& tc = get(neo_id, counter_id);
-    { std::lock_guard lk(tc.mu); tc.posted.fetch_add(n, memory_order_release); }
-    tc.data_cv.notify_all();
+    tc.posted.fetch_add(n, std::memory_order_release);
+    __emule_fiber_note_publish(n);   // tier-2 watchdog: real forward progress
+    __emule_fiber_wake(&tc);         // wake consumers parked on this TC
 }
 ```
 
-The lock ensures the atomic increment and the condition variable notification are sequenced: the consumer's `data_cv.wait` predicate re-checks `occupancy()` under the lock, so it cannot miss the notification. The `notify_all` wakes every consumer waiting on this TC.
+The release store publishes the increment; `__emule_fiber_wake(&tc)` re-queues every fiber parked on this TC's host address. The waiter's re-check-under-the-scheduler-lock closes the lost-wakeup window — see [fiber-engine.md](fiber-engine.md) §4.
 
 **`inc_acked(neo_id, counter_id, n)` — called by consumer after reading**
 
-Mirror of `inc_posted`, but increments `acked` and notifies `space_cv`. This wakes producers waiting for free space.
+Mirror of `inc_posted`, but increments `acked` and `__emule_fiber_wake(&tc)`s producers parked for free space.
 
 **Blocking for space / data — inline in `dfb_api.h`**
 
-A producer's `dfb_reserve_back` blocks until the target TC has room; a consumer's `dfb_wait_front` blocks until it holds enough posted entries. Each takes the TC's `mu` and `wait_for`s (bounded by `TT_EMULE_DFB_TIMEOUT`, §7) on `space_cv` / `data_cv` respectively, re-checking `tc.free_space() >= n` / `tc.occupancy() >= n` under the lock. The mutex is always taken — there is no lockless fast path, because `occupancy()` and `free_space()` each read two independent atomics (`posted`, `acked`) non-atomically, which could underflow in MPMC scenarios.
+A producer's `dfb_reserve_back` parks until the target TC has room; a consumer's `dfb_wait_front` parks until it holds enough posted entries. Each calls `__emule_fiber_wait(&tc, pred)` with `pred` = `tc.free_space() >= n` / `tc.occupancy() >= n`. There is no lock-free *fast-path* shortcut for DFB (`occupancy()`/`free_space()` read two independent atomics non-atomically, which could underflow in MPMC scenarios), so the predicate is always evaluated under the scheduler lock before parking.
 
 ### 3.3 The Drain Barrier: `dfb_finish()`
 
-`dfb_finish(dfb_id)` (`dfb_api.h`) is called by a producer when it has pushed all its entries and wants to wait until all consumers have acknowledged them. It iterates over the interface's TC slots (`__emule_dfbs[dfb_id]`) and, for each non-drained TC, blocks on `space_cv` until `posted == acked`. `space_cv` is reused here because the drain condition is exactly what `inc_acked` signals — a fully drained TC (`posted == acked`) means all written entries have been consumed.
+`dfb_finish(dfb_id)` (`dfb_api.h`) is called by a producer when it has pushed all its entries and wants to wait until all consumers have acknowledged them. It iterates over the interface's TC slots (`__emule_dfbs[dfb_id]`) and, for each non-drained TC, parks on `&tc` until `posted == acked`, woken by the `inc_acked` ack path.
 
-### 3.4 Why Both Atomics and a Mutex?
+### 3.4 Synchronization under the fiber engine
 
-The `posted` and `acked` counters are `std::atomic<uint32_t>` to allow lockless reads in the fast path. But `std::condition_variable` requires a `std::mutex`: the predicate must be checked under the lock to avoid the classic TOCTOU race where the notifying thread increments the counter and calls `notify` between the predicate check and the `wait` call in the blocking thread. By taking the lock before both the `fetch_add` and the `notify`, `inc_posted`/`inc_acked` ensure no notifications are lost.
+The `posted`/`acked` counters are `std::atomic<uint32_t>` (release on increment, acquire on read). Producers and consumers park/wake on the TC's host address through the fiber bridge; the `mu`/`space_cv`/`data_cv` fields on `TileCounter` predate the engine and are **unused on the fiber path** — retained only so the struct's size stays stable for any TU that embeds it. The lost-wakeup guard (predicate re-check under the scheduler lock) is the engine's, documented once in [fiber-engine.md](fiber-engine.md) §4.
 
 ---
 
@@ -293,19 +294,7 @@ All tests use the real tt-metal host APIs: `CreateDataflowBuffer`, `BindDataflow
 
 ## 7. Timeout and Hang Detection
 
-Every blocking wait is wrapped with `std::condition_variable::wait_for`:
-
-```cpp
-if (!tc.space_cv.wait_for(lk,
-        std::chrono::seconds(__emule_dfb_timeout_sec()),
-        [&]{ return tc.free_space() >= n; })) {
-    fprintf(stderr, "EMULE HANG: dfb_reserve_back(dfb=%u, n=%u) timed out "
-            "on TC(%u,%u) after %ds\n", ...);
-    std::abort();
-}
-```
-
-The timeout defaults to 120 seconds and can be overridden with the `TT_EMULE_DFB_TIMEOUT` environment variable. On expiry, the process aborts with a diagnostic message identifying the specific DFB and TC involved.
+A stuck DFB handshake is caught by the **fiber scheduler's** hang detection, not a per-op timer: tier-1 quiescent deadlock (all workers idle ∧ fibers still parked) fires instantly with a parked-fiber dump (each entry names the core, RISC, and wait-key), and the tier-2 no-progress watchdog plus a wall-clock backstop (`TT_EMULE_FIBER_WATCHDOG_SEC`, default 120) backstops livelocks. The dump resolves a DFB wait-key to its TC. See [fiber-engine.md](fiber-engine.md) §6.
 
 ---
 

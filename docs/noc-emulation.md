@@ -261,18 +261,23 @@ kernel that depended on the silicon-side race would already be broken).
 ```cpp
 template <ProgrammableCoreType core_type = ProgrammableCoreType::TENSIX>
 class Semaphore {
-    void up(uint32_t value);     // local atomic fetch_add
-    void down(uint32_t value);   // spin-wait + atomic fetch_sub
-    void wait(uint32_t target);  // spin-wait until == target
-    void wait_min(uint32_t v);   // spin-wait until ≥ v
-    void set(uint32_t value);    // atomic store
+    void up(uint32_t value);     // local atomic fetch_add, then wake the atom
+    void down(uint32_t value);   // park until reached, then atomic fetch_sub
+    void wait(uint32_t target);  // park until == target
+    void wait_min(uint32_t v);   // park until ≥ v
+    void set(uint32_t value);    // atomic store, then wake the atom
     // ...
 };
 ```
 
-Spin-waits include hang detection: 10M iterations without progress triggers
-`std::abort()` with a context print. This catches deadlocks in mock-runtime
-mismatches without infinite hangs.
+Waits **park the fiber** on the semaphore atom's host address via
+`__emule_fiber_wait(atom, pred)`; `up`/`set`/`noc_semaphore_inc`/`noc_semaphore_set`
+call `__emule_fiber_wake(atom)` after their atomic store. The old 10M-iteration spin +
+`std::abort()` is gone — a stuck handshake is caught by the scheduler's hang detection
+(tier-1 quiescent deadlock / tier-2 no-progress watchdog), and a lost wakeup from a
+waiter/waker key mismatch surfaces the same way. See [fiber-engine.md](fiber-engine.md)
+§5–§6. The waiter keys on its **local** L1 host pointer and the waker on the **resolved
+target** host pointer; for a local handshake these must resolve to the same byte.
 
 The free function `noc_semaphore_wait(ptr, val)` waits for `>= val` when
 `val >= 1` (monotonic handshake counter) and exact `== 0` when `val == 0`

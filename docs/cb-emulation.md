@@ -19,12 +19,16 @@ dispatch, the bf16-vs-uint16 ambiguity), [tilize-untilize-pack.md](tilize-untili
 ## 1. Emulation model
 
 A CB is a single-producer / single-consumer ring over a slice of L1. Under slow
-dispatch each core runs reader, compute, and writer as separate host threads, so
-the producer/consumer handshake is real cross-thread synchronization — backed by
-a mutex + condition variables, with a lock-free fast path on an atomic occupancy
-counter. Waits are bounded by a hang-detection timeout. (On Quasar, DFBs replace
-CBs with MPMC tile counters — see [DFB_EMULATION.md](DFB_EMULATION.md) — and a
-bridge keeps both views coherent; Section 4.)
+dispatch each core's reader, compute, and writer run as separate **fibers**, so the
+producer/consumer handshake is a real cross-fiber park/wake on an atomic occupancy
+counter: a consumer whose `cb_wait_front` predicate is unmet parks on the CB's host
+address and is woken when the producer's `cb_push_back` bumps `occupied` (and
+vice-versa for free space). The lock-free fast path probes `occupied` first. The
+general mechanism — the bridge, the lost-wakeup guard, hang detection — lives in
+[fiber-engine.md](fiber-engine.md); this doc covers only the CB handshake. (On
+Quasar, DFBs replace CBs with MPMC tile counters — see
+[DFB_EMULATION.md](DFB_EMULATION.md) — and a bridge keeps both views coherent;
+Section 4.)
 
 ---
 
@@ -39,21 +43,21 @@ struct CBSyncState {
     uint32_t num_pages = 0;           // ring capacity in tiles
     uint32_t page_mask = 0;           // num_pages - 1 (pow2 fast modulo)
     std::atomic<uint32_t> occupied{0};  // the shared cross-RISC semaphore
-    std::mutex              mu;
-    std::condition_variable space_cv;   // producer waits for free space
-    std::condition_variable data_cv;    // consumer waits for data
+    std::mutex              mu;          // unused under the fiber engine —
+    std::condition_variable space_cv;   // retained for ABI (a non-jit TU embeds
+    std::condition_variable data_cv;    // CBSyncState, so its size must be stable)
 };
 ```
 
 `CBSyncState` holds **only what is genuinely shared across RISCs** on silicon: the
 geometry (`base`/`page_size`/`num_pages`/`page_mask`) and the pages-occupied
-**semaphore** (`occupied` + the two condvars) — the analog of the L1
-pages_received/acked counter. The read/write *pointers* are **not** here; they are
-per-RISC (§2b). Two semaphore-only free functions maintain the count:
-`cb_sync_push` (bump `occupied`, notify consumer) and `cb_sync_pop` (drop
-`occupied`, notify producer); producers/consumers block on the condvars via
-`jit_hw/emule_wait.h`. `occupied` is **atomic** so the SPSC fast path can probe
-it without taking the lock.
+**semaphore** (`occupied`) — the analog of the L1 pages_received/acked counter. The
+read/write *pointers* are **not** here; they are per-RISC (§2b). Two semaphore-only
+free functions maintain the count: `cb_sync_push` (bump `occupied`, then
+`__emule_fiber_wake(&cb)`) and `cb_sync_pop` (drop `occupied`, then wake). `occupied`
+is **atomic** so the SPSC fast path can probe it without parking. The `mu`/`space_cv`/
+`data_cv` fields predate the fiber engine and are no longer used on the fiber path —
+they are kept only so the struct's size stays stable for a non-jit TU that embeds it.
 
 ---
 
@@ -89,7 +93,8 @@ The JIT compute/dataflow surface (`include/jit_hw/api/cb_api.h`) over the per-co
   (uint32_t + int32_t overloads). `cb_push_back`/`cb_pop_front` advance the
   calling RISC's per-RISC pointer (§2b) and then bump/drop the shared `occupied`
   semaphore; `cb_reserve_back` also resets the pack auto-advance counter
-  `__emule_pack_offset[cb_id] = 0`.
+  (`__emule_compute_ctx().pack_offset[cb_id] = 0`) — but only on a compute fiber,
+  since PACK state is compute-only (a DM reader's `cb_push_back` must not touch it).
 - `get_write_ptr(cb_id)` / `get_read_ptr(cb_id)` — return the calling RISC's own
   per-RISC pointer (§2b), so concurrent reader/writer RISCs each see their own
   view of the CB.
@@ -101,11 +106,11 @@ The JIT compute/dataflow surface (`include/jit_hw/api/cb_api.h`) over the per-co
   default 32×32). Drive the tile-shape-aware nfaces / pack / unpack paths.
 - `get_dataformat(cb_id)` — from `EMULE_CB_DATA_FORMATS` (enum-only; no
   page-size fallback — see [cb-dataformat.md](cb-dataformat.md)).
-- Waits are **`<chrono>`-free by default** (`jit_hw/emule_wait.h`): `cv.wait` +
-  `sched_yield`/`usleep`, deliberately avoiding the libstdc++ `<format>`/iostream
-  pull that costs ~1 s of JIT parse. `TT_EMULE_WAIT_TIMEOUT=1` restores bounded
-  `cv.wait_for` + a per-op deadlock diagnostic; `TT_EMULE_CB_TIMEOUT` sets the
-  wait-front timeout.
+- Waits **park the fiber**: `cb_reserve_back`/`cb_wait_front` call
+  `__emule_fiber_wait(&cb, pred)` (`jit_hw/internal/emule_fiber_bridge.h`) — fast-path
+  predicate probe, then park on the CB's host address until a `cb_push_back`/
+  `cb_pop_front` wakes them. Hang detection (a stuck handshake) and the wall-clock
+  backstop are the scheduler's, not a per-op timer — see [fiber-engine.md](fiber-engine.md) §6.
 
 ---
 
