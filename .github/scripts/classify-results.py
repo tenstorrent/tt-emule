@@ -122,9 +122,14 @@ def write_summary(
     passed_count: int,
     failed_count: int,
     build_dir: str | None,
+    gate_stale: bool = True,
 ) -> None:
     lines: list[str] = []
-    has_problems = bool(new_failures) or bool(newly_passing) or bool(stale_entries)
+    # Under a smoke/subset run (gate_stale=False) most allowlist entries are
+    # legitimately absent, so stale entries are expected and must NOT count as
+    # a problem for the pass/fail verdict.
+    stale_problem = bool(stale_entries) and gate_stale
+    has_problems = bool(new_failures) or bool(newly_passing) or stale_problem
     status = "❌ Regression failed" if has_problems else "✅ Regression passed"
     lines.append(f"# {status}")
     lines.append("")
@@ -138,10 +143,13 @@ def write_summary(
     # second one is below.
     new_marker = "❌" if new_failures else "✅"
     np_marker = "⚠️" if newly_passing else "✅"
-    stale_marker = "⚠️" if stale_entries else "✅"
+    # When stale gating is off (smoke/subset run) absent allowlist entries are
+    # expected — render them as informational (ℹ️), not a warning.
+    stale_marker = ("⚠️" if stale_problem else "ℹ️") if stale_entries else "✅"
+    stale_note = "" if gate_stale else " — not gated (subset run)"
     lines.append(f"- {new_marker} **{len(new_failures)}** new failures (failed but not allowlisted)")
     lines.append(f"- {np_marker} **{len(newly_passing)}** newly-passing allowlist entries (allowlisted but now passing)")
-    lines.append(f"- {stale_marker} **{len(stale_entries)}** stale allowlist entries (matched no test in this run)")
+    lines.append(f"- {stale_marker} **{len(stale_entries)}** stale allowlist entries (matched no test in this run){stale_note}")
     lines.append("")
 
     if new_failures:
@@ -211,6 +219,16 @@ def main() -> int:
     parser.add_argument("--xml-dir", required=True, type=Path)
     parser.add_argument("--allowlist", default=None, type=Path)
     parser.add_argument("--build-dir", default=None)
+    parser.add_argument(
+        "--ignore-stale",
+        action="store_true",
+        help=(
+            "Do not fail on stale allowlist entries (patterns that matched no "
+            "test in this run). Use for smoke/subset runs (e.g. the PR-tier "
+            "quasar smoke) where most allowlisted known-failure tests are "
+            "intentionally not executed, so their absence is expected."
+        ),
+    )
     args = parser.parse_args()
 
     passed, failed = parse_xml(args.xml_dir)
@@ -256,9 +274,10 @@ def main() -> int:
         passed_count=len(passed),
         failed_count=len(failed),
         build_dir=args.build_dir,
+        gate_stale=not args.ignore_stale,
     )
 
-    if new_failures or newly_passing or stale:
+    if new_failures or newly_passing or (stale and not args.ignore_stale):
         return 1
     return 0
 

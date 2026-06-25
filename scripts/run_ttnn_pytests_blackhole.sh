@@ -60,8 +60,74 @@ ENTRY_NUM=0
 PASS=0
 FAIL=0
 
+# CI_TIER selects which entries run: full (all, default) | pr (only PR_TIER) |
+# deferred (the rest); see ci-regression-all.sh. PR_TIER is the blackhole TTNN
+# smoke set for the PR gate — broad per-op-class coverage across 2 parallel
+# shards, excluding the heavy whole-file runs (untilize, pad, to_memory_config,
+# copy), the tensor/ dir, and the nightly matmul-activations test.
+CI_TIER="${CI_TIER:-full}"
+PR_TIER=(
+    dm_test_tilize
+    dm_test_repeat
+    dm_test_concat_5d
+    dm_test_permute_not_sharded
+    bf_test_to_and_from_device
+    bf_test_tilize_untilize_2D
+    elt_test_exp
+    elt_test_add
+    elt_test_mul
+    elt_test_unary_comp
+    reduce_test_argmax
+    reduce_test_reduction_mean
+    matmul_test_basic
+    matmul_test_linear
+    fused_test_softmax
+    pool_test_upsample_nearest_interleaved
+    dm_test_concat_sharded
+    dm_test_untilize_same_volume
+    elt_test_typecast_int
+    elt_test_binary_fp32
+    elt_test_where
+    bf_test_to_layout
+    elt_test_unary_sharding
+    dm_test_permute_sharded
+    reduce_test_max
+    reduce_test_topk
+    reduce_test_var_std
+    dm_test_embedding_base_case
+    dm_test_gather
+    elt_test_binary_int32
+    elt_test_unary_int32
+    elt_test_silu
+    elt_test_binary_composite
+    bf_test_reshape
+    bf_test_to_dtype
+    matmul_test_experimental
+    fused_test_batch_norm_pgmcache
+    pca_test_per_core_allocation
+    dm_test_pad_subcoregrids
+    fused_test_layer_norm
+    bf_test_untilize_bfloat8_b
+    fused_test_rms_norm
+    elt_test_broadcast_to
+    sdpa_test_prefill
+    elt_test_sqrt
+)
+_pr_tier_has() { local n="$1" e; for e in "${PR_TIER[@]}"; do [ "$e" = "$n" ] && return 0; done; return 1; }
+# Return 0 (skip this entry) when CI_TIER excludes it.
+_tier_skip() {
+    case "$CI_TIER" in
+        full)     return 1 ;;
+        pr)       _pr_tier_has "$1" && return 1 || return 0 ;;
+        deferred) _pr_tier_has "$1" && return 0 || return 1 ;;
+        *) echo "ERROR: bad CI_TIER='$CI_TIER' (full|pr|deferred)" >&2; exit 2 ;;
+    esac
+}
+
 run_pytest() {
     local name="$1"; shift
+    # Tier filter before shard accounting, so shards split only the PR_TIER set.
+    if _tier_skip "$name"; then return; fi
     # Remaining args are passed straight to pytest: one or more test targets
     # (file or file::node) plus any flags (-k, --deselect). Passing multiple
     # node targets in a single invocation lets one file's curated subset run in
@@ -294,6 +360,9 @@ run_pytest "elt_test_round" "$ELT_TEST_DIR/test_round.py"
 run_pytest "elt_test_signbit" "$ELT_TEST_DIR/test_signbit.py"
 run_pytest "elt_test_silu" "$ELT_TEST_DIR/test_silu.py"
 run_pytest "elt_test_silu_row_major" "$ELT_TEST_DIR/test_silu_row_major.py"
+# sqrt is the deep-default SFPU op (real silicon SQRT_23, no libm shadow), so this
+# exercises the deep-SFPU path. rsqrt deselected (non-finite-handling failures).
+run_pytest "elt_test_sqrt" "$ELT_TEST_DIR/test_unary.py::test_unary_root_ops_ttnn" -k 'sqrt and not rsqrt'
 run_pytest "elt_test_sigmoid_accurate_21f" "$ELT_TEST_DIR/test_sigmoid_accurate_21f.py"
 run_pytest "elt_test_sigmoid_vector_modes" "$ELT_TEST_DIR/test_sigmoid_vector_modes.py"
 run_pytest "elt_test_snake_beta" "$ELT_TEST_DIR/test_snake_beta.py"

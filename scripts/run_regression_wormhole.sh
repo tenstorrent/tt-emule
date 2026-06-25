@@ -48,8 +48,34 @@ _gtest_xml_args() {
     fi
 }
 
+# CI_TIER selects which entries run: full (all, default) | pr (only PR_TIER) |
+# deferred (the rest); see ci-regression-all.sh. PR_TIER is the wormhole C++
+# smoke set for the PR gate — skewed to WH-specific divergence from blackhole
+# (the full arch): DRAM bank topology, tilize/format, basic L1/JIT/NOC/reduce.
+CI_TIER="${CI_TIER:-full}"
+PR_TIER=(
+    tilize_untilize
+    SimpleL1Buffer
+    SimpleDramBuffer
+    TensixL1Tile
+    DramUnaryDRAMChannels
+    DmLoopbackPacketSizes
+    ttnn_sum_last_dim_aligned
+)
+_pr_tier_has() { local n="$1" e; for e in "${PR_TIER[@]}"; do [ "$e" = "$n" ] && return 0; done; return 1; }
+# Return 0 (skip this entry) when CI_TIER excludes it.
+_tier_skip() {
+    case "$CI_TIER" in
+        full)     return 1 ;;
+        pr)       _pr_tier_has "$1" && return 1 || return 0 ;;
+        deferred) _pr_tier_has "$1" && return 0 || return 1 ;;
+        *) echo "ERROR: bad CI_TIER='$CI_TIER' (full|pr|deferred)" >&2; exit 2 ;;
+    esac
+}
+
 run_test() {
     local name="$1"; shift
+    if _tier_skip "$name"; then SKIP=$((SKIP + 1)); return; fi
     if [ ! -f "$1" ]; then
         echo "  FAIL: $name (binary not found: $1)"
         FAIL=$((FAIL + 1))
@@ -75,6 +101,7 @@ run_test() {
 
 run_test_verbose() {
     local name="$1"; shift
+    if _tier_skip "$name"; then SKIP=$((SKIP + 1)); return; fi
     if [ ! -f "$1" ]; then
         echo "  FAIL: $name (binary not found: $1)"
         FAIL=$((FAIL + 1))
