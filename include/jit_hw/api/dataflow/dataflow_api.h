@@ -20,6 +20,7 @@
 
 #include "jit_hw/jit_kernel_stubs.hpp"
 #include "jit_hw/api/cb_api.h"
+#include "jit_hw/internal/emule_fiber_bridge.h"  // __emule_fiber_wait / _wake (park/wake)
 // INVALID/VALID semaphore sentinels — silicon's dataflow_api.h includes this
 // (real header line 22); kernels like reduction/topk/.../reader_final_topk.cpp
 // reference INVALID/VALID unqualified and rely on this transitive include.
@@ -505,10 +506,13 @@ inline void noc_async_write_multicast_one_packet(
 // remove this once that lands.
 inline void __emule_model_first_read_latency() {
     static thread_local bool first_read = true;
-    constexpr unsigned int kFirstReadLatencyUs = 200;
     if (first_read) {
         first_read = false;
-        usleep(kFirstReadLatencyUs);
+        // Under fibers: yield the worker so a starved reducer fiber can run its
+        // prologue, instead of usleep(200) which would stall the whole worker (and
+        // not actually schedule the reducer — it's a fiber on the same worker).
+        // (The gate is per-worker, not per-fiber; revisit with the argmax fix.)
+        __emule_fiber_yield();
     }
 }
 
@@ -705,7 +709,9 @@ inline std::atomic<uint32_t>* __emule_sem_atomic(volatile tt_l1_ptr uint32_t* se
 // Set semaphore value (local L1 store).
 // addr is a uint32_t L1 address (truncated host pointer).
 inline void noc_semaphore_set(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t val) {
-    __emule_sem_atomic(sem_addr)->store(val, std::memory_order_release);
+    auto* a = __emule_sem_atomic(sem_addr);
+    a->store(val, std::memory_order_release);
+    __emule_fiber_wake(a);  // wake any local waiter (e.g. VALID->0 release toggle)
 }
 
 // Wait for semaphore to reach expected value (spin with exponential backoff + hang detection).
@@ -725,23 +731,9 @@ inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t v
     // poll never misses.) For the VALID->0 release toggle (val == 0) we keep exact
     // equality; a count-up target is never 0, so the split is unambiguous.
     auto reached = [val](uint32_t cur) { return val > 0 ? cur >= val : cur == val; };
-    uint64_t spins = 0;
-    while (!reached(atom->load(std::memory_order_acquire))) {
-        if (spins < 64) {
-            // Busy-spin for fast wakeup
-        } else if (spins < 1024) {
-            sched_yield();
-        } else {
-            usleep(1);
-        }
-        if (++spins > 10'000'000ULL) {
-            fprintf(stderr, "EMULE HANG: noc_semaphore_wait(%p, %u) stuck at %u after %llu spins "
-                    "[phys (%u,%u) logical (%u,%u)]\n",
-                    (void*)sem_addr, val, atom->load(std::memory_order_relaxed), (unsigned long long)spins,
-                    my_x[0], my_y[0], __emule_self->core->logical_x, __emule_self->core->logical_y);
-            std::abort();
-        }
-    }
+    // Park on the semaphore atom until a producer's noc_semaphore_inc/_set wakes it
+    // (same resolved host address). Hang detector replaces the 10M-spin abort.
+    __emule_fiber_wait(atom, [&] { return reached(atom->load(std::memory_order_acquire)); });
 }
 
 // Wait for semaphore to reach at least min_val (spin with exponential backoff + hang detection).
@@ -753,23 +745,7 @@ inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32
                 (void*)sem_addr, min_val, atom->load(std::memory_order_acquire),
                 __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
-    uint64_t spins = 0;
-    while (atom->load(std::memory_order_acquire) < min_val) {
-        if (spins < 64) {
-            // Busy-spin for fast wakeup
-        } else if (spins < 1024) {
-            sched_yield();
-        } else {
-            usleep(1);
-        }
-        if (++spins > 10'000'000ULL) {
-            fprintf(stderr, "EMULE HANG: noc_semaphore_wait_min(%p, %u) stuck at %u after %llu spins "
-                    "[phys (%u,%u) logical (%u,%u)]\n",
-                    (void*)sem_addr, min_val, atom->load(std::memory_order_relaxed), (unsigned long long)spins,
-                    my_x[0], my_y[0], __emule_self->core->logical_x, __emule_self->core->logical_y);
-            std::abort();
-        }
-    }
+    __emule_fiber_wait(atom, [&] { return atom->load(std::memory_order_acquire) >= min_val; });
 }
 
 // Atomically increment a remote semaphore.
@@ -802,6 +778,7 @@ inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc,
     }
     if (ptr) {
         __atomic_fetch_add(reinterpret_cast<uint32_t*>(ptr), incr, __ATOMIC_SEQ_CST);
+        __emule_fiber_wake(ptr);  // wake the remote core's noc_semaphore_wait (same host addr)
     } else {
         fprintf(stderr, "EMULE WARN: noc_semaphore_inc failed to resolve addr 0x%llx "
                 "(target core (%u,%u) offset 0x%x) [from phys (%u,%u) logical (%u,%u)]\n",

@@ -2180,6 +2180,17 @@ files:
   symbols:
   - {kind: namespace, name: tt_emule}
   - {kind: struct, name: CoreState}
+- path: include/jit_hw/internal/emule_fiber_bridge.h
+  section: include/jit_hw/internal/
+  summary: extern-C fiber-scheduler bridge (lock/park_locked/wake/yield/note_publish) + the inline __emule_fiber_wait helper; the runner defines the symbols, the .so resolves them at dlopen. See docs/fiber-engine.md.
+  symbols:
+  - {kind: extern_c, name: __emule_fiber_lock}
+  - {kind: extern_c, name: __emule_fiber_unlock}
+  - {kind: extern_c, name: __emule_fiber_park_locked}
+  - {kind: extern_c, name: __emule_fiber_wake}
+  - {kind: extern_c, name: __emule_fiber_yield}
+  - {kind: extern_c, name: __emule_fiber_note_publish}
+  - {kind: function, name: __emule_fiber_wait}
 - path: include/jit_hw/internal/emule_thread_ctx.h
   section: include/jit_hw/internal/
   summary: 'Per-thread (per-RISC) execution context: ThreadCommonCtx base + ComputeThreadCtx/DatamovementThreadCtx, the __emule_self pointer, and the typed accessors.'

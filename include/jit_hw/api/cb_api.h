@@ -10,6 +10,7 @@
 #include "jit_hw/emule_dfb_state.h"
 #include "jit_hw/api/compute/common_globals.h"
 #include "jit_hw/emule_wait.h"
+#include "jit_hw/internal/emule_fiber_bridge.h"  // __emule_fiber_wait (park/wake)
 #include "jit_hw/internal/emule_cb_ptr.h"   // per-RISC CB pointers + cb_addr_shift
 #include <cstdint>
 #include <cstdio>
@@ -140,18 +141,11 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
     if ((__emule_self->cb_self_consume_mask >> cb_id) & 1u) {
         return;
     }
-    std::unique_lock<std::mutex> lk(cb.mu);
-    if (!__emule_cv_wait(cb.space_cv, lk, __emule_cb_timeout_sec(),
-            [&]{ return (cb.num_pages - cb.occupied.load(std::memory_order_relaxed)) >= n; })) {
-        fprintf(stderr, "EMULE HANG: cb_reserve_back(cb_id=%u, n=%u) timed out after %ds "
-                "(occupied=%u, num_pages=%u, page_size=%u) "
-                "[phys (%u,%u) logical (%u,%u)] "
-                "(set TT_EMULE_CB_TIMEOUT=<secs> to adjust)\n",
-                cb_id, n, __emule_cb_timeout_sec(),
-                cb.occupied.load(), cb.num_pages, cb.page_size,
-                my_x[0], my_y[0], __emule_self->core->logical_x, __emule_self->core->logical_y);
-        std::abort();
-    }
+    // Fiber park/wake: yield the worker until a consumer frees ≥ n pages (woken by
+    // cb_sync_pop → __emule_fiber_wake(&cb)). The hang detector replaces the old timeout.
+    __emule_fiber_wait(&cb, [&] {
+        return (cb.num_pages - cb.occupied.load(std::memory_order_acquire)) >= n;
+    });
 }
 
 inline void cb_push_back(uint32_t cb_id, uint32_t n) {
@@ -160,7 +154,11 @@ inline void cb_push_back(uint32_t cb_id, uint32_t n) {
     __emule_cb_advance_wr(cb_id, n);
     tt_emule::cb_sync_push(__emule_self->cbs[cb_id], n);
     // Reset the PACK auto-advance offset on batch commit (see cb_reserve_back).
-    __emule_compute_ctx().pack_offset[cb_id] = 0;
+    // PACK state is compute-only; a DM (reader) cb_push_back runs on a
+    // DatamovementThreadCtx, so guard the compute-ctx access (else it's an OOB write).
+    if (__emule_self->kind == ThreadCommonCtx::Kind::Compute) {
+        __emule_compute_ctx().pack_offset[cb_id] = 0;
+    }
     // Bridge CB→DFB: update tile counters so DM's dfb_wait_front sees compute's output.
     // cb.mu already released; now safe to acquire tc.mu (consistent lock ordering).
     if (__emule_self->dfbs && __emule_self->tc_array && __emule_self->dfbs[cb_id].active) {
@@ -200,18 +198,9 @@ inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
     __emule_self->cb_self_consume_mask |= (1u << cb_id);
     // Lock-free fast path (safe for SPSC — only producer increments occupied)
     if (cb.occupied.load(std::memory_order_acquire) >= n) return;
-    std::unique_lock<std::mutex> lk(cb.mu);
-    if (!__emule_cv_wait(cb.data_cv, lk, __emule_cb_timeout_sec(),
-            [&]{ return cb.occupied.load(std::memory_order_relaxed) >= n; })) {
-        fprintf(stderr, "EMULE HANG: cb_wait_front(cb_id=%u, n=%u) timed out after %ds "
-                "(occupied=%u, num_pages=%u, page_size=%u) "
-                "[phys (%u,%u) logical (%u,%u)] "
-                "(set TT_EMULE_CB_TIMEOUT=<secs> to adjust)\n",
-                cb_id, n, __emule_cb_timeout_sec(),
-                cb.occupied.load(), cb.num_pages, cb.page_size,
-                my_x[0], my_y[0], __emule_self->core->logical_x, __emule_self->core->logical_y);
-        std::abort();
-    }
+    // Fiber park/wake: yield the worker until the producer publishes ≥ n pages (woken
+    // by cb_sync_push → __emule_fiber_wake(&cb)). The hang detector replaces the timeout.
+    __emule_fiber_wait(&cb, [&] { return cb.occupied.load(std::memory_order_acquire) >= n; });
 }
 
 inline void cb_pop_front(uint32_t cb_id, uint32_t n) {

@@ -13,6 +13,7 @@
 #include "jit_hw/api/compute/common_globals.h"
 #include "tt_emule/tile_counter.hpp"
 #include "jit_hw/emule_wait.h"
+#include "jit_hw/internal/emule_fiber_bridge.h"  // __emule_fiber_wait (park/wake)
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -44,31 +45,19 @@ inline void dfb_reserve_back(uint32_t dfb_id, uint16_t n) {
         for (uint8_t i = 0; i < iface.num_tcs_to_rr; ++i) {
             auto& slot = iface.tc_slots[i];
             auto& tc = __emule_self->tc_array->get(slot.neo_id, slot.counter_id);
-            std::unique_lock<std::mutex> lk(tc.mu);
-            if (!__emule_cv_wait(tc.space_cv, lk, __emule_dfb_timeout_sec(),
-                    [&]{ return tc.free_space() >= n; })) {
-                fprintf(stderr, "EMULE HANG: dfb_reserve_back(dfb=%u, n=%u) timed out "
-                        "on TC(%u,%u) after %ds\n",
-                        dfb_id, n, slot.neo_id, slot.counter_id,
-                        __emule_dfb_timeout_sec());
-                std::abort();
-            }
+            __emule_fiber_wait(&tc, [&] { return tc.free_space() >= n; });
         }
     } else {
         auto& slot = iface.tc_slots[iface.tc_idx];
         auto& tc = __emule_self->tc_array->get(slot.neo_id, slot.counter_id);
-        std::unique_lock<std::mutex> lk(tc.mu);
-        if (!__emule_cv_wait(tc.space_cv, lk, __emule_dfb_timeout_sec(),
-                [&]{ return tc.free_space() >= n; })) {
-            fprintf(stderr, "EMULE HANG: dfb_reserve_back(dfb=%u, n=%u) timed out "
-                    "on TC(%u,%u) after %ds\n",
-                    dfb_id, n, slot.neo_id, slot.counter_id,
-                    __emule_dfb_timeout_sec());
-            std::abort();
-        }
+        __emule_fiber_wait(&tc, [&] { return tc.free_space() >= n; });
     }
-    // Reset PACK engine auto-advance offset for this new batch.
-    __emule_compute_ctx().pack_offset[dfb_id] = 0;
+    // Reset PACK engine auto-advance offset for this new batch. PACK state is
+    // compute-only; guard the compute-ctx access (a DM dfb_reserve_back runs on a
+    // DatamovementThreadCtx — would be an OOB write).
+    if (__emule_self->kind == ThreadCommonCtx::Kind::Compute) {
+        __emule_compute_ctx().pack_offset[dfb_id] = 0;
+    }
 }
 
 inline void dfb_push_back(uint32_t dfb_id, uint16_t n) {
@@ -109,15 +98,7 @@ inline void dfb_wait_front(uint32_t dfb_id, uint16_t n) {
     if (!iface.active) return;
     auto& slot = iface.tc_slots[iface.tc_idx];
     auto& tc = __emule_self->tc_array->get(slot.neo_id, slot.counter_id);
-    std::unique_lock<std::mutex> lk(tc.mu);
-    if (!__emule_cv_wait(tc.data_cv, lk, __emule_dfb_timeout_sec(),
-            [&]{ return tc.occupancy() >= n; })) {
-        fprintf(stderr, "EMULE HANG: dfb_wait_front(dfb=%u, n=%u) timed out "
-                "on TC(%u,%u) after %ds\n",
-                dfb_id, n, slot.neo_id, slot.counter_id,
-                __emule_dfb_timeout_sec());
-        std::abort();
-    }
+    __emule_fiber_wait(&tc, [&] { return tc.occupancy() >= n; });
 }
 
 inline void dfb_pop_front(uint32_t dfb_id, uint16_t n) {
@@ -156,8 +137,7 @@ inline void dfb_finish(uint32_t dfb_id) {
     for (uint8_t i = 0; i < iface.num_tcs_to_rr; ++i) {
         auto& slot = iface.tc_slots[i];
         auto& tc = __emule_self->tc_array->get(slot.neo_id, slot.counter_id);
-        std::unique_lock<std::mutex> lk(tc.mu);
-        tc.space_cv.wait(lk, [&] {
+        __emule_fiber_wait(&tc, [&] {
             return tc.posted.load(std::memory_order_acquire) ==
                    tc.acked.load(std::memory_order_acquire);
         });

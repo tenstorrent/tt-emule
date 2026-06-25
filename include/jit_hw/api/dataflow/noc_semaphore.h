@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include "jit_hw/api/dataflow/noc.h"
 #include "jit_hw/internal/emule_thread_ctx.h"
+#include "jit_hw/internal/emule_fiber_bridge.h"  // __emule_fiber_wait / _wake (park/wake)
 
 extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
 
@@ -58,6 +59,7 @@ public:
 
     void up(uint32_t value) {
         atom()->fetch_add(value, std::memory_order_release);
+        __emule_fiber_wake(atom());
     }
 
     // Remote atomic increment via NOC address.
@@ -71,70 +73,23 @@ public:
 
     void down(uint32_t value) {
         auto* a = atom();
-        uint64_t spins = 0;
-        while (a->load(std::memory_order_acquire) < value) {
-            if (spins < 64) {
-                // busy-spin
-            } else if (spins < 1024) {
-                sched_yield();
-            } else {
-                usleep(1);
-            }
-            if (++spins > 10'000'000ULL) {
-                fprintf(stderr,
-                    "EMULE HANG: Semaphore::down(%u) stuck at %u after %llu spins\n",
-                    value, a->load(std::memory_order_relaxed),
-                    (unsigned long long)spins);
-                std::abort();
-            }
-        }
+        __emule_fiber_wait(a, [&] { return a->load(std::memory_order_acquire) >= value; });
         a->fetch_sub(value, std::memory_order_release);
     }
 
     void wait(uint32_t target) {
         auto* a = atom();
-        uint64_t spins = 0;
-        while (a->load(std::memory_order_acquire) != target) {
-            if (spins < 64) {
-                // busy-spin
-            } else if (spins < 1024) {
-                sched_yield();
-            } else {
-                usleep(1);
-            }
-            if (++spins > 10'000'000ULL) {
-                fprintf(stderr,
-                    "EMULE HANG: Semaphore::wait(%u) stuck at %u after %llu spins\n",
-                    target, a->load(std::memory_order_relaxed),
-                    (unsigned long long)spins);
-                std::abort();
-            }
-        }
+        __emule_fiber_wait(a, [&] { return a->load(std::memory_order_acquire) == target; });
     }
 
     void wait_min(uint32_t min_val) {
         auto* a = atom();
-        uint64_t spins = 0;
-        while (a->load(std::memory_order_acquire) < min_val) {
-            if (spins < 64) {
-                // busy-spin
-            } else if (spins < 1024) {
-                sched_yield();
-            } else {
-                usleep(1);
-            }
-            if (++spins > 10'000'000ULL) {
-                fprintf(stderr,
-                    "EMULE HANG: Semaphore::wait_min(%u) stuck at %u after %llu spins\n",
-                    min_val, a->load(std::memory_order_relaxed),
-                    (unsigned long long)spins);
-                std::abort();
-            }
-        }
+        __emule_fiber_wait(a, [&] { return a->load(std::memory_order_acquire) >= min_val; });
     }
 
     void set(uint32_t value) {
         atom()->store(value, std::memory_order_release);
+        __emule_fiber_wake(atom());
     }
 
     // ---- Multicast operations ----
@@ -181,6 +136,7 @@ public:
                 if (ptr) {
                     reinterpret_cast<std::atomic<uint32_t>*>(ptr)->fetch_add(
                         value, std::memory_order_release);
+                    __emule_fiber_wake(ptr);
                 } else {
                     fprintf(stderr, "EMULE WARN: Semaphore::inc_multicast (%u,%u) "
                             "offset=0x%x failed to resolve\n", x, y, l1_offset_);
