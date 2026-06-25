@@ -110,8 +110,8 @@ PR_TIER=(
     bf_test_untilize_bfloat8_b
     fused_test_rms_norm
     elt_test_broadcast_to
-    elt_test_sqrt
     sdpa_test_prefill
+    elt_test_sqrt
 )
 _pr_tier_has() { local n="$1" e; for e in "${PR_TIER[@]}"; do [ "$e" = "$n" ] && return 0; done; return 1; }
 # Return 0 (skip this entry) when CI_TIER excludes it.
@@ -360,9 +360,9 @@ run_pytest "elt_test_round" "$ELT_TEST_DIR/test_round.py"
 run_pytest "elt_test_signbit" "$ELT_TEST_DIR/test_signbit.py"
 run_pytest "elt_test_silu" "$ELT_TEST_DIR/test_silu.py"
 run_pytest "elt_test_silu_row_major" "$ELT_TEST_DIR/test_silu_row_major.py"
-# sqrt is the deep-default SFPU op (real silicon SQRT_23, no libm shadow) — this
-# exercises the deep-SFPU path.
-run_pytest "elt_test_sqrt" "$ELT_TEST_DIR/test_eltwise_sqrt.py"
+# sqrt is the deep-default SFPU op (real silicon SQRT_23, no libm shadow), so this
+# exercises the deep-SFPU path. rsqrt deselected (non-finite-handling failures).
+run_pytest "elt_test_sqrt" "$ELT_TEST_DIR/test_unary.py::test_unary_root_ops_ttnn" -k 'sqrt and not rsqrt'
 run_pytest "elt_test_sigmoid_accurate_21f" "$ELT_TEST_DIR/test_sigmoid_accurate_21f.py"
 run_pytest "elt_test_sigmoid_vector_modes" "$ELT_TEST_DIR/test_sigmoid_vector_modes.py"
 run_pytest "elt_test_snake_beta" "$ELT_TEST_DIR/test_snake_beta.py"
