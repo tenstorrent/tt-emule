@@ -405,8 +405,12 @@ FORKED=1 run_pytest "reduce_test_argmax"              "$REDUCE_TEST_DIR/test_arg
     --deselect "tests/ttnn/unit_tests/operations/reduce/test_argmax.py::test_argmax[tensor_shape=[16, 32, 64, 128]-tensor_layout=Layout.ROW_MAJOR-dim=-1-keepdim=True-dtype=torch.float32]" \
     --deselect "tests/ttnn/unit_tests/operations/reduce/test_argmax.py::test_argmax[tensor_shape=[16, 32, 64, 128]-tensor_layout=Layout.ROW_MAJOR-dim=-1-keepdim=True-dtype=torch.int32]"
 
-# ttnn.sort is removed from the regression: multi-core sort hits the
-# Semaphore::wait watchdog abort under emule — tracked in tt-emule #200.
+# ttnn.sort: WH 262144 uses the CrossCoreDataExchange factory and passes after the
+# Semaphore::wait `>=` count-up-overshoot fix (#200, WH-scoped) — cover it here.
+# Larger Wt routes to the SingleRowMultiCore factory, which hits a coordinator
+# VALID->0 toggle race under emule (524288 on WH; 524288 + 262144 on BH via its
+# 110-core grid) — tracked in #214, excluded pending the upstream kernel fix.
+run_pytest "dm_test_sort_long_tensor_262144" "$DM_TEST_DIR/test_sort.py::test_sort_long_tensor" -k 262144
 
 # ttnn.transformer.scaled_dot_product_attention — SDPA prefill family (PR #177 bring-up).
 # Full files; the unrunnable configs self-skip (prefill: profiling/OOM guard on

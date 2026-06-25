@@ -53,19 +53,24 @@ per column.
 Reuses the TopK shims verbatim (`topk_local_sort`/`topk_merge`, not
 `topk_rebuild`) — `merge_split_col` is also correct for a full sort, so no new
 math is needed. It selects one of three program factories by width-in-tiles
-`Wt`: single-core (`Wt<=64`) and cross-core exchange are supported; the
-single-row multi-core DRAM path (largest `Wt`) is not (see below).
+`Wt` against a grid-dependent threshold: single-core (`Wt<=64`) and cross-core
+exchange are supported; the single-row multi-core DRAM path (`Wt` above the
+threshold) is not (see below). The threshold scales with the core grid, so the
+same case can differ by arch — e.g. `262144` is cross-core on WH (64 cores) but
+single-row-multi-core on BH (110 cores, where it rounds just over the threshold).
 
 The cross-core reader collapses an L1 pointer to a 32-bit address inside an
 `#include`d header, which the JIT x86 patcher now reaches (companion tt-metal
 change). For the semaphore handshake itself see *Cross-core handshakes* below.
 
-Unsupported — multi-core DRAM path: its coordinator broadcasts a toggled VALID/0
-release via `noc_semaphore_set_multicast`, which races under emule's synchronous
-(zero-latency) multicast — the consumer can lose a release. Pacing the multicast
-fixes sort but stalls sticky-signal multicasts (e.g. matmul DRAM-sharded), and
-the two are indistinguishable at the multicast layer; the cases are excluded from
-the regression entries.
+Unsupported — multi-core DRAM path (tracked in #214): its coordinator broadcasts a
+toggled VALID/0 release via `noc_semaphore_set_multicast`, which races under
+emule's synchronous (zero-latency) multicast — the consumer can lose a release
+(`Semaphore::wait(0) stuck at 1`, or a downstream `cb_wait_front` deadlock). This
+hits `524288` (both arches) and `262144` (BH only; WH `262144` is cross-core and
+passes). Pacing the multicast fixes sort but stalls sticky-signal multicasts (e.g.
+matmul DRAM-sharded), and the two are indistinguishable at the multicast layer; the
+cases are excluded from the regression entries.
 
 ## Argmax (`ttnn.argmax`)
 **Dataflow-only** — no compute/SFPU; the max-scan runs in the NCRISC reader.
