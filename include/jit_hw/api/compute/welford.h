@@ -143,6 +143,16 @@ inline void __emule_welford_finalize(uint32_t mean_dst_idx, uint32_t scale_idx, 
     __emule_dst_mark_dirty(mean_dst_idx);
     __emule_dst_mark_dirty(mean_dst_idx + 1);
     if (to_face) {
+        // Contract: the raw face layout packs 16 groups per tile (4 faces × 4
+        // groups/face), matching silicon's _store_mean_var_to_dst_raw_group_.
+        // group_id is the within-tile group index; >16 groups is the caller's
+        // multi-tile responsibility. Guard so an out-of-contract group_id fails
+        // loudly rather than indexing past the 32×32 DST tile (pos ≥ 1024).
+        if (group_id >= 16u) {
+            fprintf(stderr, "[EMULE] welford_finalize_to_face: group_id %u exceeds "
+                    "16 groups/tile (raw face layout)\n", group_id);
+            std::abort();
+        }
         // groupnorm raw/face layout. Silicon's _store_mean_var_to_dst_raw_group_
         // stores group_id's 32 per-column accumulators at a per-group DST offset
         // (group_id<<2) WITHOUT clearing the rest, so all groups share one tile —
