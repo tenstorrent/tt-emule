@@ -4,6 +4,7 @@
 
 #pragma once
 #include "jit_hw/api/compute/common.h"
+#include "jit_hw/api/compute/vector_mode.h"
 #include <algorithm>
 
 namespace ckernel {
@@ -15,14 +16,20 @@ ALWI void binary_min_int32_tile_init() {}
 ALWI void binary_max_uint32_tile_init() {}
 ALWI void binary_min_uint32_tile_init() {}
 
-ALWI void binary_max_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
+// __emule_vector_mode_active (the face-mask helper) lives in vector_mode.h.
+
+ALWI void binary_max_tile(uint32_t idst0, uint32_t idst1, uint32_t odst,
+                          VectorMode vector_mode = VectorMode::RC) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[odst][i] = std::max(__emule_dst[idst0][i], __emule_dst[idst1][i]);
+        if (__emule_vector_mode_active(i, vector_mode))
+            __emule_dst[odst][i] = std::max(__emule_dst[idst0][i], __emule_dst[idst1][i]);
 }
 
-ALWI void binary_min_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
+ALWI void binary_min_tile(uint32_t idst0, uint32_t idst1, uint32_t odst,
+                          VectorMode vector_mode = VectorMode::RC) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[odst][i] = std::min(__emule_dst[idst0][i], __emule_dst[idst1][i]);
+        if (__emule_vector_mode_active(i, vector_mode))
+            __emule_dst[odst][i] = std::min(__emule_dst[idst0][i], __emule_dst[idst1][i]);
 }
 
 template<DataFormat Fmt = DataFormat::Int32>

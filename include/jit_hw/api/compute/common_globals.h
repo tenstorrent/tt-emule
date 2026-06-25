@@ -42,6 +42,15 @@ enum class DataFormat : uint8_t {
 // cb_reserve_back; a run of reserve_back calls with no push keeps advancing).
 static thread_local uint32_t __emule_pack_offset[NUM_CIRCULAR_BUFFERS] = {};
 
+// PACK blocked-width: silicon's llk_pack_init(ocb, pack_width) programs the packer
+// MOP to emit `pack_width` consecutive tiles per single pack_tile issue (the SDPA
+// streaming "blocked pack", used on Blackhole at width>=4; Wormhole packs single-
+// tile below width 8). Recorded per-CB by llk_pack_init; a stored 0 means
+// "not configured" and is treated as width 1. pack_tile reads DST[idst..idst+w-1]
+// and writes w consecutive CB slots. Every kernel's pack_init re-establishes this
+// (default 1), so a width set by one kernel can't leak into the next.
+static thread_local uint32_t __emule_pack_width[NUM_CIRCULAR_BUFFERS] = {};
+
 // Per-DST-slot "fresh since acquire" flag.  Set true by tile_regs_acquire,
 // cleared by any op that writes meaningful values into the slot (copy_tile,
 // add/sub/mul_tiles, matmul_tiles, etc.).  reduce_tile<MAX>/<MIN> uses it to

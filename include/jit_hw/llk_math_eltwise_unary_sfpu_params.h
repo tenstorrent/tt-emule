@@ -11,23 +11,53 @@
 // clamped_silu kernel passes `ckernel::sfpu::calculate_clamped_silu_gate<...>`
 // as the fn_ptr.
 //
-// emule version: invoke the function pointer once (no per-face iteration since
-// we don't model SFPU lanes). The function body uses our sfpi:: shim
-// (placeholder scalar semantics — see sfpi.h TODO). Real implementation will
-// need to map silicon's 32-lane vector dispatch onto __emule_dst[idst][1024].
+// emule version: point the sfpi cursor at __emule_dst[dst_idx], reset the cursor +
+// active-lane mask, then invoke the functor. The functor (e.g. calculate_recip/
+// exponential/softplus_first_column, calculate_fused_max_sub_exp_add_tile) reads and
+// writes sfpi::dst_reg, which now resolves into the selected DST tile.
 
 #include <cstdint>
 
 #include "jit_hw/sfpi.h"
+#include "jit_hw/api/compute/common.h"       // __emule_dst
+#include "jit_hw/api/compute/vector_mode.h"  // ckernel::VectorMode
 
-// Variadic dispatcher: accept any params after dst_idx + vector_mode and
-// forward them to the function pointer.
-template <bool /*APPROX*/ = false, int /*DST_ACCUM_MODE*/ = 0, typename Fn, typename... Args>
+// Variadic dispatcher: point sfpi::dst_reg at DST[dst_idx], run the functor with the
+// forwarded params. vector_mode is templated (VM) so callers can pass either
+// `ckernel::VectorMode` or an int form.
+//
+// Every emule caller is an SDPA first-column COLUMN-VECTOR helper
+// (calculate_{recip,exponential,softplus}_first_column, calculate_fused_max_sub_exp_add_tile),
+// invoked with VectorMode::C. The per-row statistic they read/write lives in col 0 of all
+// 32 rows (emule row-major, no face transpose — see __emule_sfpi_first_col_mode in sfpi.h).
+// The functor walks dst_reg[0] then `dst_reg += 2`, ITERATIONS_HALF_FACE=4 times — one
+// functor call therefore covers only 4 four-row blocks = rows 0..15 (cursor 0,4,8,12).
+// Silicon's _llk_math_eltwise_sfpu_apply_vector_mode_ invokes the functor once PER ACTIVE
+// FACE (C → faces {0,2}), advancing the DST face address between, so the two invocations
+// cover the whole column. emule mirrors that: under VectorMode::C, enable the linear col-0
+// lane mode and call the functor twice WITHOUT resetting the cursor between calls — the 2nd
+// call continues at cursor 16 and covers rows 16..31 of col 0. Other modes (RC for full-tile
+// SFPU ops like clamped_silu) keep a single call + the general face-major mapping.
+template <bool /*APPROX*/ = false, int /*DST_ACCUM_MODE*/ = 0, typename Fn, typename VM, typename... Args>
 inline void _llk_math_eltwise_unary_sfpu_params_(
-    Fn /*fn*/,
-    uint32_t /*dst_idx*/,
-    int /*vector_mode*/,
-    Args... /*params*/) {
-    // TODO: invoke fn with sfpi context. For now, no-op so kernels parse
-    // and link. upstream SFPU output will be unchanged from prior DST contents.
+    Fn fn,
+    uint32_t dst_idx,
+    VM vector_mode,
+    Args... params) {
+    const bool is_col = (static_cast<int>(vector_mode) == static_cast<int>(ckernel::VectorMode::C));
+    // DST-slot contract before we take its address (matches the __emule_dst_check used
+    // by pack_tile / functors; SFPU_UNARY_CALL's _sfpu_check_ defers the real bound here).
+    __emule_dst_check(dst_idx, "_llk_math_eltwise_unary_sfpu_params_");
+    // __emule_sfpi_dst_base / _cursor / _first_col_mode are global scope; mask is in sfpi::.
+    ::__emule_sfpi_dst_base = &__emule_dst[dst_idx][0];
+    ::__emule_sfpi_cursor = 0;
+    ::__emule_sfpi_first_col_mode = is_col;
+    ::sfpi::__emule_sfpi_mask.fill(true);
+    fn(params...);                       // covers col-0 rows 0..15 (cursor ends at 16)
+    if (is_col) {
+        fn(params...);                   // continues at cursor 16 → col-0 rows 16..31
+    }
+    ::__emule_sfpi_dst_base = nullptr;
+    ::__emule_sfpi_cursor = 0;
+    ::__emule_sfpi_first_col_mode = false;
 }

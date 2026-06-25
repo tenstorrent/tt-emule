@@ -19,6 +19,40 @@
 #define KERNEL_BUILD
 #endif
 
+// ---- Host/target size_t reconciliation: mixed-type std::min / std::max ----
+// Silicon's Tensix RISC cores are 32-bit, so size_t == uint32_t there, and kernels
+// freely write e.g. std::min(uint32_t_expr, count * sizeof(T)) — both operands
+// deduce to uint32_t and std::min's single-type template binds fine. On emule's
+// 64-bit host, size_t is 64-bit, so that same call has mismatched operand types
+// (uint32_t vs unsigned long) and std::min fails to deduce a common type
+// (e.g. data_movement/scatter/.../writer_scatter.cpp). Add overloads that engage
+// ONLY when the two operands are DIFFERENT integral types (SFINAE), promoting to
+// their common type. Same-type calls are SFINAE'd out of these and still bind to
+// the real std::min/std::max, so there is no ambiguity and no behavior change.
+// Faithful in result (the same value silicon computes); the kernel source is
+// unchanged. Lives in the JIT preamble (included before every kernel).
+// Adding these to namespace std is formally [namespace.std] UB; accepted deliberately
+// because the toolchain is pinned (clang-20 + libstdc++) and there is no conforming way
+// to satisfy a *qualified* std::min(size_t, uint32_t) call without editing the pristine
+// upstream kernel. The integral-only, different-type SFINAE keeps the blast radius to
+// exactly the host/target size_t-width mismatch and never shadows a same-type call.
+#include <algorithm>
+#include <type_traits>
+namespace std {
+template <class A, class B,
+          enable_if_t<!is_same_v<A, B> && is_integral_v<A> && is_integral_v<B>, int> = 0>
+constexpr common_type_t<A, B> min(const A& a, const B& b) {
+    using C = common_type_t<A, B>;
+    return static_cast<C>(b) < static_cast<C>(a) ? static_cast<C>(b) : static_cast<C>(a);
+}
+template <class A, class B,
+          enable_if_t<!is_same_v<A, B> && is_integral_v<A> && is_integral_v<B>, int> = 0>
+constexpr common_type_t<A, B> max(const A& a, const B& b) {
+    using C = common_type_t<A, B>;
+    return static_cast<C>(a) < static_cast<C>(b) ? static_cast<C>(b) : static_cast<C>(a);
+}
+}  // namespace std
+
 // NOC mode constants — silicon firmware sets these per-RISC build.
 #ifndef DM_DEDICATED_NOC
 #define DM_DEDICATED_NOC 0

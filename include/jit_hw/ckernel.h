@@ -37,6 +37,7 @@ constexpr uint32_t UNPACK_TO_DEST = 2;
 constexpr uint32_t UNPACK_MATH_DONE = 3;
 constexpr uint32_t MATH_DONE = 4;
 constexpr uint32_t MATH_PACK = 5;
+constexpr uint32_t PACK_DONE = 6;  // SDPA streaming PACK/UNPACK sync
 }  // namespace semaphore
 
 // Note: deepseek_compute_kernel_hw_startup.h already defines
@@ -83,6 +84,7 @@ constexpr uint32_t STALL_ON_MAX = 1u << 19;
 // TTI_STALLWAIT is a no-op in emule, so the value only needs to be distinct
 // (silicon's is 0x20).
 constexpr uint32_t STALL_THCON = 1u << 20;
+constexpr uint32_t STALL_SYNC  = 1u << 21;  // SDPA streaming PACK/UNPACK sync stalls
 }  // namespace p_stall
 
 // state_configure lives in the silicon compute-kernel sentinel header alongside

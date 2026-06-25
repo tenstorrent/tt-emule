@@ -4,6 +4,7 @@
 
 #include "internal/llk_state.h"
 #include "api/compute/common.h"
+#include "jit_hw/llk_types.h"  // ckernel::PackMode
 
 // ---- Pack helpers ----
 
@@ -178,6 +179,21 @@ inline void llk_pack(uint32_t tile_idx, uint32_t ocb) {
     else __llk_pack_tiled(tile_idx, ocb);
 }
 
+// PackMode + explicit-output-slot overload (SDPA streaming sdpa_pack_tile_ooo):
+// DST[dst] → CB[cb] at output tile slot idx. Mirrors pack_tile<true>'s
+// explicit-offset path — honours __emule_pack_width and advances
+// __emule_pack_offset[cb] so a following cb_push_back stays consistent.
+template <int AccumMode, bool Untilize, ckernel::PackMode Mode>
+inline void llk_pack(uint32_t dst, uint32_t cb, uint32_t idx) {
+    const uint32_t w = __emule_pack_width[cb] ? __emule_pack_width[cb] : 1;
+    __emule_dst_check(dst + w - 1, "llk_pack<PackMode>");
+    for (uint32_t t = 0; t < w; ++t) {
+        __emule_compute::pack_dst_to_buf(
+            __emule_compute::cb_write_ptr_at(cb, idx + t), dst + t, cb);
+    }
+    if (idx + w > __emule_pack_offset[cb]) __emule_pack_offset[cb] = idx + w;
+}
+
 template <int AccumMode>
 inline void llk_math_dest_section_done() {}
 
@@ -186,11 +202,24 @@ inline void llk_pack_dest_section_done() {
     __llk_pack_offset++;
 }
 
-// LLK pack init — silicon configures pack output format here; no-op stub.
+// LLK pack init — silicon configures pack output format here. Numerically a no-op,
+// but it re-establishes single-tile pack width (the packer MOP default) for this CB.
 template <bool Untilize, bool IsTilize, bool DiagonalEn>
-inline void llk_pack_init(uint32_t /*ocb*/) {}
+inline void llk_pack_init(uint32_t ocb) { __emule_pack_width[ocb] = 1; }
 template <bool Untilize, bool IsTilize>
-inline void llk_pack_init(uint32_t /*ocb*/) {}
+inline void llk_pack_init(uint32_t ocb) { __emule_pack_width[ocb] = 1; }
+
+// PackMode-based pack init (SDPA streaming configure_pack_width). The flags
+// (zero_output / skip_addrmod_config / skip_packer_strides) are packer reconfig
+// micro-optimizations — HW pipeline config with no numerical effect. The one
+// numerically-relevant argument is pack_width: silicon programs the packer MOP to
+// emit `pack_width` tiles per pack_tile issue (blocked pack). Record it per-CB so
+// pack_tile reproduces the multi-tile emit. See __emule_pack_width.
+template <ckernel::PackMode pack_mode = ckernel::PackMode::Default,
+          bool zero_output = false,
+          bool skip_addrmod_config = false,
+          bool skip_packer_strides = false>
+inline void llk_pack_init(uint32_t ocb, uint32_t pack_width = 1) { __emule_pack_width[ocb] = pack_width; }
 
 // Pack-side dest sync stubs.
 // llk_packer_wait_for_math_done lives in llk_sync_stubs.h.

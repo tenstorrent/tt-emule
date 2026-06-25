@@ -105,12 +105,31 @@ inline void __emule_cb_view_init(uint32_t cb_id) {
     }
     const uint32_t base16 = __emule_cb_base16(cb_id);
     const uint32_t span16 = __emule_cb_span16(cb_id);
-    // Units match emule's established LocalCBInterface convention (kernels read
-    // these directly): fifo_page_size / fifo_size in BYTES; fifo_{rd,wr}_ptr /
-    // fifo_limit / fifo_wr_tile_ptr 16-byte-encoded (kernel does `<< 4`).
-    v.fifo_page_size = g.page_size;                   // BYTES
+    // fifo_page_size / fifo_size units are RISC-dependent, exactly as on silicon:
+    // tt_metal/hw/inc/internal/circular_buffer_interface.h defines
+    //   cb_addr_shift = CIRCULAR_BUFFER_COMPUTE_ADDR_SHIFT (=4) on compute/TRISC,
+    //   cb_addr_shift = 0 on dataflow (BRISC/NCRISC).
+    // So circular_buffer_init.h stores fifo_page_size/fifo_size as `value >> cb_addr_shift`:
+    // 16-byte words on the compute RISCs, raw BYTES on the dataflow RISCs. Kernels that
+    // read these fields with their own raw arithmetic rely on that per-RISC unit:
+    //   - compute: SDPA's cb_push_back_hold_wr_ptr does `fifo_wr_ptr -= n*fifo_page_size`
+    //     and `fifo_start = fifo_limit - fifo_size`, all in 16B words;
+    //   - dataflow: reader/writer_unary_interleaved do `page_bytes = fifo_page_size`.
+    // emule compiles each kernel for its own RISC (TRISC_* defined only on compute), so
+    // gate the unit here the same way. emule's pointers stay 16B-encoded for both RISCs
+    // (matching fifo_limit/rd/wr below) — dataflow addresses still resolve correctly
+    // because dataflow reads addresses via get_write_ptr/get_read_ptr (which convert),
+    // not via raw fifo_{wr,rd}_ptr. emule's own addressing derives the page stride from
+    // the shared __emule_cbs[].page_size (bytes) >> cb_addr_shift, decoupled from these
+    // view fields.
+#if defined(TRISC_MATH) || defined(TRISC_PACK) || defined(TRISC_UNPACK)
+    v.fifo_page_size = g.page_size >> cb_addr_shift;   // compute: 16-byte words
+    v.fifo_size      = span16;                          // compute: 16-byte words
+#else
+    v.fifo_page_size = g.page_size;                     // dataflow: bytes (cb_addr_shift=0)
+    v.fifo_size      = g.page_size * g.num_pages;       // dataflow: bytes
+#endif
     v.fifo_num_pages = g.num_pages;
-    v.fifo_size      = g.page_size * g.num_pages;     // BYTES
     v.fifo_limit     = base16 + span16;               // 16-byte units
     v.fifo_rd_ptr    = base16;                        // 16-byte units
     v.fifo_wr_ptr    = base16;

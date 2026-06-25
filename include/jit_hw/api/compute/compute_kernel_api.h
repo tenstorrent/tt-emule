@@ -22,11 +22,43 @@
 // Minimal sfpi:: shim for SFPU kernels that use vFloat/vInt/v_if.
 // TODO(#102): replace with real scalar semantics to produce correct outputs.
 #include "jit_hw/sfpi.h"
+#include "jit_hw/llk_math_eltwise_unary_sfpu_params.h"  // _llk_math_eltwise_unary_sfpu_params_
 
 #include <cmath>
 #include <cstring>
 #include <cstdint>
 #include <utility>
+
+// SFPU_UNARY_CALL family — emule shadow of llk_math_eltwise_unary_sfpu_macros.h
+// (pulled on silicon via the raw eltwise_unary LLK chain that compute_kernel_api.h
+// includes). The call macros expand to a dst-bounds check + emule's
+// _llk_math_eltwise_unary_sfpu_params_ dispatcher, applied to a ckernel::sfpu
+// functor. Used by the SDPA compute kernels' first-column helpers.
+//
+// DST_SYNC_MODE: silicon emits this into the kernel prelude (jit_build/genfiles.cpp);
+// emule has no prelude hook, so define the SyncHalf default here (guarded).
+#ifndef DST_SYNC_MODE
+#define DST_SYNC_MODE ::ckernel::DstSync::SyncHalf
+#endif
+
+namespace ckernel {
+// dst-bounds contract for SFPU_UNARY_CALL. No-op: the params dispatcher aims the
+// sfpi cursor at __emule_dst[dst_index] and __emule_dst_check enforces actual bounds
+// inside the functor (project rule: prefer a documenting no-op over a silent clamp).
+template <DstSync DST_SYNC, bool DST_ACCUM>
+ALWI void _sfpu_check_(std::uint32_t /*dst_index*/, VectorMode /*vector_mode*/) {}
+}  // namespace ckernel
+
+#ifndef _SFPU_EXPAND
+#define _SFPU_EXPAND(...) __VA_ARGS__
+#endif
+#define SFPU_UNARY_CALL(DST_SYNC, DST_ACCUM, FN, TEMPLATES, DST_IDX, VECTOR_MODE, ...) \
+    (::ckernel::_sfpu_check_<DST_SYNC, DST_ACCUM>(DST_IDX, VECTOR_MODE),               \
+     _llk_math_eltwise_unary_sfpu_params_(                                            \
+         ::ckernel::sfpu::FN<_SFPU_EXPAND TEMPLATES>, DST_IDX, VECTOR_MODE, ##__VA_ARGS__))
+#define SFPU_UNARY_CALL_NO_TEMPLATE_ARGS(DST_SYNC, DST_ACCUM, FN, DST_IDX, VECTOR_MODE, ...) \
+    (::ckernel::_sfpu_check_<DST_SYNC, DST_ACCUM>(DST_IDX, VECTOR_MODE),                     \
+     _llk_math_eltwise_unary_sfpu_params_(::ckernel::sfpu::FN, DST_IDX, VECTOR_MODE, ##__VA_ARGS__))
 
 namespace ckernel {
 
