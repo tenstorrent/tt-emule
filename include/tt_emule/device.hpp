@@ -104,13 +104,15 @@ public:
 
     CBSyncState* cb_sync_array() { return cb_sync_states_; }
 
-    void init_cb_sync(uint32_t idx, uint8_t* base, uint32_t page_size, uint32_t num_pages) {
+    void init_cb_sync(uint32_t idx, uint8_t* base, uint32_t page_size, uint32_t num_pages,
+                      bool globally_allocated = false) {
         if (idx >= MAX_CBS) return;
         auto& s = cb_sync_states_[idx];
         s.base      = base;
         s.page_size = page_size;
         s.num_pages = num_pages;
         s.page_mask = (num_pages > 0 && (num_pages & (num_pages - 1)) == 0) ? num_pages - 1 : 0;
+        s.globally_allocated = globally_allocated;
         s.occupied  = 0;
         // Per-RISC read/write pointers reset per-thread at kernel launch
         // (thread_local zero-init in jit_hw/internal/emule_cb_ptr.h), not here.
@@ -122,6 +124,7 @@ public:
             s.page_size = 0;
             s.num_pages = 0;
             s.page_mask = 0;
+            s.globally_allocated = false;
             s.occupied  = 0;
         }
     }

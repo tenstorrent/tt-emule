@@ -72,17 +72,20 @@ inline bool __emule_asan_cb_resolve(uint32_t l1_addr, uint8_t*& out) {
         uint32_t cb_start = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(cb.base));
         uint32_t cb_size = cb.num_pages * cb.page_size;
         if (l1_addr < cb_start || l1_addr >= cb_start + cb_size) continue;
-        if (__emule_cb_boundary_strict) {
+        // globally_allocated CBs reserve only nominally → exempt. See ASAN.md (CB Boundary Violation).
+        if (__emule_cb_boundary_strict && !cb.globally_allocated) {
             uint32_t access_page = (l1_addr - cb_start) / cb.page_size;
             uint32_t write_idx = __emule_cb_wr_page(cb_id);
             uint32_t read_idx  = __emule_cb_rd_page(cb_id);
-            uint32_t write_dist = (access_page + cb.num_pages - write_idx) % cb.num_pages;
-            uint32_t read_dist  = (access_page + cb.num_pages - read_idx)  % cb.num_pages;
             uint32_t reserved = __emule_cb_reserved_pages[cb_id];
             uint32_t waited   = __emule_cb_waited_pages[cb_id];
-            // Fire only inside an ACTIVE reserve/wait window; raw get_*_ptr
-            // addressing (no window) is legitimate. See ASAN.md §7.
-            if ((reserved > 0 || waited > 0) && !(write_dist < reserved) && !(read_dist < waited)) {
+            uint32_t write_dist = (access_page + cb.num_pages - write_idx) % cb.num_pages;
+            uint32_t read_dist  = (access_page + cb.num_pages - read_idx)  % cb.num_pages;
+            uint32_t produced  = (write_idx + cb.num_pages - read_idx) % cb.num_pages;
+            // Fire only outside an ACTIVE window AND outside the produced region
+            // [read_idx, write_idx) (reuse of valid data is legal).
+            if ((reserved > 0 || waited > 0) &&
+                !(write_dist < reserved) && !(read_dist < waited) && !(read_dist < produced)) {
                 __emule_asan_panic(
                         "[ASAN ERROR] CB Boundary Violation: Attempted to access CB %u at offset 0x%x "
                         "(byte %u of %u, page %u of %u). "

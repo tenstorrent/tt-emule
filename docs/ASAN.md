@@ -230,6 +230,15 @@ Checks run in this order inside `__emule_local_l1_to_ptr`:
    access page is inside the active write window
    `[write_idx, write_idx + reserved)` modulo num_pages or the read
    window `[read_idx, read_idx + waited)`. If outside both, abort.
+   **Two exemptions** keep this from false-positiving legitimate raw addressing:
+   (a) **globally-allocated / sharded CBs** (`CBSyncState::globally_allocated`, set
+   from `cb_impl->globally_allocated()`) — addressed across the whole backing buffer
+   via computed offsets, reserved only nominally; (b) **reuse of produced data** — an
+   access into the already-produced region `[read_idx, write_idx)` (`read_dist <
+   produced`), which holds valid data a kernel may re-read/re-derive (conv
+   activation-reuse writes back into earlier rows). Only an access outside the active
+   window AND outside the produced region reaches not-yet-produced free space — the
+   real over-reach. A write past the buffer is still caught by the OOB check.
    Returning early here is important — CB backing memory isn't
    registered in `LiveL1Ranges`, so a CB address that fell through to
    the OOB check below would always produce "Out-of-Bounds Write" even

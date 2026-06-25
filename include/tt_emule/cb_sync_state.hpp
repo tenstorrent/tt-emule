@@ -29,6 +29,7 @@ struct CBSyncState {
     uint32_t  page_size = 0;        // Bytes per page (tile size)
     uint32_t  num_pages = 0;        // Capacity
     uint32_t  page_mask = 0;        // num_pages - 1 (for bitmask modulo; 0 if non-power-of-2)
+    bool      globally_allocated = false;  // exempt from CB-Boundary window check; see docs/ASAN.md
     std::atomic<uint32_t> occupied{0};  // Number of occupied pages (the shared semaphore)
     std::mutex              mu;
     std::condition_variable space_cv;
