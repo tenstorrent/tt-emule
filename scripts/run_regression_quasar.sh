@@ -51,13 +51,9 @@ _gtest_xml_args() {
 }
 
 # CI_TIER selects which entries run: full (all, default) | pr (only PR_TIER) |
-# deferred (the rest). See ci-regression-all.sh / docs/ci-test-tiers.md.
-# PR_TIER is the quasar C++ smoke set for the PR gate — a tripwire on quasar's
-# distinct DFB/Neo subsystem (STRIDED DFBs, the DFB→compute bridge, RISCV
-# atomics), all live-and-passing 1Sx1S/1Sx4S topologies. The Tier 3h/3i/3j
-# LEGACY-binary entries are excluded: their committed filters use a stale
-# fixture name (MeshDeviceSingleCardFixture.* vs QuasarMeshDeviceSingleCardFixture.*)
-# and match no tests.
+# deferred (the rest); see ci-regression-all.sh. PR_TIER is the quasar C++
+# smoke set for the PR gate — a tripwire on quasar's distinct DFB/Neo subsystem
+# (STRIDED DFBs, the DFB→compute bridge, RISCV atomics).
 CI_TIER="${CI_TIER:-full}"
 PR_TIER=(
     DMTest1xDFB1Sx1S

@@ -3,26 +3,17 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# Run every test that the on-PR gate no longer runs — the "deferred" complement
-# of the PR gate — so a developer can cover locally, before merging, what the
-# lightweight PR gate trims. (After merge, the on-push run executes the FULL
-# suite and would catch these anyway; this script lets you find regressions
-# pre-merge instead of reddening main.)
+# Run the "deferred" complement of the PR gate — every test the lightweight PR
+# gate skips — so a developer can catch regressions locally before merging
+# (CI_TIER=deferred via the .github/scripts wrappers, so the set is always
+# exactly the complement of the PR_TIER lists).
 #
 # What this runs (= on-push full suite MINUS the on-PR gate):
-#   C++  : wormhole + quasar — every entry NOT in that script's PR_TIER smoke
-#          set. Blackhole C++ is the PR gate's full arch, so it has nothing
-#          deferred and is skipped here.
-#   TTNN : blackhole — every entry NOT in its PR_TIER smoke set.
-#          wormhole — the entire suite (no wormhole TTNN runs on the PR gate).
+#   C++  : wormhole + quasar minus their PR_TIER (blackhole C++ is the gate's
+#          full arch — nothing deferred, skipped here).
+#   TTNN : blackhole minus its PR_TIER; wormhole in full (none runs on the gate).
 #
-# This is the COMPLEMENT of the PR gate, not the whole suite. To run absolutely
-# everything, invoke the per-arch scripts directly with CI_TIER unset (the
-# default), e.g. `bash scripts/run_regression_wormhole.sh`.
-#
-# Reuses the CI wrappers (.github/scripts/) with CI_TIER=deferred so the set
-# stays exactly the complement of the PR_TIER lists — one source of truth, no
-# second list to keep in sync.
+# For the whole suite instead, run a per-arch script with CI_TIER unset.
 #
 # Required env:
 #   TT_METAL_DIR   path to tt-metal workspace (built with build_emule/ inside)

@@ -20,15 +20,11 @@
 # Optional env:
 #   ARCHES         space-separated arch list; default "wormhole blackhole quasar"
 #   GTEST_XML_ROOT root dir for per-arch XML; default $RUNNER_TEMP/gtest-xml
-#   CI_TIER        full (default) | pr | deferred — selects which entries run:
-#                    full      every entry, every arch (on-push / full local run)
-#                    pr        PR gate: PR_FULL_ARCHES run full; others run only
-#                              their script's PR_TIER (smoke)
-#                    deferred  the complement of the PR gate: PR_FULL_ARCHES are
-#                              skipped (they ran full on PR — nothing deferred);
-#                              others run everything NOT in their PR_TIER
-#   PR_FULL_ARCHES space-separated archs that run their FULL suite on the PR
-#                  gate (and are skipped under `deferred`); default "blackhole"
+#   CI_TIER        full (default) | pr | deferred — which entries run per arch:
+#                    full      every entry (on-push / full local run)
+#                    pr        PR gate — PR_FULL_ARCHES full, others their PR_TIER
+#                    deferred  complement of the PR gate (PR_FULL_ARCHES skipped)
+#   PR_FULL_ARCHES archs that run their FULL suite on the PR gate; default "blackhole"
 
 set -uo pipefail
 

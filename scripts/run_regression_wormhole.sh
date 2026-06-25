@@ -49,10 +49,9 @@ _gtest_xml_args() {
 }
 
 # CI_TIER selects which entries run: full (all, default) | pr (only PR_TIER) |
-# deferred (the rest). See ci-regression-all.sh / docs/ci-test-tiers.md.
-# PR_TIER is the wormhole C++ smoke set for the PR gate — skewed to WH-specific
-# divergence from blackhole (the full arch): DRAM bank topology, tilize/format,
-# plus a basic L1/JIT/NOC/reduce pulse.
+# deferred (the rest); see ci-regression-all.sh. PR_TIER is the wormhole C++
+# smoke set for the PR gate — skewed to WH-specific divergence from blackhole
+# (the full arch): DRAM bank topology, tilize/format, basic L1/JIT/NOC/reduce.
 CI_TIER="${CI_TIER:-full}"
 PR_TIER=(
     tilize_untilize

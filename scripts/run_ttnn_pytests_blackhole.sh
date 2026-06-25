@@ -61,11 +61,11 @@ PASS=0
 FAIL=0
 
 # CI_TIER selects which entries run: full (all, default) | pr (only PR_TIER) |
-# deferred (the rest). See ci-regression-all.sh / docs/ci-test-tiers.md.
-# PR_TIER is the blackhole TTNN smoke set for the PR gate (BH is the gate's
-# primary arch): one representative entry per op-class, excluding the heavy
-# whole-file runs (untilize, pad, to_memory_config, copy) and the nightly
-# matmul-activations test.
+# deferred (the rest); see ci-regression-all.sh. PR_TIER is the blackhole TTNN
+# smoke set for the PR gate (BH is the gate's primary arch): one entry per
+# op-class plus key distinct paths (sharding, untilize, dtype/fp32, ternary,
+# layout), excluding the heavy whole-file runs (untilize, pad, to_memory_config,
+# copy) and the nightly matmul-activations test.
 CI_TIER="${CI_TIER:-full}"
 PR_TIER=(
     dm_test_tilize
@@ -84,6 +84,12 @@ PR_TIER=(
     matmul_test_linear
     fused_test_softmax
     pool_test_upsample_nearest_interleaved
+    dm_test_concat_sharded
+    dm_test_untilize_same_volume
+    elt_test_typecast_int
+    elt_test_binary_fp32
+    elt_test_where
+    bf_test_to_layout
 )
 _pr_tier_has() { local n="$1" e; for e in "${PR_TIER[@]}"; do [ "$e" = "$n" ] && return 0; done; return 1; }
 # Return 0 (skip this entry) when CI_TIER excludes it.
