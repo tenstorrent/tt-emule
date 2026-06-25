@@ -395,19 +395,22 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
-  # Lightweight TTNN gate for pull requests ONLY. Runs the curated blackhole
-  # PR_TIER smoke set (one representative entry per op-class) in a single
-  # unsharded job — replacing the 10-runner wormhole+blackhole sharded matrix
-  # above on the PR feedback loop. Blackhole is the gate's primary arch (it is
-  # also the full C++ arch). The full suites still run on push to main.
+  # Lightweight TTNN gate for pull requests ONLY: the curated blackhole PR_TIER
+  # smoke set across 2 parallel shards, replacing the full wormhole+blackhole
+  # sharded matrix above. The full suites still run on push to main.
   ttnn-smoke-pr:
-    name: TTNN Smoke (blackhole, PR)
+    name: TTNN Smoke (blackhole, PR, shard ${{ matrix.shard }}/2)
     needs: [changes, build]
     if: ${{ needs.changes.outputs.code == 'true' && github.event_name == 'pull_request' }}
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 60
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [1, 2]
     steps:
       - name: Checkout tt-emule (PR)
         uses: actions/checkout@v4
@@ -440,16 +443,16 @@ jobs:
         shell: bash
         run: bash tt-metal/install_dependencies.sh --sfpi
 
-      - name: Run TTNN smoke (blackhole, PR_TIER)
-        # CI_TIER=pr → run_ttnn_pytests_blackhole.sh runs only its PR_TIER set.
-        # SHARD_COUNT=1 → unsharded, one runner.
+      - name: Run TTNN smoke (blackhole, PR_TIER, shard ${{ matrix.shard }}/2)
+        # CI_TIER=pr → run_ttnn_pytests_blackhole.sh runs only its PR_TIER set,
+        # round-robin split across 2 shards that run in parallel.
         env:
           TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
           BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
           TT_EMULE_ARCH: blackhole
           CI_TIER:       pr
-          SHARD_INDEX:   1
-          SHARD_COUNT:   1
+          SHARD_INDEX:   ${{ matrix.shard }}
+          SHARD_COUNT:   2
         shell: bash
         run: bash tt-emule/.github/scripts/ci-ttnn-pytests.sh
 
@@ -457,7 +460,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ttnn-smoke-pr-results
+          name: ttnn-smoke-pr-results-shard-${{ matrix.shard }}
           path: |
             ${{ runner.temp }}/ttnn-pytests.log
             ${{ runner.temp }}/ttnn-junit-xml/*.xml

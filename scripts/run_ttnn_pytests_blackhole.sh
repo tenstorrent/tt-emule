@@ -62,10 +62,9 @@ FAIL=0
 
 # CI_TIER selects which entries run: full (all, default) | pr (only PR_TIER) |
 # deferred (the rest); see ci-regression-all.sh. PR_TIER is the blackhole TTNN
-# smoke set for the PR gate (BH is the gate's primary arch): one entry per
-# op-class plus key distinct paths (sharding, untilize, dtype/fp32, ternary,
-# layout), excluding the heavy whole-file runs (untilize, pad, to_memory_config,
-# copy) and the nightly matmul-activations test.
+# smoke set for the PR gate — broad per-op-class coverage across 2 parallel
+# shards, excluding the heavy whole-file runs (untilize, pad, to_memory_config,
+# copy), the tensor/ dir, and the nightly matmul-activations test.
 CI_TIER="${CI_TIER:-full}"
 PR_TIER=(
     dm_test_tilize
@@ -90,6 +89,28 @@ PR_TIER=(
     elt_test_binary_fp32
     elt_test_where
     bf_test_to_layout
+    elt_test_unary_sharding
+    dm_test_permute_sharded
+    reduce_test_max
+    reduce_test_topk
+    reduce_test_var_std
+    dm_test_embedding_base_case
+    dm_test_gather
+    elt_test_binary_int32
+    elt_test_unary_int32
+    elt_test_silu
+    elt_test_binary_composite
+    bf_test_reshape
+    bf_test_to_dtype
+    matmul_test_experimental
+    fused_test_batch_norm_pgmcache
+    pca_test_per_core_allocation
+    dm_test_pad_subcoregrids
+    fused_test_layer_norm
+    bf_test_untilize_bfloat8_b
+    fused_test_rms_norm
+    elt_test_broadcast_to
+    elt_test_sqrt
 )
 _pr_tier_has() { local n="$1" e; for e in "${PR_TIER[@]}"; do [ "$e" = "$n" ] && return 0; done; return 1; }
 # Return 0 (skip this entry) when CI_TIER excludes it.
@@ -104,7 +125,7 @@ _tier_skip() {
 
 run_pytest() {
     local name="$1"; shift
-    # Tier filter before shard accounting (the PR smoke job runs unsharded).
+    # Tier filter before shard accounting, so shards split only the PR_TIER set.
     if _tier_skip "$name"; then return; fi
     # Remaining args are passed straight to pytest: one or more test targets
     # (file or file::node) plus any flags (-k, --deselect). Passing multiple
@@ -338,6 +359,9 @@ run_pytest "elt_test_round" "$ELT_TEST_DIR/test_round.py"
 run_pytest "elt_test_signbit" "$ELT_TEST_DIR/test_signbit.py"
 run_pytest "elt_test_silu" "$ELT_TEST_DIR/test_silu.py"
 run_pytest "elt_test_silu_row_major" "$ELT_TEST_DIR/test_silu_row_major.py"
+# sqrt is the deep-default SFPU op (real silicon SQRT_23, no libm shadow) — this
+# exercises the deep-SFPU path.
+run_pytest "elt_test_sqrt" "$ELT_TEST_DIR/test_eltwise_sqrt.py"
 run_pytest "elt_test_sigmoid_accurate_21f" "$ELT_TEST_DIR/test_sigmoid_accurate_21f.py"
 run_pytest "elt_test_sigmoid_vector_modes" "$ELT_TEST_DIR/test_sigmoid_vector_modes.py"
 run_pytest "elt_test_snake_beta" "$ELT_TEST_DIR/test_snake_beta.py"
