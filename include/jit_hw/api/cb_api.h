@@ -29,6 +29,19 @@ extern thread_local uint32_t __emule_logical_y;
 // and consumes (see cb_reserve_back). Thread_local — fresh per kernel launch.
 inline thread_local uint32_t __emule_cb_self_consume_mask = 0;
 
+// Bitmask of CBs THIS thread produces (set in cb_reserve_back/cb_push_back).
+// cb_wait_front uses it as the dual of __emule_cb_self_consume_mask: a thread
+// must never block in cb_wait_front on a CB it itself fills, because emule runs
+// the compute kernel single-threaded — there is no separate PACK engine to make
+// progress, so blocking would deadlock. On silicon the consumer (UNPACK) and
+// producer (PACK) overlap, and the in-place-recycle idiom additionally drives
+// the CB into an "over-popped" state (tiles_acked > tiles_received from a
+// pop_front of tiles never produced, e.g. legacy group_norm's cb_in pop on the
+// no-TILIZE_IN path); llk_wait_tiles' uint16 `received - acked` then underflows
+// to a huge value, so the wait is a no-op. Either way silicon never blocks here.
+// Thread_local — fresh per kernel launch.
+inline thread_local uint32_t __emule_cb_self_produce_mask = 0;
+
 // ---- Constexpr tile metadata arrays (populated by JIT defines) ----
 // EMULE_TILE_SIZES is defined by the JIT compiler as a comma-separated list of
 // 32 page sizes (one per CB index), matching the real device's unpack_tile_size[].
@@ -133,6 +146,8 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
                 my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
         std::abort();
     }
+    // This thread produces cb_id (see __emule_cb_self_produce_mask).
+    __emule_cb_self_produce_mask |= (1u << cb_id);
     // __emule_pack_offset is reset by cb_push_back, NOT here. Per silicon
     // pack.h, the sequential pack write pointer "is reset after cb_push_back",
     // so reserve_back calls without an intervening push_back keep advancing —
@@ -168,6 +183,8 @@ inline void cb_push_back(uint32_t cb_id, uint32_t n) {
     // silicon), then bump the shared occupied semaphore.
     __emule_cb_advance_wr(cb_id, n);
     tt_emule::cb_sync_push(__emule_cbs[cb_id], n);
+    // This thread produces cb_id (see __emule_cb_self_produce_mask).
+    __emule_cb_self_produce_mask |= (1u << cb_id);
     // Reset the PACK auto-advance offset on batch commit (see cb_reserve_back).
     __emule_pack_offset[cb_id] = 0;
     // Bridge CB→DFB: update tile counters so DM's dfb_wait_front sees compute's output.
@@ -209,6 +226,14 @@ inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
     __emule_cb_self_consume_mask |= (1u << cb_id);
     // Lock-free fast path (safe for SPSC — only producer increments occupied)
     if (cb.occupied.load(std::memory_order_acquire) >= n) return;
+    // Self-produced CB: this thread also fills it (called cb_reserve_back/
+    // cb_push_back), so no other thread will add tiles — blocking would deadlock
+    // the single-threaded compute kernel. The data this thread needs was already
+    // produced by it in program order. This is the dual of cb_reserve_back's
+    // self-consume short-circuit; on silicon UNPACK/PACK overlap and an
+    // over-popped CB's uint16 `received - acked` underflows, so the wait never
+    // blocks there either. See __emule_cb_self_produce_mask.
+    if ((__emule_cb_self_produce_mask >> cb_id) & 1u) return;
     std::unique_lock<std::mutex> lk(cb.mu);
     if (!__emule_cv_wait(cb.data_cv, lk, __emule_cb_timeout_sec(),
             [&]{ return cb.occupied.load(std::memory_order_relaxed) >= n; })) {

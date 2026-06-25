@@ -604,6 +604,7 @@ files:
   - {kind: global, name: __emule_logical_x}
   - {kind: global, name: __emule_logical_y}
   - {kind: global, name: __emule_cb_self_consume_mask}
+  - {kind: global, name: __emule_cb_self_produce_mask}
   - {kind: global, name: unpack_tile_size}
   - {kind: global, name: unpack_src_format}
   - {kind: global, name: pack_dst_format}
