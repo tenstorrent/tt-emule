@@ -265,21 +265,6 @@ run_pytest "fused_test_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_large_fil
 # #152 (reduce_tile element-wise scaler) regression guard — non-sharded layer_norm/rms_norm were 140/14-failing on non-32-aligned widths pre-fix.
 run_pytest "fused_test_layer_norm" "$FUSED_TEST_DIR/test_layer_norm.py"
 run_pytest "fused_test_rms_norm"   "$FUSED_TEST_DIR/test_rms_norm.py"
-# #129 (sharded fused-norm: welford to_face per-group DST layout + mul_tiles_init acc-to-dest default +
-# cb_api self-produce short-circuit) regression guard. FORKED=1 = per-test process isolation (emule's
-# fresh-boot-per-test analog): the large legacy group_norm kernels read a working-L1 region they don't
-# fully initialize, which emule faithfully exposes only when L1 is reused across programs in one process
-# (see docs/mem-zeros-handling.md).
-# tile_layout (TILE-input) legacy hang FIXED by the cb_api.h self-produce short-circuit (cb_wait_front
-# must not block on a CB this single-threaded compute also produces — the in-place gamma/beta recycle of
-# c_1). Verified on real WH silicon: all legacy tile_layout cases PASS on hardware, so emule was the
-# divergence, not the kernel. 4/6 tile_layout cases now pass (3 welford + legacy C=2560/W=512).
-# Deselects (all orthogonal to the sharded-welford bring-up):
-#   - optional_weight_bias legacy (legacy DRAM mcast-path reduce deadlock);
-#   - block_sharded_v2_8x4 legacy W=8192 (bf16 Frobenius tolerance edge, PCC 0.99995 / ALLCLOSE pass);
-#   - tile_layout legacy C=1280 (W=512 and W=2048): emule legacy-groupnorm reduce bf16-fidelity gap —
-#     E[x] ~1.2% low vs silicon, Frobenius 1.51%/1.55% > 0.015 (PCC 0.999945 / ALLCLOSE pass; silicon
-#     ~0.5%). Separate from the hang; tracked as a follow-up.
 FORKED=1 run_pytest "fused_test_group_norm" "$FUSED_TEST_DIR/test_group_norm.py" \
     -k "not (optional_weight_bias and legacy)" \
     --deselect "tests/ttnn/unit_tests/operations/fused/test_group_norm.py::test_group_norm_with_block_sharded_v2_8x4_grid[specify_grid=True-legacy-N=1-C=320-H=1-W=8192-num_groups=32-device_params={'l1_small_size': 0}]" \
