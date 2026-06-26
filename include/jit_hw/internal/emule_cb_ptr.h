@@ -26,13 +26,15 @@
 // (e.g. CB-reconfig paths) take effect automatically (write-back), and the next
 // cb_push_back / get_*_ptr advances/reads from the written value.
 //
-// RESET INVARIANT (load-bearing): `thread_local` zero-initialises for every new
-// std::thread. emule's runner creates a fresh std::thread per kernel per launch
-// and joins it (no thread pool), so each RISC starts every launch with all CB
-// pointers cleared — exactly mirroring silicon's per-RISC register reset at
-// kernel launch. `fifo_page_size == 0` is the per-(thread,cb) "uninitialised"
-// sentinel; first touch lazily seats the pointer at the shard base (index 0)
-// from the shared CBSyncState geometry.
+// RESET INVARIANT (load-bearing): each RISC must start every launch with all CB
+// pointers cleared — mirroring silicon's per-RISC register reset at kernel launch.
+// This `local_cb` array lives in the per-fiber ThreadCommonCtx, which the runner
+// allocates fresh (zero-initialised) per (core,RISC) for every program and the
+// scheduler repoints `__emule_self` to on each swap-in — so the reset holds even
+// though the fiber-engine worker OS-threads are a persistent pool reused across
+// programs (it does NOT depend on a fresh std::thread per launch). `fifo_page_size
+// == 0` is the per-(ctx,cb) "uninitialised" sentinel; first touch lazily seats the
+// pointer at the shard base (index 0) from the shared CBSyncState geometry.
 //
 // SPSC INVARIANT: a CB has exactly one producer thread and one consumer thread
 // (never same-thread produce+consume). Independent per-RISC pointers that both

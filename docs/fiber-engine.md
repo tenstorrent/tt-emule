@@ -368,16 +368,16 @@ spends 87–99% of its kernel-exec wall spinning ~192 threads through a rendezvo
 host). The fiber path has no global startup barrier (§4, §8), so it skips that storm; what
 remains are the overheads below, all of which sit **outside the kernels' own compute/sync**.
 
-Each item notes which worker count `K` it bites at (the shipping default is **K=1**). Every
-fix that touches the scheduler must be re-validated with the §7 WH+BH K-matrix — identical
-pass/fail at K=1 / moderate / high — before landing.
+Each item notes which worker count `K` it bites at (the shipping default is **K=64**, activating
+`min(K, fiber count)` workers per program — see §10.4/§10.8). Every fix that touches the
+scheduler must be re-validated with the §7 WH+BH K-matrix — identical pass/fail at K=1 / moderate
+/ high — before landing.
 
 | Overhead | Bites at | Mechanism |
 |---|---|---|
 | `swapcontext` signal-mask syscall | all K (incl. default) | every park/wake (§2.1) |
-| `cv_.notify_all()` thundering herd | K>1 | single global `cv_`, pinned fibers (§2.4) |
-| global `mu_` contention | K>1 | one scheduler lock for all workers |
-| per-program worker create/join | K>1 | `run_until_idle` spawns+joins K threads |
+| `cv_.notify_all()` thundering herd | active W>1 | single global `cv_`, pinned fibers (§2.4) |
+| global `mu_` contention | active W>1 | one scheduler lock for all active workers |
 | per-program fiber-stack mmap/munmap | all K | ucontext stacks allocated per program |
 | `latency_park` quiescence rendezvous | all K | read-latency model (§8) |
 | per-program `setup_core_state` | all K (runner, both executors) | CB/sem/DFB rebuilt per program |
@@ -407,10 +407,16 @@ all K workers. The lock is held only briefly (released before `swapcontext` into
 at high K it serializes the scheduler. **Fix:** shard scheduler state per worker (naturally
 paired with 10.2).
 
-### 10.4 Per-program worker create/join — *K>1*
-`run_until_idle` creates K `std::thread` workers and joins them **every program** (every ttnn
-op) — K thread lifecycles per op. **Fix:** a persistent worker pool reused across programs,
-re-seeded with each program's fibers.
+### 10.4 Per-program worker create/join — *ADDRESSED*
+`run_until_idle` used to create K `std::thread` workers and join them every program. It now uses a
+**persistent pool** of K threads, created once (lazily, first run) and reused across every program:
+threads park on `start_cv_` between programs; `run_until_idle` bumps a generation counter +
+`notify_all` to launch a run and waits on `done_cv_` for `workers_done_ == W`. Each program activates
+only `W = min(K, fiber count)` workers (`home = i % W`), so surplus pool workers stay parked on
+`start_cv_` and per-fiber `wake()`/`yield()` (which notify `cv_`) never wake them — a tiny program at
+K=64 pays one start `notify_all`, not a per-op thread create/join nor a per-fiber herd. The pool is
+drained + joined in `~FiberScheduler` (process exit). (Remaining minor: the tier-2 watchdog is still a
+per-run thread — 1, not K.)
 
 ### 10.5 Per-program fiber-stack mmap/munmap — *all K*
 Each fiber's ucontext stack (`TT_EMULE_FIBER_STACK_BYTES`, default 1 MB) is `mmap` + `mprotect`
@@ -433,9 +439,11 @@ bank/coord-map setup is cheap (O(banks)/O(grid)); `setup_core_state` is the prog
 remainder. **Fix:** a program-level cache keyed on the ttnn program-cache hit. (This is runner
 setup, *before* `launch_cores` — outside the kernel-exec metric, but real per-op latency.)
 
-### 10.8 The `K` knob — *config, not a fix*
-`TT_EMULE_FIBER_WORKERS` defaults to **1** (a single cooperative worker) and is uncapped.
-Empirically: light / data-movement ops are fastest at **K=1** (zero contention); compute-heavy
-ops want **K ≈ core count**; **K = N** (one worker per fiber, oversubscribing the host) always
-regresses (10.2/10.3/10.4 all peak there). Worth documenting a recommended K per op class and
-considering a clamp to hardware concurrency so a high `K` can't drive the worst case.
+### 10.8 The `K` knob — *config*
+`TT_EMULE_FIBER_WORKERS` now defaults to **64** (the persistent pool size; §10.4) and is still
+uncapped above that. Per program only `W = min(K, fiber count)` workers are activated, so a high K
+never spawns more workers than a program has fibers, and — with the pool persistent — the old
+"K = N regresses because of per-program thread create/join" failure mode (10.4) is gone. What remains
+at high active W is genuine contention on the single global `cv_`/`mu_` (10.2/10.3): light /
+data-movement ops still do best at low W and compute-heavy ops at **W ≈ core count**. K is not capped
+to hardware concurrency; that and per-worker CVs (10.2) would let an arbitrarily high K stay flat.
