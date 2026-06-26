@@ -306,19 +306,52 @@ deadlock. The diagnostic dump (§6) reports "N fiber(s) in read-latency flight".
 
 ---
 
-## 9. Multichip readiness (forward note, not scope)
+## 9. Multichip (mesh) execution — no-comm verified, concurrent dispatch implemented
 
-The engine is single-chip but designed not to block multichip
-([`multichip/pillar0-fiber-engine.md`](multichip/pillar0-fiber-engine.md)):
+A dual-chip board modeled as a 1×2 mesh device runs **data-parallel eltwise (no inter-chip
+communication) faithfully on both chips, verified** on **N300** (2× Wormhole,
+`wormhole_N300.yaml`) and **P300** (2× Blackhole, `blackhole_P300_both_mmio.yaml`); set
+`TT_METAL_MOCK_CLUSTER_DESC_PATH` to the board's descriptor (the 1×2 mesh auto-discovers).
+Repro: `scripts/run_mesh_eltwise.sh <n300|p300>`. Each chip is a distinct in-process
+`SWEmuleChip`; the host scatters/gathers (`ShardTensorToMesh` / `ConcatMeshToTensor` or
+replication) — no device-side CCL.
 
-- The **host-address wake key** already generalizes — each chip's `CBSyncState` /
-  semaphore L1 has a distinct host address in one process; the multi-process case extends
-  the key with a chip field.
-- The **register/run split** lets a mesh command queue register all chips' fibers, then
-  drive them through one `run_until_idle` — the cross-chip concurrency the CCL ops need.
-- Pinning is orthogonal to device count: fibers from all devices are distributed
-  round-robin across the K workers; cross-device wakes route to the home worker exactly as
-  cross-core wakes do.
+**What makes it work:**
+- **Compile-once / dispatch-reuse — mirrors silicon.** `execute_program_emulated` splits into
+  `prepare_program` — which resolves the program's kernels **once** (collect + JIT-compile +
+  resolve → `core_kernels`), memoized by `program.impl().get_id()` (emule's analogue of
+  silicon's `is_compiled`) — and `dispatch_to_device`, which runs per chip against the shared
+  resolved kernels. Metal's mesh dispatch routes the first chip through `LaunchProgram` and the
+  rest through `DispatchCompiledProgramToDevice` (the latter routed to `execute_program_emulated`
+  for emule, since emule never sets `is_compiled`); `prepare_program` resolves on the first chip
+  and is a no-op for the rest — **no per-device re-resolve**, the same compiled `.so` runs on
+  every chip, and the resolved program is reused across program-cache invocations too, exactly
+  like silicon's compile-once/dispatch-reuse.
+- **Concurrent dispatch via the register/run split.** The slow-dispatch mesh CQ
+  (`sd_mesh_command_queue.cpp`) brackets its per-device loop with
+  `emule::begin_mesh_dispatch()` / `run_mesh_dispatch()`: each device *registers* its fibers
+  (spawn, no run) and its borrowed per-device state is kept alive; one final `run_until_idle`
+  runs **all chips' fibers concurrently** on the worker pool. (Single-device — no
+  `begin_mesh_dispatch` — is unchanged: spawn + run per program.)
+- **Per-device state is concurrency-safe via the fiber context.** Each fiber's `__emule_self`
+  carries its device's `core_map` / `bridge_dram` (set at spawn), and the runner bridges
+  (`__emule_resolve_noc_addr` etc.) resolve through it — so concurrent fibers from different
+  chips map NOC addresses to the correct chip's L1. The bank→NOC-xy tables remain process-
+  global but are **topology-invariant across identical chips** (every WH, every BH), so they
+  are correct shared, even concurrently. The **host-address wake key** likewise stays distinct
+  per chip in one process.
+- **Pinning is orthogonal to device count:** fibers from all devices distribute round-robin
+  across the K workers; cross-device wakes route to the home worker exactly as cross-core wakes.
+
+**Remaining for full multichip (not yet needed / out of scope):**
+- **Inter-chip communication** (device-side CCL — all_gather / reduce_scatter / … — over the
+  NoC fabric) is **not emulated**. Concurrent dispatch is the prerequisite (chips must co-run
+  to exchange data mid-kernel); the fabric transport itself is future work.
+- **Heterogeneous meshes** (mixed arch / differing bank topology) would need the bank tables
+  made per-device (keyed via the fiber context, like `core_map`). No current Tenstorrent board
+  is heterogeneous, so this is deferred.
+- **Multi-process** meshes: the `uint32_t`-host-pointer identity can't span processes; the
+  wake key would extend with a chip field. See [`multichip/pillar0-fiber-engine.md`](multichip/pillar0-fiber-engine.md).
 
 Native data-race detection (TSAN-style, on the same scheduler-owned sync edges) is a
 documented future phase — see the design record — and is **out of scope** here.
