@@ -510,6 +510,7 @@ files:
   - {kind: global, name: vConst0p5}
   - {kind: global, name: vConstNeg0p5}
   - {kind: function, name: reinterpret}
+  - {kind: function, name: as}
   - {kind: function, name: float_to_fp16b}
   - {kind: function, name: float_to_fp16a}
   - {kind: function, name: setsgn}
@@ -604,6 +605,7 @@ files:
   - {kind: global, name: __emule_logical_x}
   - {kind: global, name: __emule_logical_y}
   - {kind: global, name: __emule_cb_self_consume_mask}
+  - {kind: global, name: __emule_cb_self_produce_mask}
   - {kind: global, name: unpack_tile_size}
   - {kind: global, name: unpack_src_format}
   - {kind: global, name: pack_dst_format}
@@ -794,6 +796,10 @@ files:
   - {kind: function, name: gt_int_tile}
   - {kind: function, name: le_int_tile}
   - {kind: function, name: ge_int_tile}
+  - {kind: function, name: eq_int_tile_init}
+  - {kind: function, name: ne_int_tile_init}
+  - {kind: function, name: eq_int_tile}
+  - {kind: function, name: ne_int_tile}
 - path: include/jit_hw/api/compute/binary_fmod.h
   section: include/jit_hw/api/compute/
   summary: '`ckernel::` `fmod_binary_tile`, `fmod_int32_tile` (+`_init`)'
