@@ -384,6 +384,8 @@ run_pytest "reduce_test_argmax"              "$REDUCE_TEST_DIR/test_argmax.py"
 run_pytest "sdpa_test_prefill"  "$SDPA_TEST_DIR/test_sdpa_prefill.py"          # 4 passed, 2 skipped
 run_pytest "sdpa_test_chunked"  "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_chunked.py"  # 18 passed, 16 skipped
 run_pytest "sdpa_test_joint"    "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_joint.py"    # 168 passed, 32 skipped
+run_pytest "sdpa_test_decode"   "$SDPA_TEST_DIR/test_sdpa_decode.py"           # 11 passed, 1 skipped (multi-core reduction fix)
+run_pytest "mla_test_decode"    "$SDPA_TEST_DIR/test_mla_decode.py"            # 2 passed (multi-core reduction fix)
 
 run_pytest "matmul_test_linear" "$MATMUL_TEST_DIR/test_linear.py" -k 'test_linear_fp32_acc or test_vector_linear'
 
