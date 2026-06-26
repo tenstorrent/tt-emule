@@ -1225,6 +1225,15 @@ files:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: glm_moe_gate_init}
   - {kind: function, name: glm_moe_gate}
+- path: include/jit_hw/api/compute/hadamard.h
+  section: include/jit_hw/api/compute/
+  summary: 'Emule model for the H128 1x128 Walsh-Hadamard transform: Y = H_128 @ x (Sylvester, closed form H[j][k]=(-1)^popcount(j&k)), /sqrt(128) when normalize; reads the 1x128 from in_cb face-0 rows0..7
+    x cols0..15 and writes Y to DST in the same layout (h16_cb / MATH_FIDELITY ignored — net-effect model)'
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: hadamard_h128_init}
+  - {kind: function, name: hadamard_h128_tile}
+  - {kind: function, name: hadamard_h128_uninit}
 - path: include/jit_hw/api/compute/isclose.h
   section: include/jit_hw/api/compute/
   summary: '`ckernel::` `isclose_binary_tile`, `isclose_binary_tile_init`'
@@ -2728,6 +2737,10 @@ files:
 - path: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/glm_moe_gate.h
   section: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/
   summary: emule shadow for blaze's `glm_moe_gate` compute op → routes to the high-level `api/compute/glm_moe_gate.h` emule model
+- path: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/hadamard.h
+  section: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/
+  summary: Thin jit_hw shadow of blaze's hadamard compute header (whose hadamard_h128_* bodies expand to custom narrow-MOP LLKs llk_unpack_hadamard_h128* / llk_math_hadamard_h128* emule can't consume);
+    routes to api/compute/hadamard.h. blaze stays pristine.
 - path: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/kimi_moe_gate.h
   section: include/jit_hw/blaze/kernels/kernel_includes/tt_metal/include/compute_kernel_api/
   summary: emule shadow for blaze's `kimi_moe_gate` compute op → routes to the high-level `api/compute/kimi_moe_gate.h` emule model
