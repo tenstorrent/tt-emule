@@ -75,10 +75,18 @@ public:
         while (a->load(std::memory_order_acquire) < value) {
             if (spins < 64) {
                 // busy-spin
-            } else if (spins < 1024) {
+            } else if (spins < 2048) {
                 sched_yield();
+            } else if (spins < 32768) {
+                usleep(10);
             } else {
-                usleep(1);
+                // Long wait: back off hard so this waiter cedes CPU to producer
+                // threads. emule runs each Tensix core as an OS thread (~30x
+                // oversubscribed on a typical host); a usleep(1) poll storm from
+                // hundreds of waiters starves compute-bound producers and can trip
+                // the spin watchdog as a false hang. See the matching backoff in
+                // dataflow_api.h noc_semaphore_wait.
+                usleep(200);
             }
             if (++spins > 10'000'000ULL) {
                 fprintf(stderr,
@@ -106,10 +114,18 @@ public:
         while (!reached(a->load(std::memory_order_acquire))) {
             if (spins < 64) {
                 // busy-spin
-            } else if (spins < 1024) {
+            } else if (spins < 2048) {
                 sched_yield();
+            } else if (spins < 32768) {
+                usleep(10);
             } else {
-                usleep(1);
+                // Long wait: back off hard so this waiter cedes CPU to producer
+                // threads. emule runs each Tensix core as an OS thread (~30x
+                // oversubscribed on a typical host); a usleep(1) poll storm from
+                // hundreds of waiters starves compute-bound producers and can trip
+                // the spin watchdog as a false hang. See the matching backoff in
+                // dataflow_api.h noc_semaphore_wait.
+                usleep(200);
             }
             if (++spins > 10'000'000ULL) {
                 fprintf(stderr,
@@ -127,10 +143,18 @@ public:
         while (a->load(std::memory_order_acquire) < min_val) {
             if (spins < 64) {
                 // busy-spin
-            } else if (spins < 1024) {
+            } else if (spins < 2048) {
                 sched_yield();
+            } else if (spins < 32768) {
+                usleep(10);
             } else {
-                usleep(1);
+                // Long wait: back off hard so this waiter cedes CPU to producer
+                // threads. emule runs each Tensix core as an OS thread (~30x
+                // oversubscribed on a typical host); a usleep(1) poll storm from
+                // hundreds of waiters starves compute-bound producers and can trip
+                // the spin watchdog as a false hang. See the matching backoff in
+                // dataflow_api.h noc_semaphore_wait.
+                usleep(200);
             }
             if (++spins > 10'000'000ULL) {
                 fprintf(stderr,

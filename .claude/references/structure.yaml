@@ -2133,6 +2133,7 @@ files:
   - {kind: extern_c, name: __emule_resolve_noc_addr}
   - {kind: extern_c, name: __emule_multicast_write}
   - {kind: function, name: __emule_debug_multicast}
+  - {kind: function, name: __emule_sem_spin_limit}
   - {kind: function, name: __emule_addr_to_offset}
   - {kind: macro, name: __EMULE_LOCAL_L1_TO_PTR_DEFINED}
   - {kind: function, name: __emule_local_l1_to_ptr}
