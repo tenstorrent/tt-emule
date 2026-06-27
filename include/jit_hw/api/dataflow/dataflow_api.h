@@ -86,6 +86,20 @@ inline bool __emule_debug_multicast() {
     return val;
 }
 
+// ---- Semaphore spin-wait watchdog limit ----
+// Iterations a spin-wait tolerates before declaring a hang and aborting. emule
+// runs each Tensix core as an OS thread, so a many-core program is heavily
+// oversubscribed on a typical host and a live peer can be starved past a fixed
+// count without a real deadlock. Env-tunable via TT_EMULE_SEM_SPIN_LIMIT
+// (0 = never abort).
+inline uint64_t __emule_sem_spin_limit() {
+    static uint64_t lim = []() -> uint64_t {
+        const char* e = std::getenv("TT_EMULE_SEM_SPIN_LIMIT");
+        return e ? std::strtoull(e, nullptr, 10) : 10'000'000ULL;
+    }();
+    return lim;
+}
+
 // ---- L1 address conversion helpers ----
 // Extract L1 offset from a host address using bitmask.
 // L1Pool allocates worker slots at 2 MB alignment, so addr & 0x1FFFFF
@@ -735,12 +749,19 @@ inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t v
     while (!reached(atom->load(std::memory_order_acquire))) {
         if (spins < 64) {
             // Busy-spin for fast wakeup
-        } else if (spins < 1024) {
+        } else if (spins < 2048) {
             sched_yield();
+        } else if (spins < 32768) {
+            usleep(10);
         } else {
-            usleep(1);
+            // Long wait: back off to 200us to cede CPU to producer threads. emule
+            // runs each Tensix core as an OS thread (heavily oversubscribed on a
+            // typical host); a usleep(1) poll storm from many waiters starves the
+            // compute-bound producers.
+            usleep(200);
         }
-        if (++spins > 10'000'000ULL) {
+        ++spins;
+        if (uint64_t __lim = __emule_sem_spin_limit(); __lim != 0 && spins > __lim) {
             fprintf(stderr, "EMULE HANG: noc_semaphore_wait(%p, %u) stuck at %u after %llu spins "
                     "[phys (%u,%u) logical (%u,%u)]\n",
                     (void*)sem_addr, val, atom->load(std::memory_order_relaxed), (unsigned long long)spins,
@@ -763,12 +784,19 @@ inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32
     while (atom->load(std::memory_order_acquire) < min_val) {
         if (spins < 64) {
             // Busy-spin for fast wakeup
-        } else if (spins < 1024) {
+        } else if (spins < 2048) {
             sched_yield();
+        } else if (spins < 32768) {
+            usleep(10);
         } else {
-            usleep(1);
+            // Long wait: back off to 200us to cede CPU to producer threads. emule
+            // runs each Tensix core as an OS thread (heavily oversubscribed on a
+            // typical host); a usleep(1) poll storm from many waiters starves the
+            // compute-bound producers.
+            usleep(200);
         }
-        if (++spins > 10'000'000ULL) {
+        ++spins;
+        if (uint64_t __lim = __emule_sem_spin_limit(); __lim != 0 && spins > __lim) {
             fprintf(stderr, "EMULE HANG: noc_semaphore_wait_min(%p, %u) stuck at %u after %llu spins "
                     "[phys (%u,%u) logical (%u,%u)]\n",
                     (void*)sem_addr, min_val, atom->load(std::memory_order_relaxed), (unsigned long long)spins,
