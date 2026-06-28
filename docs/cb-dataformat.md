@@ -66,6 +66,27 @@ Concrete dispatch sites today:
 - `__emule_unpack_cb_tile_to(icb, …)`: format read from the **input** CB's
   `unpack_src_format`.
 
+## Integer CBs: raw datum vs numeric value (the DST int-payload tag)
+
+An integer CB (`UInt16`/`Int32`) is read two ways, and emule must reproduce both
+even though its DST is untyped float32:
+
+- **Raw integer payload** (e.g. TopK/Sort/Argmax indices). Datacopy moves the
+  datum verbatim — the integer bit pattern lands in the DST slot (int `5` reads
+  back as a denormal), the int comparison shims read it via `__emule_dst_load_i32`,
+  and pack truncates the low 16 bits straight back: **bit-exact**.
+- **Numeric value** (e.g. an `(index==0)` 0/1 mask). The same CB feeds an FPU
+  multiply where `1` must act as `1.0f`. Silicon runs the SFPU/FPU in
+  integer-register mode (the integer `1`, not IEEE `0x3F800000`).
+
+A per-slot tag `__emule_dst_holds_int[]` (`common_globals.h`) disambiguates:
+`copy_tile` sets it from the source CB (`cb_is_int_format`), `tile_regs_acquire`
+clears it. `eqz_tile` consults it to emit an integer `1`/`0` (survives the
+bit-exact pack) vs a float `1.0f`/`0.0f`; the FPU binary ops convert an
+integer operand to its numeric value (`__emule_unpack_cb_tile_numeric`). The pack
+path is unchanged, so the raw-payload path can't regress. Getting it wrong shows
+as an all-zero output (the float `1.0` eqz result truncated to `0` by the pack).
+
 ## Silicon ↔ emule mapping
 
 | | Silicon | emule |

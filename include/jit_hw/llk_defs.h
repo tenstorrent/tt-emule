@@ -3,15 +3,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
-// LLK definitions aggregator for emulated mode. Per-domain headers below
-// own the actual LLK surface; this aggregator is kept for back-compat with
-// any consumer that `#include`s `jit_hw/llk_defs.h` directly.
+// LLK definitions for emulated mode — the enums/types silicon's
+// tt_llk_<arch>/common/inc/llk_defs.h provides (ReduceDim, PoolType, …).
+// Deliberately does NOT pull the compute API (common.h, pack/unpack/datacopy):
+// dataflow kernels include this (via reduce_helpers_dataflow.hpp) only for the
+// enums, and those compute headers' `using namespace ckernel` would otherwise
+// leak into a dataflow kernel and collide with its own bare constants (e.g. the
+// sampling writer's FACE_WIDTH). Compute consumers include the compute headers
+// directly.
 #include "llk_types.h"
-#include "api/compute/common.h"
 #include "jit_hw/api/compute/nfaces.h"
 #include "internal/firmware_common.h"
 #include "internal/llk_state.h"
-#include "llk_math_eltwise_unary_datacopy.h"
-#include "llk_pack.h"
 #include "llk_sync_stubs.h"
-#include "llk_unpack_a.h"

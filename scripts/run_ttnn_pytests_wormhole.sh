@@ -390,6 +390,9 @@ FORKED=1 run_pytest "reduce_test_argmax"              "$REDUCE_TEST_DIR/test_arg
     --deselect "tests/ttnn/unit_tests/operations/reduce/test_argmax.py::test_argmax[tensor_shape=[16, 32, 64, 128]-tensor_layout=Layout.ROW_MAJOR-dim=-1-keepdim=True-dtype=torch.float32]" \
     --deselect "tests/ttnn/unit_tests/operations/reduce/test_argmax.py::test_argmax[tensor_shape=[16, 32, 64, 128]-tensor_layout=Layout.ROW_MAJOR-dim=-1-keepdim=True-dtype=torch.int32]"
 
+run_pytest "reduce_test_moe"                 "$REDUCE_TEST_DIR/test_moe.py"
+run_pytest "reduce_test_sampling"            "$REDUCE_TEST_DIR/test_sampling.py"
+
 # ttnn.sort: WH 262144 uses the CrossCoreDataExchange factory and passes after the
 # Semaphore::wait `>=` count-up-overshoot fix (#200, WH-scoped) — cover it here.
 # Larger Wt routes to the SingleRowMultiCore factory, which hits a coordinator
