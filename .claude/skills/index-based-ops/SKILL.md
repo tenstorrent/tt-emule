@@ -83,6 +83,32 @@ multi-core ROW_MAJOR. No new shim needed — `api/numeric/*` and
 without `WATCHER_ENABLED`). The multi-core path depends on the cross-core
 start-ordering below.
 
+## MoE (`ttnn.moe`)
+TopK + `-inf`-masked softmax, reusing the four `topk_*` shims; value-based (PCC
+0.999). Selects the 0th expert via `eqz(index)` then `mul(weights, mask)`,
+routing a 0/1 mask through the UInt16 index CB — see *Integer-mask round-trip*.
+Symptom when wrong: ttnn output all-zero vs nonzero torch.
+
+## Integer-mask round-trip (an int CB used as a numeric 0/1 mask)
+A UInt16 CB carries two kinds of datum: raw integer **index payloads** (must stay
+bit-exact, read via `__emule_dst_load_i32`) and **numeric** masks (a 1 must
+multiply as `1.0f`). emule's DST is untyped float32, so a per-slot tag
+`__emule_dst_holds_int[]` (`common_globals.h`) disambiguates: `copy_tile` sets it
+from the source CB (`cb_is_int_format`), `eqz_tile` consults it to emit an integer
+1/0 (survives the bit-exact pack) vs a float, and the FPU binary ops convert an
+integer operand to its numeric value (`__emule_unpack_cb_tile_numeric`). Pack is
+unchanged, so TopK/Sort/Argmax can't regress. Mirrors silicon, where the SFPU's
+integer mode leaves an integer (not IEEE-float) result.
+
+## Sampling (`ttnn.sampling`)
+top-k/top-p filter + inverse-CDF draw over the SFPU RNG. Index-validity contract
+(determinism / randomness / validity / k=1) — match the contract, not the RNG bit
+sequence. `rand.h` uses a per-core thread-local `mt19937` seeded from (op seed,
+core coords): seeded → reproducible, `seed == 0` → reseeded from entropy each draw
+(every emule core is a host thread, so a process-global `std::rand` both races and
+can't reproduce per core). The writer pulls the SDPA dataflow chain via a
+`cpp/ttnn/...` include, resolved by the `-I <src>/ttnn` JIT flag.
+
 ## Cross-core handshakes under emule
 A reducer-style op (workers signal a collator core, which waits) leans on two
 silicon timings emule collapses. When one hangs, suspect these before declaring a
