@@ -498,29 +498,11 @@ inline void noc_async_write_multicast_one_packet(
 
 // ---- Barriers ----
 
-// Model silicon's NOC read latency: on hardware a core that issues a read stalls at
-// the read barrier for the round-trip, during which other cores progress. Emule reads
-// are instant, so a kernel that relies on that ordering instead of a handshake can race
-// — e.g. argmax's first reduction iteration, where the reducer resets done_sem in its
-// prologue and workers must not increment it until after the reset. We reproduce the
-// ordering by latency-parking the fiber on its FIRST read barrier (per-fiber one-shot):
-// the scheduler releases latency-parked fibers only at quiescence, i.e. after every other
-// runnable core has run — so the reducer's quick local reset always lands first. See
-// docs/fiber-engine.md. A worker's cross-core output (its done_sem.up) comes after this
-// barrier, so one park per fiber suffices.
-inline void __emule_model_first_read_latency() {
-    if (__emule_self->read_latency_pending) {
-        __emule_self->read_latency_pending = false;
-        __emule_fiber_read_latency();
-    }
-}
-
 // Clears the pending-NOC-reads counter (the NoC Barrier Missing check reads it
-// in cb_pop_front; see docs/ASAN.md) and models first-input-read latency. The
-// reads themselves are synchronous memcpys, so there's nothing to wait for.
+// in cb_pop_front; see docs/ASAN.md). The reads themselves are synchronous
+// memcpys, so there's nothing to wait for.
 inline void noc_async_read_barrier(uint8_t noc = noc_index) {
     __emule_pending_noc_reads = 0;
-    __emule_model_first_read_latency();
 }
 inline void noc_async_write_barrier(uint8_t noc = noc_index) {}
 inline void noc_async_writes_flushed(uint8_t noc = noc_index) {}
@@ -535,9 +517,7 @@ inline void noc_async_posted_writes_flushed(uint8_t noc = noc_index) {}
 // its only call sites are experimental kernels (ccl/deepseek/prefetcher) not
 // in the routine bring-up regression scope, and adding it would also require
 // noc_async_read_one_packet_set_state / _with_state which are a separate gap.
-inline void noc_async_read_barrier_with_trid(uint32_t trid, uint8_t noc = noc_index) {
-    __emule_model_first_read_latency();
-}
+inline void noc_async_read_barrier_with_trid(uint32_t trid, uint8_t noc = noc_index) {}
 inline void noc_async_write_barrier_with_trid(uint32_t trid, uint8_t noc = noc_index) {}
 inline void noc_async_write_flushed_with_trid(uint32_t trid, uint8_t noc = noc_index) {}
 // noc_async_read_set_trid lives further down in the trid / shard-state cluster

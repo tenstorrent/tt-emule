@@ -2109,7 +2109,6 @@ files:
   - {kind: function, name: noc_async_write_multicast}
   - {kind: function, name: noc_async_write_multicast_loopback_src}
   - {kind: function, name: noc_async_write_multicast_one_packet}
-  - {kind: function, name: __emule_model_first_read_latency}
   - {kind: function, name: noc_async_read_barrier}
   - {kind: function, name: noc_async_write_barrier}
   - {kind: function, name: noc_async_writes_flushed}
@@ -2335,7 +2334,6 @@ files:
   - {kind: extern_c, name: __emule_fiber_park_locked}
   - {kind: extern_c, name: __emule_fiber_wake}
   - {kind: extern_c, name: __emule_fiber_yield}
-  - {kind: extern_c, name: __emule_fiber_read_latency}
   - {kind: extern_c, name: __emule_fiber_note_publish}
   - {kind: function, name: __emule_fiber_wait}
 - path: include/jit_hw/internal/emule_l1_to_ptr.h
