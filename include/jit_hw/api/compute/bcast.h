@@ -92,8 +92,10 @@ inline void apply(uint32_t icb0, uint32_t icb1, uint32_t itile0, uint32_t itile1
 } // namespace __emule_bcast
 
 // ---- Init helpers (templated 2-arg form) — HW config, no-op on emule. ----
+// init_bcast's 3rd silicon arg (ocb) is pack-config only; ignored here.
+// Defaulted so existing 2-arg callers still resolve.
 template <EltwiseBinaryType op_type, BroadcastType bcast_type>
-inline void init_bcast(uint32_t icb0 = 0, uint32_t icb1 = 1) {}
+inline void init_bcast(uint32_t icb0 = 0, uint32_t icb1 = 1, uint32_t ocb = 0) {}
 template <EltwiseBinaryType op_type, BroadcastType bcast_type>
 inline void add_bcast_rows_init_short(uint32_t icb0 = 0, uint32_t icb1 = 1) {}
 template <EltwiseBinaryType op_type, BroadcastType bcast_type>

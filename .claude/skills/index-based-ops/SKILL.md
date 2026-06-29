@@ -53,19 +53,24 @@ per column.
 Reuses the TopK shims verbatim (`topk_local_sort`/`topk_merge`, not
 `topk_rebuild`) — `merge_split_col` is also correct for a full sort, so no new
 math is needed. It selects one of three program factories by width-in-tiles
-`Wt`: single-core (`Wt<=64`) and cross-core exchange are supported; the
-single-row multi-core DRAM path (largest `Wt`) is not (see below).
+`Wt` against a grid-dependent threshold: single-core (`Wt<=64`) and cross-core
+exchange are supported; the single-row multi-core DRAM path (`Wt` above the
+threshold) is not (see below). The threshold scales with the core grid, so the
+same case can differ by arch — e.g. `262144` is cross-core on WH (64 cores) but
+single-row-multi-core on BH (110 cores, where it rounds just over the threshold).
 
 The cross-core reader collapses an L1 pointer to a 32-bit address inside an
 `#include`d header, which the JIT x86 patcher now reaches (companion tt-metal
 change). For the semaphore handshake itself see *Cross-core handshakes* below.
 
-Unsupported — multi-core DRAM path: its coordinator broadcasts a toggled VALID/0
-release via `noc_semaphore_set_multicast`, which races under emule's synchronous
-(zero-latency) multicast — the consumer can lose a release. Pacing the multicast
-fixes sort but stalls sticky-signal multicasts (e.g. matmul DRAM-sharded), and
-the two are indistinguishable at the multicast layer; the cases are excluded from
-the regression entries.
+Unsupported — multi-core DRAM path (tracked in #214): its coordinator broadcasts a
+toggled VALID/0 release via `noc_semaphore_set_multicast`, which races under
+emule's synchronous (zero-latency) multicast — the consumer can lose a release
+(`Semaphore::wait(0) stuck at 1`, or a downstream `cb_wait_front` deadlock). This
+hits `524288` (both arches) and `262144` (BH only; WH `262144` is cross-core and
+passes). Pacing the multicast fixes sort but stalls sticky-signal multicasts (e.g.
+matmul DRAM-sharded), and the two are indistinguishable at the multicast layer; the
+cases are excluded from the regression entries.
 
 ## Argmax (`ttnn.argmax`)
 **Dataflow-only** — no compute/SFPU; the max-scan runs in the NCRISC reader.
@@ -77,6 +82,32 @@ multi-core ROW_MAJOR. No new shim needed — `api/numeric/*` and
 `api/debug/waypoint.h` resolve to real tt-metal headers (waypoint is a no-op
 without `WATCHER_ENABLED`). The multi-core path depends on the cross-core
 start-ordering below.
+
+## MoE (`ttnn.moe`)
+TopK + `-inf`-masked softmax, reusing the four `topk_*` shims; value-based (PCC
+0.999). Selects the 0th expert via `eqz(index)` then `mul(weights, mask)`,
+routing a 0/1 mask through the UInt16 index CB — see *Integer-mask round-trip*.
+Symptom when wrong: ttnn output all-zero vs nonzero torch.
+
+## Integer-mask round-trip (an int CB used as a numeric 0/1 mask)
+A UInt16 CB carries two kinds of datum: raw integer **index payloads** (must stay
+bit-exact, read via `__emule_dst_load_i32`) and **numeric** masks (a 1 must
+multiply as `1.0f`). emule's DST is untyped float32, so a per-slot tag
+`__emule_dst_holds_int[]` (`common_globals.h`) disambiguates: `copy_tile` sets it
+from the source CB (`cb_is_int_format`), `eqz_tile` consults it to emit an integer
+1/0 (survives the bit-exact pack) vs a float, and the FPU binary ops convert an
+integer operand to its numeric value (`__emule_unpack_cb_tile_numeric`). Pack is
+unchanged, so TopK/Sort/Argmax can't regress. Mirrors silicon, where the SFPU's
+integer mode leaves an integer (not IEEE-float) result.
+
+## Sampling (`ttnn.sampling`)
+top-k/top-p filter + inverse-CDF draw over the SFPU RNG. Index-validity contract
+(determinism / randomness / validity / k=1) — match the contract, not the RNG bit
+sequence. `rand.h` uses a per-core thread-local `mt19937` seeded from (op seed,
+core coords): seeded → reproducible, `seed == 0` → reseeded from entropy each draw
+(every emule core is a host thread, so a process-global `std::rand` both races and
+can't reproduce per core). The writer pulls the SDPA dataflow chain via a
+`cpp/ttnn/...` include, resolved by the `-I <src>/ttnn` JIT flag.
 
 ## Cross-core handshakes under emule
 A reducer-style op (workers signal a collator core, which waits) leans on two

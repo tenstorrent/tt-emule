@@ -185,6 +185,16 @@ ALWI void lez_tile_int32(uint32_t idst) {
 ALWI void eqz_tile_init() {}
 
 ALWI void eqz_tile(uint32_t idst) {
+    // Integer-format operand (e.g. a UInt16 index): silicon runs eqz in integer
+    // mode and yields an integer 1/0, which packs bit-exact. A float 1.0f would
+    // be truncated to 0 by the UInt16 packer. Float operands take the usual path.
+    if (__emule_dst_is_int(idst)) {
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+            int32_t x = __emule_dst_load_i32(idst, i);
+            __emule_dst_store_i32(idst, i, x == 0 ? 1 : 0);
+        }
+        return;
+    }
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
         __emule_dst[idst][i] = (__emule_dst[idst][i] == 0.0f) ? 1.0f : 0.0f;
 }

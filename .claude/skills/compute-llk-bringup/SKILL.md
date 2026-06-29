@@ -319,6 +319,15 @@ but in some other kernel chain. Capture the failing kernel via
 `#include` list, identify the missing header. Add a thin re-export shim
 under `include/jit_hw/` at the matching path.
 
+### Umbrella SFPU header (`ckernel_sfpu.h`)
+
+Some kernels `#include "ckernel_sfpu.h"`, the upstream catch-all of every SFPU
+`_calculate_*` template; it's not on emule's include path. **Do not** add the
+real LLK header — it double-declares symbols emule already provides (e.g.
+`topk_*` from `compute_kernel_api.h`). Add a minimal `include/jit_hw/ckernel_sfpu.h`
+with only the symbols the kernels actually consume (grep for `sfpu::` uses), each
+a no-op/forwarder per the reduce-jit_hw-surface rule.
+
 ## Composed ops (no standalone upstream `<name>_tile`)
 
 Some activation-style ops are not standalone SFPU primitives — they're

@@ -15,7 +15,8 @@ include search order:
 1. `include/jit_hw` (first)
 2. `include/`
 3. the kernel's own directory
-4. extras: `ttnn/cpp`, **the tt-metal source root**, `tt_metal/hw/inc`, `hostdevcommon/api`
+4. extras: `ttnn/cpp`, `ttnn`, **the tt-metal source root**, `tt_metal/hw/inc`, `hostdevcommon/api`
+   (the `ttnn` root resolves headers included with the repo-rooted `cpp/ttnn/...` prefix)
 
 Two consequences make the deep path pure-header:
 

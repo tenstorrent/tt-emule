@@ -12,3 +12,4 @@ build_clang20/
 build_*/
 scripts/out/
 __pycache__/
+.local_ci/

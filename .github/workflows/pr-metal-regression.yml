@@ -231,9 +231,16 @@ jobs:
         # arch's gtest XML to gtest-xml/<arch>/ and classifying per arch
         # (quasar gets the known-failures allowlist; wh/bh are zero-tolerance).
         # Exits non-zero if any arch has a new failure.
+        #
+        # CI_TIER controls the on-PR vs on-push split for C++:
+        #   pull_request → CI_TIER=pr: blackhole (PR_FULL_ARCHES) runs its full
+        #     suite; wormhole + quasar run only their PR_TIER smoke set.
+        #   push / other → CI_TIER=full: every arch runs its full suite, so the
+        #     on-push regression is identical to before this split.
         env:
           TT_METAL_DIR: ${{ github.workspace }}/tt-metal
           BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule
+          CI_TIER: ${{ github.event_name == 'pull_request' && 'pr' || 'full' }}
         shell: bash
         run: bash tt-emule/.github/scripts/ci-regression-all.sh
 
@@ -250,10 +257,14 @@ jobs:
 
   # Keep shards serialized within each architecture to avoid overwhelming the
   # shared CPU runners while still allowing wormhole and blackhole to progress.
+  #
+  # The full sharded TTNN suites run on push to main (and any non-PR event), NOT
+  # on pull_request — on a PR the lightweight `ttnn-smoke-pr` job below replaces
+  # them. The on-push suite is therefore unchanged.
   ttnn-pytest-wormhole:
     name: TTNN Pytests (${{ matrix.arch }}, shard ${{ matrix.shard }}/5)
     needs: [changes, build]
-    if: ${{ needs.changes.outputs.code == 'true' }}
+    if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'pull_request' }}
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 90
     container:
@@ -320,7 +331,7 @@ jobs:
   ttnn-pytest-blackhole:
     name: TTNN Pytests (${{ matrix.arch }}, shard ${{ matrix.shard }}/5)
     needs: [changes, build]
-    if: ${{ needs.changes.outputs.code == 'true' }}
+    if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'pull_request' }}
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 90
     container:
@@ -384,6 +395,78 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+  # Lightweight TTNN gate for pull requests ONLY: the curated blackhole PR_TIER
+  # smoke set across 2 parallel shards, replacing the full wormhole+blackhole
+  # sharded matrix above. The full suites still run on push to main.
+  ttnn-smoke-pr:
+    name: TTNN Smoke (blackhole, PR, shard ${{ matrix.shard }}/2)
+    needs: [changes, build]
+    if: ${{ needs.changes.outputs.code == 'true' && github.event_name == 'pull_request' }}
+    runs-on: tt-ubuntu-2204-xlarge-stable
+    timeout-minutes: 60
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [1, 2]
+    steps:
+      - name: Checkout tt-emule (PR)
+        uses: actions/checkout@v4
+        with:
+          path: tt-emule
+
+      - name: Checkout tt-metal at pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ needs.build.outputs.pin }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tt-metal-build-${{ github.run_id }}
+          path: tt-metal/build_emule/
+
+      - name: Place cluster descriptors
+        shell: bash
+        run: |
+          mkdir -p tt-metal/tt_metal/third_party/umd/tests
+          cp -r tt-metal/build_emule/_cluster_descs/cluster_descriptor_examples \
+                tt-metal/tt_metal/third_party/umd/tests/
+
+      - name: Install SFPI toolchain
+        shell: bash
+        run: bash tt-metal/install_dependencies.sh --sfpi
+
+      - name: Run TTNN smoke (blackhole, PR_TIER, shard ${{ matrix.shard }}/2)
+        # CI_TIER=pr → run_ttnn_pytests_blackhole.sh runs only its PR_TIER set,
+        # round-robin split across 2 shards that run in parallel.
+        env:
+          TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
+          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
+          TT_EMULE_ARCH: blackhole
+          CI_TIER:       pr
+          SHARD_INDEX:   ${{ matrix.shard }}
+          SHARD_COUNT:   2
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-ttnn-pytests.sh
+
+      - name: Upload TTNN smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ttnn-smoke-pr-results-shard-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/ttnn-pytests.log
+            ${{ runner.temp }}/ttnn-junit-xml/*.xml
+          retention-days: 30
+          if-no-files-found: warn
+
   # Aggregator gate: a single, statically-named check that succeeds only when
   # every matrix leg above succeeds. Branch protection requires THIS check
   # (instead of the dynamically-named build/test/ttnn-pytest checks), so the
@@ -395,7 +478,7 @@ jobs:
     name: All checks passed
     # Run even when a dependency failed/was skipped, so the gate always reports.
     if: ${{ always() }}
-    needs: [changes, build, test, ttnn-pytest-wormhole, ttnn-pytest-blackhole]
+    needs: [changes, build, test, ttnn-pytest-wormhole, ttnn-pytest-blackhole, ttnn-smoke-pr]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any required job did not succeed
@@ -404,6 +487,12 @@ jobs:
         # success/skipped as OK: a failed `build` trips this via its own
         # 'failure', and docs-only runs leave build/test/ttnn 'skipped' (OK).
         # `changes` failing (detection error) also trips the gate — fail closed.
+        #
+        # The on-PR and on-push paths each leave the other's TTNN jobs 'skipped':
+        # a pull_request runs ttnn-smoke-pr (the sharded ttnn-pytest-* are
+        # skipped); a push runs ttnn-pytest-* (ttnn-smoke-pr is skipped). Both
+        # are OK here, so the same single required check ("All checks passed")
+        # covers both paths with no branch-protection change.
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: |
           echo "One or more required jobs did not succeed:"
@@ -412,6 +501,7 @@ jobs:
           echo "  test:        ${{ needs.test.result }}"
           echo "  ttnn-pytest-wormhole: ${{ needs.ttnn-pytest-wormhole.result }}"
           echo "  ttnn-pytest-blackhole: ${{ needs.ttnn-pytest-blackhole.result }}"
+          echo "  ttnn-smoke-pr: ${{ needs.ttnn-smoke-pr.result }}"
           exit 1
       - name: All required jobs passed
         run: echo "All required jobs passed."

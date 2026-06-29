@@ -647,6 +647,13 @@ inline Dst reinterpret(const Src& s) {
     return d;
 }
 
+// `as<Dst>(src)` is the sfpi 7.61.0 spelling of the bit-cast formerly named
+// `reinterpret<Dst>(src)` (tt-metal #47976 bumped sfpi; #48055 switched the LLK
+// SFPU headers from sfpi::reinterpret to sfpi::as). Same semantics — a per-lane
+// bit reinterpret between vFloat/vInt/vUInt — so it delegates to reinterpret.
+template <typename Dst, typename Src>
+inline Dst as(const Src& s) { return reinterpret<Dst, Src>(s); }
+
 // ---- Bit-format conversions ----
 
 // Per-lane bfloat16 truncation. Used by upstream kernels to round results

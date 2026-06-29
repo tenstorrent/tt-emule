@@ -31,6 +31,7 @@ ALWI void tile_regs_acquire() {
     for (uint32_t s = 0; s < active; s++) {
         std::memset(__emule_dst[s], 0, sizeof(__emule_dst[s]));
         __emule_dst_fresh[s] = true;
+        __emule_dst_set_int(s, false);  // clean regs hold numeric float zeros
     }
 }
 ALWI void tile_regs_commit()  {}

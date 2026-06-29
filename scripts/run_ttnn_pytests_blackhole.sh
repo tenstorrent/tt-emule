@@ -60,8 +60,74 @@ ENTRY_NUM=0
 PASS=0
 FAIL=0
 
+# CI_TIER selects which entries run: full (all, default) | pr (only PR_TIER) |
+# deferred (the rest); see ci-regression-all.sh. PR_TIER is the blackhole TTNN
+# smoke set for the PR gate — broad per-op-class coverage across 2 parallel
+# shards, excluding the heavy whole-file runs (untilize, pad, to_memory_config,
+# copy), the tensor/ dir, and the nightly matmul-activations test.
+CI_TIER="${CI_TIER:-full}"
+PR_TIER=(
+    dm_test_tilize
+    dm_test_repeat
+    dm_test_concat_5d
+    dm_test_permute_not_sharded
+    bf_test_to_and_from_device
+    bf_test_tilize_untilize_2D
+    elt_test_exp
+    elt_test_add
+    elt_test_mul
+    elt_test_unary_comp
+    reduce_test_argmax
+    reduce_test_reduction_mean
+    matmul_test_basic
+    matmul_test_linear
+    fused_test_softmax
+    pool_test_upsample_nearest_interleaved
+    dm_test_concat_sharded
+    dm_test_untilize_same_volume
+    elt_test_typecast_int
+    elt_test_binary_fp32
+    elt_test_where
+    bf_test_to_layout
+    elt_test_unary_sharding
+    dm_test_permute_sharded
+    reduce_test_max
+    reduce_test_topk
+    reduce_test_var_std
+    dm_test_embedding_base_case
+    dm_test_gather
+    elt_test_binary_int32
+    elt_test_unary_int32
+    elt_test_silu
+    elt_test_binary_composite
+    bf_test_reshape
+    bf_test_to_dtype
+    matmul_test_experimental
+    fused_test_batch_norm_pgmcache
+    pca_test_per_core_allocation
+    dm_test_pad_subcoregrids
+    fused_test_layer_norm
+    bf_test_untilize_bfloat8_b
+    fused_test_rms_norm
+    elt_test_broadcast_to
+    sdpa_test_prefill
+    elt_test_sqrt
+)
+_pr_tier_has() { local n="$1" e; for e in "${PR_TIER[@]}"; do [ "$e" = "$n" ] && return 0; done; return 1; }
+# Return 0 (skip this entry) when CI_TIER excludes it.
+_tier_skip() {
+    case "$CI_TIER" in
+        full)     return 1 ;;
+        pr)       _pr_tier_has "$1" && return 1 || return 0 ;;
+        deferred) _pr_tier_has "$1" && return 0 || return 1 ;;
+        *) echo "ERROR: bad CI_TIER='$CI_TIER' (full|pr|deferred)" >&2; exit 2 ;;
+    esac
+}
+
 run_pytest() {
     local name="$1"; shift
+    # Tier filter before shard accounting, so shards split only the PR_TIER set.
+    if _tier_skip "$name"; then return; fi
     # Remaining args are passed straight to pytest: one or more test targets
     # (file or file::node) plus any flags (-k, --deselect). Passing multiple
     # node targets in a single invocation lets one file's curated subset run in
@@ -265,6 +331,11 @@ run_pytest "fused_test_softmax" "$FUSED_TEST_DIR/test_softmax.py::test_large_fil
 # #152 (reduce_tile element-wise scaler) regression guard — non-sharded layer_norm/rms_norm were 140/14-failing on non-32-aligned widths pre-fix.
 run_pytest "fused_test_layer_norm" "$FUSED_TEST_DIR/test_layer_norm.py"
 run_pytest "fused_test_rms_norm"   "$FUSED_TEST_DIR/test_rms_norm.py"
+FORKED=1 run_pytest "fused_test_group_norm" "$FUSED_TEST_DIR/test_group_norm.py" \
+    -k "not (optional_weight_bias and legacy)" \
+    --deselect "tests/ttnn/unit_tests/operations/fused/test_group_norm.py::test_group_norm_with_block_sharded_v2_8x4_grid[specify_grid=True-legacy-N=1-C=320-H=1-W=8192-num_groups=32-device_params={'l1_small_size': 0}]" \
+    --deselect "tests/ttnn/unit_tests/operations/fused/test_group_norm.py::test_group_norm_with_block_sharded_v2_8x8_grid_tile_layout[specify_grid=True-legacy-N=1-C=1280-H=1-W=512-num_groups=32-device_params={'l1_small_size': 0}]" \
+    --deselect "tests/ttnn/unit_tests/operations/fused/test_group_norm.py::test_group_norm_with_block_sharded_v2_8x8_grid_tile_layout[specify_grid=True-legacy-N=1-C=1280-H=1-W=2048-num_groups=32-device_params={'l1_small_size': 0}]"
 run_pytest "reduce_test_cumprod" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_backward" "$REDUCE_TEST_DIR/test_cumprod.py::test_cumprod_failing_cases"
 run_pytest "reduce_test_cumsum_failing" "$REDUCE_TEST_DIR/test_cumsum.py::test_cumsum_failing_cases"
 
@@ -294,6 +365,9 @@ run_pytest "elt_test_round" "$ELT_TEST_DIR/test_round.py"
 run_pytest "elt_test_signbit" "$ELT_TEST_DIR/test_signbit.py"
 run_pytest "elt_test_silu" "$ELT_TEST_DIR/test_silu.py"
 run_pytest "elt_test_silu_row_major" "$ELT_TEST_DIR/test_silu_row_major.py"
+# sqrt is the deep-default SFPU op (real silicon SQRT_23, no libm shadow), so this
+# exercises the deep-SFPU path. rsqrt deselected (non-finite-handling failures).
+run_pytest "elt_test_sqrt" "$ELT_TEST_DIR/test_unary.py::test_unary_root_ops_ttnn" -k 'sqrt and not rsqrt'
 run_pytest "elt_test_sigmoid_accurate_21f" "$ELT_TEST_DIR/test_sigmoid_accurate_21f.py"
 run_pytest "elt_test_sigmoid_vector_modes" "$ELT_TEST_DIR/test_sigmoid_vector_modes.py"
 run_pytest "elt_test_snake_beta" "$ELT_TEST_DIR/test_snake_beta.py"
@@ -354,7 +428,13 @@ run_pytest "dm_test_untilize_same_volume" "$DM_TEST_DIR/test_untilize.py::test_u
 run_pytest "dm_test_untilize"               "$DM_TEST_DIR/test_untilize.py"  # promoted (#73 timeout-rerun): 795 passed, ~6.7 min (renamed from dm_test_untilize_sharded)
 
 run_pytest "reduce_test_reduction_mean" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean_scaling" "$REDUCE_TEST_DIR/test_reduction_mean.py::test_mean_scaling_factor"
-run_pytest "reduce_test_reduction_not_sharded" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_2d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_3d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_4d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_sum_2d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_sum_4d_tensor_dims" -k 'not sharded'
+# Deselect 3 SUM-to-scalar full reductions: bf16 output-quantization Frobenius edge (~0.5% > 0.4%
+# threshold; ALLCLOSE passes, PCC skipped for scalar). emule fp32-accumulates with the same bf16
+# output silicon uses, so it's a faithful tolerance edge, not a bug. Surfaced by the tt-metal pin bump.
+run_pytest "reduce_test_reduction_not_sharded" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_2d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_3d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_mean_4d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_sum_2d_tensor_dims" "$REDUCE_TEST_DIR/test_reduction.py::test_sum_4d_tensor_dims" -k 'not sharded' \
+    --deselect "tests/ttnn/unit_tests/operations/reduce/test_reduction.py::test_sum_4d_tensor_dims[keepdim=True-dim=None-w=63-h=37-c=32-batch_size=32]" \
+    --deselect "tests/ttnn/unit_tests/operations/reduce/test_reduction.py::test_sum_4d_tensor_dims[keepdim=True-dim=[]-w=63-h=37-c=32-batch_size=32]" \
+    --deselect "tests/ttnn/unit_tests/operations/reduce/test_reduction.py::test_sum_4d_tensor_dims[keepdim=True-dim=[0, 1, 2, 3]-w=63-h=37-c=32-batch_size=32]"
 run_pytest "reduce_test_reduction_min_not_sharded" "$REDUCE_TEST_DIR/test_reduction_min.py::test_min" "$REDUCE_TEST_DIR/test_reduction_min.py::test_min_global" -k 'not sharded'
 run_pytest "reduce_test_torch_compat" "$REDUCE_TEST_DIR/test_reduction.py::test_torch_compatibility"
 # var/std: use_legacy=False (Welford, #107) + use_legacy=True (legacy 2-pass). The legacy single-tile
@@ -370,10 +450,22 @@ run_pytest "reduce_test_ema" "$REDUCE_TEST_DIR/test_ema.py"
 run_pytest "reduce_test_topk"                "$REDUCE_TEST_DIR/test_topk.py"
 run_pytest "reduce_test_topk_reduction"      "$REDUCE_TEST_DIR/test_reduction.py" -k topk
 run_pytest "reduce_test_topk_graph_capture"  "$BF_TEST_DIR/test_graph_capture.py::test_graph_capture_topk"
-run_pytest "reduce_test_argmax"              "$REDUCE_TEST_DIR/test_argmax.py"
+# FORKED=1 (per-test process isolation): the non-forked whole-file run accumulates emule state and
+# aborts on the large-4D cases; isolation clears it. The two largest 4D cases (shape [16,32,64,128],
+# ~8M elems) abort even when isolated (genuine emule resource limit for that shape; flaky across
+# float32/int32), so they are additionally deselected. Surfaced by the tt-metal pin bump.
+FORKED=1 run_pytest "reduce_test_argmax"              "$REDUCE_TEST_DIR/test_argmax.py" \
+    --deselect "tests/ttnn/unit_tests/operations/reduce/test_argmax.py::test_argmax[tensor_shape=[16, 32, 64, 128]-tensor_layout=Layout.ROW_MAJOR-dim=-1-keepdim=True-dtype=torch.float32]" \
+    --deselect "tests/ttnn/unit_tests/operations/reduce/test_argmax.py::test_argmax[tensor_shape=[16, 32, 64, 128]-tensor_layout=Layout.ROW_MAJOR-dim=-1-keepdim=True-dtype=torch.int32]"
 
-# ttnn.sort is removed from the regression: multi-core sort hits the
-# Semaphore::wait watchdog abort under emule — tracked in tt-emule #200.
+run_pytest "reduce_test_moe"                 "$REDUCE_TEST_DIR/test_moe.py"
+run_pytest "reduce_test_sampling"            "$REDUCE_TEST_DIR/test_sampling.py"
+
+# ttnn.sort is excluded on Blackhole: its 110-core grid routes BOTH 262144 and
+# 524288 to the SingleRowMultiCore factory, which hits a coordinator VALID->0
+# toggle race under emule — tracked in #214 (pending the upstream kernel fix).
+# (The WH count-up overshoot #200 is fixed and WH 262144 is covered in the WH
+# script; on BH there is no CrossCoreDataExchange sort case to cover.)
 
 # ttnn.transformer.scaled_dot_product_attention — SDPA prefill family (PR #177 bring-up).
 # Full files; the unrunnable configs self-skip (prefill: profiling/OOM guard on

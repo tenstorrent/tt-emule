@@ -398,6 +398,18 @@ inline bool cb_is_uint16_format(uint32_t cb_id) {
     return cb_data_format(cb_id) == static_cast<uint8_t>(DataFormat::UInt16);
 }
 
+// Genuine integer formats only (NOT Float32/Tf32). Datums are raw integer
+// values: an index lives in DST as its bit pattern and packs bit-exact.
+inline bool cb_is_int_format(uint32_t cb_id) {
+    const auto fmt = static_cast<DataFormat>(cb_data_format(cb_id));
+    // RawUInt16 is excluded: __emule_unpack_cb_tile_to has no RawUInt16 branch
+    // (it would fall through to bf16), so tagging it integer would be inconsistent.
+    return fmt == DataFormat::Int32     ||
+           fmt == DataFormat::UInt32    ||
+           fmt == DataFormat::UInt16    ||
+           fmt == DataFormat::RawUInt32;
+}
+
 // Block-float formats emule does not encode/decode (only Bfp8_b / Bfp4_b are
 // supported). Without this guard they fall through to the bf16 path and produce
 // silent garbage; abort with a clear message instead.
@@ -737,6 +749,8 @@ inline void __emule_eltwise_binary_tile(uint32_t icb0, uint32_t icb1,
 // binary primitives decode block-float (Bfp8_b/Bfp4_b) inputs via the one central
 // reader instead of re-implementing every format.
 inline void __emule_unpack_cb_tile_to(uint32_t icb, uint32_t itile, float* out);
+// Numeric-converting variant for the FPU binary path (defined below).
+inline void __emule_unpack_cb_tile_numeric(uint32_t icb, uint32_t itile, float* out);
 
 // add/sub/mul_tiles dispatch: when operand 1 is a thin-tile broadcast (smaller
 // page than operand 0, e.g. a [1,W] mask) use the tile-shape-aware helper that
@@ -747,13 +761,14 @@ ALWI void add_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
     __emule_dst_check(idst, "add_tiles");
     __emule_dst_mark_dirty(idst);
+    __emule_dst_set_int(idst, false);  // numeric float result
     if (__emule_thin_broadcast_b1(icb0, icb1)) {
         __emule_eltwise_binary_tile<EltwiseBinaryType::ELWADD>(icb0, icb1, itile0, itile1, idst);
         return;
     }
     float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
-    __emule_unpack_cb_tile_to(icb0, itile0, a);
-    __emule_unpack_cb_tile_to(icb1, itile1, b);
+    __emule_unpack_cb_tile_numeric(icb0, itile0, a);
+    __emule_unpack_cb_tile_numeric(icb1, itile1, b);
     if (__emule_dest_accum_en)
         for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] += a[i] + b[i];
     else
@@ -764,13 +779,14 @@ ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
     __emule_dst_check(idst, "sub_tiles");
     __emule_dst_mark_dirty(idst);
+    __emule_dst_set_int(idst, false);  // numeric float result
     if (__emule_thin_broadcast_b1(icb0, icb1)) {
         __emule_eltwise_binary_tile<EltwiseBinaryType::ELWSUB>(icb0, icb1, itile0, itile1, idst);
         return;
     }
     float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
-    __emule_unpack_cb_tile_to(icb0, itile0, a);
-    __emule_unpack_cb_tile_to(icb1, itile1, b);
+    __emule_unpack_cb_tile_numeric(icb0, itile0, a);
+    __emule_unpack_cb_tile_numeric(icb1, itile1, b);
     if (__emule_dest_accum_en)
         for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] += a[i] - b[i];
     else
@@ -781,13 +797,14 @@ ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
                     uint32_t itile0, uint32_t itile1, uint32_t idst) {
     __emule_dst_check(idst, "mul_tiles");
     __emule_dst_mark_dirty(idst);
+    __emule_dst_set_int(idst, false);  // numeric float result
     if (__emule_thin_broadcast_b1(icb0, icb1)) {
         __emule_eltwise_binary_tile<EltwiseBinaryType::ELWMUL>(icb0, icb1, itile0, itile1, idst);
         return;
     }
     float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
-    __emule_unpack_cb_tile_to(icb0, itile0, a);
-    __emule_unpack_cb_tile_to(icb1, itile1, b);
+    __emule_unpack_cb_tile_numeric(icb0, itile0, a);
+    __emule_unpack_cb_tile_numeric(icb1, itile1, b);
     if (__emule_dest_accum_en)
         for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] += a[i] * b[i];
     else
@@ -920,11 +937,34 @@ inline void __emule_unpack_cb_tile_to(uint32_t icb, uint32_t itile, float* out) 
     }
 }
 
+// Numeric unpack for the FPU binary ops, which operate on values not raw datums:
+// an integer-format operand is converted to its numeric float (a 0/1 mask reads
+// back as 0.0f/1.0f, not the raw-int-bit denormal). Float CBs are unchanged.
+inline void __emule_unpack_cb_tile_numeric(uint32_t icb, uint32_t itile, float* out) {
+    __emule_unpack_cb_tile_to(icb, itile, out);
+    if (!__emule_compute::cb_is_int_format(icb)) {
+        return;
+    }
+    // Int32 is signed; the unsigned formats (UInt16/UInt32/RawUInt32) must not be
+    // read as a negative int32 when the high bit is set.
+    const bool is_signed =
+        static_cast<DataFormat>(__emule_compute::cb_data_format(icb)) == DataFormat::Int32;
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        uint32_t bits;
+        std::memcpy(&bits, &out[i], sizeof(uint32_t));
+        out[i] = is_signed ? static_cast<float>(static_cast<int32_t>(bits))
+                           : static_cast<float>(bits);
+    }
+}
+
 // copy_tile: UNPACK CB[icb][itile] → DST[idst].
 ALWI void copy_tile(uint32_t icb, uint32_t itile, uint32_t idst) {
     __emule_dst_check(idst, "copy_tile");
     __emule_dst_mark_dirty(idst);
     __emule_unpack_cb_tile_to(icb, itile, &__emule_dst[idst][0]);
+    // Datacopy preserves the source datum verbatim, so the slot's int-ness
+    // follows the source CB format (consulted by eqz; see __emule_dst_holds_int).
+    __emule_dst_set_int(idst, __emule_compute::cb_is_int_format(icb));
 }
 
 // copy_block_matmul_partials: reload a block of tiles from CB into DST.

@@ -163,6 +163,14 @@ files:
   - {kind: macro, name: TTI_STALLWAIT}
   - {kind: macro, name: TTI_SFPCONFIG}
   - {kind: function, name: __emule_sfpu_unsupported}
+- path: include/jit_hw/ckernel_sfpu.h
+  section: include/jit_hw/
+  summary: Umbrella SFPU-header shim; provides only ckernel::sfpu::_init_sfpu_config_reg() as a no-op (SFPU config-register reset emule does not model). Other SFPU symbols come from the dedicated api/compute
+    shims.
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: namespace, name: sfpu}
+  - {kind: function, name: _init_sfpu_config_reg}
 - path: include/jit_hw/ckernel_sfpu_exp.h
   section: include/jit_hw/
   summary: stub of silicon SFPU exp ckernel (functional impl in `api/compute/eltwise_unary/exp.h`)
@@ -510,6 +518,7 @@ files:
   - {kind: global, name: vConst0p5}
   - {kind: global, name: vConstNeg0p5}
   - {kind: function, name: reinterpret}
+  - {kind: function, name: as}
   - {kind: function, name: float_to_fp16b}
   - {kind: function, name: float_to_fp16a}
   - {kind: function, name: setsgn}
@@ -604,6 +613,7 @@ files:
   - {kind: global, name: __emule_logical_x}
   - {kind: global, name: __emule_logical_y}
   - {kind: global, name: __emule_cb_self_consume_mask}
+  - {kind: global, name: __emule_cb_self_produce_mask}
   - {kind: global, name: unpack_tile_size}
   - {kind: global, name: unpack_src_format}
   - {kind: global, name: pack_dst_format}
@@ -794,6 +804,10 @@ files:
   - {kind: function, name: gt_int_tile}
   - {kind: function, name: le_int_tile}
   - {kind: function, name: ge_int_tile}
+  - {kind: function, name: eq_int_tile_init}
+  - {kind: function, name: ne_int_tile_init}
+  - {kind: function, name: eq_int_tile}
+  - {kind: function, name: ne_int_tile}
 - path: include/jit_hw/api/compute/binary_fmod.h
   section: include/jit_hw/api/compute/
   summary: '`ckernel::` `fmod_binary_tile`, `fmod_int32_tile` (+`_init`)'
@@ -915,6 +929,7 @@ files:
   - {kind: function, name: cb_is_bfp8_b_format}
   - {kind: function, name: cb_is_bfp4_b_format}
   - {kind: function, name: cb_is_uint16_format}
+  - {kind: function, name: cb_is_int_format}
   - {kind: function, name: __emule_check_blockfloat_supported}
   - {kind: function, name: pack_dst_to_buf}
   - {kind: function, name: binary_op_init_common}
@@ -926,6 +941,7 @@ files:
   - {kind: function, name: __emule_thin_broadcast_b1}
   - {kind: function, name: __emule_eltwise_binary_tile}
   - {kind: function, name: __emule_unpack_cb_tile_to}
+  - {kind: function, name: __emule_unpack_cb_tile_numeric}
   - {kind: function, name: add_tiles}
   - {kind: function, name: sub_tiles}
   - {kind: function, name: mul_tiles}
@@ -963,6 +979,9 @@ files:
   - {kind: global, name: __emule_pack_width}
   - {kind: global, name: __emule_dst_fresh}
   - {kind: function, name: __emule_dst_mark_dirty}
+  - {kind: global, name: __emule_dst_holds_int}
+  - {kind: function, name: __emule_dst_set_int}
+  - {kind: function, name: __emule_dst_is_int}
   - {kind: function, name: __emule_dst_take_fresh}
 - path: include/jit_hw/api/compute/compute_kernel_api.h
   section: include/jit_hw/api/compute/
@@ -1819,6 +1838,9 @@ files:
   summary: '`ckernel::` `rand_tile` (+`_init`)'
   symbols:
   - {kind: namespace, name: ckernel}
+  - {kind: global, name: __emule_rand_engine}
+  - {kind: global, name: __emule_rand_deterministic}
+  - {kind: global, name: __emule_rand_nonce}
   - {kind: function, name: rand_tile_init}
   - {kind: function, name: rand_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/rdiv.h
