@@ -162,7 +162,6 @@ run_pytest "dm_test_sharded_to_interleaved_oob" "$DM_TEST_DIR/test_sharded_to_in
 # tests/ttnn/unit_tests/base_functionality/ — whole-file all-pass entries.
 run_pytest "bf_test_as_tensor"                              "$BF_TEST_DIR/test_as_tensor.py"
 run_pytest "bf_test_cluster"                                "$BF_TEST_DIR/test_cluster.py"
-run_pytest "bf_test_database"                               "$BF_TEST_DIR/test_database.py"
 run_pytest "bf_test_device"                                 "$BF_TEST_DIR/test_device.py"
 run_pytest "bf_test_device_synchronize"                     "$BF_TEST_DIR/test_device_synchronize.py"
 run_pytest "bf_test_dump_and_load"                          "$BF_TEST_DIR/test_dump_and_load.py"

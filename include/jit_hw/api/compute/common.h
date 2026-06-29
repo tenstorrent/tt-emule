@@ -40,6 +40,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <limits>
 
 // ---- TRISC execution macros ----
 // On device, PACK/MATH/UNPACK select which TRISC core runs the code.
@@ -396,6 +397,26 @@ inline bool cb_is_bfp4_b_format(uint32_t cb_id) {
 
 inline bool cb_is_uint16_format(uint32_t cb_id) {
     return cb_data_format(cb_id) == static_cast<uint8_t>(DataFormat::UInt16);
+}
+
+// FP8 E4M3 (OCP, DataFormat 0x1A): 1 sign, 4 exp (bias 7), 3 mantissa. No infinities;
+// (exp=15,mant=7) is the only NaN. Used as a TILE input format by tilize/to_layout (#48046).
+inline bool cb_is_fp8_e4m3_format(uint32_t cb_id) {
+    return cb_data_format(cb_id) == static_cast<uint8_t>(DataFormat::Fp8_e4m3);
+}
+inline float __emule_fp8_e4m3_to_f32(uint8_t b) {
+    const uint32_t s = (b >> 7) & 1u;
+    const uint32_t e = (b >> 3) & 0xFu;
+    const uint32_t m = b & 0x7u;
+    float val;
+    if (e == 0u) {
+        val = std::ldexp(static_cast<float>(m), -9);          // subnormal: (m/8)*2^-6 = m*2^-9
+    } else if (e == 0xFu && m == 0x7u) {
+        val = std::numeric_limits<float>::quiet_NaN();         // e4m3: sole NaN encoding
+    } else {
+        val = std::ldexp(1.0f + static_cast<float>(m) / 8.0f, static_cast<int>(e) - 7);  // normal
+    }
+    return s ? -val : val;
 }
 
 // Genuine integer formats only (NOT Float32/Tf32). Datums are raw integer
