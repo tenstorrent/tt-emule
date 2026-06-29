@@ -929,6 +929,8 @@ files:
   - {kind: function, name: cb_is_bfp8_b_format}
   - {kind: function, name: cb_is_bfp4_b_format}
   - {kind: function, name: cb_is_uint16_format}
+  - {kind: function, name: cb_is_fp8_e4m3_format}
+  - {kind: function, name: __emule_fp8_e4m3_to_f32}
   - {kind: function, name: cb_is_int_format}
   - {kind: function, name: __emule_check_blockfloat_supported}
   - {kind: function, name: pack_dst_to_buf}
@@ -1417,6 +1419,13 @@ files:
   - {kind: function, name: topk_xl_rebuild}
   - {kind: function, name: topk_xl_separate_indices}
   - {kind: function, name: topk_xl_remove_msb_values}
+- path: include/jit_hw/api/compute/transpose.h
+  section: include/jit_hw/api/compute/
+  summary: Host-memcpy 32x32 tile transpose shim (transpose_init/transpose_tile); shadows the real LLK transpose path. transpose_wh.h forwards here.
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: transpose_init}
+  - {kind: function, name: transpose_tile}
 - path: include/jit_hw/api/compute/transpose_wh.h
   section: include/jit_hw/api/compute/
   summary: '`ckernel::` `transpose_wh_tile`, `transpose_wh_init`, `copy_tile`'

@@ -46,14 +46,24 @@ ALWI void reduce_block_max_row_init_runtime(uint32_t ocb, uint32_t block_ct_dim,
     __emule_reduce_block_ct_dim = block_ct_dim;
 }
 
+// respect_trigger + overlap_first_half are silicon MOP-split / unpacker-scheduling
+// optimizations; they have no effect on the row-major reduce emule computes. The
+// signature mirrors the upstream tt_metal/hw/inc/api/compute/reduce_custom.h so SDPA's
+// compute_streaming.hpp (which passes overlap_first_half) resolves against the shadow.
 ALWI void reduce_block_max_row_runtime(
-    uint32_t icb, uint32_t icb_scaler, uint32_t row_start_index, uint32_t idst, bool respect_trigger = false) {
+    uint32_t icb,
+    uint32_t icb_scaler,
+    uint32_t row_start_index,
+    uint32_t idst,
+    bool respect_trigger = false,
+    bool overlap_first_half = false) {
     for (uint32_t t = 0; t < __emule_reduce_block_ct_dim; t++) {
         reduce_tile<PoolType::MAX, ReduceDim::REDUCE_ROW>(icb, icb_scaler, row_start_index + t, 0, idst);
     }
 }
 
-ALWI void reduce_block_max_row_uninit_runtime(uint32_t icb, bool respect_trigger = false) {}
+ALWI void reduce_block_max_row_uninit_runtime(
+    uint32_t icb, bool respect_trigger = false, bool overlap_first_half = false) {}
 
 }  // namespace ckernel
 

@@ -21,6 +21,7 @@
 #include "jit_hw/internal/llk_state.h"
 #include "jit_hw/api/compute/nfaces.h"
 #include "jit_hw/api/bfp8.h"
+#include "jit_hw/api/compute/bfp4.h"
 #include "jit_hw/api/bfloat16.h"
 
 inline void tilize_init(uint32_t, uint32_t, uint32_t) {
@@ -67,7 +68,15 @@ inline void tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb) {
     constexpr uint32_t TILE_DIM = 32;
     const bool icb_is_32bit = __emule_compute::cb_is_32bit_format(icb);
     const bool ocb_is_32bit = __emule_compute::cb_is_32bit_format(ocb);
-    const uint32_t in_elem_size  = icb_is_32bit ? 4 : 2;
+    // FP8 E4M3 input (tilize/to_layout fp8 support, #48046): 1 byte/element, decoded to f32.
+    const bool icb_is_fp8 = __emule_compute::cb_is_fp8_e4m3_format(icb);
+    const uint32_t in_elem_size  = icb_is_fp8 ? 1 : (icb_is_32bit ? 4 : 2);
+    // Read one input element (at byte ptr p) as f32, honoring the input CB format.
+    auto read_in_f32 = [&](const uint8_t* p) -> float {
+        if (icb_is_fp8) return __emule_compute::__emule_fp8_e4m3_to_f32(*p);
+        if (icb_is_32bit) { float v; std::memcpy(&v, p, sizeof(float)); return v; }
+        uint16_t bf; std::memcpy(&bf, p, sizeof(uint16_t)); return __emule_bf16::to_f32(bf);
+    };
     // Input row stride: silicon's tilize unpacker reads with a TILE_DIM (32) row
     // stride per tile regardless of output tile geometry. Callers pad input to
     // 32 rows even when the useful data is thinner.
@@ -99,17 +108,33 @@ inline void tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb) {
                     const uint32_t rr = rm / TILE_DIM;
                     const uint32_t cc = rm % TILE_DIM;
                     const uint8_t* p = in_base + rr * row_stride + (t * TILE_DIM + cc) * in_elem_size;
-                    if (icb_is_32bit) {
-                        float v;
-                        std::memcpy(&v, p, sizeof(float));
-                        row16[k] = v;
-                    } else {
-                        uint16_t bf;
-                        std::memcpy(&bf, p, sizeof(uint16_t));
-                        row16[k] = __emule_bf16::to_f32(bf);
-                    }
+                    row16[k] = read_in_f32(p);
                 }
                 __emule_bfp8::encode_face_row(row16, exp_base[fr], &mant_base[fr * 16]);
+            }
+        }
+        return;
+    }
+
+    // BFP4_b output: 64 shared-exponent bytes + 64*8 mantissa bytes (two 4-bit elems
+    // per byte). Mirrors the bfp8 path and __llk_pack_tiled's Bfp4_b branch.
+    if (__emule_compute::cb_is_bfp4_b_format(ocb)) {
+        for (uint32_t t = 0; t < ntiles; ++t) {
+            uint8_t* const out = __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++);
+            uint8_t* const exp_base  = out;
+            uint8_t* const mant_base = out + 64;
+            for (uint32_t fr = 0; fr < 64; ++fr) {
+                float row16[16];
+                for (uint32_t k = 0; k < 16; ++k) {
+                    const uint32_t rm = __emule_nfaces::nfaces_to_rowmajor[fr * 16 + k];
+                    const uint32_t rr = rm / TILE_DIM;
+                    const uint32_t cc = rm % TILE_DIM;
+                    const uint8_t* p = in_base + rr * row_stride + (t * TILE_DIM + cc) * in_elem_size;
+                    row16[k] = read_in_f32(p);
+                }
+                uint8_t packed[8];
+                __emule_bfp4::encode_face_row(row16, exp_base[fr], packed);
+                std::memcpy(&mant_base[fr * 8], packed, 8);
             }
         }
         return;
@@ -122,7 +147,15 @@ inline void tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb) {
                 in_base + r * row_stride + t * TILE_DIM * in_elem_size;
             for (uint32_t c = 0; c < TILE_DIM; ++c) {
                 const uint32_t out_pos = __emule_nfaces::tile_rm_to_nfaces(r * TILE_DIM + c, out_rows);
-                if (icb_is_32bit && ocb_is_32bit) {
+                if (icb_is_fp8) {
+                    // FP8 input: decode to f32, then store in the output format (fp32 or bf16).
+                    const float v = read_in_f32(row_in + c * 1);
+                    if (ocb_is_32bit) {
+                        reinterpret_cast<float*>(out)[out_pos] = v;
+                    } else {
+                        reinterpret_cast<uint16_t*>(out)[out_pos] = __emule_bf16::from_f32(v);
+                    }
+                } else if (icb_is_32bit && ocb_is_32bit) {
                     uint32_t v;
                     std::memcpy(&v, row_in + c * 4, 4);
                     std::memcpy(reinterpret_cast<uint32_t*>(out) + out_pos, &v, 4);
