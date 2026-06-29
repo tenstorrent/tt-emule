@@ -1417,6 +1417,13 @@ files:
   - {kind: function, name: topk_xl_rebuild}
   - {kind: function, name: topk_xl_separate_indices}
   - {kind: function, name: topk_xl_remove_msb_values}
+- path: include/jit_hw/api/compute/transpose.h
+  section: include/jit_hw/api/compute/
+  summary: '`ckernel::` transpose API shim — 32×32 tile transpose emulation (`transpose_init`, `transpose_tile`)'
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: transpose_init}
+  - {kind: function, name: transpose_tile}
 - path: include/jit_hw/api/compute/transpose_wh.h
   section: include/jit_hw/api/compute/
   summary: '`ckernel::` `transpose_wh_tile`, `transpose_wh_init`, `copy_tile`'
