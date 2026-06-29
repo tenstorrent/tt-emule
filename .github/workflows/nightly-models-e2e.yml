@@ -1,0 +1,191 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Nightly model end-to-end (e2e) tests under emule: full Llama-class
+# prefill+decode at the pinned tt-metal SHA, asserting coherent generation past
+# the multi-chunk SDPA-decode boundary (sequence position 128). Heavy (real
+# weights, ~15-20 min each), so they run nightly — NOT in the per-PR regression.
+#
+# Per-arch legs run in parallel (and concurrently with the other nightlies).
+# Weights: the UNGATED unsloth Llama mirror, cached via actions/cache (no
+# HF_TOKEN, no /mnt/MLPerf mount needed — the emule runners have neither).
+# See tests/emule/ for the test bodies and scripts/run_model_e2e.sh for the suite.
+
+name: Nightly Models E2E
+
+on:
+  schedule:
+    - cron: '0 4 * * *'   # 04:00 UTC daily — off-peak, after the 03:30 sweep, before the 07:00 nightlies
+  workflow_dispatch: {}
+
+concurrency:
+  group: nightly-models-e2e
+  cancel-in-progress: false
+
+env:
+  # MUST equal the length of the matrix.shard list in the `models-e2e` job —
+  # round-robin sharding pairs SHARD_INDEX 1..N with SHARD_COUNT=N. Change both.
+  SHARD_COUNT: '1'
+  # Ungated mirror — no HF_TOKEN required.
+  HF_MODEL: unsloth/Llama-3.2-1B-Instruct
+
+jobs:
+  build:
+    name: Build tt-metal (pinned) against tt-emule main
+    runs-on: tt-ubuntu-2204-large-stable
+    timeout-minutes: 180
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
+    outputs:
+      pin: ${{ steps.pin.outputs.sha }}
+    steps:
+      - name: Checkout tt-emule (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: tt-emule
+
+      - name: Resolve pinned tt-metal SHA
+        id: pin
+        shell: bash
+        run: |
+          SHA=$(grep -vE '^\s*(#|$)' tt-emule/tt-metal-pin.txt | head -1 | awk '{print $1}')
+          if [ -z "$SHA" ]; then
+            echo "::error::tt-metal-pin.txt has no SHA"; exit 1
+          fi
+          echo "Pinned tt-metal SHA: $SHA"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tt-metal at pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ steps.pin.outputs.sha }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Init required tt-metal submodules
+        shell: bash
+        run: |
+          cd tt-metal
+          git submodule update --init --depth=1 tt_metal/third_party/umd
+          git submodule update --init --depth=1 tt_metal/third_party/tracy
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: tt-metal-${{ steps.pin.outputs.sha }}-clang20-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            tt-metal-${{ steps.pin.outputs.sha }}-clang20-${{ runner.os }}-
+            tt-metal-${{ steps.pin.outputs.sha }}-clang20-
+
+      - name: Build
+        env:
+          TT_EMULE_DIR: ${{ github.workspace }}/tt-emule
+          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
+          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-build.sh
+
+      - name: Stage cluster descriptors with build artifact
+        shell: bash
+        run: |
+          mkdir -p tt-metal/build_emule/_cluster_descs
+          cp -r tt-metal/tt_metal/third_party/umd/tests/cluster_descriptor_examples \
+                tt-metal/build_emule/_cluster_descs/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: models-e2e-tt-metal-build-${{ github.run_id }}
+          path: tt-metal/build_emule/
+          retention-days: 1
+          if-no-files-found: error
+
+  models-e2e:
+    name: Model e2e (${{ matrix.arch }})
+    needs: build
+    runs-on: tt-ubuntu-2204-xlarge-stable
+    timeout-minutes: 240
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
+    strategy:
+      fail-fast: false
+      max-parallel: 2   # fleet policy: at most 2 xlarge runners at once (issue #189)
+      matrix:
+        arch: [wormhole, blackhole]
+        shard: [1]
+    steps:
+      - name: Checkout tt-emule (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: tt-emule
+
+      - name: Checkout tt-metal at pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ needs.build.outputs.pin }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: models-e2e-tt-metal-build-${{ github.run_id }}
+          path: tt-metal/build_emule/
+
+      - name: Restore executable bits on test binaries
+        shell: bash
+        run: |
+          chmod +x tt-metal/build_emule/test/tt_metal/unit_tests_* 2>/dev/null || true
+          chmod +x tt-metal/build_emule/test/ttnn/unit_tests_* 2>/dev/null || true
+
+      - name: Place cluster descriptors
+        shell: bash
+        run: |
+          mkdir -p tt-metal/tt_metal/third_party/umd/tests
+          cp -r tt-metal/build_emule/_cluster_descs/cluster_descriptor_examples \
+                tt-metal/tt_metal/third_party/umd/tests/
+
+      - name: Install SFPI toolchain
+        shell: bash
+        run: bash tt-metal/install_dependencies.sh --sfpi
+
+      # Ungated unsloth weights, cached across runs. First run downloads (~2.5 GB)
+      # and populates the cache; later runs restore it and run offline.
+      - name: Cache Llama-3.2-1B-Instruct weights (unsloth, ungated)
+        id: hfcache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/hf_home
+          key: hf-unsloth-llama-3.2-1b-instruct-v1
+
+      - name: Run model e2e (${{ matrix.arch }})
+        env:
+          TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
+          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
+          TT_EMULE_ARCH: ${{ matrix.arch }}
+          SHARD_INDEX:   ${{ matrix.shard }}
+          SHARD_COUNT:   ${{ env.SHARD_COUNT }}
+          GTEST_XML_DIR: ${{ runner.temp }}/models-e2e-xml
+          HF_MODEL:      ${{ env.HF_MODEL }}
+          HF_HOME:       ${{ github.workspace }}/hf_home
+          # On a cache hit, force offline so the run never touches the network.
+          HF_HUB_OFFLINE: ${{ steps.hfcache.outputs.cache-hit == 'true' && '1' || '0' }}
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-models-e2e.sh
+
+      - name: Upload e2e XML + logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: models-e2e-results-${{ matrix.arch }}-shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/models-e2e-xml/*
+          retention-days: 30
+          if-no-files-found: warn
