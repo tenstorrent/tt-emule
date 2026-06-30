@@ -66,6 +66,10 @@ focused reference; start here and follow the links.
   (#189), local reproduction (`scripts/post_commit_sweep/`).
 
 **Integration & build**
+- [llm-single-chip-bringup.md](docs/llm-single-chip-bringup.md) — single-chip
+  LLM bring-up (Qwen target): family decision, prefill-vs-decode op map, op
+  support + open issues (#147/#163), the `tt_transformers` test ladder, and the
+  remaining blockers (decode ops, CCL all-gather-matmul, full-depth model).
 - [metal-integration.md](docs/metal-integration.md) — how emule injects into
   tt-metal (UMD chip, runtime activation, JIT runner, guards).
 - [BUILD_GUIDE.md](BUILD_GUIDE.md) / [GETTING_STARTED.md](GETTING_STARTED.md) —
