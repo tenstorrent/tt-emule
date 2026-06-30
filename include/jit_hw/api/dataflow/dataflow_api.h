@@ -87,13 +87,11 @@ inline bool __emule_debug_multicast() {
 }
 
 // ---- Semaphore spin-wait watchdog limit ----
-// Iterations a semaphore spin-wait tolerates before declaring a hang and
-// aborting. The default is a heuristic; under heavy host thread oversubscription
-// (emule runs every Tensix core as an OS thread, so a 64-core program is ~30x
-// oversubscribed on a typical host) a *live* peer can be starved long enough to
-// trip a fixed iteration count without any real deadlock. Override with
-// TT_EMULE_SEM_SPIN_LIMIT (0 = never abort) to distinguish starvation from a true
-// deadlock and to give large models headroom.
+// Iterations a spin-wait tolerates before declaring a hang and aborting. emule
+// runs each Tensix core as an OS thread, so a many-core program is heavily
+// oversubscribed on a typical host and a live peer can be starved past a fixed
+// count without a real deadlock. Env-tunable via TT_EMULE_SEM_SPIN_LIMIT
+// (0 = never abort).
 inline uint64_t __emule_sem_spin_limit() {
     static uint64_t lim = []() -> uint64_t {
         const char* e = std::getenv("TT_EMULE_SEM_SPIN_LIMIT");
@@ -756,13 +754,10 @@ inline void noc_semaphore_wait(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t v
         } else if (spins < 32768) {
             usleep(10);
         } else {
-            // Long wait: back off hard to cede CPU to producer threads. emule runs
-            // every Tensix core as its own OS thread, so a 64-core program is ~30x
-            // oversubscribed on a typical host. Hundreds of waiters polling at
-            // usleep(1) form a wakeup storm that starves the few compute-bound
-            // producers; at 8B scale that slowed a legitimate wait enough to trip
-            // the spin watchdog (a false hang). A 200us sleep cuts the aggregate
-            // wakeup rate so producers actually get scheduled.
+            // Long wait: back off to 200us to cede CPU to producer threads. emule
+            // runs each Tensix core as an OS thread (heavily oversubscribed on a
+            // typical host); a usleep(1) poll storm from many waiters starves the
+            // compute-bound producers.
             usleep(200);
         }
         ++spins;
@@ -794,13 +789,10 @@ inline void noc_semaphore_wait_min(volatile tt_l1_ptr uint32_t* sem_addr, uint32
         } else if (spins < 32768) {
             usleep(10);
         } else {
-            // Long wait: back off hard to cede CPU to producer threads. emule runs
-            // every Tensix core as its own OS thread, so a 64-core program is ~30x
-            // oversubscribed on a typical host. Hundreds of waiters polling at
-            // usleep(1) form a wakeup storm that starves the few compute-bound
-            // producers; at 8B scale that slowed a legitimate wait enough to trip
-            // the spin watchdog (a false hang). A 200us sleep cuts the aggregate
-            // wakeup rate so producers actually get scheduled.
+            // Long wait: back off to 200us to cede CPU to producer threads. emule
+            // runs each Tensix core as an OS thread (heavily oversubscribed on a
+            // typical host); a usleep(1) poll storm from many waiters starves the
+            // compute-bound producers.
             usleep(200);
         }
         ++spins;

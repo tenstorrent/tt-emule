@@ -80,12 +80,9 @@ public:
             } else if (spins < 32768) {
                 usleep(10);
             } else {
-                // Long wait: back off hard so this waiter cedes CPU to producer
-                // threads. emule runs each Tensix core as an OS thread (~30x
-                // oversubscribed on a typical host); a usleep(1) poll storm from
-                // hundreds of waiters starves compute-bound producers and can trip
-                // the spin watchdog as a false hang. See the matching backoff in
-                // dataflow_api.h noc_semaphore_wait.
+                // Long wait: back off to 200us to cede CPU to producers (see
+                // dataflow_api.h noc_semaphore_wait). emule runs each core as an OS
+                // thread; a usleep(1) poll storm from many waiters starves producers.
                 usleep(200);
             }
             if (++spins > 10'000'000ULL) {
@@ -119,12 +116,9 @@ public:
             } else if (spins < 32768) {
                 usleep(10);
             } else {
-                // Long wait: back off hard so this waiter cedes CPU to producer
-                // threads. emule runs each Tensix core as an OS thread (~30x
-                // oversubscribed on a typical host); a usleep(1) poll storm from
-                // hundreds of waiters starves compute-bound producers and can trip
-                // the spin watchdog as a false hang. See the matching backoff in
-                // dataflow_api.h noc_semaphore_wait.
+                // Long wait: back off to 200us to cede CPU to producers (see
+                // dataflow_api.h noc_semaphore_wait). emule runs each core as an OS
+                // thread; a usleep(1) poll storm from many waiters starves producers.
                 usleep(200);
             }
             if (++spins > 10'000'000ULL) {
@@ -148,12 +142,9 @@ public:
             } else if (spins < 32768) {
                 usleep(10);
             } else {
-                // Long wait: back off hard so this waiter cedes CPU to producer
-                // threads. emule runs each Tensix core as an OS thread (~30x
-                // oversubscribed on a typical host); a usleep(1) poll storm from
-                // hundreds of waiters starves compute-bound producers and can trip
-                // the spin watchdog as a false hang. See the matching backoff in
-                // dataflow_api.h noc_semaphore_wait.
+                // Long wait: back off to 200us to cede CPU to producers (see
+                // dataflow_api.h noc_semaphore_wait). emule runs each core as an OS
+                // thread; a usleep(1) poll storm from many waiters starves producers.
                 usleep(200);
             }
             if (++spins > 10'000'000ULL) {
