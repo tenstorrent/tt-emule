@@ -60,9 +60,6 @@ template <auto... TArgs>
 inline void llk_unpack_reconfig_data_format_srcb(uint32_t /*old_or_new*/ = 0, uint32_t /*new_operand*/ = 0) {}
 template <auto... TArgs>
 inline void llk_math_reconfig_data_format_srcb(uint32_t /*old_or_new*/ = 0, uint32_t /*new_operand*/ = 0) {}
-// No-op on WH/Quasar silicon (only BH has a body); emule models no remap state.
-inline void llk_math_reconfig_remap(const bool /*remap_enable*/) {}
-
 // llk_math_reconfig_remap — moved to api/compute/common.h (which this header
 // includes) so it is ALSO visible to deepseek_compute_kernel_hw_startup.h,
 // which calls it (global scope) at HW-startup before any reduce header is

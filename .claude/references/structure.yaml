@@ -1,94 +1,20 @@
 files:
-- path: src/host_api.cpp
-  section: src/
-  summary: '`tt_emule::` free fns: `CreateDevice`, `CloseDevice`, `CreateProgram`, `CreateCommandQueue`, `SetRuntimeArgs`, `CreateBuffer`, `EnqueueWriteBuffer`/`EnqueueReadBuffer`/`EnqueueProgram`/`Finish`
-    (Device + CommandQueue overloads); `detail::` `LaunchProgram`, `ReadFromDeviceL1`/`WriteToDeviceL1`, `ReadFromDeviceDRAMChannel`/`WriteToDeviceDRAMChannel`'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: function, name: Device}
-  - {kind: function, name: dram_}
-  - {kind: function, name: dram_bump_}
-  - {kind: function, name: core_}
-  - {kind: function, name: alloc_}
-  - {kind: function, name: allocator_}
-  - {kind: function, name: allocator_impl_}
-  - {kind: function, name: sub_device_ids_}
-  - {kind: function, name: sub_device_stall_group_}
-  - {kind: function, name: ~Device}
-  - {kind: function, name: CreateDevice}
-  - {kind: function, name: CloseDevice}
-  - {kind: function, name: CreateProgram}
-  - {kind: function, name: SetRuntimeArgs}
-  - {kind: function, name: CreateCircularBuffer}
-  - {kind: function, name: CreateDataflowBuffer}
-  - {kind: function, name: CreateBuffer}
-  - {kind: function, name: EnqueueWriteBuffer}
-  - {kind: function, name: EnqueueReadBuffer}
-  - {kind: function, name: Finish}
-  - {kind: function, name: CreateCommandQueue}
-  - {kind: function, name: EnqueueProgram}
-  - {kind: namespace, name: detail}
-  - {kind: function, name: LaunchProgram}
-  - {kind: function, name: ReadFromDeviceL1}
-  - {kind: function, name: WriteToDeviceL1}
-  - {kind: function, name: WriteToDeviceDRAMChannel}
-  - {kind: function, name: ReadFromDeviceDRAMChannel}
-- path: src/kernel_runner.cpp
-  section: src/
-  summary: '`EnqueueProgram`; `extern "C" __emule_dram_ptr`; thread_locals `__rt_args`, `__core`, `__device`, `__processor_id`, `__emule_tc_array`, `__emule_dfbs`; anon-ns `build_dfb_interfaces`'
-  symbols:
-  - {kind: global, name: __rt_args}
-  - {kind: global, name: __core}
-  - {kind: global, name: __device}
-  - {kind: global, name: __processor_id}
-  - {kind: global, name: __emule_tc_array}
-  - {kind: global, name: __emule_dfbs}
-  - {kind: extern_c, name: __emule_dram_ptr}
-  - {kind: namespace, name: tt_emule}
-  - {kind: function, name: EnqueueProgram}
-- path: include/tt_emule/buffer.hpp
-  section: include/tt_emule/
-  summary: '`class Buffer`; fwd `enum class BufferType`'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: fwd, name: Device}
-  - {kind: enum, name: BufferType}
-  - {kind: class, name: Buffer}
 - path: include/tt_emule/cb_sync_state.hpp
   section: include/tt_emule/
   summary: '`struct CBSyncState` (shared geometry + `occupied` semaphore; per-RISC read/write pointers live in `jit_hw/internal/emule_cb_ptr.h`); semaphore-only `cb_sync_reserve`/`cb_sync_push`/`cb_sync_wait`/`cb_sync_pop`'
   symbols:
   - {kind: namespace, name: tt_emule}
   - {kind: struct, name: CBSyncState}
-  - {kind: function, name: cb_sync_reserve}
   - {kind: function, name: cb_sync_push}
-  - {kind: function, name: cb_sync_wait}
   - {kind: function, name: cb_sync_pop}
-- path: include/tt_emule/circular_buffer.hpp
-  section: include/tt_emule/
-  summary: '`class CircularBuffer` (reserve_back/push_back/wait_front/pop_front/get_write_ptr/get_read_ptr)'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: class, name: CircularBuffer}
-- path: include/tt_emule/dataflow_buffer.hpp
-  section: include/tt_emule/
-  summary: '`class DataflowBuffer` (reserve_back/push_back/wait_front/pop_front/finish/get_write_ptr/get_read_ptr/get_id)'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: class, name: DataflowBuffer}
 - path: include/tt_emule/device.hpp
   section: include/tt_emule/
   summary: '`class Device : tt::tt_metal::IDevice`, `class Core`, `class MockAllocator`; `enum class HalMemType`, `CoreRole`, `BufferType`; `CoreCoord` (`struct` or `tt_xy_pair` alias, `#ifdef TT_EMULE_USE_XY_PAIR`)'
   symbols:
   - {kind: namespace, name: tt_emule}
-  - {kind: enum, name: HalMemType}
   - {kind: enum, name: CoreRole}
-  - {kind: using, name: CoreCoord}
   - {kind: struct, name: CoreCoord}
   - {kind: class, name: Core}
-  - {kind: enum, name: BufferType}
-  - {kind: class, name: MockAllocator}
-  - {kind: class, name: Device}
 - path: include/tt_emule/dfb_sync_state.hpp
   section: include/tt_emule/
   summary: '`struct DFBTCSlot`, `EmuleDFBInterface`, `DFBSyncState`; `MAX_DFBS`, `MAX_TC_SLOTS_PER_DFB`'
@@ -99,76 +25,12 @@ files:
   - {kind: struct, name: DFBTCSlot}
   - {kind: struct, name: EmuleDFBInterface}
   - {kind: struct, name: DFBSyncState}
-- path: include/tt_emule/dst_register_file.hpp
-  section: include/tt_emule/
-  summary: '`class DstRegisterFile`; `enum class State {IDLE,ACQUIRED,COMMITTED,PACKING}`; acquire/commit/wait/release'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: class, name: DstRegisterFile}
-- path: include/tt_emule/host_api.hpp
-  section: include/tt_emule/
-  summary: 'decls: `CloseDevice`, `SetRuntimeArgs`, `EnqueueWriteBuffer`/`EnqueueReadBuffer`/`EnqueueProgram`/`Finish`; `struct CommandQueue`; `using KernelHandle`; `namespace detail` L1/DRAM r/w, `LaunchProgram`,
-    `WriteToBuffer`/`ReadFromBuffer`'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: using, name: KernelHandle}
-  - {kind: struct, name: CommandQueue}
-  - {kind: function, name: CreateDevice}
-  - {kind: function, name: CloseDevice}
-  - {kind: function, name: CreateCommandQueue}
-  - {kind: function, name: CreateProgram}
-  - {kind: function, name: SetRuntimeArgs}
-  - {kind: function, name: CreateCircularBuffer}
-  - {kind: function, name: CreateDataflowBuffer}
-  - {kind: function, name: CreateBuffer}
-  - {kind: function, name: EnqueueWriteBuffer}
-  - {kind: function, name: EnqueueReadBuffer}
-  - {kind: function, name: EnqueueProgram}
-  - {kind: function, name: Finish}
-  - {kind: namespace, name: detail}
-  - {kind: function, name: LaunchProgram}
-  - {kind: function, name: ReadFromDeviceL1}
-  - {kind: function, name: WriteToDeviceL1}
-  - {kind: function, name: WriteToDeviceDRAMChannel}
-  - {kind: function, name: ReadFromDeviceDRAMChannel}
-  - {kind: function, name: WriteToBuffer}
-  - {kind: function, name: ReadFromBuffer}
 - path: include/tt_emule/l1_pool.hpp
   section: include/tt_emule/
   summary: '`class L1Pool`; `SLOT_SIZE`, `SLOT_MASK`, `to_offset`, `num_slots`'
   symbols:
   - {kind: namespace, name: tt_emule}
   - {kind: class, name: L1Pool}
-- path: include/tt_emule/program.hpp
-  section: include/tt_emule/
-  summary: '`class Program`; `struct KernelDescriptor`, `DataMovementConfig`, `ComputeConfig`, `QuasarDataMovementConfig`, `QuasarComputeConfig`, `CircularBufferConfig`, `DataflowBufferConfig`; `enum class
-    KernelType`, `DataMovementProcessor`, `NOC`, `NOC_MODE`, `MathFidelity`, `UnpackToDestMode`, `AccessPattern`; `using KernelFn`/`CBHandle`/`DFBHandle`'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: using, name: KernelFn}
-  - {kind: enum, name: KernelType}
-  - {kind: enum, name: DataMovementProcessor}
-  - {kind: enum, name: NOC}
-  - {kind: enum, name: NOC_MODE}
-  - {kind: enum, name: MathFidelity}
-  - {kind: enum, name: UnpackToDestMode}
-  - {kind: enum, name: AccessPattern}
-  - {kind: struct, name: DataMovementConfig}
-  - {kind: struct, name: ComputeConfig}
-  - {kind: struct, name: QuasarDataMovementConfig}
-  - {kind: struct, name: QuasarComputeConfig}
-  - {kind: struct, name: KernelDescriptor}
-  - {kind: using, name: CBHandle}
-  - {kind: using, name: DFBHandle}
-  - {kind: struct, name: DataflowBufferConfig}
-  - {kind: struct, name: CircularBufferConfig}
-  - {kind: class, name: Program}
-- path: include/tt_emule/tile.hpp
-  section: include/tt_emule/
-  summary: '`class Tile`; `ROWS`/`COLS`/`NUM_ELEMENTS`/`SIZE_BYTES`; `operator+`/`+=`/`()`'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: class, name: Tile}
 - path: include/tt_emule/tile_counter.hpp
   section: include/tt_emule/
   summary: '`struct TileCounter`, `class TileCounterArray`; `TILE_COUNTERS_PER_NEO`; inc_posted/inc_acked/wait_free_space/wait_occupancy/reset_all'
@@ -218,6 +80,7 @@ files:
   - {kind: global, name: UNPACK_MATH_DONE}
   - {kind: global, name: MATH_DONE}
   - {kind: global, name: MATH_PACK}
+  - {kind: global, name: PACK_DONE}
   - {kind: function, name: t6_semaphore_init}
   - {kind: function, name: t6_semaphore_get}
   - {kind: function, name: t6_semaphore_post}
@@ -243,6 +106,8 @@ files:
   - {kind: global, name: STALL_TDMA}
   - {kind: global, name: STALL_ON_ZERO}
   - {kind: global, name: STALL_ON_MAX}
+  - {kind: global, name: STALL_THCON}
+  - {kind: global, name: STALL_SYNC}
   - {kind: function, name: t6_semaphore_wait_on_zero}
   - {kind: function, name: t6_semaphore_wait_on_max}
   - {kind: enum, name: SfpuType}
@@ -263,6 +128,12 @@ files:
 - path: include/jit_hw/ckernel_defs.h
   section: include/jit_hw/
   summary: empty shim (pragma-once only)
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: global, name: FACE_HEIGHT}
+  - {kind: global, name: FACE_WIDTH}
+  - {kind: global, name: TILE_HEIGHT}
+  - {kind: global, name: TILE_WIDTH}
 - path: include/jit_hw/ckernel_include.h
   section: include/jit_hw/
   summary: '`enum firmware_msg_e`; `namespace ckernel`'
@@ -275,8 +146,30 @@ files:
   symbols:
   - {kind: macro, name: TT_SFPLOADI}
   - {kind: macro, name: TTI_SFPLOADI}
+  - {kind: macro, name: TTI_SFPNOP}
+  - {kind: macro, name: TTI_INCRWC}
+  - {kind: macro, name: TT_SFPADDI}
+  - {kind: macro, name: TTI_SFPMAD}
+  - {kind: macro, name: TTI_SFPLOAD}
+  - {kind: macro, name: TTI_SFPSTORE}
+  - {kind: macro, name: TTI_SFPCAST}
+  - {kind: macro, name: TTI_SFPENCC}
+  - {kind: macro, name: TTI_SFPSETCC}
+  - {kind: macro, name: TTI_SFPSETEXP}
+  - {kind: macro, name: TTI_SFP_STOCH_RND}
+  - {kind: macro, name: TTI_SFPGT}
+  - {kind: macro, name: TTI_SFPARECIP}
+  - {kind: macro, name: TTI_SETRWC}
+  - {kind: macro, name: TTI_STALLWAIT}
   - {kind: macro, name: TTI_SFPCONFIG}
   - {kind: function, name: __emule_sfpu_unsupported}
+- path: include/jit_hw/ckernel_sfpu.h
+  section: include/jit_hw/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: namespace, name: sfpu}
+  - {kind: function, name: _init_sfpu_config_reg}
 - path: include/jit_hw/ckernel_sfpu_exp.h
   section: include/jit_hw/
   summary: stub of silicon SFPU exp ckernel (functional impl in `api/compute/eltwise_unary/exp.h`)
@@ -306,6 +199,7 @@ files:
   - {kind: macro, name: MEM_L1_UNCACHED_BASE}
   - {kind: global, name: MEM_ZEROS_SIZE}
   - {kind: global, name: MEM_ZEROS_BASE}
+  - {kind: macro, name: NUM_TRISC_CORES}
 - path: include/jit_hw/emule_cb_state.h
   section: include/jit_hw/
   summary: '`using __emule_cb_state = tt_emule::CBSyncState`; `extern thread_local __emule_cbs`'
@@ -337,19 +231,21 @@ files:
   symbols:
   - {kind: macro, name: __EMULE_JIT_MODE}
   - {kind: macro, name: KERNEL_BUILD}
+  - {kind: namespace, name: std}
+  - {kind: function, name: min}
+  - {kind: function, name: max}
   - {kind: macro, name: DM_DEDICATED_NOC}
   - {kind: macro, name: DM_DYNAMIC_NOC}
-  - {kind: global, name: noc_mode}
   - {kind: function, name: tensix_sync}
   - {kind: function, name: riscv_wait}
   - {kind: macro, name: ALWI}
   - {kind: macro, name: __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED}
+  - {kind: enum, name: SrcOrder}
   - {kind: function, name: compute_kernel_hw_startup}
   - {kind: namespace, name: tt_emule}
   - {kind: global, name: __rt_args}
   - {kind: global, name: __common_rt_args}
   - {kind: global, name: __core}
-  - {kind: global, name: __device}
   - {kind: extern_c, name: __emule_dram_ptr}
   - {kind: extern_c, name: __emule_noc_resolve}
   - {kind: global, name: __emule_bridge_l1}
@@ -367,7 +263,10 @@ files:
   - {kind: global, name: __emule_num_threads}
   - {kind: global, name: __emule_my_thread_id}
   - {kind: macro, name: tt_l1_ptr}
+  - {kind: macro, name: NOC_INDEX}
+  - {kind: macro, name: NOC_MODE}
   - {kind: global, name: noc_index}
+  - {kind: global, name: noc_mode}
   - {kind: function, name: get_arg_addr}
   - {kind: function, name: get_common_arg_addr}
   - {kind: function, name: get_arg_val}
@@ -410,6 +309,11 @@ files:
   - {kind: function, name: __llk_tilize_datacopy}
   - {kind: function, name: __llk_untilize_datacopy}
   - {kind: function, name: llk_math_eltwise_unary_datacopy}
+  - {kind: global, name: is_fp32_dest_acc_en}
+  - {kind: global, name: src_b_bcast_type}
+  - {kind: global, name: is_int_fpu_en}
+  - {kind: global, name: pack_mode}
+  - {kind: function, name: llk_math_eltwise_unary_datacopy_init}
 - path: include/jit_hw/llk_math_eltwise_unary_sfpu_init.h
   section: include/jit_hw/
   summary: shim → `llk_math_unary_sfpu.h`
@@ -444,6 +348,9 @@ files:
   - {kind: function, name: llk_math_dest_section_done}
   - {kind: function, name: llk_pack_dest_section_done}
   - {kind: function, name: llk_pack_init}
+  - {kind: global, name: zero_output}
+  - {kind: global, name: skip_addrmod_config}
+  - {kind: global, name: skip_packer_strides}
   - {kind: global, name: __emule_pack_rows_num}
   - {kind: function, name: llk_pack_rows_init}
   - {kind: function, name: llk_pack_rows_uninit}
@@ -475,6 +382,7 @@ files:
   - {kind: enum, name: MathFidelity}
   - {kind: enum, name: DstSync}
   - {kind: enum, name: DataCopyType}
+  - {kind: enum, name: PackMode}
   - {kind: global, name: UnpackToDestEn}
 - path: include/jit_hw/llk_unpack_a.h
   section: include/jit_hw/
@@ -551,6 +459,7 @@ files:
   - {kind: global, name: __EMULE_SFPI_TILE_ELEMS}
   - {kind: global, name: __emule_sfpi_dst_base}
   - {kind: global, name: __emule_sfpi_cursor}
+  - {kind: global, name: __emule_sfpi_first_col_mode}
   - {kind: namespace, name: sfpi}
   - {kind: enum, name: RoundMode}
   - {kind: global, name: SFPSHFT2_MOD1_SUBVEC_SHFLROR1}
@@ -577,19 +486,44 @@ files:
   - {kind: function, name: __emule_sfpi_endif}
   - {kind: global, name: __emule_sfpi_dst_fallback}
   - {kind: function, name: __emule_sfpi_active_dst}
+  - {kind: function, name: __emule_sfpi_lane_index}
   - {kind: class, name: DstRegLane}
   - {kind: class, name: DstReg}
   - {kind: global, name: dst_reg}
   - {kind: global, name: __emule_lreg}
   - {kind: struct, name: LRegFile}
   - {kind: global, name: l_reg}
+  - {kind: function, name: __emule_sfp_ru}
+  - {kind: function, name: __emule_sfp_wu}
+  - {kind: function, name: __emule_sfp_rf}
+  - {kind: function, name: __emule_sfp_wf}
+  - {kind: function, name: __emule_half_to_float_bits}
   - {kind: function, name: __emule_sfploadi}
+  - {kind: function, name: __emule_sfpu_unsupported}
+  - {kind: function, name: __emule_sfp_mad}
+  - {kind: function, name: __emule_sfp_addi}
+  - {kind: function, name: __emule_sfp_round_ties_away}
+  - {kind: global, name: SFPSTOCHRND_MOD1_FP32_TO_FP16B}
+  - {kind: global, name: SFPSTOCHRND_MOD1_FP32_TO_UINT8}
+  - {kind: global, name: SFPSTOCHRND_MOD1_FP32_TO_INT8}
+  - {kind: function, name: __emule_sfp_stoch_rnd}
+  - {kind: function, name: __emule_sfp_cast}
+  - {kind: function, name: __emule_sfp_setexp}
+  - {kind: global, name: __emule_sfp_cc_outer}
+  - {kind: global, name: __emule_sfp_cc_active}
+  - {kind: function, name: __emule_sfp_setcc}
+  - {kind: function, name: __emule_sfp_encc}
+  - {kind: function, name: __emule_sfp_nop}
+  - {kind: function, name: __emule_sfp_load}
+  - {kind: function, name: __emule_sfp_store}
+  - {kind: function, name: __emule_sfp_incrwc}
   - {kind: global, name: vConst0}
   - {kind: global, name: vConst1}
   - {kind: global, name: vConstNeg1}
   - {kind: global, name: vConst0p5}
   - {kind: global, name: vConstNeg0p5}
   - {kind: function, name: reinterpret}
+  - {kind: function, name: as}
   - {kind: function, name: float_to_fp16b}
   - {kind: function, name: float_to_fp16a}
   - {kind: function, name: setsgn}
@@ -616,18 +550,24 @@ files:
   - {kind: class, name: __vCRegInt}
   - {kind: global, name: vConstFloatPrgm0}
   - {kind: global, name: vConstIntPrgm0}
-  - {kind: function, name: __emule_sfpu_unsupported}
   - {kind: function, name: vec_swap}
   - {kind: function, name: subvec_transp}
+  - {kind: using, name: RoundMode}
   - {kind: macro, name: v_if}
   - {kind: macro, name: v_elseif}
   - {kind: macro, name: v_else}
   - {kind: macro, name: v_endif}
   - {kind: namespace, name: ckernel}
+  - {kind: namespace, name: sfpu}
   - {kind: function, name: _sfpu_sigmoid_}
   - {kind: function, name: _sfpu_exp_}
   - {kind: function, name: _sfpu_reciprocal_}
   - {kind: function, name: _init_sfpu_reciprocal_}
+  - {kind: function, name: _reciprocal_compat_}
+  - {kind: function, name: sfpu_reciprocal_init}
+  - {kind: function, name: sfpu_reciprocal_iter}
+  - {kind: function, name: _ckernel_sfpu_exp_accurate_}
+  - {kind: function, name: calculate_softplus_body}
 - path: include/jit_hw/stream_io_map.h
   section: include/jit_hw/
   summary: stub of silicon stream I/O map (empty; no stream engine)
@@ -678,6 +618,7 @@ files:
   - {kind: global, name: __emule_logical_x}
   - {kind: global, name: __emule_logical_y}
   - {kind: global, name: __emule_cb_self_consume_mask}
+  - {kind: global, name: __emule_cb_self_produce_mask}
   - {kind: global, name: unpack_tile_size}
   - {kind: global, name: unpack_src_format}
   - {kind: global, name: pack_dst_format}
@@ -687,6 +628,8 @@ files:
   - {kind: global, name: unpack_tile_c_dim}
   - {kind: global, name: unpack_num_faces_r_dim}
   - {kind: global, name: unpack_num_faces_c_dim}
+  - {kind: global, name: unpack_tile_face_r_dim}
+  - {kind: global, name: unpack_tile_num_faces}
   - {kind: function, name: __emule_cb_timeout_sec}
   - {kind: function, name: cb_reserve_back}
   - {kind: function, name: cb_push_back}
@@ -866,6 +809,10 @@ files:
   - {kind: function, name: gt_int_tile}
   - {kind: function, name: le_int_tile}
   - {kind: function, name: ge_int_tile}
+  - {kind: function, name: eq_int_tile_init}
+  - {kind: function, name: ne_int_tile_init}
+  - {kind: function, name: eq_int_tile}
+  - {kind: function, name: ne_int_tile}
 - path: include/jit_hw/api/compute/binary_fmod.h
   section: include/jit_hw/api/compute/
   summary: '`ckernel::` `fmod_binary_tile`, `fmod_int32_tile` (+`_init`)'
@@ -933,11 +880,7 @@ files:
   - {kind: enum, name: EltwiseBinaryType}
   - {kind: enum, name: BroadcastType}
   - {kind: enum, name: EltwiseBinaryReuseDestType}
-  - {kind: global, name: TILE_WIDTH}
-  - {kind: global, name: TILE_HEIGHT}
   - {kind: global, name: TILE_HW}
-  - {kind: global, name: FACE_WIDTH}
-  - {kind: global, name: FACE_HEIGHT}
   - {kind: global, name: FACE_HW}
   - {kind: global, name: ELWADD}
   - {kind: global, name: ELWSUB}
@@ -945,6 +888,7 @@ files:
   - {kind: macro, name: __EMULE_MATH_FIDELITY_DEFINED}
   - {kind: enum, name: MathFidelity}
   - {kind: enum, name: ReluType}
+  - {kind: struct, name: ReluConfig}
   - {kind: enum, name: p_dim_stride_target}
   - {kind: function, name: llk_math_reconfig_remap}
   - {kind: macro, name: DST_ACCUM_MODE}
@@ -967,6 +911,9 @@ files:
   - {kind: global, name: UNP1}
   - {kind: global, name: PAC}
   - {kind: macro, name: TTI_SETADCXX}
+  - {kind: macro, name: TTI_STALLWAIT}
+  - {kind: macro, name: TTI_SEMWAIT}
+  - {kind: macro, name: TT_SETC16}
   - {kind: function, name: _llk_pack_mop_config_}
   - {kind: function, name: __emule_apply_pack_relu}
   - {kind: global, name: __emule_src_scratch}
@@ -988,6 +935,9 @@ files:
   - {kind: function, name: cb_is_bfp8_b_format}
   - {kind: function, name: cb_is_bfp4_b_format}
   - {kind: function, name: cb_is_uint16_format}
+  - {kind: function, name: cb_is_fp8_e4m3_format}
+  - {kind: function, name: __emule_fp8_e4m3_to_f32}
+  - {kind: function, name: cb_is_int_format}
   - {kind: function, name: __emule_check_blockfloat_supported}
   - {kind: function, name: pack_dst_to_buf}
   - {kind: function, name: binary_op_init_common}
@@ -999,6 +949,7 @@ files:
   - {kind: function, name: __emule_thin_broadcast_b1}
   - {kind: function, name: __emule_eltwise_binary_tile}
   - {kind: function, name: __emule_unpack_cb_tile_to}
+  - {kind: function, name: __emule_unpack_cb_tile_numeric}
   - {kind: function, name: add_tiles}
   - {kind: function, name: sub_tiles}
   - {kind: function, name: mul_tiles}
@@ -1037,15 +988,24 @@ files:
   symbols:
   - {kind: enum, name: DataFormat}
   - {kind: global, name: __emule_pack_offset}
+  - {kind: global, name: __emule_pack_width}
   - {kind: global, name: __emule_dst_fresh}
   - {kind: function, name: __emule_dst_mark_dirty}
+  - {kind: global, name: __emule_dst_holds_int}
+  - {kind: function, name: __emule_dst_set_int}
+  - {kind: function, name: __emule_dst_is_int}
   - {kind: function, name: __emule_dst_take_fresh}
 - path: include/jit_hw/api/compute/compute_kernel_api.h
   section: include/jit_hw/api/compute/
   summary: '`ckernel::` `square_tile`/`sigmoid_tile`/`sign_tile`/`signbit_tile`/`signbit_tile_int32`/`silu_tile`/`log_tile`/`log_with_base_tile`/`exp2_tile`/`expm1_tile`/`power_tile`/`power_iterative_tile`/`tiled_prod_tile`/`unary_max_tile`/`unary_min_tile`/`unary_max_int32_tile`/`unary_min_int32_tile`/`unary_max_uint32_tile`/`unary_min_uint32_tile`/`alt_complex_rotate90_tile`
     (+`_init`), `silu_tile_pack`/`silu_tile_init_pack`, `sfpu_reduce_init`, `topk_tile_init`/`topk_local_sort`/`topk_merge`/`topk_rebuild`; `namespace __emule_topk` (`merge_split_col`/`sort_col`)'
   symbols:
+  - {kind: macro, name: DST_SYNC_MODE}
   - {kind: namespace, name: ckernel}
+  - {kind: function, name: _sfpu_check_}
+  - {kind: macro, name: _SFPU_EXPAND}
+  - {kind: macro, name: SFPU_UNARY_CALL}
+  - {kind: macro, name: SFPU_UNARY_CALL_NO_TEMPLATE_ARGS}
   - {kind: function, name: square_tile_init}
   - {kind: function, name: square_tile}
   - {kind: function, name: exp2_tile_init}
@@ -1104,6 +1064,7 @@ files:
   summary: '`compute_kernel_hw_startup` (2-arg + 3-arg)'
   symbols:
   - {kind: macro, name: __EMULE_COMPUTE_KERNEL_HW_STARTUP_DEFINED}
+  - {kind: enum, name: SrcOrder}
   - {kind: function, name: compute_kernel_hw_startup}
 - path: include/jit_hw/api/compute/copy_dest_values.h
   section: include/jit_hw/api/compute/
@@ -1279,10 +1240,13 @@ files:
   - {kind: function, name: mm_init}
   - {kind: function, name: mm_init_short}
   - {kind: function, name: mm_init_short_with_dt}
+  - {kind: function, name: matmul_init}
+  - {kind: function, name: matmul_block_init}
   - {kind: function, name: matmul_tiles}
   - {kind: function, name: mm_block_init}
   - {kind: function, name: mm_block_init_short}
   - {kind: function, name: mm_block_init_short_with_dt}
+  - {kind: function, name: mm_block_init_short_with_both_dt}
   - {kind: function, name: matmul_block}
   - {kind: macro, name: TTMLIR_TARGET_TTKERNEL_LLKS_EXPERIMENTAL_MATMUL_LLKS_H}
   - {kind: namespace, name: experimental}
@@ -1291,9 +1255,6 @@ files:
   summary: '`ckernel::` `custom_mm_block_init`/`custom_mm_block_init_short`; `namespace packer`/`semaphore`; `TTI_SEMWAIT`/`TTI_STALLWAIT`/`TT_SETC16` no-op macros (MatmulFusedAct kernel-body shim)'
   symbols:
   - {kind: namespace, name: ckernel}
-  - {kind: macro, name: TTI_SEMWAIT}
-  - {kind: macro, name: TTI_STALLWAIT}
-  - {kind: macro, name: TT_SETC16}
   - {kind: global, name: DEST_TARGET_REG_CFG_MATH_Offset_ADDR32}
   - {kind: namespace, name: packer}
   - {kind: function, name: get_packer_dest_offset}
@@ -1333,6 +1294,10 @@ files:
 - path: include/jit_hw/api/compute/pack.h
   section: include/jit_hw/api/compute/
   summary: empty shim (pragma-once only)
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: llk_pack_reduce_mask_config}
+  - {kind: function, name: llk_pack_reduce_mask_clear}
 - path: include/jit_hw/api/compute/pack_untilize.h
   section: include/jit_hw/api/compute/
   summary: '`ckernel::`/`experimental::` `pack_untilize_block`, `pack_untilize_init`, `pack_untilize_dest_init`'
@@ -1383,6 +1348,18 @@ files:
   - {kind: function, name: reduce_revert_delta}
   - {kind: function, name: reduce_tile}
   - {kind: function, name: reduce_tile_math}
+- path: include/jit_hw/api/compute/reduce_custom.h
+  section: include/jit_hw/api/compute/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: reduce_block_max_row_init}
+  - {kind: function, name: reduce_block_max_row}
+  - {kind: function, name: reduce_block_max_row_uninit}
+  - {kind: global, name: __emule_reduce_block_ct_dim}
+  - {kind: function, name: reduce_block_max_row_init_runtime}
+  - {kind: function, name: reduce_block_max_row_runtime}
+  - {kind: function, name: reduce_block_max_row_uninit_runtime}
 - path: include/jit_hw/api/compute/reg_api.h
   section: include/jit_hw/api/compute/
   summary: '`tile_regs_acquire`/`tile_regs_commit`/`tile_regs_wait`/`tile_regs_release`; `ALWI` macro; `__emule_dst_active_tiles`'
@@ -1469,6 +1446,13 @@ files:
   - {kind: function, name: topk_xl_rebuild}
   - {kind: function, name: topk_xl_separate_indices}
   - {kind: function, name: topk_xl_remove_msb_values}
+- path: include/jit_hw/api/compute/transpose.h
+  section: include/jit_hw/api/compute/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: transpose_init}
+  - {kind: function, name: transpose_tile}
 - path: include/jit_hw/api/compute/transpose_wh.h
   section: include/jit_hw/api/compute/
   summary: '`ckernel::` `transpose_wh_tile`, `transpose_wh_init`, `copy_tile`'
@@ -1491,6 +1475,7 @@ files:
   symbols:
   - {kind: namespace, name: ckernel}
   - {kind: enum, name: VectorMode}
+  - {kind: function, name: __emule_vector_mode_active}
 - path: include/jit_hw/api/compute/welford.h
   section: include/jit_hw/api/compute/
   summary: '`ckernel::` `welford_init`, `welford_reinit`, `welford_clear`; TLS `__emule_welford_mean`/`__emule_welford_m2`/`__emule_welford_count`, `__emule_welford_clear`'
@@ -1568,6 +1553,7 @@ files:
   symbols:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: binop_with_scalar_tile_init}
+  - {kind: function, name: llk_math_eltwise_unary_sfpu_binop_with_scalar}
   - {kind: function, name: add_unary_tile}
   - {kind: function, name: sub_unary_tile}
   - {kind: function, name: mul_unary_tile}
@@ -1727,13 +1713,25 @@ files:
   symbols:
   - {kind: enum, name: InputClamping}
   - {kind: namespace, name: p_sfpu}
-  - {kind: global, name: kCONST_1_FP16B}
+  - {kind: global, name: LREG0}
+  - {kind: global, name: LREG4}
+  - {kind: global, name: LCONST_0}
   - {kind: namespace, name: ckernel}
-  - {kind: global, name: scale_en}
+  - {kind: global, name: ADDR_MOD_0}
+  - {kind: global, name: ADDR_MOD_4}
+  - {kind: struct, name: addr_mod_t}
+  - {kind: enum, name: InstrModLoadStore}
+  - {kind: struct, name: p_setrwc}
+  - {kind: namespace, name: math}
+  - {kind: function, name: set_addr_mod_base}
+  - {kind: function, name: clear_addr_mod_base}
+  - {kind: global, name: kCONST_1_FP16B}
+  - {kind: global, name: __emule_exp_init_scale}
   - {kind: global, name: input_clamping}
-  - {kind: global, name: iterations}
   - {kind: function, name: exp_tile_init}
   - {kind: function, name: exp_tile}
+  - {kind: function, name: exp_packthread_tile_init}
+  - {kind: function, name: exp_packthread_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/fill.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `fill_tile`, `fill_tile_int`, `fill_tile_bitcast` (+`_init`)'
@@ -1885,6 +1883,9 @@ files:
   summary: '`ckernel::` `rand_tile` (+`_init`)'
   symbols:
   - {kind: namespace, name: ckernel}
+  - {kind: global, name: __emule_rand_engine}
+  - {kind: global, name: __emule_rand_deterministic}
+  - {kind: global, name: __emule_rand_nonce}
   - {kind: function, name: rand_tile_init}
   - {kind: function, name: rand_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/rdiv.h
@@ -2026,6 +2027,13 @@ files:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: tanh_derivative_tile_init}
   - {kind: function, name: tanh_derivative_tile}
+- path: include/jit_hw/api/compute/eltwise_unary/tanhshrink.h
+  section: include/jit_hw/api/compute/eltwise_unary/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: tanhshrink_tile_init}
+  - {kind: function, name: tanhshrink_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/threshold.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `threshold_tile` (+`_init`)'
@@ -2101,6 +2109,15 @@ files:
   - {kind: function, name: fill_arange_tile}
   - {kind: function, name: write_row_mask_tile}
   - {kind: function, name: write_col_mask_tile}
+- path: include/jit_hw/api/compute/experimental/matmul_custom.h
+  section: include/jit_hw/api/compute/experimental/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+  symbols:
+  - {kind: macro, name: MM_THROTTLE}
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: mm_no_mop_init_short}
+  - {kind: function, name: matmul_block_no_mop}
+  - {kind: function, name: mm_no_mop_reinit_short}
 - path: include/jit_hw/api/compute/experimental/mul_reduce_scalar.h
   section: include/jit_hw/api/compute/experimental/
   summary: emule model+shadow for fused multiply-reduce-scalar (dst[0][0]=scaler^2*sum(A*B)); shims the inlined LLK state machine sum_of_squares uses (mul/move/fill/column-reduce/scalar-reduce)
@@ -2135,6 +2152,13 @@ files:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: pack_block_contiguous_init}
   - {kind: function, name: pack_block_contiguous}
+- path: include/jit_hw/api/compute/experimental/sdpa_sub_custom.h
+  section: include/jit_hw/api/compute/experimental/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: sub_bcast_cols_init_short_custom}
+  - {kind: function, name: sub_tiles_bcast_cols_custom}
 - path: include/jit_hw/api/compute/experimental/semaphore.h
   section: include/jit_hw/api/compute/experimental/
   summary: '`ckernel::Semaphore`'
@@ -2574,6 +2598,9 @@ files:
   - {kind: struct, name: InterleavedPow2AddrGen}
   - {kind: struct, name: InterleavedPow2AddrGenFast}
   - {kind: struct, name: InterleavedAddrGenFast}
+- path: include/jit_hw/internal/dataflow/dataflow_api_common.h
+  section: include/jit_hw/internal/dataflow/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
 - path: include/jit_hw/internal/ethernet/dataflow_api.h
   section: include/jit_hw/internal/ethernet/
   summary: stub of silicon ethernet dataflow API (no ethernet engine in emule)
@@ -2759,3 +2786,24 @@ files:
 - path: include/jit_hw/blaze/ops/local_top_k/kernels/run_top32_llk.hpp
   section: include/jit_hw/blaze/ops/local_top_k/kernels/
   summary: emule shadow for blaze/ops/local_top_k/kernels/run_top32_llk.hpp (full-path include used by cross_core_topk_merge / cross_device_top32_merge); routes to api/compute/experimental/top32_rm.h.
+- path: include/jit_hw/cpp/ttnn/kernel_lib/dest_helpers.hpp
+  section: include/jit_hw/cpp/ttnn/kernel_lib/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+- path: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/dataflow/chunked_prefill_utils.hpp
+  section: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/dataflow/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+- path: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/q_chunk_remapping.hpp
+  section: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+- path: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/sdpa_streaming_qktv.hpp
+  section: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+- path: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/sliding_window_geometry.hpp
+  section: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+- path: include/jit_hw/experimental/llk_sfpu/ckernel_sfpu_sdpa.h
+  section: include/jit_hw/experimental/llk_sfpu/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+- path: include/jit_hw/sfpu/ckernel_sfpu_rsqrt_compat.h
+  section: include/jit_hw/sfpu/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
