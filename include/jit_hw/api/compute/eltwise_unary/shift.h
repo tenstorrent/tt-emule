@@ -22,10 +22,10 @@ namespace ckernel {
 template <DataFormat data_format = DataFormat::Int32>
 ALWI void left_shift_tile(uint32_t idst, uint32_t param0) {
     __emule_dst_check(idst, "left_shift_tile");
-    uint32_t shift = param0 & 0x1F;
+    const bool out_of_range = param0 >= 32u;
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
         int32_t v = __emule_dst_load_i32(idst, i);
-        uint32_t u = static_cast<uint32_t>(v) << shift;
+        uint32_t u = out_of_range ? 0u : (static_cast<uint32_t>(v) << param0);
         __emule_dst_store_i32(idst, i, static_cast<int32_t>(u));
     }
 }
@@ -33,10 +33,13 @@ ALWI void left_shift_tile(uint32_t idst, uint32_t param0) {
 template <DataFormat data_format = DataFormat::Int32>
 ALWI void right_shift_tile(uint32_t idst, uint32_t param0) {
     __emule_dst_check(idst, "right_shift_tile");
-    const uint32_t shift = param0 & 31u;
+    const bool out_of_range = param0 >= 32u;
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
         int32_t v = __emule_dst_load_i32(idst, i);
-        __emule_dst_store_i32(idst, i, v >> shift);
+        // Arithmetic right shift; a shift >= 32 saturates to the sign
+        // (non-negative -> 0, negative -> -1), matching ckernel_sfpu_unary_shift.h.
+        int32_t r = out_of_range ? (v < 0 ? -1 : 0) : (v >> param0);
+        __emule_dst_store_i32(idst, i, r);
     }
 }
 
