@@ -112,3 +112,42 @@ Use it when you need the tail the sweep suite can't reach:
 TT_METAL_DIR=/localdev/mkamran/emule/tt-metal \
   perf/run_bench_emule.sh --op exp --side-tiles 32 64 128 192 256 384 --out /tmp/emule_big.csv
 ```
+
+## One-shot lifecycle: is there ANY regime where emule wins on speed?
+
+The per-op metric excludes device bringup. `oneshot_lifecycle.py` measures the
+opposite — full run-once process wall-clock (`import ttnn` + open + first-op
+compile + N warm ops + close) vs ops-per-session N — to test whether emule's
+cheaper mock bringup lets it win end-to-end for small N. Fits and overlay:
+`oneshot_crossover.py` → `oneshot_crossover.png`.
+
+Result (exp, side=8 tiles, WH; silicon device **warm**):
+
+| phase | emule | silicon |
+|---|---|---|
+| `import ttnn` | ~1690ms | ~1494ms |
+| device open | ~201ms | ~914ms |
+| first-op compile | ~871ms | ~66ms |
+| close | ~0ms | ~115ms |
+| warm per-op | ~160ms | ~0.14ms |
+
+Fits: **emule `total(N) ≈ 2.70s + 152ms·N`**, **silicon `total(N) ≈ 2.60s`
+(flat)**. **No positive crossover — silicon wins at every N ≥ 1.** emule's
+device-open *is* ~713ms cheaper (mock vs real init), but that saving is almost
+exactly cancelled by emule's ~805ms-slower first-op JIT compile (host-compiling
+the emulated kernel), so the floors are equal (~2.6–2.7s) and emule's per-op
+cost loses from N=1 up.
+
+Caveat: silicon `open` here (~0.9s) is a **warm** re-open. A truly cold device
+(post `tt-smi -r`: PCIe enum + firmware boot + DRAM training) can be seconds to
+tens of seconds; that would raise silicon's floor and let emule win the
+first-boot one-shot at low N. To capture it, reset the device immediately before
+the `--ops 1` run.
+
+### Bottom line — where emule actually beats silicon
+
+On **every speed axis** — per-op, tensor size, dtype, memory config, and
+one-shot lifecycle on a warm device — **silicon wins**. emule's advantages are
+**capacity/availability**, not speed: a tensor larger than silicon's ~12GB DRAM
+(silicon OOMs, emule runs it in host RAM), or needing more chips than are
+physically present / no hardware at all.
