@@ -185,6 +185,31 @@ device-bringup cost that motivated the question. It is a one-time "chip is off"
 cost, not a steady-state property: keep the device warm and it vanishes (silicon
 wins at all N, per the warm result above).
 
+## matmul — the FLOP-heavy op
+
+`bench_matmul.py` sweeps square S×S @ S×S bf16 (FLOP = 2·S³), the compute-bound
+counterpart to eltwise. Overlay: `emule_vs_silicon_matmul.png`.
+
+| S | emule | silicon | emule/silicon |
+|---|---|---|---|
+| 32 | 0.55ms | 0.088ms | 6× |
+| 128 | 11.0ms | 0.097ms | 113× |
+| 256 | 169ms | 0.088ms | 1931× |
+| 1024 | 193ms | 0.144ms | 1339× |
+| peak | **11 GFLOP/s** | **38.5 TFLOP/s** (S=2048) | ~3500× |
+
+matmul is where hardware crushes emulation hardest — the gap is 1000–1900× (vs
+46–500× for eltwise), because this is exactly the arithmetic the Tensix matrix
+engines exist for and the host has to emulate serially. Silicon is dispatch-floor
+-bound (~0.09ms flat) up to S≈512, then compute-bound; it peaks ~38.5 TFLOP/s at
+S=2048 (dips at S=4096, likely tiling/DRAM-bound). emule tops out ~11 GFLOP/s.
+
+Note: emule matmul is **not** on the eltwise ~90ms floor — small matmuls (S≤128)
+are <15ms. So emule's per-program cost tracks the emulated program's work/core
+span, not a universal dispatch tax; the ~90ms eltwise "floor" is a property of
+that op's 64-core program, not all ops. (Large-S emule matmul is noisy: S=1024
+swung 120–193ms across runs.)
+
 ## Additional views
 
 - **Throughput vs size** (`plot_throughput.py` → `throughput_vs_size.png`):
