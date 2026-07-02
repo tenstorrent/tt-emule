@@ -185,6 +185,24 @@ device-bringup cost that motivated the question. It is a one-time "chip is off"
 cost, not a steady-state property: keep the device warm and it vanishes (silicon
 wins at all N, per the warm result above).
 
+## Additional views
+
+- **Throughput vs size** (`plot_throughput.py` → `throughput_vs_size.png`):
+  recasts a size→time curve into achieved Gelem/s. emule and silicon trace the
+  same S-curve but silicon's is shifted ~2.5 decades left — it reaches high
+  efficiency at ~250–1000× smaller problem size because its overhead floor is µs
+  vs emule's ~90ms. Caveat: silicon here only has data to 2.4M elements (still
+  rising, not plateaued), so its measured peak understates the real ceiling — a
+  fair peak comparison needs the silicon large-tensor sweep. Rates are e2e
+  (include `to_torch` readback), not pure compute.
+- **Operand location, L1 vs DRAM** (`plot_memcfg.py` → `emule_exp_memcfg.png`):
+  the eltwise sweeps cover all four {DRAM,L1}×{DRAM,L1} in/out combos. On emule
+  all four overlap (~108–117ms median) — operand location does **not** move
+  wall-clock, because emule is overhead-bound and does not model L1's bandwidth
+  advantage in timing. On silicon L1-resident ops should be materially faster
+  than DRAM, so this is a place where emule timing diverges from hardware; run
+  `plot_memcfg.py` on a silicon sweep JSON to quantify the gap.
+
 ### Bottom line — where emule actually beats silicon
 
 On the **steady-state / warm axes** — per-op, tensor size, dtype, memory config,
