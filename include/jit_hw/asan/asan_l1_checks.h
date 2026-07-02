@@ -17,6 +17,7 @@
 
 #include "jit_hw/emule_cb_state.h"          // __emule_cbs (CBSyncState*)
 #include "jit_hw/internal/emule_cb_ptr.h"   // __emule_cb_wr_page / __emule_cb_rd_page
+#include "jit_hw/asan/asan_cb_state.h"
 #include "jit_hw/asan/emule_asan.h"         // __emule_asan_panic
 
 // L1 bridge base + sanitizer thread-locals these checks (and the chokepoint's
@@ -35,9 +36,6 @@ extern thread_local uint32_t __emule_l1_host_ranges_count;
 extern thread_local uint64_t* __emule_l1_resolved_ranges;
 extern thread_local uint32_t* __emule_l1_resolved_ranges_count;
 extern thread_local uint32_t __emule_l1_resolved_ranges_capacity;
-extern thread_local uint32_t __emule_cb_reserved_pages[32];
-extern thread_local uint32_t __emule_cb_waited_pages[32];
-extern thread_local bool __emule_cb_boundary_strict;
 
 // Plain address->host-pointer translation (the tail every chokepoint path ends
 // in). A firmware-style offset is rebased onto __emule_self->bridge_l1; an already-
