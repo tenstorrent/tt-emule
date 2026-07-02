@@ -141,8 +141,31 @@ cost loses from N=1 up.
 Caveat: silicon `open` here (~0.9s) is a **warm** re-open. A truly cold device
 (post `tt-smi -r`: PCIe enum + firmware boot + DRAM training) can be seconds to
 tens of seconds; that would raise silicon's floor and let emule win the
-first-boot one-shot at low N. To capture it, reset the device immediately before
-the `--ops 1` run.
+first-boot one-shot at low N.
+
+**Measuring the true cold start.** `oneshot_lifecycle.py --reset-first` resets
+the chip (chip "off") *before* `open()`, so `open_ms` captures the full cold
+bringup. Each process is only cold once, so use `--ops 1` (every invocation
+resets). The row records `reset_ms` (the power-off) separately and
+`total_with_reset_ms` = the full "cold → open → op → close" workload. On silicon:
+
+```bash
+# one row per fresh cold start; tune --reset-cmd for your box
+for i in 1 2 3; do
+  python perf/oneshot_lifecycle.py --backend silicon-wh-cold --op exp --ops 1 \
+      --reset-first --reset-cmd "tt-smi -r" --out silicon_cold.csv
+done
+```
+
+Then compare against emule using the reset-inclusive column:
+
+```bash
+python perf/oneshot_crossover.py perf/emule_oneshot.csv silicon_cold.csv \
+    --col total_with_reset_ms --out cold_crossover.png
+```
+
+(emule has no cold state — its mock `open` is a constant ~0.2s — so its
+`total_with_reset_ms` equals its `total_ms`.)
 
 ### Bottom line — where emule actually beats silicon
 

@@ -27,12 +27,15 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-def load(paths):
-    series = defaultdict(dict)  # backend -> {ops: total_ms}
+def load(paths, col):
+    series = defaultdict(dict)  # backend -> {ops: chosen time_ms}
     for path in paths:
         with open(path, newline="") as f:
             for row in csv.DictReader(f):
-                series[row["backend"]][int(row["ops"])] = float(row["total_ms"])
+                # fall back to total_ms when the requested column is absent
+                # (older CSVs) or blank — for those, reset_ms is 0 anyway.
+                v = row.get(col) or row.get("total_ms")
+                series[row["backend"]][int(row["ops"])] = float(v)
     return series
 
 
@@ -54,9 +57,15 @@ def main(argv=None):
     p.add_argument("csvs", nargs="+")
     p.add_argument("--out", default="oneshot_crossover.png")
     p.add_argument("--title", default="one-shot lifecycle: total wall-clock vs ops-per-session")
+    p.add_argument(
+        "--col",
+        default="total_ms",
+        help="which time column to fit: total_ms (process) or "
+        "total_with_reset_ms (full cold: chip-off reset included). Default total_ms.",
+    )
     args = p.parse_args(argv or sys.argv[1:])
 
-    series = load(args.csvs)
+    series = load(args.csvs, args.col)
     fits = {}
     fig, ax = plt.subplots(figsize=(8, 5.5))
     for be in sorted(series):
