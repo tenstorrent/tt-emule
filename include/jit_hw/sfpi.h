@@ -261,6 +261,14 @@ inline vCond v_not(const vCond& a) { vCond r; for (uint32_t i = 0; i < 32; ++i) 
 
 
 
+inline vCond __emule_vint_to_cond(const vInt& c) {
+    vCond cond;
+    for (uint32_t i = 0; i < 32; ++i) {
+        cond.mask[i] = c.v[i] != 0;
+    }
+    return cond;
+}
+
 inline void __emule_sfpi_push_if(const vCond& c) {
     auto& f = __emule_compute_ctx().sfpu.frames[__emule_compute_ctx().sfpu.frame_depth++];
     f.outer = __emule_compute_ctx().sfpu.mask;
@@ -270,6 +278,10 @@ inline void __emule_sfpi_push_if(const vCond& c) {
     }
 }
 
+inline void __emule_sfpi_push_if(const vInt& c) {
+    __emule_sfpi_push_if(__emule_vint_to_cond(c));
+}
+
 inline void __emule_sfpi_elseif(const vCond& c) {
     auto& f = __emule_compute_ctx().sfpu.frames[__emule_compute_ctx().sfpu.frame_depth - 1];
     for (uint32_t i = 0; i < 32; ++i) {
@@ -277,6 +289,10 @@ inline void __emule_sfpi_elseif(const vCond& c) {
         __emule_compute_ctx().sfpu.mask[i] = f.outer[i] && fresh;
         f.taken[i] = f.taken[i] || c.mask[i];
     }
+}
+
+inline void __emule_sfpi_elseif(const vInt& c) {
+    __emule_sfpi_elseif(__emule_vint_to_cond(c));
 }
 
 inline void __emule_sfpi_else() {
