@@ -779,6 +779,9 @@ inline vInt exexp(const vFloat& vf, ExponentMode mode = ExponentMode::Unbiased) 
     }
     return r;
 }
+inline vInt exexp_nodebias(const vFloat& vf) {
+    return exexp(vf, ExponentMode::NoDebias);
+}
 inline vMag exman(const vFloat& vf, MantissaMode mode = MantissaMode::Fraction) {
     vMag r;
     for (uint32_t i = 0; i < 32; ++i) {
