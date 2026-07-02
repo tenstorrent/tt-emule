@@ -17,7 +17,8 @@ code path. Post-process the framework's JSON into a size→time curve and plot.
 | `sweep_to_curve.py` | Reduces a `sweep_framework` results JSON to a size→time curve CSV (slices to one dtype + in/out buffer; aggregates `e2e_perf_ms` by total elements). |
 | `plot_bench.py` | Plots one or more curve CSVs (log-log time vs total elements) + an emule/silicon ratio panel. matplotlib only, no device. |
 | `bench_eltwise_unary.py`, `run_bench_emule.sh` | **Secondary** lightweight microbench (not the sweep_framework). Only used to push far past the sweep suite's max size — see "Reaching the compute-bound regime". |
-| `emule_exp_curve.csv` | emule wormhole `exp` bf16 baseline curve (reduced from a `nightly` sweep run; the multi-MB raw framework JSON is not committed). |
+| `emule_exp_curve.csv`, `silicon_exp_curve.csv` | reduced `exp` bf16 curves for emule (WH host) and silicon (WH-B0), both from a `nightly` sweep at git SHA `8b9517627da`. Raw multi-MB framework JSONs are not committed. |
+| `emule_vs_silicon_exp.png` | the overlay plot (left: both curves; right: emule/silicon ratio). |
 
 ## Method
 
@@ -63,25 +64,41 @@ python perf/sweep_to_curve.py <silicon results>.json --backend silicon-n150  --o
 python perf/plot_bench.py emule_exp_curve.csv silicon_exp_curve.csv --out compare.png
 ```
 
-## Finding (emule, wormhole, exp bf16)
+## Finding (emule vs silicon WH-B0, exp bf16, DRAM→DRAM)
 
-Across the `nightly` suite (2K → 2.4M elements) emule's `e2e_perf` is **flat and
-dispatch-overhead-bound** — ~80–150ms with heavy jitter, no scaling trend. The
-per-op cost is dominated by fixed program-launch overhead (JIT dispatch +
-slow-dispatch launch + 64-core host program emulation), not per-element compute.
+Overlay: `emule_vs_silicon_exp.png` (both from `nightly`, same git SHA
+`8b9517627da`). Curves: `emule_exp_curve.csv`, `silicon_exp_curve.csv`.
 
-This inverts the naive expectation that emule wins at small sizes for lack of
-device open/close overhead: emule's fixed per-program cost is *larger* than
-silicon fast-dispatch (µs-scale), so on wall-clock silicon is expected to win
-across this range. Confirm against real silicon data with the steps above.
+- **emule** is **flat and dispatch-overhead-bound** — ~90–115ms with heavy
+  jitter, no scaling trend across 2K → 2.4M elements. The per-op cost is fixed
+  program-launch overhead (JIT dispatch + slow-dispatch launch + 64-core host
+  program emulation), not per-element compute.
+- **silicon** shows real **compute scaling** — a ~0.2ms dispatch floor at tiny
+  sizes rising to ~3.8ms at 2.4M elements (1176× size → ~18× time; sub-linear
+  because the small end is also floor-bound).
+- **silicon wins everywhere**, by ~393× at <10K elements narrowing to ~46× at
+  >1M. The gap *shrinks* with size (emule flat, silicon rising).
+
+This **refutes** the initial hypothesis that emule wins at small sizes for lack
+of device open/close overhead. It is exactly backwards: emule is relatively
+*worst* at small sizes, where its fixed ~90ms program overhead is compared
+against silicon's ~0.2ms. emule's fixed per-program cost (slow dispatch + host
+emulation) dwarfs silicon fast-dispatch, so there is no small-size regime where
+emule wins; the disadvantage only narrows as silicon's compute term grows.
+
+(The lone ~400ms spikes on both curves at ~86K elements are first-run JIT/compile
+outliers, not a size effect — the exporter records a single uncached run per
+vector.)
 
 ### Reaching the compute-bound regime
 
 The `nightly` suite tops out at ~2.4M elements, entirely inside emule's overhead
 floor. The secondary microbench (`run_bench_emule.sh`, pure ttnn — also portable
 to silicon) pushes further and shows emule only becomes **compute-bound above
-~40M elements**, rising ~linearly to ~180ms at 151M. Use it when you need the
-tail the sweep suite can't reach:
+~40M elements**, rising ~linearly to ~180ms at 151M. Note that silicon keeps
+scaling too, so any true emule/silicon crossover (if one exists) is far beyond
+the measured range and would require both curves out in the compute-bound tail.
+Use it when you need the tail the sweep suite can't reach:
 
 ```bash
 TT_METAL_DIR=/localdev/mkamran/emule/tt-metal \
