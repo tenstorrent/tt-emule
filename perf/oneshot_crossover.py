@@ -66,6 +66,9 @@ def main(argv=None):
     args = p.parse_args(argv or sys.argv[1:])
 
     series = load(args.csvs, args.col)
+    # extend all fit lines across the global N range so a backend measured at a
+    # single N (e.g. cold runs only done at --ops 1) still draws a full line.
+    xmax = max(x for be in series for x in series[be])
     fits = {}
     fig, ax = plt.subplots(figsize=(8, 5.5))
     for be in sorted(series):
@@ -74,7 +77,7 @@ def main(argv=None):
         a, b = linfit(xs, ys)
         fits[be] = (a, b)
         (line,) = ax.plot(xs, ys, marker="o", ls="", label=f"{be} (measured)")
-        xf = [0, max(xs)]
+        xf = [0, xmax]
         ax.plot(xf, [a + b * x for x in xf], ls="--", color=line.get_color(),
                 label=f"{be} fit: {a:.2f}s + {b*1e3:.0f}ms·N")
 

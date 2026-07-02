@@ -1,0 +1,4 @@
+backend,op,ops,side_tiles,cold,reset_ms,import_ms,open_ms,compile_ms,warm_mean_ms,ops_total_ms,close_ms,bringup_ms,total_ms,total_with_reset_ms
+silicon-wh-cold,exp,1,8,1,8403.15,1414.339,925.13,65.827,nan,65.827,112.308,2339.468,2517.603,10920.753
+silicon-wh-cold,exp,1,8,1,8448.292,1464.209,910.066,63.127,nan,63.127,114.367,2374.275,2551.769,11000.061
+silicon-wh-cold,exp,1,8,1,8496.923,1449.382,896.467,57.672,nan,57.672,119.74,2345.849,2523.261,11020.184

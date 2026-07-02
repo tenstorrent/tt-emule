@@ -167,10 +167,36 @@ python perf/oneshot_crossover.py perf/emule_oneshot.csv silicon_cold.csv \
 (emule has no cold state — its mock `open` is a constant ~0.2s — so its
 `total_with_reset_ms` equals its `total_ms`.)
 
+**Measured cold-start result** (`oneshot_cold_crossover.png`). Surprise: the
+cold cost is *not* in `open()` — `tt-smi -r` itself takes **~8.5s** (it fully
+re-inits the chip), and the subsequent `open()` is still ~0.9s. So the true
+"from powered-off → open → op → close" cost is **~11s**, dominated by the reset.
+
+| | fit `total(N)` |
+|---|---|
+| emule (no cold state) | `2.70s + 152ms·N` |
+| silicon, from chip-off | `11.02s` (flat; per-op negligible) |
+
+**Crossover N\* ≈ 55 ops.** Below ~55 ops per session, starting from a
+powered-off chip, **emule is faster end-to-end** (its ~2.7s floor beats silicon's
+~11s cold bringup); above ~55 ops silicon's per-op speed wins. This is the one
+regime where emule beats silicon on wall-clock — and it is exactly the
+device-bringup cost that motivated the question. It is a one-time "chip is off"
+cost, not a steady-state property: keep the device warm and it vanishes (silicon
+wins at all N, per the warm result above).
+
 ### Bottom line — where emule actually beats silicon
 
-On **every speed axis** — per-op, tensor size, dtype, memory config, and
-one-shot lifecycle on a warm device — **silicon wins**. emule's advantages are
-**capacity/availability**, not speed: a tensor larger than silicon's ~12GB DRAM
-(silicon OOMs, emule runs it in host RAM), or needing more chips than are
-physically present / no hardware at all.
+On the **steady-state / warm axes** — per-op, tensor size, dtype, memory config,
+and one-shot lifecycle on a warm device — **silicon wins** (46–500× per-op; no
+crossover). emule beats silicon on wall-clock in exactly two situations:
+
+1. **Cold-start, light workloads.** From a powered-off chip, silicon pays ~11s
+   of bringup (mostly the `tt-smi -r` re-init) vs emule's ~2.7s floor, so a
+   run-once workload of **fewer than ~55 ops** finishes sooner on emule
+   (`oneshot_cold_crossover.png`). One-time cost, not steady state.
+2. **Capacity/availability.** A tensor larger than silicon's ~12GB DRAM (silicon
+   OOMs; emule uses host RAM), or needing more chips than are physically present
+   / no hardware at all.
+
+Everywhere else, silicon wins.
