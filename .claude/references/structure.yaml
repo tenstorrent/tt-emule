@@ -249,8 +249,7 @@ files:
   - {kind: extern_c, name: __emule_dram_ptr}
   - {kind: extern_c, name: __emule_noc_resolve}
   - {kind: global, name: __emule_bridge_l1}
-  - {kind: macro, name: __EMULE_LOCAL_L1_TO_PTR_DEFINED}
-  - {kind: function, name: __emule_local_l1_to_ptr}
+  - {kind: global, name: __emule_pending_noc_reads}
   - {kind: global, name: bank_to_dram_offset}
   - {kind: global, name: bank_to_l1_offset}
   - {kind: global, name: my_x}
@@ -2117,10 +2116,9 @@ files:
   - {kind: macro, name: NOC_UNICAST_ADDR_Y}
   - {kind: extern_c, name: __emule_resolve_noc_addr}
   - {kind: extern_c, name: __emule_multicast_write}
+  - {kind: extern_c, name: __emule_noc_addr_is_dram}
   - {kind: function, name: __emule_debug_multicast}
   - {kind: function, name: __emule_addr_to_offset}
-  - {kind: macro, name: __EMULE_LOCAL_L1_TO_PTR_DEFINED}
-  - {kind: function, name: __emule_local_l1_to_ptr}
   - {kind: global, name: worker_logical_col_to_virtual_col}
   - {kind: global, name: worker_logical_row_to_virtual_row}
   - {kind: macro, name: __EMULE_GET_LOGICAL_COORDS_DEFINED}
@@ -2366,6 +2364,14 @@ files:
   - {kind: function, name: __emule_cb_rd_addr}
   - {kind: function, name: __emule_cb_advance_wr}
   - {kind: function, name: __emule_cb_advance_rd}
+  - {kind: function, name: __emule_cb_wr_page}
+  - {kind: function, name: __emule_cb_rd_page}
+- path: include/jit_hw/internal/emule_l1_to_ptr.h
+  section: include/jit_hw/internal/
+  summary: Single source of truth for the kernel L1 access chokepoint `__emule_local_l1_to_ptr` (master-switch early-out + semaphore/CB-boundary/OOB/padding sanitizer checks) plus the sanitizer thread-locals
+    it consumes; included by jit_kernel_stubs.hpp and dataflow_api.h (was duplicated in both). See docs/ASAN.md.
+  symbols:
+  - {kind: function, name: __emule_local_l1_to_ptr}
 - path: include/jit_hw/internal/firmware_common.h
   section: include/jit_hw/internal/
   summary: '`WAYPOINT` macro; cache-op stubs'
@@ -2629,3 +2635,78 @@ files:
   section: include/jit_hw/experimental/llk_sfpu/
   summary: emule shadow of the raw-TTI SDPA SFPU header — verbatim silicon first-column helpers (exp polynomial/recip/softplus/fused-max-sub-exp, calculate_binop_with_scalar) over emule's sfpi+ckernel_ops
     substrate instead of the uncompilable raw exp/recip/converter LLK headers.
+- path: include/jit_hw/api/dataflow/asan/asan_dataflow.h
+  section: include/jit_hw/api/dataflow/asan/
+  summary: NOC Transfer Alignment sanitizer (`__emule_check_noc_read_alignment` / `__emule_check_noc_write_alignment`), split out of dataflow_api.h; per-side absolute alignment (L1 16B, DRAM read 32/64B,
+    DRAM write 16B). Gated by TT_METAL_EMULE_ASAN. See docs/ASAN.md §10.
+  symbols:
+  - {kind: extern_c, name: __emule_noc_addr_is_dram}
+  - {kind: function, name: __emule_check_noc_read_alignment}
+  - {kind: function, name: __emule_check_noc_write_alignment}
+- path: include/jit_hw/asan/asan_cb.h
+  section: include/jit_hw/asan/
+  summary: 'CB-op sanitizer bookkeeping lifted out of cb_api.h: `__emule_asan_cb_on_{reserve,push,wait,pop}` helpers (Dirty-CB dangling flags + call sites, CB-Boundary window counters, always-on Reservation
+    Overflow check, gated NoC-read-pending race check) and the thread-local state they own. See docs/ASAN.md.'
+  symbols:
+  - {kind: global, name: my_x}
+  - {kind: global, name: my_y}
+  - {kind: global, name: __emule_logical_x}
+  - {kind: global, name: __emule_logical_y}
+  - {kind: global, name: __emule_pending_noc_reads}
+  - {kind: global, name: __emule_cb_reserve_file}
+  - {kind: global, name: __emule_cb_reserve_line}
+  - {kind: global, name: __emule_cb_wait_file}
+  - {kind: global, name: __emule_cb_wait_line}
+  - {kind: global, name: __emule_cb_reserved_pages}
+  - {kind: global, name: __emule_cb_waited_pages}
+  - {kind: global, name: __emule_cb_reserve_dangling}
+  - {kind: global, name: __emule_cb_wait_dangling}
+  - {kind: function, name: __emule_asan_cb_on_reserve}
+  - {kind: function, name: __emule_asan_cb_on_push}
+  - {kind: function, name: __emule_asan_cb_on_wait}
+  - {kind: function, name: __emule_asan_cb_on_pop}
+- path: include/jit_hw/asan/asan_l1_checks.h
+  section: include/jit_hw/asan/
+  summary: 'The per-access L1 sanitizer checks lifted out of the __emule_local_l1_to_ptr chokepoint: plain `__emule_l1_translate` + semaphore/CB-resolve(+boundary)/OOB-tensor/padding helpers, and the sanitizer
+    thread-locals they consume. Reached only when TT_METAL_EMULE_ASAN is on. See docs/ASAN.md.'
+  symbols:
+  - {kind: global, name: __emule_bridge_l1}
+  - {kind: global, name: __emule_sem_l1_range_start}
+  - {kind: global, name: __emule_sem_l1_range_end}
+  - {kind: global, name: __emule_l1_unreserved_base}
+  - {kind: global, name: __emule_l1_tensor_ranges}
+  - {kind: global, name: __emule_l1_tensor_ranges_count}
+  - {kind: global, name: __emule_l1_padding_ranges}
+  - {kind: global, name: __emule_l1_padding_ranges_count}
+  - {kind: global, name: __emule_l1_host_ranges}
+  - {kind: global, name: __emule_l1_host_ranges_count}
+  - {kind: global, name: __emule_l1_resolved_ranges}
+  - {kind: global, name: __emule_l1_resolved_ranges_count}
+  - {kind: global, name: __emule_l1_resolved_ranges_capacity}
+  - {kind: global, name: __emule_cb_reserved_pages}
+  - {kind: global, name: __emule_cb_waited_pages}
+  - {kind: global, name: __emule_cb_boundary_strict}
+  - {kind: function, name: __emule_l1_translate}
+  - {kind: function, name: __emule_asan_check_semaphore}
+  - {kind: function, name: __emule_asan_cb_resolve}
+  - {kind: function, name: __emule_asan_check_oob_tensor}
+  - {kind: function, name: __emule_asan_check_padding}
+- path: include/jit_hw/asan/emule_asan.h
+  section: include/jit_hw/asan/
+  summary: '`__emule_asan_enabled()` master switch (per-launch thread_local cache) + the unified `__emule_asan_panic()` diagnostic trace (kernel/core/processor context + symbolized backtrace); definition
+    behind EMULE_ASAN_IMPLEMENTATION. Moved here from jit_hw/ root.'
+  symbols:
+  - {kind: function, name: __emule_asan_enabled}
+  - {kind: global, name: __emule_kernel_name}
+  - {kind: extern_c, name: __emule_asan_panic}
+  - {kind: global, name: my_x}
+  - {kind: global, name: my_y}
+  - {kind: global, name: __emule_logical_x}
+  - {kind: global, name: __emule_logical_y}
+  - {kind: global, name: __processor_id}
+  - {kind: global, name: __emule_neo_id}
+  - {kind: global, name: __emule_trisc_id}
+  - {kind: function, name: __emule_asan_symbolize}
+  - {kind: function, name: __emule_asan_collapse_angles}
+  - {kind: function, name: __emule_asan_print_trace}
+  - {kind: function, name: __emule_asan_handle_coredump}

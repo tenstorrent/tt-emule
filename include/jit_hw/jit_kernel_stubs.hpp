@@ -88,6 +88,7 @@ inline void tensix_sync() {}
 #include "dev_mem_map.h"
 #include "emule_cb_state.h"
 #include "emule_dfb_state.h"
+#include "jit_hw/asan/emule_asan.h"
 #include "tools/profiler/kernel_profiler.hpp"
 
 // CB-interface surface. Silicon kernels (and consumer kernel-lib templates
@@ -150,19 +151,13 @@ extern "C" uint8_t* __emule_noc_resolve(uint32_t x, uint32_t y, uint64_t addr);
 // from mmap'd-below-4GB L1) and real host pointers.
 extern thread_local uint8_t* __emule_bridge_l1;
 
-// Translate a raw L1 firmware offset (or already-absolute host pointer) to a
-// host uint8_t*.  Available to ALL JIT kernels so the l1_arg_ptr regex patch in
-// emulated_program_runner can inject calls without requiring dataflow_api.h.
-#ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED
-#define __EMULE_LOCAL_L1_TO_PTR_DEFINED
-inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
-    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
-    if (l1_addr >= l1_base) {
-        return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
-    }
-    return __emule_bridge_l1 + l1_addr;
-}
-#endif
+// NoC-read-pending counter (NoC Barrier Missing check in cb_pop_front); not used
+// by the L1 chokepoint. The chokepoint and the rest of its sanitizer
+// thread-locals live together in internal/emule_l1_to_ptr.h. See ASAN.md.
+extern thread_local uint32_t __emule_pending_noc_reads;
+
+// L1 access chokepoint — single definition shared with dataflow_api.h.
+#include "jit_hw/internal/emule_l1_to_ptr.h"
 
 // Bank mapping arrays — populated by emulated_program_runner, resolved at dlopen.
 // Match firmware declarations from dataflow_api_common.h / firmware_common.h —

@@ -79,6 +79,7 @@ extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
 // matches by name only; a mismatch leaves the 4th arg as register garbage.
 extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src,
                                         uint32_t size, bool include_self);
+extern "C" bool __emule_noc_addr_is_dram(uint64_t noc_addr);
 
 // ---- Debug logging (enabled by TT_EMULE_DEBUG_MULTICAST=1 env var) ----
 inline bool __emule_debug_multicast() {
@@ -99,25 +100,10 @@ inline uint32_t __emule_addr_to_offset(uint32_t addr) {
     return addr & 0x1FFFFF;  // SLOT_MASK = 2 MB - 1
 }
 
-// Inverse of __emule_addr_to_offset: convert a uint32_t L1 address (which
-// may be either a firmware-style offset or an absolute host pointer from
-// l1_alloc / CB / DFB) to a dereferenceable host pointer.
-//
-// l1_alloc() returns l1_base_ + bump  (>= l1_base, always a valid host ptr).
-// Firmware HAL addresses (e.g. 0x19520) are offsets into the L1 buffer.
-// We distinguish by comparing against __emule_bridge_l1's numeric address.
-#ifndef __EMULE_LOCAL_L1_TO_PTR_DEFINED
-#define __EMULE_LOCAL_L1_TO_PTR_DEFINED
-inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
-    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_bridge_l1));
-    if (l1_addr >= l1_base) {
-        // Already an absolute host pointer (from l1_alloc / CB / DFB).
-        return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
-    }
-    // Firmware L1 offset — translate via bridge pointer.
-    return __emule_bridge_l1 + l1_addr;
-}
-#endif
+// L1 access chokepoint (__emule_local_l1_to_ptr) — single definition shared with
+// jit_kernel_stubs.hpp. (__emule_addr_to_offset above is a separate helper for
+// NOC-address construction, not the access chokepoint.)
+#include "jit_hw/internal/emule_l1_to_ptr.h"
 
 // ---- Coordinate translation tables ----
 // On real hardware, these are L1-resident lookup tables populated by firmware.
@@ -233,6 +219,7 @@ FORCE_INLINE void noc_async_read_page(
     } else {
         page_size = (1u << addrgen.log_base_2_of_page_size);
     }
+    if (__emule_asan_enabled()) ++__emule_pending_noc_reads;
     uint64_t noc_addr = addrgen.get_noc_addr(id, offset, noc);
     uint8_t* dst = __emule_local_l1_to_ptr(dst_local_l1_addr);
     uint8_t* src = __emule_resolve_noc_addr(noc_addr);
@@ -295,13 +282,20 @@ FORCE_INLINE void noc_async_write_tile(
     noc_async_write_page(id, addrgen, src_local_l1_addr, size, offset, noc);
 }
 
+// ---- NOC transfer alignment check (gated by TT_METAL_EMULE_ASAN) ----
+// __emule_check_noc_{read,write}_alignment live in asan/asan_dataflow.h (included
+// here, after the NOC params + __emule_noc_addr_is_dram decl they depend on).
+#include "jit_hw/api/dataflow/asan/asan_dataflow.h"
+
 // ---- Raw NOC read/write ----
 
 inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
                            uint32_t size, uint8_t noc = noc_index, uint32_t vc = 0) {
+    __emule_check_noc_read_alignment(src_noc_addr, dst_local_l1_addr);
     // NOC addresses are already properly constructed by get_noc_addr() or
     // get_noc_addr_from_bank_id() — no fixup needed here.  Applying
     // __emule_fixup_noc_addr would destroy DRAM bank offsets (> 2MB).
+    if (__emule_asan_enabled()) ++__emule_pending_noc_reads;
     uint8_t* dst = __emule_local_l1_to_ptr(dst_local_l1_addr);
     uint8_t* src = __emule_resolve_noc_addr(src_noc_addr);
     if (__emule_debug_multicast()) {
@@ -325,6 +319,7 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
 
 inline void noc_async_write(uint32_t src_local_l1_addr, uint64_t dst_noc_addr,
                             uint32_t size, uint8_t noc = noc_index, uint32_t vc = 0) {
+    __emule_check_noc_write_alignment(src_local_l1_addr, dst_noc_addr);
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
     uint8_t* dst = __emule_resolve_noc_addr(dst_noc_addr);
     // Guard BOTH ends. The src L1 resolve can legitimately fail when the
@@ -519,7 +514,13 @@ inline void __emule_model_first_read_latency() {
     }
 }
 
-inline void noc_async_read_barrier(uint8_t noc = noc_index) { __emule_model_first_read_latency(); }
+// Clears the pending-NOC-reads counter (the NoC Barrier Missing check reads it
+// in cb_pop_front; see docs/ASAN.md) and models first-input-read latency. The
+// reads themselves are synchronous memcpys, so there's nothing to wait for.
+inline void noc_async_read_barrier(uint8_t noc = noc_index) {
+    __emule_pending_noc_reads = 0;
+    __emule_model_first_read_latency();
+}
 inline void noc_async_write_barrier(uint8_t noc = noc_index) {}
 inline void noc_async_writes_flushed(uint8_t noc = noc_index) {}
 inline void noc_async_posted_writes_flushed(uint8_t noc = noc_index) {}
@@ -698,14 +699,11 @@ inline uint32_t get_semaphore(uint32_t semaphore_id) {
 // Atomic helpers for semaphore operations.
 // volatile reads are unreliable at -O3; use std::atomic for cross-thread visibility.
 inline std::atomic<uint32_t>* __emule_sem_atomic(volatile tt_l1_ptr uint32_t* sem_addr) {
-    // sem_addr may be a raw firmware L1 offset cast straight to a pointer (e.g.
-    // a constexpr receiver-semaphore offset) rather than an absolute host
-    // pointer from get_semaphore() / l1_alloc().  Route it through the same
-    // offset-vs-absolute disambiguation every other dataflow path uses so the
-    // semaphore lands in the relocated L1 pool instead of dereferencing a bare
-    // offset.  Absolute pointers (>= l1_base) pass through unchanged.
+    // Plain translation (offset-vs-absolute disambiguation only), NOT the
+    // sanitizer chokepoint: this is the legitimate semaphore API, which the
+    // checks must exempt. See docs/ASAN.md §6.
     uint32_t addr32 = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(const_cast<uint32_t*>(sem_addr)));
-    return reinterpret_cast<std::atomic<uint32_t>*>(__emule_local_l1_to_ptr(addr32));
+    return reinterpret_cast<std::atomic<uint32_t>*>(__emule_l1_translate(addr32));
 }
 
 // Set semaphore value (local L1 store).

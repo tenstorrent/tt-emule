@@ -8,6 +8,8 @@
 
 #include "jit_hw/emule_cb_state.h"
 #include "jit_hw/emule_dfb_state.h"
+#include "jit_hw/asan/emule_asan.h"
+#include "jit_hw/asan/asan_cb.h"            // CB-op sanitizer bookkeeping helpers + state
 #include "jit_hw/api/compute/common_globals.h"
 #include "jit_hw/emule_wait.h"
 #include "jit_hw/internal/emule_cb_ptr.h"   // per-RISC CB pointers + cb_addr_shift
@@ -21,6 +23,11 @@ extern thread_local uint8_t my_x[2];
 extern thread_local uint8_t my_y[2];
 extern thread_local uint32_t __emule_logical_x;
 extern thread_local uint32_t __emule_logical_y;
+
+// The CB-op sanitizer state (Dirty-CB dangling flags + call sites, CB-Boundary
+// window counters) and the per-op `__emule_asan_cb_on_*` helpers that maintain
+// it live in asan/asan_cb.h; the cb_* ops below call those helpers so the CB
+// sync logic here stays uncluttered.
 
 // cb_addr_shift (16-byte fifo-pointer encoding) is defined in emule_cb_ptr.h.
 
@@ -118,12 +125,8 @@ constexpr uint8_t unpack_tile_num_faces[32] = {
     4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
 };
 
-// ---- Per-RISC CB pointers ----
-// The per-thread read/write pointers (the single source of truth that fixes the
-// #139 race) live in jit_hw/internal/emule_cb_ptr.h (__emule_local_cb). This
-// file's cb_push_back/cb_pop_front advance them via __emule_cb_advance_wr/rd and
-// get_write_ptr/get_read_ptr read them via __emule_cb_wr_addr/__emule_cb_rd_addr.
-// CBSyncState here owns only the shared occupied semaphore.
+// __emule_asan_enabled() (master switch) now lives in emule_asan.h (included
+// above), so every ASAN TU shares one definition.
 
 // ---- Circular Buffer sync operations ----
 
@@ -137,23 +140,19 @@ inline int __emule_cb_timeout_sec() {
     return val;
 }
 
-inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
+inline void cb_reserve_back(
+    uint32_t cb_id, uint32_t n,
+    const char* site_file = __builtin_FILE(), uint32_t site_line = __builtin_LINE()) {
     auto& cb = __emule_cbs[cb_id];
-    if (n > cb.num_pages) {
-        fprintf(stderr, "EMULE BUG: cb_reserve_back(cb_id=%u, n=%u) requests more than capacity "
-                "(num_pages=%u, page_size=%u) [phys (%u,%u) logical (%u,%u)]\n",
-                cb_id, n, cb.num_pages, cb.page_size,
-                my_x[0], my_y[0], __emule_logical_x, __emule_logical_y);
-        std::abort();
-    }
+    // ASAN: Dirty-CB site/flag, always-on Reservation Overflow check, reserve
+    // window. (__emule_pack_offset is intentionally NOT reset here — it is reset
+    // by cb_push_back; silicon pack.h: the sequential pack write pointer "is reset
+    // after cb_push_back", so a reserve_back without an intervening push keeps
+    // advancing, as the multi-core topk final kernel needs.)
+    __emule_asan_cb_on_reserve(cb_id, n, site_file, site_line);
     // This thread produces cb_id (see __emule_cb_self_produce_mask).
     __emule_cb_self_produce_mask |= (1u << cb_id);
-    // __emule_pack_offset is reset by cb_push_back, NOT here. Per silicon
-    // pack.h, the sequential pack write pointer "is reset after cb_push_back",
-    // so reserve_back calls without an intervening push_back keep advancing —
-    // required by the multi-core topk final kernel (reserve_back(1) per tile +
-    // one trailing push_back(Wt)).
-    // Lock-free fast path (safe for SPSC — only consumer decrements occupied)
+    // Lock-free fast path (safe for SPSC — only consumer decrements occupied).
     if ((cb.num_pages - cb.occupied.load(std::memory_order_acquire)) >= n) {
         return;
     }
@@ -179,6 +178,9 @@ inline void cb_reserve_back(uint32_t cb_id, uint32_t n) {
 }
 
 inline void cb_push_back(uint32_t cb_id, uint32_t n) {
+    // ASAN: clear the dangling reserve + shrink the reserve window before the
+    // FIFO advance.
+    __emule_asan_cb_on_push(cb_id, n);
     // Advance this thread's own write pointer (mirrors the per-RISC write ptr on
     // silicon), then bump the shared occupied semaphore.
     __emule_cb_advance_wr(cb_id, n);
@@ -211,8 +213,12 @@ inline void cb_push_back(uint32_t cb_id, uint32_t n) {
     }
 }
 
-inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
+inline void cb_wait_front(
+    uint32_t cb_id, uint32_t n,
+    const char* site_file = __builtin_FILE(), uint32_t site_line = __builtin_LINE()) {
     auto& cb = __emule_cbs[cb_id];
+    // ASAN: record site, mark wait outstanding, grow the waited window (max()).
+    __emule_asan_cb_on_wait(cb_id, n, site_file, site_line);
     if (n > cb.num_pages) {
         fprintf(stderr, "EMULE BUG: cb_wait_front(cb_id=%u, n=%u) requests more than capacity "
                 "(num_pages=%u, page_size=%u) [phys (%u,%u) logical (%u,%u)]\n",
@@ -224,8 +230,10 @@ inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
     // (the in-place recycle idiom) does not block waiting on a non-existent
     // other consumer. See __emule_cb_self_consume_mask.
     __emule_cb_self_consume_mask |= (1u << cb_id);
-    // Lock-free fast path (safe for SPSC — only producer increments occupied)
-    if (cb.occupied.load(std::memory_order_acquire) >= n) return;
+    // Lock-free fast path (safe for SPSC — only producer increments occupied).
+    if (cb.occupied.load(std::memory_order_acquire) >= n) {
+        return;
+    }
     // Self-produced CB: this thread also fills it (called cb_reserve_back/
     // cb_push_back), so no other thread will add tiles — blocking would deadlock
     // the single-threaded compute kernel. The data this thread needs was already
@@ -249,6 +257,10 @@ inline void cb_wait_front(uint32_t cb_id, uint32_t n) {
 }
 
 inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
+    // ASAN: NoC-read-pending race check (a pop frees the page for the producer to
+    // refill, so all reads must be barriered first), then clear the dangling wait
+    // + shrink the waited window.
+    __emule_asan_cb_on_pop(cb_id, n);
     // Advance this thread's own read pointer (mirrors the per-RISC read ptr on
     // silicon), then drop the shared occupied semaphore.
     __emule_cb_advance_rd(cb_id, n);
@@ -267,12 +279,23 @@ inline void cb_pop_front(uint32_t cb_id, uint32_t n) {
 }
 
 // ---- int32_t overloads (D2M int32 support emits int32_t tile counts) ----
-inline void cb_reserve_back(uint32_t cb_id, int32_t n) { cb_reserve_back(cb_id, static_cast<uint32_t>(n)); }
+// reserve/wait forward the call site so the Dirty-CB check still records the
+// kernel location rather than this overload's line.
+inline void cb_reserve_back(
+    uint32_t cb_id, int32_t n,
+    const char* site_file = __builtin_FILE(), uint32_t site_line = __builtin_LINE()) {
+    cb_reserve_back(cb_id, static_cast<uint32_t>(n), site_file, site_line);
+}
 inline void cb_push_back(uint32_t cb_id, int32_t n)    { cb_push_back(cb_id, static_cast<uint32_t>(n)); }
-inline void cb_wait_front(uint32_t cb_id, int32_t n)   { cb_wait_front(cb_id, static_cast<uint32_t>(n)); }
+inline void cb_wait_front(
+    uint32_t cb_id, int32_t n,
+    const char* site_file = __builtin_FILE(), uint32_t site_line = __builtin_LINE()) {
+    cb_wait_front(cb_id, static_cast<uint32_t>(n), site_file, site_line);
+}
 inline void cb_pop_front(uint32_t cb_id, int32_t n)    { cb_pop_front(cb_id, static_cast<uint32_t>(n)); }
 
 // ---- Pointer accessors ----
+
 
 // Return uint32_t (truncated host pointer). CB memory is mmap'd below 4 GB.
 // Reads the calling thread's own per-RISC write/read pointer (emule_cb_ptr.h),
