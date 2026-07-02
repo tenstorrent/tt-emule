@@ -126,6 +126,19 @@ ALWI void sigmoid_tile(uint32_t idst) {
     }
 }
 
+#ifndef EMULE_SIGMOID_PACK_WRAPPERS_DEFINED
+#define EMULE_SIGMOID_PACK_WRAPPERS_DEFINED
+template <bool approx = false>
+ALWI void sigmoid_tile_init_pack() {
+    sigmoid_tile_init<approx>();
+}
+
+template <VectorMode vector_mode = VectorMode::RC, bool approx = false>
+ALWI void sigmoid_tile_pack(uint32_t idst) {
+    sigmoid_tile<vector_mode, approx>(idst);
+}
+#endif
+
 // --- sign (-1, 0, +1) ---
 ALWI void sign_tile_init() {}
 ALWI void sign_tile(uint32_t idst) {
