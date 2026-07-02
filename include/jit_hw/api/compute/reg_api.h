@@ -33,6 +33,8 @@ ALWI void tile_regs_acquire() {
         __emule_compute_ctx().dst_fresh[s] = true;
         __emule_dst_set_int(s, false);  // clean regs hold numeric float zeros
     }
+    __emule_sfpi_dst_base = &__emule_dst[0][0];
+    __emule_sfpi_cursor = 0;
 }
 ALWI void tile_regs_commit()  {}
 ALWI void tile_regs_wait()    {}
