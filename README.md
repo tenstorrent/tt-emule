@@ -1,3 +1,5 @@
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/tenstorrent/tt-emule)
+
 # tt-emule
 
 A C++ software emulator of the Tenstorrent device-level kernel and host APIs. Run tt-metal kernel
