@@ -72,10 +72,10 @@ ENTRY_NUM=0
 PASS=0
 FAIL=0
 
-# run_model <name> <hf_model> [pytest args...]
+# run_model <name> <hf_model> <pytest args...>
 # Runs the vendored demo end-to-end for one model/scenario. Remaining args are
-# passed straight to pytest (typically a -k selector plus any --overrides). Each
-# entry runs in its own subshell with a fresh HF_MODEL + full emule env.
+# passed straight to pytest and MUST include a -k selector plus any --overrides.
+# Each entry runs in its own subshell with a fresh HF_MODEL + full emule env.
 run_model() {
     local name="$1"; shift
     local hf_model="$1"; shift
@@ -84,8 +84,18 @@ run_model() {
     if [ $(( (ENTRY_NUM - 1) % SHARD_COUNT + 1 )) -ne "$SHARD_INDEX" ]; then
         return
     fi
-    if [ "$#" -eq 0 ]; then
-        echo "--- $name ---"; echo "  FAIL (no pytest args / -k selector supplied to run_model)"
+    # Require an explicit -k selector. $E2E_TEST points at a single, heavily
+    # parametrized test (test_demo_text has dozens of variants: long-context,
+    # multi-device DP, TG, stress, ...). Without -k, pytest would collect and run
+    # the ENTIRE matrix — a slow, mostly-unsupported run. Guard on -k presence,
+    # not merely non-empty args, so an entry passing only an --override (e.g.
+    # --max_generated_tokens) can't silently trigger the full sweep.
+    local has_k=0
+    for _arg in "$@"; do
+        case "$_arg" in -k|-k*) has_k=1; break ;; esac
+    done
+    if [ "$has_k" -eq 0 ]; then
+        echo "--- $name ---"; echo "  FAIL (run_model requires a -k selector to pick a test_demo_text variant)"
         FAIL=$((FAIL + 1)); return
     fi
     echo "--- $name (HF_MODEL=$hf_model) ---"
