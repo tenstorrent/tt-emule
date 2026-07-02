@@ -11,8 +11,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <sched.h>
-#include <unistd.h>
+#include "jit_hw/emule_sem_wait.h"
 
 // get_semaphore() is defined in jit_kernel_stubs.hpp (included by all JIT
 // kernels).  It returns a uint32_t L1 address (truncated host pointer) for
@@ -45,15 +44,10 @@ public:
         // never 0, so the split is unambiguous.
         auto reached = [target](uint32_t cur) { return target > 0 ? cur >= target : cur == target; };
         uint64_t spins = 0;
+        uint64_t start_ns = __emule_now_ns();
         while (!reached(a->load(std::memory_order_acquire))) {
-            if (spins < 64) {
-                // busy-spin
-            } else if (spins < 1024) {
-                sched_yield();
-            } else {
-                usleep(1);
-            }
-            if (++spins > 10'000'000ULL) {
+            __emule_sem_backoff(spins++);
+            if (__emule_sem_watchdog_expired(start_ns)) {
                 fprintf(stderr,
                     "EMULE HANG: ckernel::Semaphore::wait(%u) stuck at %u "
                     "after %llu spins\n",
@@ -67,15 +61,10 @@ public:
     void wait_min(uint32_t min_val) {
         auto* a = atom();
         uint64_t spins = 0;
+        uint64_t start_ns = __emule_now_ns();
         while (a->load(std::memory_order_acquire) < min_val) {
-            if (spins < 64) {
-                // busy-spin
-            } else if (spins < 1024) {
-                sched_yield();
-            } else {
-                usleep(1);
-            }
-            if (++spins > 10'000'000ULL) {
+            __emule_sem_backoff(spins++);
+            if (__emule_sem_watchdog_expired(start_ns)) {
                 fprintf(stderr,
                     "EMULE HANG: ckernel::Semaphore::wait_min(%u) stuck at %u "
                     "after %llu spins\n",

@@ -215,6 +215,14 @@ files:
   - {kind: global, name: __emule_dfbs}
   - {kind: global, name: __emule_tc_array}
   - {kind: global, name: __processor_id}
+- path: include/jit_hw/emule_sem_wait.h
+  section: include/jit_hw/
+  summary: Shared semaphore spin-wait backoff + wall-clock hang watchdog (`TT_EMULE_SEM_TIMEOUT_SEC`) for the three emule semaphore paths; host scheduling only, no result impact
+  symbols:
+  - {kind: function, name: __emule_sem_backoff}
+  - {kind: function, name: __emule_now_ns}
+  - {kind: function, name: __emule_sem_timeout_ns}
+  - {kind: function, name: __emule_sem_watchdog_expired}
 - path: include/jit_hw/emule_wait.h
   section: include/jit_hw/
   summary: '`__emule_cv_wait` (cv.wait by default; `cv.wait_for`+`<chrono>` under `EMULE_WAIT_TIMEOUT`)'
@@ -2133,7 +2141,6 @@ files:
   - {kind: extern_c, name: __emule_resolve_noc_addr}
   - {kind: extern_c, name: __emule_multicast_write}
   - {kind: function, name: __emule_debug_multicast}
-  - {kind: function, name: __emule_sem_spin_limit}
   - {kind: function, name: __emule_addr_to_offset}
   - {kind: macro, name: __EMULE_LOCAL_L1_TO_PTR_DEFINED}
   - {kind: function, name: __emule_local_l1_to_ptr}

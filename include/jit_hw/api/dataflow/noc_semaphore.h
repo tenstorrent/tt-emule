@@ -20,8 +20,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <sched.h>
-#include <unistd.h>
+#include "jit_hw/emule_sem_wait.h"
 #include "jit_hw/api/dataflow/noc.h"
 
 extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
@@ -72,20 +71,10 @@ public:
     void down(uint32_t value) {
         auto* a = atom();
         uint64_t spins = 0;
+        uint64_t start_ns = __emule_now_ns();
         while (a->load(std::memory_order_acquire) < value) {
-            if (spins < 64) {
-                // busy-spin
-            } else if (spins < 2048) {
-                sched_yield();
-            } else if (spins < 32768) {
-                usleep(10);
-            } else {
-                // Long wait: back off to 200us to cede CPU to producers (see
-                // dataflow_api.h noc_semaphore_wait). emule runs each core as an OS
-                // thread; a usleep(1) poll storm from many waiters starves producers.
-                usleep(200);
-            }
-            if (++spins > 10'000'000ULL) {
+            __emule_sem_backoff(spins++);
+            if (__emule_sem_watchdog_expired(start_ns)) {
                 fprintf(stderr,
                     "EMULE HANG: Semaphore::down(%u) stuck at %u after %llu spins\n",
                     value, a->load(std::memory_order_relaxed),
@@ -108,20 +97,10 @@ public:
         // never 0, so the split is unambiguous.
         auto reached = [target](uint32_t cur) { return target > 0 ? cur >= target : cur == target; };
         uint64_t spins = 0;
+        uint64_t start_ns = __emule_now_ns();
         while (!reached(a->load(std::memory_order_acquire))) {
-            if (spins < 64) {
-                // busy-spin
-            } else if (spins < 2048) {
-                sched_yield();
-            } else if (spins < 32768) {
-                usleep(10);
-            } else {
-                // Long wait: back off to 200us to cede CPU to producers (see
-                // dataflow_api.h noc_semaphore_wait). emule runs each core as an OS
-                // thread; a usleep(1) poll storm from many waiters starves producers.
-                usleep(200);
-            }
-            if (++spins > 10'000'000ULL) {
+            __emule_sem_backoff(spins++);
+            if (__emule_sem_watchdog_expired(start_ns)) {
                 fprintf(stderr,
                     "EMULE HANG: Semaphore::wait(%u) stuck at %u after %llu spins\n",
                     target, a->load(std::memory_order_relaxed),
@@ -134,20 +113,10 @@ public:
     void wait_min(uint32_t min_val) {
         auto* a = atom();
         uint64_t spins = 0;
+        uint64_t start_ns = __emule_now_ns();
         while (a->load(std::memory_order_acquire) < min_val) {
-            if (spins < 64) {
-                // busy-spin
-            } else if (spins < 2048) {
-                sched_yield();
-            } else if (spins < 32768) {
-                usleep(10);
-            } else {
-                // Long wait: back off to 200us to cede CPU to producers (see
-                // dataflow_api.h noc_semaphore_wait). emule runs each core as an OS
-                // thread; a usleep(1) poll storm from many waiters starves producers.
-                usleep(200);
-            }
-            if (++spins > 10'000'000ULL) {
+            __emule_sem_backoff(spins++);
+            if (__emule_sem_watchdog_expired(start_ns)) {
                 fprintf(stderr,
                     "EMULE HANG: Semaphore::wait_min(%u) stuck at %u after %llu spins\n",
                     min_val, a->load(std::memory_order_relaxed),
