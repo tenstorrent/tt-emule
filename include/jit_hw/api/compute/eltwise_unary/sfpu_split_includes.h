@@ -167,24 +167,12 @@
 #include "api/compute/eltwise_unary/erfinv.h"
 #endif
 
-#if SFPU_OP_BITWISE_AND_INCLUDE
-#include "api/compute/eltwise_unary/bitwise_and.h"
+#if SFPU_OP_BITWISE_INCLUDE
+#include "api/compute/eltwise_unary/bitwise.h"
 #endif
 
-#if SFPU_OP_BITWISE_OR_INCLUDE
-#include "api/compute/eltwise_unary/bitwise_or.h"
-#endif
-
-#if SFPU_OP_BITWISE_XOR_INCLUDE
-#include "api/compute/eltwise_unary/bitwise_xor.h"
-#endif
-
-#if SFPU_OP_LEFT_SHIFT_INCLUDE
-#include "api/compute/eltwise_unary/left_shift.h"
-#endif
-
-#if SFPU_OP_RIGHT_SHIFT_INCLUDE
-#include "api/compute/eltwise_unary/right_shift.h"
+#if SFPU_OP_SHIFT_INCLUDE
+#include "api/compute/eltwise_unary/shift.h"
 #endif
 
 #if SFPU_OP_THRESHOLD_INCLUDE

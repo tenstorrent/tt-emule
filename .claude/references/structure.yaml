@@ -1525,13 +1525,17 @@ files:
   - {kind: function, name: rsub_unary_tile}
   - {kind: function, name: add_unary_tile_int32}
   - {kind: function, name: sub_unary_tile_int32}
-- path: include/jit_hw/api/compute/eltwise_unary/bitwise_and.h
+- path: include/jit_hw/api/compute/eltwise_unary/bitwise.h
   section: include/jit_hw/api/compute/eltwise_unary/
-  summary: '`ckernel::` `bitwise_and_tile` (+`_init`)'
+  summary: SFPU bitwise tile shims (AND/OR/XOR), DataFormat-templated; emulated on the int32 DST slot.
   symbols:
   - {kind: namespace, name: ckernel}
-  - {kind: function, name: bitwise_and_tile_init}
   - {kind: function, name: bitwise_and_tile}
+  - {kind: function, name: bitwise_or_tile}
+  - {kind: function, name: bitwise_xor_tile}
+  - {kind: function, name: bitwise_and_tile_init}
+  - {kind: function, name: bitwise_or_tile_init}
+  - {kind: function, name: bitwise_xor_tile_init}
 - path: include/jit_hw/api/compute/eltwise_unary/bitwise_not.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `bitwise_not_tile` (+`_init`)'
@@ -1539,20 +1543,6 @@ files:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: bitwise_not_tile_init}
   - {kind: function, name: bitwise_not_tile}
-- path: include/jit_hw/api/compute/eltwise_unary/bitwise_or.h
-  section: include/jit_hw/api/compute/eltwise_unary/
-  summary: '`ckernel::` `bitwise_or_tile` (+`_init`)'
-  symbols:
-  - {kind: namespace, name: ckernel}
-  - {kind: function, name: bitwise_or_tile_init}
-  - {kind: function, name: bitwise_or_tile}
-- path: include/jit_hw/api/compute/eltwise_unary/bitwise_xor.h
-  section: include/jit_hw/api/compute/eltwise_unary/
-  summary: '`ckernel::` `bitwise_xor_tile` (+`_init`)'
-  symbols:
-  - {kind: namespace, name: ckernel}
-  - {kind: function, name: bitwise_xor_tile_init}
-  - {kind: function, name: bitwise_xor_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/cbrt.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `cbrt_tile` (+`_init`)'
@@ -1774,13 +1764,6 @@ files:
   - {kind: function, name: isposinf_tile}
   - {kind: function, name: isneginf_tile_init}
   - {kind: function, name: isneginf_tile}
-- path: include/jit_hw/api/compute/eltwise_unary/left_shift.h
-  section: include/jit_hw/api/compute/eltwise_unary/
-  summary: '`ckernel::` `left_shift_tile` (+`_init`)'
-  symbols:
-  - {kind: namespace, name: ckernel}
-  - {kind: function, name: left_shift_tile_init}
-  - {kind: function, name: left_shift_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/lerp.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `lerp_tile` (+`_init`)'
@@ -1893,13 +1876,6 @@ files:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: remainder_tile_init}
   - {kind: function, name: remainder_tile}
-- path: include/jit_hw/api/compute/eltwise_unary/right_shift.h
-  section: include/jit_hw/api/compute/eltwise_unary/
-  summary: '`ckernel::` `right_shift_tile` (+`_init`)'
-  symbols:
-  - {kind: namespace, name: ckernel}
-  - {kind: function, name: right_shift_tile_init}
-  - {kind: function, name: right_shift_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/rounding.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `floor_tile`, `ceil_tile`, `trunc_tile`, `frac_tile`, `round_tile`, `rounding_op_tile_init`, `round_tile_init`'
@@ -1947,6 +1923,15 @@ files:
 - path: include/jit_hw/api/compute/eltwise_unary/sfpu_split_includes.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: conditional includes under `SFPU_OP_*_INCLUDE` guards (no own symbols)
+- path: include/jit_hw/api/compute/eltwise_unary/shift.h
+  section: include/jit_hw/api/compute/eltwise_unary/
+  summary: SFPU shift tile shims (logical left_shift, arithmetic right_shift), DataFormat-templated; emulated on the int32 DST slot.
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: left_shift_tile}
+  - {kind: function, name: right_shift_tile}
+  - {kind: function, name: left_shift_tile_init}
+  - {kind: function, name: right_shift_tile_init}
 - path: include/jit_hw/api/compute/eltwise_unary/sigmoid.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `sigmoid_tile`, `sigmoid_tile_init`'

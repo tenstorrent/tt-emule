@@ -741,14 +741,17 @@ inline vUInt& operator>>=(vUInt& a, int s) { for (uint32_t i = 0; i < 32; ++i) a
 inline vCond operator&&(const vCond& a, const vCond& b) { return v_and(a, b); }
 
 // ---- Exponent/mantissa field ops (SFPEXEXP / SFPSETEXP / SFPDIVP2) ----
-enum class ExponentMode { Debias, NoDebias };
+// Mirrors sfpi 7.63.0: canonical names are Unbiased (debiased, e - 127) and
+// Biased (raw biased exponent e); Debias/NoDebias are retained as the
+// deprecated legacy aliases so existing callers still compile.
+enum class ExponentMode { Unbiased, Biased, Debias = Unbiased, NoDebias = Biased };
 
-inline vInt exexp(const vFloat& vf, ExponentMode mode = ExponentMode::Debias) {
+inline vInt exexp(const vFloat& vf, ExponentMode mode = ExponentMode::Unbiased) {
     vInt r;
     for (uint32_t i = 0; i < 32; ++i) {
         uint32_t b; std::memcpy(&b, &vf.v[i], 4);
         int e = static_cast<int>((b >> 23) & 0xFF);
-        r.v[i] = (mode == ExponentMode::Debias) ? (e - 127) : e;
+        r.v[i] = (mode == ExponentMode::Biased) ? e : (e - 127);
     }
     return r;
 }
