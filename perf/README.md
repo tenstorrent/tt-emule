@@ -18,7 +18,8 @@ code path. Post-process the framework's JSON into a size→time curve and plot.
 | `plot_bench.py` | Plots one or more curve CSVs (log-log time vs total elements) + an emule/silicon ratio panel. matplotlib only, no device. |
 | `bench_eltwise_unary.py`, `run_bench_emule.sh` | **Secondary** lightweight microbench (not the sweep_framework). Only used to push far past the sweep suite's max size — see "Reaching the compute-bound regime". |
 | `emule_exp_curve.csv`, `silicon_exp_curve.csv` | reduced `exp` bf16 curves for emule (WH host) and silicon (WH-B0), both from a `nightly` sweep at git SHA `8b9517627da`. Raw multi-MB framework JSONs are not committed. |
-| `emule_vs_silicon_exp.png` | the overlay plot (left: both curves; right: emule/silicon ratio). |
+| `emule_gelu_curve.csv`, `silicon_gelu_curve.csv` | same for `gelu` (companion op — confirms the finding is not exp-specific). |
+| `emule_vs_silicon_exp.png`, `emule_vs_silicon_gelu.png` | overlay plots (left: both curves; right: emule/silicon ratio). |
 
 ## Method
 
@@ -89,6 +90,13 @@ emule wins; the disadvantage only narrows as silicon's compute term grows.
 (The lone ~400ms spikes on both curves at ~86K elements are first-run JIT/compile
 outliers, not a size effect — the exporter records a single uncached run per
 vector.)
+
+**gelu confirms it.** The companion `gelu` sweep (`emule_vs_silicon_gelu.png`)
+reproduces the exact shape: emule flat ~90–115ms, silicon ~0.24ms → ~2.95ms,
+silicon winning ~502× at <10K narrowing to ~28× at >1M. The finding is not
+exp-specific — the emule floor is the fixed program-launch cost, independent of
+which SFPU op runs. (gelu shows the same ~86K first-run compile spike on both
+sides.)
 
 ### Reaching the compute-bound regime
 
