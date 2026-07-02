@@ -254,7 +254,8 @@ Optional debug/perf knobs (all default off / auto):
 
 | Variable | Value | Effect |
 |---|---|---|
-| `TT_EMULE_WAIT_TIMEOUT` | `1` | Re-enable the per-op CB/DFB/semaphore hang watchdog. Off by default: the JIT kernel wait path uses `cv.wait` and drops `<chrono>`, which on libstdc++ pulls the heavy C++20 `<format>`/iostream graph (~1 s of cold JIT compile per kernel). Set this when debugging a deadlock to restore the bounded `wait_for` + offending-CB/DFB abort message. The flag is part of the JIT cache key, so toggling it recompiles automatically. |
+| `TT_EMULE_WAIT_TIMEOUT` | `1` | Re-enable the per-op CB/DFB hang watchdog. Off by default: the JIT kernel wait path uses `cv.wait` and drops `<chrono>`, which on libstdc++ pulls the heavy C++20 `<format>`/iostream graph (~1 s of cold JIT compile per kernel). Set this when debugging a deadlock to restore the bounded `wait_for` + offending-CB/DFB abort message. The flag is part of the JIT cache key, so toggling it recompiles automatically. (Semaphore spin-waits have a separate always-on watchdog; see `TT_EMULE_SEM_TIMEOUT_SEC`.) |
+| `TT_EMULE_SEM_TIMEOUT_SEC` | `120` | Wall-clock deadline for a semaphore spin-wait before it declares a hang and aborts with an `EMULE HANG` diagnostic. `0` disables the watchdog (wait forever). Read at runtime via `clock_gettime` (not a JIT-cache key), so it can be changed between runs without recompiling. Independent of `TT_EMULE_WAIT_TIMEOUT`: that gates the CB/DFB `cv.wait` path; this gates the always-on semaphore spin-wait (`emule_sem_wait.h`). |
 | `TT_EMULE_JIT_CACHE_DIR` | path | Override the JIT `.so` cache dir (default `/tmp/tt_emule_jit_cache_<uid>`). |
 | `TT_EMULE_KEEP_JIT_SRC` | `1` | Keep generated inline-kernel sources for inspection instead of deleting them. |
 

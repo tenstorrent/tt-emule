@@ -210,7 +210,7 @@ heuristic. See `docs/cb-dataformat.md`, `docs/cb-emulation.md`, and
 
 | Silicon | Emule |
 |---|---|
-| In-L1 32-bit words at fixed offsets, atomic ops from RISCs and NOC remote writes | Same — at `EMULE_SEM_BASE + id*16` per core. Accessed via `std::atomic_*` on raw `uint32_t`. NOC remote sets go through `__emule_resolve_noc_addr`. `noc_semaphore_wait` is a spin-wait with `std::this_thread::yield()`. |
+| In-L1 32-bit words at fixed offsets, atomic ops from RISCs and NOC remote writes | Same — at `EMULE_SEM_BASE + id*16` per core. Accessed via `std::atomic_*` on raw `uint32_t`. NOC remote sets go through `__emule_resolve_noc_addr`. `noc_semaphore_wait` is a spin-wait with an escalating backoff (busy -> `sched_yield` -> `usleep`) and a wall-clock hang watchdog, shared via `emule_sem_wait.h`. |
 
 Owner: `tt-emule/include/jit_hw/api/dataflow/dataflow_api.h::noc_semaphore_*`.
 

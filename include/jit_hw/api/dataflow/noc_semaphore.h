@@ -14,7 +14,7 @@
 //   - up(const Noc&, ...) delegates to noc_semaphore_inc (already in dataflow_api.h)
 //
 // Semaphore operations use C++ atomics for cross-thread visibility.
-// Spin-waits include hang detection that aborts after 10M iterations.
+// Spin-waits share the backoff + wall-clock hang watchdog in emule_sem_wait.h.
 
 #include <atomic>
 #include <cstdint>

@@ -270,9 +270,15 @@ class Semaphore {
 };
 ```
 
-Spin-waits include hang detection: 10M iterations without progress triggers
-`std::abort()` with a context print. This catches deadlocks in mock-runtime
-mismatches without infinite hangs.
+Spin-waits share one backoff-and-watchdog helper (`emule_sem_wait.h`): a wait
+escalates busy-spin -> `sched_yield` -> `usleep(10)` -> `usleep(200)` so a
+long-waiting thread cedes its host CPU to the peer it is waiting on (emule runs
+each core as an OS thread and is heavily oversubscribed). A wall-clock watchdog
+(`TT_EMULE_SEM_TIMEOUT_SEC`, default 120 s, `0` disables) then triggers
+`std::abort()` with a context print, catching real deadlocks without infinite
+hangs. The deadline is wall-clock rather than a spin count so it does not shift
+with the backoff tier. This is host scheduling only; silicon just busy-spins on
+the L1 word with no backoff or watchdog.
 
 The free function `noc_semaphore_wait(ptr, val)` waits for `>= val` when
 `val >= 1` (monotonic handshake counter) and exact `== 0` when `val == 0`
