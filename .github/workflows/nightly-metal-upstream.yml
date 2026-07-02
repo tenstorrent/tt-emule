@@ -244,3 +244,95 @@ jobs:
             ${{ runner.temp }}/ttnn-junit-xml/*.xml
           retention-days: 30
           if-no-files-found: warn
+
+  e2e-models:
+    name: E2E Models (${{ matrix.arch }}, shard ${{ matrix.shard }}/2)
+    needs: build
+    runs-on: tt-ubuntu-2204-xlarge-stable
+    # Full model demos under emule slow-dispatch are slow; warning-only so a
+    # failure/timeout never blocks. Runs in parallel with the regression and
+    # ttnn-pytest jobs (all `needs: build`, separate jobs).
+    timeout-minutes: 300
+    continue-on-error: true
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Blackhole full-model support is unvalidated — kept warning-only.
+        arch: [wormhole, blackhole]
+        shard: [1, 2]   # one shard per curated model entry (round-robin)
+    env:
+      HF_HOME: ${{ runner.temp }}/hf-cache
+    steps:
+      - name: Checkout tt-emule (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: tt-emule
+
+      - name: Checkout tt-metal at resolved SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ needs.build.outputs.sha }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nightly-tt-metal-build-${{ github.run_id }}
+          path: tt-metal/build_emule/
+
+      - name: Place cluster descriptors
+        shell: bash
+        run: |
+          mkdir -p tt-metal/tt_metal/third_party/umd/tests
+          cp -r tt-metal/build_emule/_cluster_descs/cluster_descriptor_examples \
+                tt-metal/tt_metal/third_party/umd/tests/
+
+      - name: Install SFPI toolchain
+        shell: bash
+        run: bash tt-metal/install_dependencies.sh --sfpi
+
+      - name: Install model deps (transformers, torchvision — no torch bump)
+        # The tt_transformers model loader needs transformers; torchvision is
+        # pulled in by the model preprocessing chain. Pin to the versions the
+        # toolchain venv is validated against and install torchvision --no-deps
+        # so it never bumps the pre-baked torch.
+        shell: bash
+        run: |
+          VENV=/opt/ttmlir-toolchain/venv
+          "$VENV/bin/pip" install --no-cache-dir transformers==4.53.0
+          "$VENV/bin/pip" install --no-cache-dir --no-deps torchvision==0.24.0
+
+      - name: Restore HuggingFace weight cache (ungated unsloth mirror)
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/hf-cache
+          key: hf-unsloth-llama-3.2-1b-instruct-v1
+          restore-keys: |
+            hf-unsloth-llama-3.2-1b-
+
+      - name: Run E2E models (${{ matrix.arch }}, shard ${{ matrix.shard }}/2)
+        env:
+          TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
+          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
+          TT_EMULE_ARCH: ${{ matrix.arch }}
+          SHARD_INDEX:   ${{ matrix.shard }}
+          SHARD_COUNT:   2
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-e2e-models.sh
+
+      - name: Upload E2E model artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-e2e-models-results-${{ github.run_id }}-${{ matrix.arch }}-shard-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/e2e-models.log
+            ${{ runner.temp }}/e2e-junit-xml/*.xml
+          retention-days: 30
+          if-no-files-found: warn

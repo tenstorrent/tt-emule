@@ -59,6 +59,10 @@ focused reference; start here and follow the links.
   dividend); generic RISC-V semantics, not Quasar-specific.
 
 **CI / testing**
+- [e2e-models.md](docs/e2e-models.md) — end-to-end model regression: runs full
+  tt-metal demos (`simple_text_demo`) under emulation via an emule-vendored copy
+  of the demo (host-sampling + trace-off), a curated per-arch runner, and a
+  nightly `e2e-models` shard parallel to the regression + ttnn-pytest jobs.
 - [post-commit-sweep.md](docs/post-commit-sweep.md) — the nightly post-commit
   pass-rate sweep: runs tt-metal's per-arch post-commit ttnn lane under emule
   and reports a growing pass-rate metric (not a gate). Manifest-entry
