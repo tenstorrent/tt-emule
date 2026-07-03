@@ -185,6 +185,36 @@ device-bringup cost that motivated the question. It is a one-time "chip is off"
 cost, not a steady-state property: keep the device warm and it vanishes (silicon
 wins at all N, per the warm result above).
 
+## Core-count scaling — what the fixed floor actually is
+
+`bench_core_scaling.py` holds per-core work fixed (1 tile/core) and varies how
+many cores the program spans via height-sharding, isolating core count from data
+size (`emule_core_scaling.png`):
+
+| cores | exp (fixed-floor) | reduce_sum (per-tile) |
+|---|---|---|
+| 1 | 135ms | 1.1ms |
+| 8 | 153ms | 2.9ms |
+| 32 | 151ms | 49ms |
+| 64 | 138ms | 213ms |
+
+This disambiguates the bimodal split — and **corrects** an earlier guess that the
+floor "tracks core-span":
+
+- **exp is FLAT ~140ms across 1→64 cores.** The fixed floor is a **per-program**
+  cost (dispatch / program setup / kernel launch), *not* per-core — a 1-core
+  1-tile exp already costs ~135ms. Core count is irrelevant to it.
+- **reduce rises with cores** (1.1→213ms over 1→64), super-linearly at the top —
+  its cost tracks active cores, emulated serially on the host.
+
+So emule's per-op cost = (a fixed per-program launch overhead that dominates the
+fixed-floor ops regardless of size or cores) + (per-core/per-tile serial work
+that dominates the scaling ops). On silicon this same experiment would be ~flat
+for *both* (cores run concurrently in hardware); reduce's rise here is purely the
+serial core emulation. The speedup levers are therefore two separate things:
+shrink the fixed per-program overhead (helps unary/binary/softmax) and thread the
+per-core loop (helps reduce/matmul/tilize).
+
 ## Op-class survey — emule perf is bimodal
 
 `bench_ops.py` times a spread of op classes; run at several sizes it reveals two
