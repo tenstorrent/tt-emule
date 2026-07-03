@@ -86,6 +86,22 @@ if(TT_EMULE_BUILD_TESTS)
         ${TT_METAL_DIR}/tt_metal/hostdevcommon/api
     )
     add_test(NAME test_ziveli_compat COMMAND test_ziveli_compat)
+
+    add_executable(test_ziveli_conv_chain
+        tests/jit_hw/test_ziveli_conv_chain.cpp
+    )
+    target_link_libraries(test_ziveli_conv_chain PRIVATE tt-emule::headers)
+    target_compile_definitions(test_ziveli_conv_chain PRIVATE
+        ARCH_WORMHOLE=1
+        EMULE_SEM_BASE=0
+    )
+    target_include_directories(test_ziveli_conv_chain PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/jit_hw
+        ${TT_METAL_DIR}
+        ${TT_METAL_DIR}/tt_metal/api
+        ${TT_METAL_DIR}/tt_metal/hostdevcommon/api
+    )
+    add_test(NAME test_ziveli_conv_chain COMMAND test_ziveli_conv_chain)
 endif()
 
 # ---- Install rules ----
