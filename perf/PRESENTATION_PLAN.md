@@ -44,10 +44,10 @@ regimes where emule is the right tool.
 | **Memory location** | DRAM→DRAM, DRAM→L1, L1→DRAM, L1→L1 | silicon L1≫DRAM; emule flat | emule done; **silicon todo** |
 | **Interleaved vs sharded** | interleaved vs width/height-sharded | layout cost | partial (via core-scaling) |
 | **Core count** | 1, 2, 4, 8, 16, 32, 64 | isolates per-program vs per-core cost | emule done; **silicon todo** |
-| **MathFidelity** | LoFi, HiFi2, HiFi3, HiFi4 (matmul) | multi-pass bf16 cost; faithfulness | **todo both** |
+| **MathFidelity** | LoFi, HiFi2, HiFi3, HiFi4 (matmul) | multi-pass bf16 cost; faithfulness | emule done (flat=ignored); **silicon todo** |
 | **Lifecycle / ops-per-session** | N = 1..500; warm vs cold (tt-smi -r) | dispatch/bringup amortization | done both (warm + cold) |
-| **Fusion** | K separate ops vs 1 fused program | emule per-program floor rewards fusion | **todo** |
-| **Batch** | B = 1, 8, 32 at fixed per-batch shape | batch-dim handling | **todo** |
+| **Fusion** | K separate ops vs 1 fused program | emule per-program floor rewards fusion | emule done (per-program tax); fused-kernel todo |
+| **Batch** | B = 1, 4, 16, 64 (matmul) | batch-dim handling | emule done; **silicon todo** |
 | **Metric** | e2e wall-clock; throughput Gelem/s; GFLOP/s; ratio; roofline | different lenses on same data | done (recast tooling exists) |
 
 Legend: "done" = both backends measured; "emule done" = emule only, needs
@@ -135,8 +135,8 @@ tt-sim as a 3rd line everywhere if that backend comes online.)
 11. **Capacity wall** (conceptual / small demo)
     - Point: tensor > silicon ~12GB DRAM → silicon OOMs, emule runs it in host
       RAM. emule "wins" by being able to run it at all.
-    - Status: **todo** — small demo: run an op at ~7B elems on emule, show silicon
-      OOM size.
+    - Status: **emule done** — `emule_capacity.csv`: single-tensor exp at 2GiB
+      (616ms) & 4GiB (1662ms) in host RAM. (To show silicon OOM, push >12GB.)
 
 ### Act V — implications
 
@@ -149,14 +149,13 @@ tt-sim as a 3rd line everywhere if that backend comes online.)
 
 ### Optional new experiments (strengthen the deck)
 
-13. **MathFidelity matmul** — x: LoFi/HiFi2/3/4 · y: ms, both backends. Does
-    emule model the multi-pass cost? Faithfulness + perf. **todo.**
-14. **Fusion** — x: chain length K · y: total ms, fused vs separate, both
-    backends. emule's per-program floor should reward fusion far more. **todo.**
-15. **Real-model composite ops** — layernorm, rms_norm, SDPA, embedding, conv at
-    a representative size, both backends. Bridges microbench → model relevance.
-    **todo.**
-16. **Batch scaling** — x: batch B · y: ms, both backends. **todo.**
+13. **MathFidelity matmul** — `emule_matmul_fidelity.png`. emule flat across
+    LoFi..HiFi4 -> ignores fidelity. **emule done; silicon todo.**
+14. **Fusion / per-program tax** — `emule_chain_tax.png`. K ops ~ K x floor;
+    fusion would save ~(K-1)x~120ms. **emule done; true fused kernel + silicon todo.**
+15. **Real-model composite ops** — `emule_composite_ops.png` (layer_norm 3.5ms,
+    rms_norm 3.9ms, sdpa 68ms, embedding 96ms, silu 115ms). **emule done; silicon todo.**
+16. **Batch scaling** — `emule_batch_matmul.csv` (B=1->64: 59->215ms). **emule done; silicon todo.**
 
 ---
 
