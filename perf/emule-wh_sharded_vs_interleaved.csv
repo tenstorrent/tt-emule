@@ -1,0 +1,9 @@
+backend,layout,total_elements,median_ms,min_ms,error
+emule-wh,interleaved_dram,65536,110.99825892597437,66.99209474027157,
+emule-wh,sharded_l1_64core,65536,164.5780811086297,115.86307361721992,
+emule-wh,interleaved_dram,262144,170.1216627843678,53.58431674540043,
+emule-wh,sharded_l1_64core,262144,194.1821938380599,136.16829551756382,
+emule-wh,interleaved_dram,1048576,143.04394461214542,88.25511764734983,
+emule-wh,sharded_l1_64core,1048576,nan,nan,RuntimeError:TT_FATAL @ /localdev/mkamran/emule/tt-metal/tt_metal/impl/allocator/bank_manager
+emule-wh,interleaved_dram,4194304,193.96792398765683,88.2812850177288,
+emule-wh,sharded_l1_64core,4194304,nan,nan,RuntimeError:TT_FATAL @ /localdev/mkamran/emule/tt-metal/tt_metal/impl/allocator/bank_manager

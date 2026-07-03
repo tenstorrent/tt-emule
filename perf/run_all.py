@@ -307,10 +307,168 @@ def batch_matmul(c):
     c.write("batch_matmul", rows, list(rows[0].keys()))
 
 
+def transfer(c):
+    """Host<->device transfer vs size. emule = host memcpy; silicon = PCIe.
+    The one place emule may WIN a sub-operation."""
+    sides = [4, 16, 64] if c.args.quick else [4, 16, 64, 128, 256, 512]
+    rows = []
+    for side in sides:
+        h = w = side * TILE
+        host = torch.rand(1, 1, h, w, dtype=torch.bfloat16) + 0.5
+        # H2D: time from_torch (host tensor already built)
+        try:
+            med, mn = c.timed(lambda: ttnn.from_torch(host, dtype=ttnn.bfloat16,
+                              layout=ttnn.TILE_LAYOUT, device=c.dev)); err = ""
+        except Exception as e:
+            med = mn = float("nan"); err = f"{type(e).__name__}:{str(e)[:80]}"
+        rows.append(dict(backend=c.args.backend, dir="H2D_from_torch", total_elements=h * w,
+                         median_ms=med, min_ms=mn, error=err))
+        # D2H: time to_torch (device tensor already built)
+        x = c.T(1, 1, h, w)
+        try:
+            med, mn = c.timed(lambda: ttnn.to_torch(x)); err = ""
+        except Exception as e:
+            med = mn = float("nan"); err = f"{type(e).__name__}:{str(e)[:80]}"
+        rows.append(dict(backend=c.args.backend, dir="D2H_to_torch", total_elements=h * w,
+                         median_ms=med, min_ms=mn, error=err))
+        print(f"  transfer side={side:>4} elems={h*w:>9}", flush=True)
+        ttnn.deallocate(x)
+    c.write("transfer", rows, list(rows[0].keys()))
+
+
+def datamov(c):
+    side = 16
+    h = w = side * TILE
+    x = c.T(1, 1, h, w)
+    xr = c.T(1, 1, h, w, layout=ttnn.ROW_MAJOR_LAYOUT)
+    specs = {
+        "concat_w": lambda: ttnn.concat([x, x], dim=-1),
+        "concat_h": lambda: ttnn.concat([x, x], dim=-2),
+        "permute": lambda: ttnn.permute(x, (0, 1, 3, 2)),
+        "reshape": lambda: ttnn.reshape(x, (1, 1, w, h)),
+        "repeat": lambda: ttnn.repeat(x, ttnn.Shape([1, 2, 1, 1])),
+        "pad": lambda: ttnn.pad(x, [(0, 0), (0, 0), (0, TILE), (0, TILE)], value=0.0),
+        "slice": lambda: ttnn.slice(x, [0, 0, 0, 0], [1, 1, h // 2, w // 2]),
+        "typecast_bf8": lambda: ttnn.typecast(x, ttnn.bfloat8_b),
+        "clone": lambda: ttnn.clone(x),
+        "to_layout_rm": lambda: ttnn.to_layout(x, ttnn.ROW_MAJOR_LAYOUT),
+        "to_layout_tile": lambda: ttnn.to_layout(xr, ttnn.TILE_LAYOUT),
+    }
+    rows = []
+    for name, fn in specs.items():
+        try:
+            med, mn = c.timed(fn); err = ""
+        except Exception as e:
+            med = mn = float("nan"); err = f"{type(e).__name__}:{str(e)[:90]}"
+        rows.append(dict(backend=c.args.backend, op=name, median_ms=med, min_ms=mn, error=err))
+        print(f"  datamov {name:<14} median={med:9.2f}ms {err}", flush=True)
+    c.write("datamov", rows, list(rows[0].keys()))
+
+
+def index_ops(c):
+    side = 16
+    h = w = side * TILE
+    x = c.T(1, 1, h, w)
+    specs = {
+        "argmax_w": lambda: ttnn.argmax(x, dim=-1),
+        "topk32_w": lambda: ttnn.topk(x, 32, dim=-1, largest=True, sorted=True),
+        "sort_w": lambda: ttnn.sort(x, dim=-1),
+        "max_w": lambda: ttnn.max(x, dim=-1),
+    }
+    rows = []
+    for name, fn in specs.items():
+        try:
+            med, mn = c.timed(fn); err = ""
+        except Exception as e:
+            med = mn = float("nan"); err = f"{type(e).__name__}:{str(e)[:90]}"
+        rows.append(dict(backend=c.args.backend, op=name, median_ms=med, min_ms=mn, error=err))
+        print(f"  index {name:<12} median={med:9.2f}ms {err}", flush=True)
+    c.write("index_ops", rows, list(rows[0].keys()))
+
+
+def sharded_vs_interleaved(c):
+    """exp at fixed size: interleaved DRAM vs height-sharded across 64 cores."""
+    rows = []
+    for side in ([8, 16] if c.args.quick else [8, 16, 32, 64]):
+        h = w = side * TILE
+        # interleaved
+        try:
+            x = c.T(1, 1, h, w, mc=ttnn.DRAM_MEMORY_CONFIG)
+            med, mn = c.timed(lambda: ttnn.exp(x)); err = ""
+            ttnn.deallocate(x)
+        except Exception as e:
+            med = mn = float("nan"); err = f"{type(e).__name__}:{str(e)[:80]}"
+        rows.append(dict(backend=c.args.backend, layout="interleaved_dram",
+                         total_elements=h * w, median_ms=med, min_ms=mn, error=err))
+        # height-sharded across 64 cores (needs h divisible by 64 tiles)
+        try:
+            ntiles_h = side * side  # total tiles = side^2; shard height across 64 cores
+            spec = ttnn.ShardSpec(_grid(64), (max(1, side * side // 64) * TILE, w),
+                                  ttnn.ShardOrientation.ROW_MAJOR)
+            mc = ttnn.MemoryConfig(ttnn.TensorMemoryLayout.HEIGHT_SHARDED, ttnn.BufferType.L1, spec)
+            x = c.T(1, 1, h, w, mc=mc)
+            med, mn = c.timed(lambda: ttnn.exp(x)); err = ""
+            ttnn.deallocate(x)
+        except Exception as e:
+            med = mn = float("nan"); err = f"{type(e).__name__}:{str(e)[:80]}"
+        rows.append(dict(backend=c.args.backend, layout="sharded_l1_64core",
+                         total_elements=h * w, median_ms=med, min_ms=mn, error=err))
+        print(f"  shard vs interleaved side={side}", flush=True)
+    c.write("sharded_vs_interleaved", rows, list(rows[0].keys()))
+
+
+def broadcast(c):
+    side = 16
+    h = w = side * TILE
+    x = c.T(1, 1, h, w)
+    y = c.T(1, 1, h, w)
+    row = c.T(1, 1, 1, w)
+    specs = {
+        "add_full": lambda: ttnn.add(x, y),
+        "add_row_bcast": lambda: ttnn.add(x, row),
+        "add_scalar": lambda: ttnn.add(x, 1.0),
+        "mul_scalar": lambda: ttnn.multiply(x, 2.0),
+    }
+    rows = []
+    for name, fn in specs.items():
+        try:
+            med, mn = c.timed(fn); err = ""
+        except Exception as e:
+            med = mn = float("nan"); err = f"{type(e).__name__}:{str(e)[:90]}"
+        rows.append(dict(backend=c.args.backend, op=name, median_ms=med, min_ms=mn, error=err))
+        print(f"  bcast {name:<14} median={med:9.2f}ms {err}", flush=True)
+    c.write("broadcast", rows, list(rows[0].keys()))
+
+
+def conv2d(c):
+    rows = []
+    cfgs = [(64, 64, 32, 32, 3), (128, 128, 16, 16, 3)]  # (Cin,Cout,H,W,K)
+    for cin, cout, ih, iw, ks in cfgs:
+        try:
+            inp = ttnn.from_torch(torch.rand(1, ih, iw, cin, dtype=torch.bfloat16),
+                                  dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, device=c.dev)
+            wt = ttnn.from_torch(torch.rand(cout, cin, ks, ks, dtype=torch.bfloat16),
+                                 dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, device=c.dev)
+            def run():
+                return ttnn.conv2d(input_tensor=inp, weight_tensor=wt, device=c.dev,
+                                   in_channels=cin, out_channels=cout,
+                                   batch_size=1, input_height=ih, input_width=iw,
+                                   kernel_size=(ks, ks), stride=(1, 1), padding=(1, 1))
+            med, mn = c.timed(run, warmup=1, iters=3); err = ""
+        except Exception as e:
+            med = mn = float("nan"); err = f"{type(e).__name__}:{str(e)[:120]}"
+        rows.append(dict(backend=c.args.backend, cin=cin, cout=cout, ih=ih, iw=iw, k=ks,
+                         median_ms=med, min_ms=mn, error=err))
+        print(f"  conv2d {cin}->{cout} {ih}x{iw} k{ks} median={med:9.2f}ms {err}", flush=True)
+    c.write("conv2d", rows, list(rows[0].keys()))
+
+
 EXPERIMENTS = {
     "exp_size": exp_size, "core_scaling": core_scaling, "dtype": dtype, "memcfg": memcfg,
     "sfpu": sfpu, "matmul": matmul, "matmul_fidelity": matmul_fidelity,
     "chain_tax": chain_tax, "composite": composite, "batch_matmul": batch_matmul,
+    "transfer": transfer, "datamov": datamov, "index_ops": index_ops,
+    "sharded_vs_interleaved": sharded_vs_interleaved, "broadcast": broadcast, "conv2d": conv2d,
 }
 
 

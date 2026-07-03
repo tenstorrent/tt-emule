@@ -1,0 +1,7 @@
+backend,cin,cout,ih,iw,k,median_ms,min_ms,error
+emule-wh,64,64,32,32,3,nan,nan,"RuntimeError:TT_FATAL @ /localdev/mkamran/emule/tt-metal/tt_metal/impl/allocator/bank_manager.cpp:462: false
+info:
+Out of Memory: Not"
+emule-wh,128,128,16,16,3,nan,nan,"RuntimeError:TT_FATAL @ /localdev/mkamran/emule/tt-metal/tt_metal/impl/allocator/bank_manager.cpp:462: false
+info:
+Out of Memory: Not"

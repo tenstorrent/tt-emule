@@ -320,6 +320,33 @@ swung 120–193ms across runs.)
   past what a single silicon buffer comfortably holds — the capacity axis where
   emule "wins" by running the problem at all.
 
+## More op coverage (transfer, data-movement, index, broadcast)
+
+Added to `run_all.py` and run on emule:
+
+- **Host↔device transfer** (`*_transfer.csv`) — the discussion piece. emule
+  `from_torch`/`to_torch` are **cheap and scale with size** (0.07ms @16K →
+  ~956ms/1170ms @268M), *not* on the ~90ms floor, because they're host memcpy.
+  On silicon these cross PCIe, so this is a candidate regime where emule is
+  **competitive or faster** — the exception to "silicon always wins" (confirm
+  with the silicon `_transfer.csv`).
+- **Data-movement / NoC ops** (`*_datamov.csv`) — bimodal again: `reshape`
+  ~0ms (metadata-only no-op), `to_layout` ~8ms, `repeat` ~12ms; vs
+  `concat`/`pad`/`slice`/`clone`/`permute`/`typecast` ~50–146ms (full dataflow
+  programs on the floor).
+- **Index / data-dependent ops** (`*_index_ops.csv`) — all supported and cheap
+  (argmax 1.2ms, topk 7ms, sort 15ms, max 10ms), per-tile-scaling class.
+- **Broadcast binary** (`*_broadcast.csv`) — add_full 99ms, row-broadcast 146ms,
+  +scalar 154–170ms. Broadcasting does **not** save emule time (all go through
+  the eltwise program floor); scalar variants are marginally *higher*.
+- **Sharded vs interleaved** (`*_sharded_vs_interleaved.csv`) — interleaved DRAM
+  ~110–194ms; L1-sharded slightly *slower* at small sizes (emule doesn't model
+  L1's speed). NOTE: large-size sharded rows error on a harness shard-shape bug,
+  not an emule limit — to fix before presenting that panel.
+- **conv2d** (`*_conv2d.csv`) — errors with a bank-allocation `TT_FATAL` at the
+  configs tried; needs a proper conv sharding config (or is an emule gap). Left
+  as an error row (op-coverage data point) pending follow-up.
+
 ## Additional views
 
 - **Throughput vs size** (`plot_throughput.py` → `throughput_vs_size.png`):
