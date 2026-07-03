@@ -116,20 +116,11 @@ ALWI void power_tile(uint32_t idst, uint32_t exponent_packed = 0) {
         __emule_compute_ctx().dst[idst][i] = std::pow(__emule_compute_ctx().dst[idst][i], exponent);
 }
 
-// --- sigmoid (1 / (1 + e^-x)) ---
-template <uint32_t sigmoid_mode = 0>
-ALWI void sigmoid_tile_init() {}
-template <VectorMode vector_mode = VectorMode::RC, uint32_t sigmoid_mode = 0>
-ALWI void sigmoid_tile(uint32_t idst) {
-    __emule_dst_check(idst, "sigmoid_tile");
-    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_compute_ctx().dst[idst][i];
-        __emule_compute_ctx().dst[idst][i] = 1.0f / (1.0f + std::exp(-x));
-    }
-}
-
-// sigmoid_tile_init_pack / sigmoid_tile_pack live in
+// sigmoid_tile / sigmoid_tile_init / *_pack live in
 // api/compute/eltwise_unary/sigmoid.h (already included above) — single site.
+// The umbrella used to define its own `<VectorMode, uint32_t>` overload; that
+// collided at unqualified call sites with sigmoid.h's `<int, bool>` overload.
+// Keep one canonical site and route through it.
 
 // --- sign (-1, 0, +1) ---
 ALWI void sign_tile_init() {}
@@ -280,16 +271,7 @@ ALWI void alt_complex_rotate90_tile(uint32_t idst) {
     }
 }
 
-// --- silu (x * sigmoid(x)) ---
-ALWI void silu_tile_init() {}
-ALWI void silu_tile(uint32_t idst) {
-    __emule_dst_check(idst, "silu_tile");
-    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_compute_ctx().dst[idst][i];
-        __emule_compute_ctx().dst[idst][i] = x / (1.0f + std::exp(-x));
-    }
-}
-// silu_tile_init_pack / silu_tile_pack live in
+// silu_tile / silu_tile_init / *_pack live in
 // api/compute/eltwise_unary/silu.h (already included above) — single site.
 
 // --- sfpu_reduce — SFPU-based reduction helper; emule reduces via other paths.

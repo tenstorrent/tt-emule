@@ -986,8 +986,6 @@ files:
   - {kind: function, name: log_tile}
   - {kind: function, name: power_tile_init}
   - {kind: function, name: power_tile}
-  - {kind: function, name: sigmoid_tile_init}
-  - {kind: function, name: sigmoid_tile}
   - {kind: function, name: sign_tile_init}
   - {kind: function, name: sign_tile}
   - {kind: function, name: heaviside_tile_init}
@@ -1016,8 +1014,6 @@ files:
   - {kind: function, name: unary_min_uint32_tile}
   - {kind: function, name: alt_complex_rotate90_tile_init}
   - {kind: function, name: alt_complex_rotate90_tile}
-  - {kind: function, name: silu_tile_init}
-  - {kind: function, name: silu_tile}
   - {kind: function, name: sfpu_reduce}
   - {kind: function, name: sfpu_reduce_init}
   - {kind: namespace, name: __emule_topk}
