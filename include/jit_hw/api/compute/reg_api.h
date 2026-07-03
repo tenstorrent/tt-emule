@@ -33,8 +33,14 @@ ALWI void tile_regs_acquire() {
         __emule_compute_ctx().dst_fresh[s] = true;
         __emule_dst_set_int(s, false);  // clean regs hold numeric float zeros
     }
-    __emule_sfpi_dst_base = &__emule_dst[0][0];
-    __emule_sfpi_cursor = 0;
+    // SFPI window: point dst_base at DST[0] and reset the 32-lane cursor.
+    // Both live in per-fiber ComputeThreadCtx.sfpu so an SFPI-modify sequence
+    // started here isn't clobbered by a co-scheduled fiber on the same worker
+    // (issue #243 lifetime; the bare `__emule_sfpi_dst_base` / `_cursor`
+    // thread_local globals were removed by #223 in favor of this per-fiber
+    // storage).
+    __emule_compute_ctx().sfpu.dst_base = &__emule_compute_ctx().dst[0][0];
+    __emule_compute_ctx().sfpu.cursor = 0;
 }
 ALWI void tile_regs_commit()  {}
 ALWI void tile_regs_wait()    {}
