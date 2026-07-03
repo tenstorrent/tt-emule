@@ -18,6 +18,32 @@
 
 namespace tt_emule {
 
+// Optional caller-context hints that Core::l1_ptr will include in the OOB
+// message before aborting. All three default to zero and are omitted from the
+// message when unset, so no existing caller has to change.
+//
+// Intended use: a caller that has richer context than Core::l1_ptr sees (a
+// full NOC address, the calling core's coord, a symbolic tag like a kernel
+// name or a page_id) sets these thread_locals before dispatching L1 accesses,
+// so a bounds-check abort points back to WHO made the request instead of only
+// WHERE it landed. A typical wrapper:
+//
+//     tt_emule::l1_ptr_hint_noc_addr = noc_addr;
+//     tt_emule::l1_ptr_hint_self_x   = my_x;
+//     tt_emule::l1_ptr_hint_self_y   = my_y;
+//     uint8_t* p = target_core->l1_ptr(offset);
+//     tt_emule::l1_ptr_hint_noc_addr = 0;   // clear on the way out
+//
+// Motivation: on a matmul mcast_in1 OOB, the original message told us the
+// target coord + offset but not the source coord or the raw NOC address. That
+// forced hand-instrumentation of __emule_resolve_noc_addr / TensorAccessor to
+// identify the offending write. Making these hints a first-class part of the
+// abort output keeps the next debug session to minutes instead of an hour.
+inline thread_local uint64_t l1_ptr_hint_noc_addr = 0;
+inline thread_local uint32_t l1_ptr_hint_self_x   = 0;
+inline thread_local uint32_t l1_ptr_hint_self_y   = 0;
+inline thread_local const char* l1_ptr_hint_tag   = nullptr;
+
 // Role of a Core — determines how its mmap'd region is used.
 enum class CoreRole { WORKER, DRAM };
 
@@ -70,11 +96,27 @@ public:
     uint8_t* l1_ptr(uint64_t offset) {
         if (offset >= l1_size_) {
             std::fprintf(stderr,
-                "[EMULE] Core::l1_ptr OOB: role=%s coord=(%zu,%zu) offset=0x%llx size=0x%zx\n",
+                "[EMULE] Core::l1_ptr OOB: role=%s coord=(%zu,%zu) offset=0x%llx size=0x%zx",
                 role_ == CoreRole::DRAM ? "DRAM" : "WORKER",
                 coord_.x, coord_.y,
                 static_cast<unsigned long long>(offset),
                 l1_size_);
+            // Emit caller-context hints if any have been populated. Each hint
+            // is checked independently so partial context still prints.
+            if (l1_ptr_hint_noc_addr != 0) {
+                std::fprintf(stderr,
+                    " noc_addr=0x%llx",
+                    static_cast<unsigned long long>(l1_ptr_hint_noc_addr));
+            }
+            if (l1_ptr_hint_self_x != 0 || l1_ptr_hint_self_y != 0) {
+                std::fprintf(stderr,
+                    " self=(%u,%u)",
+                    l1_ptr_hint_self_x, l1_ptr_hint_self_y);
+            }
+            if (l1_ptr_hint_tag != nullptr) {
+                std::fprintf(stderr, " tag=%s", l1_ptr_hint_tag);
+            }
+            std::fprintf(stderr, "\n");
             std::abort();
         }
         return l1_ + offset;
