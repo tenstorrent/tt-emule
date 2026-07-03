@@ -18,7 +18,7 @@ template <bool fast_and_approx = true>
 ALWI void erf_tile(uint32_t idst) {
     __emule_dst_check(idst, "erf_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::erf(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::erf(__emule_compute_ctx().dst[idst][i]);
 }
 
 ALWI void erfc_tile_init() {}
@@ -26,7 +26,7 @@ ALWI void erfc_tile_init() {}
 ALWI void erfc_tile(uint32_t idst) {
     __emule_dst_check(idst, "erfc_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::erfc(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::erfc(__emule_compute_ctx().dst[idst][i]);
 }
 
 } // namespace ckernel

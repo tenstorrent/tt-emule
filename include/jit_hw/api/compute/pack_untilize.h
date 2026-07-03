@@ -58,15 +58,15 @@ inline void pack_untilize_dst(uint32_t cb_out, uint32_t out_subblock_h, uint32_t
 // so we re-seed __llk_pack_offset per call.
 template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim>
 inline void pack_untilize_block(uint32_t icb, uint32_t block_rt_dim, uint32_t ocb, uint32_t block_c_index = 0) {
-    __llk_pack_block_c = full_ct_dim;
+    __emule_compute_ctx().llk_pack_block_c = full_ct_dim;
     for (uint32_t r = 0; r < block_rt_dim; ++r) {
         for (uint32_t c = 0; c < block_ct_dim; ++c) {
             copy_tile(icb, r * block_ct_dim + c, c);
         }
-        __llk_pack_offset = r * full_ct_dim + block_c_index * block_ct_dim;
+        __emule_compute_ctx().llk_pack_offset = r * full_ct_dim + block_c_index * block_ct_dim;
         for (uint32_t c = 0; c < block_ct_dim; ++c) {
             __llk_pack_untilize(c, ocb);
-            __llk_pack_offset++;
+            __emule_compute_ctx().llk_pack_offset++;
         }
     }
 }
@@ -125,7 +125,7 @@ inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
             const uint32_t dst_idx = tile_dst_ct_offset + rt * block_ct_dim + ct;
             for (uint32_t r = 0; r < TILE_DIM; ++r) {
                 for (uint32_t c = 0; c < row_cols; ++c) {
-                    const float src = __emule_dst[dst_idx][r * TILE_DIM + c];
+                    const float src = __emule_compute_ctx().dst[dst_idx][r * TILE_DIM + c];
                     uint8_t* dst_ptr = target(rt, ct, r, c);
                     if (is_uint16) {
                         // uint16 output: write low 16 bits of DST int32 bit pattern.
@@ -140,7 +140,7 @@ inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
                         // apply the clamp through the float view, then memcpy
                         // out the bits (NO_RELU fast path preserves INT32 bit
                         // patterns via memcpy of the unmodified src).
-                        if (__emule_pack_relu_mode == ReluType::NO_RELU) {
+                        if (__emule_compute_ctx().pack_relu_mode == ReluType::NO_RELU) {
                             std::memcpy(dst_ptr, &src, sizeof(uint32_t));
                         } else {
                             float clamped = __emule_apply_pack_relu(src);
@@ -172,8 +172,8 @@ template <uint32_t cols_per_dst_pass, uint32_t total_col_tiles>
 inline void pack_untilize_block(uint32_t icb, uint32_t ocb,
                                 uint32_t block_row_tiles,
                                 uint32_t block_col_tiles) {
-    __llk_pack_block_c = total_col_tiles;
-    __llk_pack_offset = 0;
+    __emule_compute_ctx().llk_pack_block_c = total_col_tiles;
+    __emule_compute_ctx().llk_pack_offset = 0;
 
     const uint32_t num_col_blocks = block_col_tiles / cols_per_dst_pass;
     for (uint32_t r = 0; r < block_row_tiles; ++r) {
@@ -185,7 +185,7 @@ inline void pack_untilize_block(uint32_t icb, uint32_t ocb,
 
             for (uint32_t c = 0; c < cols_per_dst_pass; ++c) {
                 __llk_pack_untilize(c, ocb);
-                __llk_pack_offset++;
+                __emule_compute_ctx().llk_pack_offset++;
             }
         }
     }

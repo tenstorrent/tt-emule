@@ -33,21 +33,21 @@ ALWI void sin_tile_init() {}
 ALWI void sin_tile(uint32_t idst) {
     __emule_dst_check(idst, "sin_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::sin(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::sin(__emule_compute_ctx().dst[idst][i]);
 }
 
 ALWI void cos_tile_init() {}
 ALWI void cos_tile(uint32_t idst) {
     __emule_dst_check(idst, "cos_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::cos(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::cos(__emule_compute_ctx().dst[idst][i]);
 }
 
 ALWI void tan_tile_init() {}
 ALWI void tan_tile(uint32_t idst) {
     __emule_dst_check(idst, "tan_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::tan(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::tan(__emule_compute_ctx().dst[idst][i]);
 }
 
 // Templated on fast_and_approx to match upstream compute_kernel_api.h; the
@@ -67,7 +67,7 @@ ALWI void tanh_tile(uint32_t idst) {
     });
 #else
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::tanh(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::tanh(__emule_compute_ctx().dst[idst][i]);
 #endif
 }
 
@@ -75,56 +75,56 @@ ALWI void asin_tile_init() {}
 ALWI void asin_tile(uint32_t idst) {
     __emule_dst_check(idst, "asin_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::asin(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::asin(__emule_compute_ctx().dst[idst][i]);
 }
 
 ALWI void acos_tile_init() {}
 ALWI void acos_tile(uint32_t idst) {
     __emule_dst_check(idst, "acos_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::acos(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::acos(__emule_compute_ctx().dst[idst][i]);
 }
 
 ALWI void atan_tile_init() {}
 ALWI void atan_tile(uint32_t idst) {
     __emule_dst_check(idst, "atan_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::atan(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::atan(__emule_compute_ctx().dst[idst][i]);
 }
 
 ALWI void acosh_tile_init() {}
 ALWI void acosh_tile(uint32_t idst) {
     __emule_dst_check(idst, "acosh_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::acosh(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::acosh(__emule_compute_ctx().dst[idst][i]);
 }
 
 ALWI void asinh_tile_init() {}
 ALWI void asinh_tile(uint32_t idst) {
     __emule_dst_check(idst, "asinh_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::asinh(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::asinh(__emule_compute_ctx().dst[idst][i]);
 }
 
 ALWI void atanh_tile_init() {}
 ALWI void atanh_tile(uint32_t idst) {
     __emule_dst_check(idst, "atanh_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::atanh(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::atanh(__emule_compute_ctx().dst[idst][i]);
 }
 
 ALWI void cosh_tile_init() {}
 ALWI void cosh_tile(uint32_t idst) {
     __emule_dst_check(idst, "cosh_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::cosh(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::cosh(__emule_compute_ctx().dst[idst][i]);
 }
 
 ALWI void sinh_tile_init() {}
 ALWI void sinh_tile(uint32_t idst) {
     __emule_dst_check(idst, "sinh_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::sinh(__emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::sinh(__emule_compute_ctx().dst[idst][i]);
 }
 
 } // namespace ckernel

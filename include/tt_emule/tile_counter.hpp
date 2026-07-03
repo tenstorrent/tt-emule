@@ -10,8 +10,8 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
-#include <mutex>
-#include <condition_variable>
+
+#include "jit_hw/internal/emule_fiber_bridge.h"
 
 namespace tt_emule {
 
@@ -21,9 +21,8 @@ struct TileCounter {
     std::atomic<uint32_t> posted{0};
     std::atomic<uint32_t> acked{0};
     uint32_t capacity{0};
-    std::mutex mu;
-    std::condition_variable space_cv;  // producer waits here
-    std::condition_variable data_cv;   // consumer waits here
+    // No mutex/CV here: under the fiber engine dfb_* park on &tc and are woken by
+    // inc_posted/inc_acked below. See docs/fiber-engine.md.
 
     uint32_t occupancy() const {
         return posted.load(std::memory_order_acquire)
@@ -54,20 +53,15 @@ public:
 
     void inc_posted(uint8_t neo_id, uint8_t counter_id, uint32_t n) {
         auto& tc = get(neo_id, counter_id);
-        {
-            std::lock_guard<std::mutex> lk(tc.mu);
             tc.posted.fetch_add(n, std::memory_order_release);
-        }
-        tc.data_cv.notify_all();
+        __emule_fiber_note_publish(n);   // tier-2 watchdog: real forward progress
+        __emule_fiber_wake(&tc);
     }
 
     void inc_acked(uint8_t neo_id, uint8_t counter_id, uint32_t n) {
         auto& tc = get(neo_id, counter_id);
-        {
-            std::lock_guard<std::mutex> lk(tc.mu);
             tc.acked.fetch_add(n, std::memory_order_release);
-        }
-        tc.space_cv.notify_all();
+        __emule_fiber_wake(&tc);
     }
 
     void reset_all() {

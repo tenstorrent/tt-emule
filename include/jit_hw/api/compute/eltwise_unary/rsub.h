@@ -18,7 +18,7 @@ ALWI void rsub_tile(uint32_t idst, uint32_t param0) {
     float scalar;
     std::memcpy(&scalar, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        __emule_dst[idst][i] = scalar - __emule_dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = scalar - __emule_compute_ctx().dst[idst][i];
     }
 }
 

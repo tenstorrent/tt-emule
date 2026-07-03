@@ -22,7 +22,7 @@ ALWI void rpow_tile(uint32_t idst, uint32_t base_val, VectorMode vector_mode = V
     float base;
     std::memcpy(&base, &base_val, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = std::pow(base, __emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::pow(base, __emule_compute_ctx().dst[idst][i]);
 }
 
 } // namespace ckernel

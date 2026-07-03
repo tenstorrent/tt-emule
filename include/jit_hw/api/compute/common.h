@@ -33,7 +33,7 @@
 #include "jit_hw/internal/llk_state.h"
 // Note: llk_pack.h / llk_unpack_a.h / llk_math_eltwise_unary_datacopy.h /
 // llk_sync_stubs.h are pulled in at the END of this header (after
-// __emule_compute::, __emule_dst[][], __emule_bf16:: are defined — they
+// __emule_compute::, __emule_compute_ctx().dst[][], __emule_bf16:: are defined — they
 // transitively reference these).
 #include <cstring>
 #include <cstdint>
@@ -96,7 +96,7 @@ inline constexpr ckernel::EltwiseBinaryType ELWMUL = ckernel::EltwiseBinaryType:
 enum class MathFidelity : uint8_t { LoFi = 0, HiFi2 = 2, HiFi3 = 3, HiFi4 = 4 };
 #endif
 
-enum class ReluType { NO_RELU, ZERO_RELU, MIN_THRESHOLD_RELU, MAX_THRESHOLD_RELU };
+enum class ReluType : uint8_t { NO_RELU, ZERO_RELU, MIN_THRESHOLD_RELU, MAX_THRESHOLD_RELU };
 
 // Pack-fused ReLU config — mirrors ckernel::ReluConfig
 // (tt_llk_wormhole_b0/llk_lib/llk_defs.h). Kernels (e.g. bmm fused-bias-
@@ -154,8 +154,6 @@ static constexpr uint32_t __EMULE_DST_TILES = 16;     // bf16 SyncFull ceiling (
 static constexpr uint32_t __EMULE_DST_TILES_FP32 = 8; // f32 SyncFull ceiling (arch-independent)
 static constexpr uint32_t __EMULE_TILE_ELEMS = 1024;
 static constexpr uint32_t __EMULE_DST_BYTES = __EMULE_TILE_ELEMS * sizeof(float);
-static thread_local float __emule_dst[__EMULE_DST_TILES][__EMULE_TILE_ELEMS];
-static thread_local bool __emule_l1_acc_enabled = false;
 // Math-side DST accumulate — silicon's dest_accum_en bit (the 2nd operand of
 // the ELWADD / ELWSUB / ELWMUL / DOTPV opcode, bit 21 of the FPU instruction
 // word; see ckernel_ops.h:155 `TT_OP_ELWADD(clear_dvalid, dest_accum_en, ...)`).
@@ -164,18 +162,15 @@ static thread_local bool __emule_l1_acc_enabled = false;
 // When true, add/sub/mul_tiles compute DST = DST + (in0 OP in1) instead of
 // DST = in0 OP in1 (e.g. fast_reduce_nc sums input tiles into one DST slot).
 //
-// Distinct from __emule_l1_acc_enabled above: that one models the pack-side
+// Distinct from __emule_compute_ctx().l1_acc_enabled above: that one models the pack-side
 // Pack_L1_Acc THCON CFG bit (L1 += DST at packer Stage 5). Different RISCs,
 // different accumulators, different LHS — composable, not interchangeable.
-static thread_local bool __emule_dest_accum_en = false;
 
 // Pack-fused ReLU state — silicon STACC_RELU is a single packer CFG reg, so
-// thread-global like __emule_l1_acc_enabled.  `llk_pack_relu_config(ReluType)`
+// thread-global like __emule_compute_ctx().l1_acc_enabled.  `llk_pack_relu_config(ReluType)`
 // writes the mode; `pack_set_relu_threshold(float)` writes the threshold.
 // `pack_dst_to_buf` / `__llk_pack_tiled` / `__llk_pack_untilize` apply the
 // clamp before format conversion.
-static thread_local ReluType __emule_pack_relu_mode = ReluType::NO_RELU;
-static thread_local float    __emule_pack_relu_threshold = 0.0f;
 
 // ---- Layer-1.5 pack-subrect state (TTI_SETADCXX + _llk_pack_mop_config_) ----
 // Silicon's PACK engine has an ADC (address counter) X-end value and a MOP
@@ -187,16 +182,12 @@ static thread_local float    __emule_pack_relu_threshold = 0.0f;
 // and pack_dst_to_buf honors them — enough to let the kernels execute
 // without rewriting the op.hpp body.
 //
-// Defaults model the full 32×32 tile across all 4 faces.
-static thread_local uint32_t __emule_pack_x_end       = 31;  // SETADCXX(PAC, x_end, _) → pack (x_end+1) cols per row
-static thread_local uint32_t __emule_pack_face_r_dim  = 16;  // rows per face packed
-static thread_local uint32_t __emule_pack_num_faces   = 4;   // num faces packed
-static thread_local uint32_t __emule_pack_num_tiles   = 1;   // tiles per pack-tile call (always 1 here)
+// Defaults model the full 32×32 tile across all 4 faces.  // SETADCXX(PAC, x_end, _) → pack (x_end+1) cols per row  // rows per face packed   // num faces packed   // tiles per pack-tile call (always 1 here)
 
 inline bool __emule_pack_subrect_active() {
-    return __emule_pack_x_end != 31
-        || __emule_pack_face_r_dim != 16
-        || __emule_pack_num_faces != 4;
+    return __emule_compute_ctx().pack_x_end != 31
+        || __emule_compute_ctx().pack_face_r_dim != 16
+        || __emule_compute_ctx().pack_num_faces != 4;
 }
 
 // Restore the full-tile pack defaults (32×32 across 4 faces). emule runs every
@@ -205,10 +196,10 @@ inline bool __emule_pack_subrect_active() {
 // that silently reshape packing for the next kernel. compute_kernel_hw_startup
 // calls this alongside the other pack-state resets.
 inline void __emule_reset_pack_subrect() {
-    __emule_pack_x_end      = 31;
-    __emule_pack_face_r_dim = 16;
-    __emule_pack_num_faces  = 4;
-    __emule_pack_num_tiles  = 1;
+    __emule_compute_ctx().pack_x_end      = 31;
+    __emule_compute_ctx().pack_face_r_dim = 16;
+    __emule_compute_ctx().pack_num_faces  = 4;
+    __emule_compute_ctx().pack_num_tiles  = 1;
 }
 
 // p_setadc::PAC is silicon's engine-selector bitmask for the pack engine.
@@ -229,7 +220,7 @@ namespace p_setadc {
 #define TTI_SETADCXX(adc, x_end_val, mask) \
     do { \
         if ((adc) == ::p_setadc::PAC) { \
-            ::__emule_pack_x_end = static_cast<uint32_t>(x_end_val); \
+            ::__emule_compute_ctx().pack_x_end = static_cast<uint32_t>(x_end_val); \
         } \
         (void)(mask); \
     } while (0)
@@ -258,17 +249,17 @@ inline void _llk_pack_mop_config_(uint32_t face_r_dim,
                                   uint32_t num_faces,
                                   uint32_t num_tiles) {
     (void)tile_c_dim;
-    __emule_pack_face_r_dim = face_r_dim;
-    __emule_pack_num_faces  = num_faces;
-    __emule_pack_num_tiles  = num_tiles;
+    __emule_compute_ctx().pack_face_r_dim = face_r_dim;
+    __emule_compute_ctx().pack_num_faces  = num_faces;
+    __emule_compute_ctx().pack_num_tiles  = num_tiles;
 }
 
 inline float __emule_apply_pack_relu(float v) {
-    switch (__emule_pack_relu_mode) {
+    switch (__emule_compute_ctx().pack_relu_mode) {
         case ReluType::NO_RELU:            return v;
         case ReluType::ZERO_RELU:          return v < 0.0f ? 0.0f : v;
-        case ReluType::MIN_THRESHOLD_RELU: return v < __emule_pack_relu_threshold ? __emule_pack_relu_threshold : v;
-        case ReluType::MAX_THRESHOLD_RELU: return v > __emule_pack_relu_threshold ? __emule_pack_relu_threshold : v;
+        case ReluType::MIN_THRESHOLD_RELU: return v < __emule_compute_ctx().pack_relu_threshold ? __emule_compute_ctx().pack_relu_threshold : v;
+        case ReluType::MAX_THRESHOLD_RELU: return v > __emule_compute_ctx().pack_relu_threshold ? __emule_compute_ctx().pack_relu_threshold : v;
     }
     return v;
 }
@@ -278,7 +269,6 @@ inline float __emule_apply_pack_relu(float v) {
 // (binary_dest_reuse_tiles) we need a working buffer that is NOT a DST
 // slot — otherwise we steal kernel-addressable DST space and go
 // out-of-bounds in fp32 mode. Not addressable by kernels.
-static thread_local float __emule_src_scratch[__EMULE_TILE_ELEMS];
 
 // Assert FULL DEST is not used
 #ifdef FULL_DEST
@@ -306,12 +296,12 @@ inline void __emule_dst_check(uint32_t slot, const char* caller) {
 inline int32_t __emule_dst_load_i32(uint32_t slot, uint32_t idx) {
     __emule_dst_check(slot, "__emule_dst_load_i32");
     int32_t v;
-    std::memcpy(&v, &__emule_dst[slot][idx], sizeof(int32_t));
+    std::memcpy(&v, &__emule_compute_ctx().dst[slot][idx], sizeof(int32_t));
     return v;
 }
 inline void __emule_dst_store_i32(uint32_t slot, uint32_t idx, int32_t v) {
     __emule_dst_check(slot, "__emule_dst_store_i32");
-    std::memcpy(&__emule_dst[slot][idx], &v, sizeof(int32_t));
+    std::memcpy(&__emule_compute_ctx().dst[slot][idx], &v, sizeof(int32_t));
 }
 
 // ---- DST state machine ----
@@ -333,8 +323,8 @@ inline void __emule_dst_store_i32(uint32_t slot, uint32_t idx, int32_t v) {
 // for real coordinates but uint32_t avoids narrowing surprises).
 #ifndef __EMULE_GET_LOGICAL_COORDS_DEFINED
 #define __EMULE_GET_LOGICAL_COORDS_DEFINED
-inline uint32_t get_absolute_logical_x() { return __emule_logical_x; }
-inline uint32_t get_absolute_logical_y() { return __emule_logical_y; }
+inline uint32_t get_absolute_logical_x() { return __emule_self->core->logical_x; }
+inline uint32_t get_absolute_logical_y() { return __emule_self->core->logical_y; }
 #endif
 
 // ---- CB helpers (read/write via the calling thread's per-RISC CB pointer) ----
@@ -357,12 +347,12 @@ inline uint8_t* cb_write_ptr_at(uint32_t cb_id, uint32_t tile_offset) {
 }
 
 inline uint32_t cb_page_size(uint32_t cb_id) {
-    return __emule_cbs[cb_id].page_size;
+    return __emule_self->cbs[cb_id].page_size;
 }
 
 // Number of bfloat16 elements in a page (only valid for bf16 format).
 inline uint32_t cb_tile_elems(uint32_t cb_id) {
-    return __emule_cbs[cb_id].page_size / sizeof(uint16_t);
+    return __emule_self->cbs[cb_id].page_size / sizeof(uint16_t);
 }
 
 // Real per-CB data format (tt::DataFormat enum value) from the compile-time
@@ -449,7 +439,7 @@ inline void __emule_check_blockfloat_supported(uint32_t cb_id, const char* calle
 }
 
 // pack_dst_to_buf: PACK row-major DST → nfaces CB with L1 accumulation support.
-// When __emule_l1_acc_enabled, adds DST to existing CB contents instead of overwriting.
+// When __emule_compute_ctx().l1_acc_enabled, adds DST to existing CB contents instead of overwriting.
 //
 // Tile-shape aware: silicon supports thin output tiles (M×32 with
 // M ∈ {1,2,4,8,16}). Page size determines how many DST rows to pack and which
@@ -469,9 +459,9 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
     // isn't exercised by any kernel today (and would need partial-tile
     // exponent handling).
     if (__emule_pack_subrect_active()) {
-        const uint32_t cols    = __emule_pack_x_end + 1u;
-        const uint32_t rows    = __emule_pack_face_r_dim;
-        const uint32_t n_faces = __emule_pack_num_faces;
+        const uint32_t cols    = __emule_compute_ctx().pack_x_end + 1u;
+        const uint32_t rows    = __emule_compute_ctx().pack_face_r_dim;
+        const uint32_t n_faces = __emule_compute_ctx().pack_num_faces;
 
         // Validate the kernel-programmed rectangle against the DST face layout
         // (16 rows × 16 cols, 4 faces) and the output CB page size. The values
@@ -503,20 +493,20 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
             // memcpy (preserves INT32 bit patterns that float assignment would
             // flush under x86 DAZ/FTZ).
             uint32_t out_idx = 0;
-            if (__emule_l1_acc_enabled) {
+            if (__emule_compute_ctx().l1_acc_enabled) {
                 float* out = reinterpret_cast<float*>(buf);
                 for (uint32_t f = 0; f < n_faces; ++f)
                     for (uint32_t r = 0; r < rows; ++r)
                         for (uint32_t c = 0; c < cols; ++c)
                             out[out_idx++] += __emule_apply_pack_relu(
-                                __emule_dst[dst_slot][subrect_dst_rm(f, r, c)]);
-            } else if (__emule_pack_relu_mode == ReluType::NO_RELU) {
+                                __emule_compute_ctx().dst[dst_slot][subrect_dst_rm(f, r, c)]);
+            } else if (__emule_compute_ctx().pack_relu_mode == ReluType::NO_RELU) {
                 uint32_t* out = reinterpret_cast<uint32_t*>(buf);
                 for (uint32_t f = 0; f < n_faces; ++f)
                     for (uint32_t r = 0; r < rows; ++r)
                         for (uint32_t c = 0; c < cols; ++c)
                             std::memcpy(&out[out_idx++],
-                                        &__emule_dst[dst_slot][subrect_dst_rm(f, r, c)],
+                                        &__emule_compute_ctx().dst[dst_slot][subrect_dst_rm(f, r, c)],
                                         sizeof(uint32_t));
             } else {
                 float* out = reinterpret_cast<float*>(buf);
@@ -524,7 +514,7 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
                     for (uint32_t r = 0; r < rows; ++r)
                         for (uint32_t c = 0; c < cols; ++c)
                             out[out_idx++] = __emule_apply_pack_relu(
-                                __emule_dst[dst_slot][subrect_dst_rm(f, r, c)]);
+                                __emule_compute_ctx().dst[dst_slot][subrect_dst_rm(f, r, c)]);
             }
             return;
         }
@@ -539,7 +529,7 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
                     for (uint32_t c = 0; c < cols; ++c) {
                         const uint32_t dst_rm = subrect_dst_rm(f, r, c);
                         uint32_t bits;
-                        std::memcpy(&bits, &__emule_dst[dst_slot][dst_rm], sizeof(uint32_t));
+                        std::memcpy(&bits, &__emule_compute_ctx().dst[dst_slot][dst_rm], sizeof(uint32_t));
                         out[out_idx++] = static_cast<uint16_t>(bits);
                     }
                 }
@@ -555,8 +545,8 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
             for (uint32_t r = 0; r < rows; ++r) {
                 for (uint32_t c = 0; c < cols; ++c) {
                     const float v = __emule_apply_pack_relu(
-                        __emule_dst[dst_slot][subrect_dst_rm(f, r, c)]);
-                    if (__emule_l1_acc_enabled) {
+                        __emule_compute_ctx().dst[dst_slot][subrect_dst_rm(f, r, c)]);
+                    if (__emule_compute_ctx().l1_acc_enabled) {
                         bf[out_idx] = __emule_bf16::from_f32(__emule_bf16::to_f32(bf[out_idx]) + v);
                     } else {
                         bf[out_idx] = __emule_bf16::from_f32(v);
@@ -580,7 +570,7 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
             float row16[16];
             for (uint32_t k = 0; k < 16; ++k) {
                 const uint32_t rm = __emule_nfaces::tile_nfaces_to_rm(fr * 16 + k, th, tw);
-                row16[k] = __emule_apply_pack_relu(__emule_dst[dst_slot][rm]);
+                row16[k] = __emule_apply_pack_relu(__emule_compute_ctx().dst[dst_slot][rm]);
             }
             uint8_t packed[8];
             __emule_bfp4::encode_face_row(row16, exp_base[fr], packed);
@@ -599,7 +589,7 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
             float row16[16];
             for (uint32_t k = 0; k < 16; ++k) {
                 const uint32_t rm = __emule_nfaces::tile_nfaces_to_rm(fr * 16 + k, th, tw);
-                row16[k] = __emule_apply_pack_relu(__emule_dst[dst_slot][rm]);
+                row16[k] = __emule_apply_pack_relu(__emule_compute_ctx().dst[dst_slot][rm]);
             }
             uint8_t mant_row[16];
             __emule_bfp8::encode_face_row(row16, exp_base[fr], mant_row);
@@ -614,13 +604,13 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
     // index is r*32+c (stride-32 grid); the CB offset is the compact nfaces
     // position. For a full 32×32 tile this is identical to the old linear loops.
     if (cb_is_32bit_format(ocb)) {
-        if (__emule_l1_acc_enabled) {
+        if (__emule_compute_ctx().l1_acc_enabled) {
             float* out = reinterpret_cast<float*>(buf);
             for (uint32_t r = 0; r < th; r++)
                 for (uint32_t c = 0; c < tw; c++)
                     out[__emule_nfaces::tile_rc_to_nfaces(r, c, th, tw)] +=
-                        __emule_apply_pack_relu(__emule_dst[dst_slot][r * 32u + c]);
-        } else if (__emule_pack_relu_mode == ReluType::NO_RELU) {
+                        __emule_apply_pack_relu(__emule_compute_ctx().dst[dst_slot][r * 32u + c]);
+        } else if (__emule_compute_ctx().pack_relu_mode == ReluType::NO_RELU) {
             // Bit-exact copy via memcpy preserves INT32 bit patterns that are
             // denormalized floats (would be flushed to zero by float assignment
             // when x86 DAZ/FTZ is set).
@@ -628,7 +618,7 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
             for (uint32_t r = 0; r < th; r++)
                 for (uint32_t c = 0; c < tw; c++)
                     std::memcpy(&out[__emule_nfaces::tile_rc_to_nfaces(r, c, th, tw)],
-                                &__emule_dst[dst_slot][r * 32u + c], sizeof(uint32_t));
+                                &__emule_compute_ctx().dst[dst_slot][r * 32u + c], sizeof(uint32_t));
         } else {
             // ReLU clamp: reinterpret as float, clamp, write back. Loses INT32
             // bit-exactness, but ReLU+INT32 isn't a coherent silicon config anyway.
@@ -636,7 +626,7 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
             for (uint32_t r = 0; r < th; r++)
                 for (uint32_t c = 0; c < tw; c++)
                     out[__emule_nfaces::tile_rc_to_nfaces(r, c, th, tw)] =
-                        __emule_apply_pack_relu(__emule_dst[dst_slot][r * 32u + c]);
+                        __emule_apply_pack_relu(__emule_compute_ctx().dst[dst_slot][r * 32u + c]);
         }
     } else if (cb_is_uint16_format(ocb)) {
         // 16-bit integer output: low 16 bits of the DST int32 bit pattern. ReLU is
@@ -645,24 +635,24 @@ inline void pack_dst_to_buf(uint8_t* buf, uint32_t dst_slot, uint32_t ocb) {
         for (uint32_t r = 0; r < th; r++)
             for (uint32_t c = 0; c < tw; c++) {
                 uint32_t bits;
-                std::memcpy(&bits, &__emule_dst[dst_slot][r * 32u + c], sizeof(uint32_t));
+                std::memcpy(&bits, &__emule_compute_ctx().dst[dst_slot][r * 32u + c], sizeof(uint32_t));
                 out[__emule_nfaces::tile_rc_to_nfaces(r, c, th, tw)] = static_cast<uint16_t>(bits);
             }
     } else {
         uint16_t* bf = reinterpret_cast<uint16_t*>(buf);
-        if (__emule_l1_acc_enabled) {
+        if (__emule_compute_ctx().l1_acc_enabled) {
             for (uint32_t r = 0; r < th; r++)
                 for (uint32_t c = 0; c < tw; c++) {
                     uint32_t ni = __emule_nfaces::tile_rc_to_nfaces(r, c, th, tw);
                     bf[ni] = __emule_bf16::from_f32(
                         __emule_bf16::to_f32(bf[ni])
-                        + __emule_apply_pack_relu(__emule_dst[dst_slot][r * 32u + c]));
+                        + __emule_apply_pack_relu(__emule_compute_ctx().dst[dst_slot][r * 32u + c]));
                 }
         } else {
             for (uint32_t r = 0; r < th; r++)
                 for (uint32_t c = 0; c < tw; c++)
                     bf[__emule_nfaces::tile_rc_to_nfaces(r, c, th, tw)] = __emule_bf16::from_f32(
-                        __emule_apply_pack_relu(__emule_dst[dst_slot][r * 32u + c]));
+                        __emule_apply_pack_relu(__emule_compute_ctx().dst[dst_slot][r * 32u + c]));
         }
     }
 }
@@ -675,8 +665,8 @@ namespace ckernel {
 
 // binary_op_init_common — resets the binary accumulate-to-DST mode so a stale
 // thread_local flag from a prior kernel can't leak into the next one.
-ALWI void binary_op_init_common(uint32_t, uint32_t, uint32_t) { __emule_dest_accum_en = false; }
-ALWI void binary_op_init_common(uint32_t, uint32_t, uint32_t, uint32_t) { __emule_dest_accum_en = false; }
+ALWI void binary_op_init_common(uint32_t, uint32_t, uint32_t) { __emule_compute_ctx().dest_accum_en = false; }
+ALWI void binary_op_init_common(uint32_t, uint32_t, uint32_t, uint32_t) { __emule_compute_ctx().dest_accum_en = false; }
 
 // binary_tiles_init — no-op (per-op hardware init)
 template<bool FullInit = true, EltwiseBinaryType BinaryType = EltwiseBinaryType::ELWADD>
@@ -751,7 +741,7 @@ inline void __emule_eltwise_binary_tile(uint32_t icb0, uint32_t icb1,
                 const float a = buf0[__emule_nfaces::tile_rc_to_nfaces(r, c, th0, tw0)];
                 const float v1 = thin_b1 ? buf1[(r * 32u + c) % n_b1]
                                          : buf1[__emule_nfaces::tile_rc_to_nfaces(r, c, th1, tw1)];
-                __emule_dst[idst][r * 32u + c] = apply(a, v1);
+                __emule_compute_ctx().dst[idst][r * 32u + c] = apply(a, v1);
             }
     } else {
         const uint16_t* buf0 = reinterpret_cast<const uint16_t*>(p0);
@@ -761,7 +751,7 @@ inline void __emule_eltwise_binary_tile(uint32_t icb0, uint32_t icb1,
                 const float a = __emule_bf16::to_f32(buf0[__emule_nfaces::tile_rc_to_nfaces(r, c, th0, tw0)]);
                 const float v1 = thin_b1 ? __emule_bf16::to_f32(buf1[(r * 32u + c) % n_b1])
                                          : __emule_bf16::to_f32(buf1[__emule_nfaces::tile_rc_to_nfaces(r, c, th1, tw1)]);
-                __emule_dst[idst][r * 32u + c] = apply(a, v1);
+                __emule_compute_ctx().dst[idst][r * 32u + c] = apply(a, v1);
             }
     }
 }
@@ -790,10 +780,10 @@ ALWI void add_tiles(uint32_t icb0, uint32_t icb1,
     float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
     __emule_unpack_cb_tile_numeric(icb0, itile0, a);
     __emule_unpack_cb_tile_numeric(icb1, itile1, b);
-    if (__emule_dest_accum_en)
-        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] += a[i] + b[i];
+    if (__emule_compute_ctx().dest_accum_en)
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_compute_ctx().dst[idst][i] += a[i] + b[i];
     else
-        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] + b[i];
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_compute_ctx().dst[idst][i] = a[i] + b[i];
 }
 
 ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
@@ -808,10 +798,10 @@ ALWI void sub_tiles(uint32_t icb0, uint32_t icb1,
     float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
     __emule_unpack_cb_tile_numeric(icb0, itile0, a);
     __emule_unpack_cb_tile_numeric(icb1, itile1, b);
-    if (__emule_dest_accum_en)
-        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] += a[i] - b[i];
+    if (__emule_compute_ctx().dest_accum_en)
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_compute_ctx().dst[idst][i] += a[i] - b[i];
     else
-        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] - b[i];
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_compute_ctx().dst[idst][i] = a[i] - b[i];
 }
 
 ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
@@ -826,10 +816,10 @@ ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
     float a[__EMULE_TILE_ELEMS], b[__EMULE_TILE_ELEMS];
     __emule_unpack_cb_tile_numeric(icb0, itile0, a);
     __emule_unpack_cb_tile_numeric(icb1, itile1, b);
-    if (__emule_dest_accum_en)
-        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] += a[i] * b[i];
+    if (__emule_compute_ctx().dest_accum_en)
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_compute_ctx().dst[idst][i] += a[i] * b[i];
     else
-        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_dst[idst][i] = a[i] * b[i];
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) __emule_compute_ctx().dst[idst][i] = a[i] * b[i];
 }
 
 // pack_tile: write DST[idst] → CB[ocb] write slot.
@@ -839,12 +829,12 @@ ALWI void mul_tiles(uint32_t icb0, uint32_t icb1,
 ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
     // Blocked pack (llk_pack_init pack_width>1): one issue emits w consecutive
     // tiles DST[idst..idst+w-1] → CB slots, auto-advancing the offset each.
-    const uint32_t w = __emule_pack_width[ocb] ? __emule_pack_width[ocb] : 1;
+    const uint32_t w = __emule_compute_ctx().pack_width[ocb] ? __emule_compute_ctx().pack_width[ocb] : 1;
     __emule_dst_check(idst + w - 1, "pack_tile");
     // PACK engine auto-advance: write to current offset, then advance.
     for (uint32_t t = 0; t < w; ++t) {
         __emule_compute::pack_dst_to_buf(
-            __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++), idst + t, ocb);
+            __emule_compute::cb_write_ptr_at(ocb, __emule_compute_ctx().pack_offset[ocb]++), idst + t, ocb);
     }
 }
 
@@ -853,7 +843,7 @@ ALWI void pack_tile(uint32_t idst, uint32_t ocb) {
 // offset is ignored, slot auto-advances. `<true>` honours the offset.
 //
 // pack_offset semantics: the explicit-slot path bypasses the
-// auto-advance `__emule_pack_offset[ocb]++` that the no-arg path uses. To
+// auto-advance `__emule_compute_ctx().pack_offset[ocb]++` that the no-arg path uses. To
 // keep `cb_push_back(ocb, n)` consistent, advance pack_offset past
 // `output_offset`. Mirrors silicon's single PACK pointer.
 template <bool UseOutputOffset = false>
@@ -861,14 +851,14 @@ ALWI void pack_tile(uint32_t idst, uint32_t ocb, uint32_t output_offset = 0) {
     if constexpr (UseOutputOffset) {
         // Blocked pack (llk_pack_init pack_width>1): one issue emits w consecutive
         // tiles DST[idst..idst+w-1] → CB[output_offset..output_offset+w-1].
-        const uint32_t w = __emule_pack_width[ocb] ? __emule_pack_width[ocb] : 1;
+        const uint32_t w = __emule_compute_ctx().pack_width[ocb] ? __emule_compute_ctx().pack_width[ocb] : 1;
         __emule_dst_check(idst + w - 1, "pack_tile<templated>");
         for (uint32_t t = 0; t < w; ++t) {
             __emule_compute::pack_dst_to_buf(
                 __emule_compute::cb_write_ptr_at(ocb, output_offset + t), idst + t, ocb);
         }
-        if (output_offset + w > __emule_pack_offset[ocb]) {
-            __emule_pack_offset[ocb] = output_offset + w;
+        if (output_offset + w > __emule_compute_ctx().pack_offset[ocb]) {
+            __emule_compute_ctx().pack_offset[ocb] = output_offset + w;
         }
     } else {
         __emule_dst_check(idst, "pack_tile<templated>");
@@ -982,7 +972,7 @@ inline void __emule_unpack_cb_tile_numeric(uint32_t icb, uint32_t itile, float* 
 ALWI void copy_tile(uint32_t icb, uint32_t itile, uint32_t idst) {
     __emule_dst_check(idst, "copy_tile");
     __emule_dst_mark_dirty(idst);
-    __emule_unpack_cb_tile_to(icb, itile, &__emule_dst[idst][0]);
+    __emule_unpack_cb_tile_to(icb, itile, &__emule_compute_ctx().dst[idst][0]);
     // Datacopy preserves the source datum verbatim, so the slot's int-ness
     // follows the source CB format (consulted by eqz; see __emule_dst_holds_int).
     __emule_dst_set_int(idst, __emule_compute::cb_is_int_format(icb));
@@ -1041,12 +1031,12 @@ ALWI void pack_reconfig_data_format(uint32_t, uint32_t) {}
 // state applied at every pack site.  Mode is set by `llk_pack_relu_config`,
 // threshold by `pack_set_relu_threshold`; `pack_relu_config(uint32_t)`
 // decodes the silicon-style packed config.
-ALWI void llk_pack_relu_config(ReluType type) { __emule_pack_relu_mode = type; }
+ALWI void llk_pack_relu_config(ReluType type) { __emule_compute_ctx().pack_relu_mode = type; }
 ALWI void llk_pack_relu_config(const ReluConfig& config) {
-    __emule_pack_relu_mode = config.get_mode();
-    __emule_pack_relu_threshold = static_cast<float>(config.get_threshold());
+    __emule_compute_ctx().pack_relu_mode = config.get_mode();
+    __emule_compute_ctx().pack_relu_threshold = static_cast<float>(config.get_threshold());
 }
-ALWI void pack_set_relu_threshold(float threshold) { __emule_pack_relu_threshold = threshold; }
+ALWI void pack_set_relu_threshold(float threshold) { __emule_compute_ctx().pack_relu_threshold = threshold; }
 
 // Public-API forwarders for handwritten compute kernels that use silicon's
 // public pack_* names (rather than the llk_-prefixed forms).  Forward
@@ -1111,16 +1101,16 @@ template<EltwiseBinaryType BinaryType, EltwiseBinaryReuseDestType ReuseType>
 ALWI void binary_dest_reuse_tiles(uint32_t icb, uint32_t in_tile, uint32_t idst) {
     __emule_dst_check(idst, "binary_dest_reuse_tiles");
     __emule_dst_mark_dirty(idst);
-    __emule_unpack_cb_tile_to(icb, in_tile, __emule_src_scratch);
+    __emule_unpack_cb_tile_to(icb, in_tile, __emule_compute_ctx().src_scratch);
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float a = __emule_dst[idst][i];
-        float b = __emule_src_scratch[i];
+        float a = __emule_compute_ctx().dst[idst][i];
+        float b = __emule_compute_ctx().src_scratch[i];
         if constexpr (BinaryType == EltwiseBinaryType::ELWADD)
-            __emule_dst[idst][i] = a + b;
+            __emule_compute_ctx().dst[idst][i] = a + b;
         else if constexpr (BinaryType == EltwiseBinaryType::ELWSUB)
-            __emule_dst[idst][i] = (ReuseType == EltwiseBinaryReuseDestType::DEST_TO_SRCB) ? (b - a) : (a - b);
+            __emule_compute_ctx().dst[idst][i] = (ReuseType == EltwiseBinaryReuseDestType::DEST_TO_SRCB) ? (b - a) : (a - b);
         else
-            __emule_dst[idst][i] = a * b;
+            __emule_compute_ctx().dst[idst][i] = a * b;
     }
 }
 
@@ -1130,7 +1120,7 @@ ALWI void state_configure(uint32_t = 0) {}
 // llk_pack_reconfig_l1_acc — L1 accumulation toggle for pack operations.
 // enable=1: pack_tile adds DST to existing CB data; enable=0: pack_tile overwrites.
 ALWI void llk_pack_reconfig_l1_acc(uint32_t enable) {
-    __emule_l1_acc_enabled = (enable != 0);
+    __emule_compute_ctx().l1_acc_enabled = (enable != 0);
 }
 
 } // namespace ckernel
@@ -1169,7 +1159,7 @@ using namespace ckernel;
 #include "api/rt_arg.h"
 
 // ---- LLK function templates ----
-// Pulled in AFTER __emule_compute::, __emule_dst[][], __emule_bf16::, and
+// Pulled in AFTER __emule_compute::, __emule_compute_ctx().dst[][], __emule_bf16::, and
 // __EMULE_TILE_ELEMS are defined above — these LLK headers reference all
 // of them. Templates here are inline + datacopy-routed; no SFPU INT32
 // conflict (common.h's copy_tile remains the canonical CB→DST path).

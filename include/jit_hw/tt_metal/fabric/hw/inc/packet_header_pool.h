@@ -1,2 +1,140 @@
+// SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
 #pragma once
+// emule shadow of tt_metal/fabric/hw/inc/packet_header_pool.h.
+//
+// The silicon pool hands out L1 addresses from the reserved MEM_PACKET_HEADER_POOL_BASE region. emule
+// must return a HOST pointer into the CURRENT worker's real L1 (MAP_32BIT low-2GB alias), because the
+// fabric kernels pass `(uint32_t)packet_header` to the sender and the teleport re-extends that uint32
+// as a host pointer — only L1-backed pointers survive that truncation (the .so's own static storage is
+// mapped above 4 GB and would truncate to garbage). We therefore map the same reserved L1 region
+// through __emule_local_l1_to_ptr.
+//
+// Routes: silicon allocates contiguous blocks of headers and registers each block under a route_id
+// (header_table[route_id] = {first_header, num}); the route-variant fabric send API iterates a route's
+// headers via for_each_header. emule mirrors this with per-(core,risc)-thread state. Partitioning is by
+// RISC (__emule_self->processor_id) — mirroring silicon's proc_type partition — so a core's DM0/DM1 riscs never
+// alias a header; cores are already separate L1 (__emule_local_l1_to_ptr resolves to the running
+// thread's core), so every (core, risc) thread's region is disjoint (race-free, no global counter).
+#include <cstdint>
 #include "jit_hw/__emule_fabric_stubs.h"
+#include "dev_mem_map.h"
+#include "jit_hw/internal/emule_thread_ctx.h"  // __emule_self->processor_id (per-RISC pool key)
+
+// Both defined in the runner / dataflow_api.h; declared here so the pool can map a reserved L1 offset to
+// its low-2GB host alias and partition by the running RISC.
+uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr);
+
+class PacketHeaderPool {
+    static constexpr uint32_t HEADER_STRIDE = sizeof(PACKET_HEADER_TYPE);  // 48B, already 16B-aligned
+    static constexpr uint32_t POOL_SLOTS = MEM_PACKET_HEADER_POOL_SIZE / HEADER_STRIDE;
+    static constexpr uint32_t SLOTS_PER_RISC = 16;                      // headers per RISC partition
+    static constexpr uint32_t MAX_RISCS = POOL_SLOTS / SLOTS_PER_RISC;  // 48/16=3: BRISC/NCRISC/TRISC
+    static constexpr uint8_t MAX_ROUTES = 16;
+
+    // Per-(core,risc)-thread allocation state. thread_local because launch_cores runs each (core,risc)
+    // kernel on its own thread; separate threads → separate cursors → no cross-thread aliasing.
+    static inline thread_local uint32_t s_cursor = 0;     // next free header index within this risc partition
+    static inline thread_local uint8_t s_route_count = 0;
+    static inline thread_local uint32_t s_route_first[MAX_ROUTES] = {};  // route → first header index (in partition)
+    static inline thread_local uint8_t s_route_num[MAX_ROUTES] = {};     // route → header count
+
+    static uint32_t risc_partition_base() {
+        return (static_cast<uint32_t>(__emule_self->processor_id) % MAX_RISCS) * SLOTS_PER_RISC;
+    }
+    static PACKET_HEADER_TYPE* header_at(uint32_t index_in_partition) {
+        const uint32_t slot = risc_partition_base() + (index_in_partition % SLOTS_PER_RISC);
+        return reinterpret_cast<PACKET_HEADER_TYPE*>(
+            __emule_local_l1_to_ptr(MEM_PACKET_HEADER_POOL_BASE + slot * HEADER_STRIDE));
+    }
+
+public:
+    // Reset this thread's allocation cursor + route table (mirrors silicon reset() for loop reuse).
+    static void reset() {
+        s_cursor = 0;
+        s_route_count = 0;
+    }
+
+    // Allocate `num` contiguous headers; register them as a new route; return the FIRST header pointer.
+    static PACKET_HEADER_TYPE* allocate_header(uint32_t num = 1) {
+        const uint32_t first = s_cursor;
+        s_cursor += num;
+        if (s_route_count < MAX_ROUTES) {
+            s_route_first[s_route_count] = first;
+            s_route_num[s_route_count] = static_cast<uint8_t>(num);
+            s_route_count++;
+        }
+        return header_at(first);
+    }
+
+    // Allocate `num` contiguous headers and return the route_id (mirrors silicon: route over `num` conns).
+    static uint8_t allocate_header_n(uint32_t num) {
+        allocate_header(num);
+        return static_cast<uint8_t>(s_route_count - 1);
+    }
+
+    template <typename Func>
+    static void for_each_header(uint8_t route_id, Func&& func) {
+        const uint32_t first = s_route_first[route_id];
+        const uint8_t num = s_route_num[route_id];
+        for (uint8_t i = 0; i < num; i++) {
+            func(header_at(first + i), i);
+        }
+    }
+
+    static uint8_t get_num_headers(uint8_t route_id) { return s_route_num[route_id]; }
+};
+
+// Route-variant fabric send API (silicon: linear/api.h connection_manager+route_id overloads). They
+// iterate a route's headers and apply the per-header set/with-state form (defined in the stub). emule's
+// chip-multicast routing metadata is inert (the teleport reaches the neighbor regardless), so set_state
+// ignores the connection; with_state sends each header through the matching connection slot's
+// teleporting sender. Defined here (not in the stub) because they reference PacketHeaderPool.
+namespace tt::tt_fabric::linear::experimental {
+
+template <UnicastWriteUpdateMask Mask = UnicastWriteUpdateMask::None, typename ConnMgr, typename Cmd = std::nullptr_t>
+inline void fabric_multicast_noc_unicast_write_set_state(
+    ConnMgr& /*conn*/, uint8_t route_id, uint8_t* start, uint8_t* range, Cmd cmd = nullptr, uint16_t size = 0) {
+    PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        fabric_multicast_noc_unicast_write_set_state<Mask>(hdr, start[i], range[i], cmd, size);
+    });
+}
+template <UnicastWriteUpdateMask Mask = UnicastWriteUpdateMask::None, typename ConnMgr, typename Cmd = std::nullptr_t>
+inline void fabric_multicast_noc_unicast_write_with_state(
+    ConnMgr& conn, uint8_t route_id, uint32_t src_addr, Cmd cmd = nullptr, uint16_t size = 0) {
+    PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        fabric_multicast_noc_unicast_write_with_state<Mask>(&conn.get(i).sender, hdr, src_addr, cmd, size);
+    });
+}
+
+template <UnicastScatterWriteUpdateMask Mask = UnicastScatterWriteUpdateMask::None, typename ConnMgr, typename Cmd = std::nullptr_t>
+inline void fabric_multicast_noc_scatter_write_set_state(
+    ConnMgr& /*conn*/, uint8_t route_id, uint8_t* start, uint8_t* range, Cmd cmd = nullptr, uint16_t size = 0) {
+    PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        fabric_multicast_noc_scatter_write_set_state<Mask>(hdr, start[i], range[i], cmd, size);
+    });
+}
+template <UnicastScatterWriteUpdateMask Mask = UnicastScatterWriteUpdateMask::None, typename ConnMgr, typename Cmd = std::nullptr_t>
+inline void fabric_multicast_noc_scatter_write_with_state(
+    ConnMgr& conn, uint8_t route_id, uint32_t src_addr, Cmd cmd = nullptr, uint16_t size = 0) {
+    PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        fabric_multicast_noc_scatter_write_with_state<Mask>(&conn.get(i).sender, hdr, src_addr, cmd, size);
+    });
+}
+
+template <UnicastAtomicIncUpdateMask Mask = UnicastAtomicIncUpdateMask::None, typename ConnMgr, typename Cmd = std::nullptr_t>
+inline void fabric_multicast_noc_unicast_atomic_inc_set_state(
+    ConnMgr& /*conn*/, uint8_t route_id, uint8_t* start, uint8_t* range, Cmd cmd = nullptr) {
+    PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        fabric_multicast_noc_unicast_atomic_inc_set_state<Mask>(hdr, start[i], range[i], cmd);
+    });
+}
+template <UnicastAtomicIncUpdateMask Mask = UnicastAtomicIncUpdateMask::None, typename ConnMgr, typename Cmd = std::nullptr_t>
+inline void fabric_multicast_noc_unicast_atomic_inc_with_state(ConnMgr& conn, uint8_t route_id, Cmd cmd = nullptr) {
+    PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        fabric_multicast_noc_unicast_atomic_inc_with_state<Mask>(&conn.get(i).sender, hdr, cmd);
+    });
+}
+
+}  // namespace tt::tt_fabric::linear::experimental

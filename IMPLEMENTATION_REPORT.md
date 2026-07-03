@@ -41,11 +41,21 @@ focused reference; start here and follow the links.
   `sfpi` backend (lane-masked registers, cregs, sign-magnitude cast); engaged per
   op via `EMULE_DEEP_SFPU_<OP>`.
 
+**Execution model**
+- [fiber-engine.md](docs/fiber-engine.md) — the cooperative M:N ucontext fiber
+  scheduler (`TT_EMULE_FIBER_WORKERS`), persistent worker pool + `min(K,fibers)`
+  clamp, register/run split, and §9 multichip co-scheduling.
+- [state-tiers.md](docs/state-tiers.md) — per-chip / per-core / per-fiber state
+  partition (the fiber ThreadCommonCtx / ComputeThreadCtx and what stays shared).
+
 **Communication**
 - [noc-emulation.md](docs/noc-emulation.md) — NOC address encoding/resolution,
   async read/write, multicast, semaphore operations, per-NOC state.
 - [DFB_EMULATION.md](docs/DFB_EMULATION.md) — Quasar Dataflow Buffers (MPMC tile
   counters, STRIDED/BLOCKED).
+- [fabric-ccl-emulation.md](docs/fabric-ccl-emulation.md) — inter-chip fabric
+  (host-inject teleport transport) and how CCL collectives (all_gather,
+  point_to_point, …) run on a 2-chip mesh.
 
 **Architecture**
 - [QUASAR_EMULATION.md](docs/QUASAR_EMULATION.md) — Quasar (Tensix Neo) threading,

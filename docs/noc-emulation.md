@@ -286,14 +286,24 @@ hang. A count-up target is never 0, so the split is unambiguous.
 
 | Call | Behaviour |
 |---|---|
-| `Semaphore::up(noc, x, y, v, vc)` | Remote atomic fetch_add via `noc_semaphore_inc` |
-| `Semaphore::set_multicast<opts>(noc, x_start, ..., num_dests, linked)` | `__emule_multicast_write` 4-byte broadcast; `MCAST_INCL_SRC` opt controls loopback |
-| `Semaphore::inc_multicast(noc, x_start, ..., value, num_dests)` | Walks rect, per-core resolve + atomic fetch_add |
-| `Semaphore::relay_unicast(noc, dst_sem, x, y)` | 4-byte unicast write of local value to a different sem on remote core |
-| `Semaphore::relay_multicast<opts>(noc, dst_sem, ...)` | Mcast write of local value to a different sem on every core in rect |
-| `noc_semaphore_set_remote(src_l1, dst_noc, noc)` | 4-byte unicast write (free function, same path as `set` but for a remote target) |
-| `noc_semaphore_inc(addr, incr, noc, vc)` | Resolve + atomic fetch_add at addr |
-| `noc_semaphore_inc_multicast(addr, incr, num_dests, noc, vc)` | Walks rect, per-core resolve + atomic fetch_add |
+| `Semaphore::up(noc, x, y, v, vc)` | Remote atomic fetch_add via `noc_semaphore_inc` (wakes) |
+| `Semaphore::set_multicast<opts>(noc, x_start, ..., num_dests, linked)` | `__emule_multicast_write` 4-byte broadcast (wakes each target); `MCAST_INCL_SRC` opt controls loopback |
+| `Semaphore::inc_multicast(noc, x_start, ..., value, num_dests)` | `noc_semaphore_inc_multicast` — per-core resolve + atomic fetch_add (wakes each) |
+| `Semaphore::relay_unicast(noc, dst_sem, x, y)` | `noc_semaphore_set_remote` — 4-byte unicast write of local value to a different sem on remote core (wakes) |
+| `Semaphore::relay_multicast<opts>(noc, dst_sem, ...)` | Mcast write of local value to a different sem on every core in rect (wakes each) |
+| `noc_semaphore_set_remote(src_l1, dst_noc, noc)` | 4-byte unicast write (free function, same path as `set` but for a remote target) + fiber wake |
+| `noc_semaphore_inc(addr, incr, noc, vc)` | Resolve + atomic fetch_add at addr (wakes) |
+| `noc_semaphore_inc_multicast(addr, incr, num_dests, noc, vc)` | Walks rect, per-core resolve + atomic fetch_add (wakes each) |
+
+**Wake-on-sync-write invariant (load-bearing under the fiber engine).** Every remote semaphore write
+above calls `__emule_fiber_wake` on each resolved target host pointer — the same key a `noc_semaphore_wait`
+parks on. This is required because the fiber scheduler is cooperative: a peer fiber parked on a semaphore
+is only re-queued by an explicit wake (unlike the legacy OS-thread executor, where the spinning thread
+observed the L1 write directly). A cross-core handshake — e.g. the SDPA K/V-chain `relay_unicast` of the
+data-valid sem to the next core — would deadlock if any of these paths wrote the sem without waking
+(`set_remote` and `inc_multicast` were such gaps). Plain data writes (`noc_async_write`, the
+non-4-byte `__emule_multicast_write` branch) do **not** wake: no fiber parks on raw data L1; consumers of
+remote data wait on a companion semaphore (above) or a local `cb_push_back`, not the data address.
 
 The `ProgrammableCoreType` template arg selects which L1 base to use on
 silicon (TENSIX vs ACTIVE_ETH vs IDLE_ETH). Emule has only the TENSIX L1

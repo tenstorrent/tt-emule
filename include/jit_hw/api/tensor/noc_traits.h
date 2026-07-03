@@ -67,7 +67,7 @@ private:
         uint64_t noc_addr = acc.get_noc_addr(page_id, offset_bytes, noc_id);
         // __emule_resolve_noc_addr decodes the NOC XY from the upper bits and
         // the local offset from the lower NOC_ADDR_LOCAL_BITS bits, then looks
-        // up the correct core in __emule_core_map.
+        // up the correct core in __emule_self->core_map.
         return __emule_resolve_noc_addr(noc_addr);
     }
 

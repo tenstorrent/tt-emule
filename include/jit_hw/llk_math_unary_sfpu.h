@@ -6,7 +6,7 @@
 // LLK unary SFPU stubs. Silicon's init functions configure SFPU op tables
 // in firmware; emule has no SFPU vector hardware, so all inits are no-ops.
 // The actual SFPU math lives in the api/compute/eltwise_unary/*.h tile-ops
-// (exp_tile, sigmoid_tile, etc.) which operate directly on __emule_dst.
+// (exp_tile, sigmoid_tile, etc.) which operate directly on __emule_compute_ctx().dst.
 
 #include <cstdint>
 

@@ -22,8 +22,8 @@ ALWI void lerp_tile(uint32_t idst0, uint32_t idst1, uint32_t idst2, uint32_t ods
     __emule_dst_check(idst2, "lerp_tile");
     __emule_dst_check(odst, "lerp_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float start = __emule_dst[idst0][i];
-        __emule_dst[odst][i] = start + __emule_dst[idst2][i] * (__emule_dst[idst1][i] - start);
+        float start = __emule_compute_ctx().dst[idst0][i];
+        __emule_compute_ctx().dst[odst][i] = start + __emule_compute_ctx().dst[idst2][i] * (__emule_compute_ctx().dst[idst1][i] - start);
     }
 }
 

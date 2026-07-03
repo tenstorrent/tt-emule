@@ -39,7 +39,7 @@ ALWI void reshuffle_rows_tile(uint32_t idst, uint32_t addr) {
             continue;
         }
         for (uint32_t c = 0; c < 32; c++) {
-            __emule_dst[idst + 1][dst_row * 32 + c] += __emule_dst[idst][r * 32 + c];
+            __emule_compute_ctx().dst[idst + 1][dst_row * 32 + c] += __emule_compute_ctx().dst[idst][r * 32 + c];
         }
     }
 }

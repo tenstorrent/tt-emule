@@ -21,8 +21,20 @@ Companion docs: [cb-emulation.md](cb-emulation.md) (CBs live in L1),
 Each emulated core owns an L1 region in host memory. The governing convention is
 **host-pointer-everywhere**: every L1 address handed to a kernel
 (`get_write_ptr`, `get_read_ptr`, `get_semaphore`) is a real host pointer
-truncated to `uint32_t`. This works because the L1 mmap is placed below 4 GB
-(`MAP_32BIT`) for worker cores, so the truncated pointer round-trips losslessly.
+truncated to `uint32_t`. This works because worker L1 is mapped in the **low
+4 GB**, so the truncated pointer round-trips losslessly.
+
+This is **load-bearing, not an optimization**: tt-metal kernel source dereferences
+those addresses *directly* — `reinterpret_cast<T*>(cb.get_write_ptr())[i] = …`
+appears in 136 kernel sites (mask/scaler generators, fill-pad, …). emule runs the
+kernel as native JIT'd x86, so there is no hook on that raw `*ptr`; the address
+must already be a valid host pointer. Hence worker L1 *cannot* be moved above 4 GB
+or replaced by offsets/translation without editing pristine upstream kernels — the
+aliasing is fixed. The window spans all of `[0, 4 GB)`:
+`include/tt_emule/low4g_mmap.hpp` uses `MAP_32BIT` for `[0, 2 GB)` and a
+`/proc/self/maps`-found `MAP_FIXED` gap for `[2 GB, 4 GB)`, fitting ~16 BH /
+~27 WH chips in one process. Scaling past one window needs multi-process (the
+`uint32_t` L1-address truncation can't span a single process's 4 GB).
 
 Consequences:
 - L1 is **zeroed once** at mmap time (`MAP_ANONYMOUS`), not re-zeroed per program
@@ -130,14 +142,25 @@ delegate uniformly to `get_core(xy)->l1_ptr(offset)` + `memcpy`.
 - No per-program re-zeroing (one-time `MAP_ANONYMOUS` zero-init; the Quasar DFB
   fallback bump allocator is the one exception — see
   [mem-zeros-handling.md](mem-zeros-handling.md)).
-- **Sub-4 GB address-space pressure.** `MAP_32BIT` forces every worker L1
-  region below 4 GB, but that 4 GB host range is shared with the loader's
-  text/data, the heap, every thread's stack, and the JIT-compiled kernel
-  `.so` mappings. Each worker core mapped individually would compete with
-  those for a few megabytes at a time. `L1Pool` mitigates by reserving a
-  single contiguous 2-MB-aligned slot pool for all workers up front;
-  cores that overflow the pool fall back to individual `MAP_32BIT`
-  mappings and re-enter the competition.
+- **Low-4 GB address-space pressure.** Worker L1 must be uint32-addressable, so it
+  lives in the low 4 GB (`low4g_mmap.hpp`: `MAP_32BIT`'s `[0, 2 GB)` first, then a
+  `/proc/self/maps`-found `[2 GB, 4 GB)` gap via `MAP_FIXED`), shared with the
+  loader's text/data, the heap, every thread's stack, and the JIT-compiled kernel
+  `.so` mappings. Each worker core mapped individually would compete with those a
+  few megabytes at a time. `L1Pool` reserves one contiguous 2-MB-aligned slot pool
+  for all workers up front; cores that overflow it fall back to individual low-4 GB
+  mappings. The pool holds **one slot per Tensix core**
+  (`SWEmuleChip` sizes it to `num_tensix`, no headroom multiplier): a
+  worker's physical, NOC1, and translated coordinates all name the same
+  physical tile and resolve to one `Core`/one L1, and only WORKER cores draw
+  from the pool (eth/router cores are never instantiated; DRAM has its own
+  non-`MAP_32BIT` backing), so `num_tensix` is an exact upper bound. The pool
+  is mapped `MAP_NORESERVE` and is **not** eagerly written, so its slots cost
+  only virtual address space until a core is first touched (zero-fill on
+  fault, per §1). This is what lets a multi-chip mesh share the one low-4 GB
+  window — e.g. an 8-chip Blackhole loudbox needs ~8 × `num_tensix` × 2 MB ≈ 1.9 GB
+  of VA, which fits the full `[0, 4 GB)` window comfortably (it overflowed the
+  `[0, 2 GB)` half). ~16 BH chips fill the window; beyond that needs multi-process.
 
 ---
 

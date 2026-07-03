@@ -27,17 +27,17 @@ namespace ckernel {
 ALWI void mm_init(uint32_t in0_cb_id, uint32_t in1_cb_id, uint32_t out_cb_id,
                   uint32_t transpose = 0) {
     (void)in0_cb_id; (void)in1_cb_id; (void)out_cb_id;
-    __llk_matmul_transpose = (transpose != 0);
+    __emule_compute_ctx().llk_matmul_transpose = (transpose != 0);
 }
 ALWI void mm_init_short(uint32_t in0_cb_id, uint32_t in1_cb_id,
                         uint32_t transpose = 0) {
     (void)in0_cb_id; (void)in1_cb_id;
-    __llk_matmul_transpose = (transpose != 0);
+    __emule_compute_ctx().llk_matmul_transpose = (transpose != 0);
 }
 ALWI void mm_init_short_with_dt(uint32_t in0_cb_id, uint32_t in1_cb_id,
                                 uint32_t c_in_old_srca, uint32_t transpose = 0) {
     (void)in0_cb_id; (void)in1_cb_id; (void)c_in_old_srca;
-    __llk_matmul_transpose = (transpose != 0);
+    __emule_compute_ctx().llk_matmul_transpose = (transpose != 0);
 }
 
 // #46346/#22219 renamed mm_init->matmul_init and mm_block_init->matmul_block_init
@@ -48,7 +48,7 @@ ALWI void matmul_init(uint32_t in0_cb_id, uint32_t in1_cb_id,
                       const uint32_t transpose = 0,
                       uint32_t call_line = __builtin_LINE()) {
     (void)in0_cb_id; (void)in1_cb_id; (void)call_line;
-    __llk_matmul_transpose = (transpose != 0);
+    __emule_compute_ctx().llk_matmul_transpose = (transpose != 0);
 }
 ALWI void matmul_block_init(uint32_t in0_cb_id, uint32_t in1_cb_id,
                             const uint32_t transpose = 0, uint32_t ct_dim = 1,
@@ -56,7 +56,7 @@ ALWI void matmul_block_init(uint32_t in0_cb_id, uint32_t in1_cb_id,
                             uint32_t call_line = __builtin_LINE()) {
     (void)in0_cb_id; (void)in1_cb_id;
     (void)ct_dim; (void)rt_dim; (void)kt_dim; (void)call_line;
-    __llk_matmul_transpose = (transpose != 0);
+    __emule_compute_ctx().llk_matmul_transpose = (transpose != 0);
 }
 
 // ---- matmul_tiles: tile GEMM accumulate into DST ----
@@ -76,7 +76,7 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
     constexpr uint32_t DIM = 32;
     const uint32_t M = get_tile_r_dim(in0_cb);
     const uint32_t K = get_tile_c_dim(in0_cb);
-    const bool transpose = __llk_matmul_transpose;
+    const bool transpose = __emule_compute_ctx().llk_matmul_transpose;
     // Under transpose, in1 is stored as N×K and used as its transpose (K×N);
     // otherwise in1 is B directly (K×N).
     const uint32_t N = transpose ? get_tile_r_dim(in1_cb) : get_tile_c_dim(in1_cb);
@@ -107,9 +107,9 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
             __m256 a_vec = _mm256_set1_ps(a_rm[m * DIM + k]);
             for (uint32_t n = 0; n < N; n += 8) {  // N ∈ {16,32}; inactive b lanes are 0
                 __m256 b_vec = _mm256_loadu_ps(&b[k * DIM + n]);
-                __m256 d_vec = _mm256_loadu_ps(&__emule_dst[idst][m * DIM + n]);
+                __m256 d_vec = _mm256_loadu_ps(&__emule_compute_ctx().dst[idst][m * DIM + n]);
                 d_vec = _mm256_fmadd_ps(a_vec, b_vec, d_vec);
-                _mm256_storeu_ps(&__emule_dst[idst][m * DIM + n], d_vec);
+                _mm256_storeu_ps(&__emule_compute_ctx().dst[idst][m * DIM + n], d_vec);
             }
         }
     }
@@ -118,7 +118,7 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
         for (uint32_t k = 0; k < K; k++) {
             float a_val = a_rm[m * DIM + k];
             for (uint32_t n = 0; n < N; n++) {
-                __emule_dst[idst][m * DIM + n] += a_val * b[k * DIM + n];
+                __emule_compute_ctx().dst[idst][m * DIM + n] += a_val * b[k * DIM + n];
             }
         }
     }
@@ -135,14 +135,14 @@ ALWI void mm_block_init(uint32_t in0_cb_id, uint32_t in1_cb_id,
                         uint32_t kt_dim = 1) {
     (void)in0_cb_id; (void)in1_cb_id; (void)out_cb_id;
     (void)ct_dim; (void)rt_dim; (void)kt_dim;
-    __llk_matmul_transpose = (transpose != 0);
+    __emule_compute_ctx().llk_matmul_transpose = (transpose != 0);
 }
 ALWI void mm_block_init_short(uint32_t in0_cb_id, uint32_t in1_cb_id,
                               uint32_t transpose = 0, uint32_t ct_dim = 1,
                               uint32_t rt_dim = 1, uint32_t kt_dim = 1) {
     (void)in0_cb_id; (void)in1_cb_id;
     (void)ct_dim; (void)rt_dim; (void)kt_dim;
-    __llk_matmul_transpose = (transpose != 0);
+    __emule_compute_ctx().llk_matmul_transpose = (transpose != 0);
 }
 ALWI void mm_block_init_short_with_dt(uint32_t in0_cb_id, uint32_t in1_cb_id,
                                       uint32_t old_in1_cb_id, uint32_t transpose = 0,
@@ -150,7 +150,7 @@ ALWI void mm_block_init_short_with_dt(uint32_t in0_cb_id, uint32_t in1_cb_id,
                                       uint32_t kt_dim = 1) {
     (void)in0_cb_id; (void)in1_cb_id; (void)old_in1_cb_id;
     (void)ct_dim; (void)rt_dim; (void)kt_dim;
-    __llk_matmul_transpose = (transpose != 0);
+    __emule_compute_ctx().llk_matmul_transpose = (transpose != 0);
 }
 // _with_both_dt reconfigures both input CB formats; emule reads CB format
 // per-call so the reconfig is implicit (only the transpose state matters).
@@ -160,7 +160,7 @@ ALWI void mm_block_init_short_with_both_dt(uint32_t in0_cb_id, uint32_t in1_cb_i
                                            uint32_t rt_dim = 1, uint32_t kt_dim = 1) {
     (void)in0_cb_id; (void)in1_cb_id; (void)old_in0_cb_id; (void)old_in1_cb_id;
     (void)ct_dim; (void)rt_dim; (void)kt_dim;
-    __llk_matmul_transpose = (transpose != 0);
+    __emule_compute_ctx().llk_matmul_transpose = (transpose != 0);
 }
 // matmul_block: compute rt_dim × ct_dim block of output tiles.
 // For each output tile (r, c): DST[idst + r*ct_dim + c] += A[in0_tile + r*kt_dim] * B[in1_tile + c]
@@ -172,7 +172,7 @@ ALWI void matmul_block(uint32_t in0_cb_id, uint32_t in1_cb_id,
                        uint32_t rt_dim, uint32_t kt_dim) {
     if (rt_dim * ct_dim > 0)
         __emule_dst_check(idst + rt_dim * ct_dim - 1, "matmul_block");
-    __llk_matmul_transpose = (transpose != 0);
+    __emule_compute_ctx().llk_matmul_transpose = (transpose != 0);
     uint32_t dst = idst;
     for (uint32_t r = 0; r < rt_dim; r++) {
         for (uint32_t c = 0; c < ct_dim; c++) {

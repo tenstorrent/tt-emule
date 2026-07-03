@@ -31,7 +31,7 @@ ALWI void fmod_tile(uint32_t idst, uint32_t param0, uint32_t param1) {
     float divisor;
     std::memcpy(&divisor, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        __emule_dst[idst][i] = std::fmod(__emule_dst[idst][i], divisor);
+        __emule_compute_ctx().dst[idst][i] = std::fmod(__emule_compute_ctx().dst[idst][i], divisor);
     }
 }
 

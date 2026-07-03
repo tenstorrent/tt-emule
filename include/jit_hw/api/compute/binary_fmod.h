@@ -12,7 +12,7 @@ ALWI void fmod_int32_tile_init() {}
 
 ALWI void fmod_binary_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[odst][i] = std::fmod(__emule_dst[idst0][i], __emule_dst[idst1][i]);
+        __emule_compute_ctx().dst[odst][i] = std::fmod(__emule_compute_ctx().dst[idst0][i], __emule_compute_ctx().dst[idst1][i]);
 }
 
 template<DataFormat Fmt = DataFormat::Int32>

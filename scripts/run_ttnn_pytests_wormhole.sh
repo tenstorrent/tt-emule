@@ -405,7 +405,7 @@ run_pytest "dm_test_sort_long_tensor_262144" "$DM_TEST_DIR/test_sort.py::test_so
 # every runnable config passes. test_sdpa_prefill exercises the non-streaming paths
 # (mask/sink/sliding); chunked is the streaming + paged-KV path; joint is the
 # image+text MMDiT path.
-run_pytest "sdpa_test_prefill"  "$SDPA_TEST_DIR/test_sdpa_prefill.py"          # 4 passed, 2 skipped
+run_pytest "sdpa_test_prefill"  "$SDPA_TEST_DIR/test_sdpa_prefill.py"
 run_pytest "sdpa_test_chunked"  "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_chunked.py"  # 18 passed, 16 skipped
 run_pytest "sdpa_test_joint"    "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_joint.py"    # 168 passed, 32 skipped
 

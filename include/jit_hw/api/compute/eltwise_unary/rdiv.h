@@ -35,13 +35,13 @@ ALWI void rdiv_tile(uint32_t dst_index, uint32_t value, VectorMode vector_mode =
     float num;
     std::memcpy(&num, &value, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float r = num / __emule_dst[dst_index][i];
+        float r = num / __emule_compute_ctx().dst[dst_index][i];
         if (rounding_mode == RoundingMode::Trunc) {
             r = std::trunc(r);
         } else if (rounding_mode == RoundingMode::Floor) {
             r = std::floor(r);
         }
-        __emule_dst[dst_index][i] = r;
+        __emule_compute_ctx().dst[dst_index][i] = r;
     }
 }
 

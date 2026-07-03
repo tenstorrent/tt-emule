@@ -12,6 +12,7 @@
 // "Diagnostic trace".
 
 #include <cstdint>
+#include "jit_hw/internal/emule_thread_ctx.h"  // __emule_self (fiber ctx: neo_id/trisc_id)
 #include <cstdlib>
 
 // Master ASAN switch (TT_METAL_EMULE_ASAN), cached in a per-launch thread_local.
@@ -58,8 +59,6 @@ extern thread_local uint8_t my_y[2];
 extern thread_local uint32_t __emule_logical_x;
 extern thread_local uint32_t __emule_logical_y;
 extern thread_local uint8_t __processor_id;
-extern thread_local uint8_t __emule_neo_id;
-extern thread_local uint8_t __emule_trisc_id;
 
 // Resolve one (module, file-relative offset) to a "func at file:line" string,
 // flattening inlined frames onto one line with " <- ". Returns false if no real
@@ -178,8 +177,8 @@ static void __emule_asan_print_trace() {
             stderr,
             "  processor: %u  (neo %u, trisc %u)\n",
             static_cast<unsigned>(__processor_id),
-            static_cast<unsigned>(__emule_neo_id),
-            static_cast<unsigned>(__emule_trisc_id));
+            static_cast<unsigned>(__emule_self ? __emule_self->neo_id : 0),
+            static_cast<unsigned>(__emule_self ? __emule_self->trisc_id : 0));
     }
 
     void* frames[128];

@@ -42,7 +42,9 @@ extern int32_t bank_to_dram_offset[NUM_DRAM_BANKS];
 extern uint16_t l1_bank_to_noc_xy[2][NUM_L1_BANKS];
 extern int32_t bank_to_l1_offset[NUM_L1_BANKS];
 
-// Core coordinates (set per kernel thread by program runner).
+// __emule_self + per-core CoreState (logical coords). my_x/my_y stay silicon-named
+// runner-set globals (read by unmodified upstream), so re-declare them locally.
+#include "jit_hw/internal/emule_thread_ctx.h"
 extern thread_local uint8_t my_x[2];
 extern thread_local uint8_t my_y[2];
 

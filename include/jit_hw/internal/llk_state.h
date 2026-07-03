@@ -28,22 +28,7 @@ inline uint32_t get_output_num_faces(uint32_t) { return 4; }
 // does not include this header, so there is no include cycle.
 #include "jit_hw/api/cb_api.h"
 
-// ---- Tilize/Untilize state ----
-// Unpack state: tracks source CB and tile position for datacopy calls
-static thread_local uint32_t __llk_unpack_src_cb = 0;
-static thread_local uint32_t __llk_unpack_start_tile_idx = 0;
-static thread_local uint32_t __llk_unpack_block_c = 0;
-static thread_local uint32_t __llk_unpack_current_tile = 0;
-static thread_local bool __llk_unpack_is_tilize = false;
-
-// Pack state: tracks output position and layout mode
-static thread_local uint32_t __llk_pack_offset = 0;
-static thread_local bool __llk_pack_is_untilize = false;
-static thread_local uint32_t __llk_pack_block_c = 0;
-
-// Matmul state: `transpose=1` passed to mm_init / mm_block_init means the
-// unpacker delivers the IN1 (SrcB) tile transposed before the math op
-// (see llk_unpack_AB_matmul.h:176 — `THCON_SEC0_REG2_Haloize_mode_RMW`).
-// Equivalent: compute A * B^T. emule has no SrcB modelling — `matmul_tiles`
-// reads this flag and transposes its decoded IN1 tile before the FMA loop.
-static thread_local bool __llk_matmul_transpose = false;
+// ---- Tilize/Untilize/Matmul trackers ----
+// The pack/unpack tilize trackers and the matmul-transpose flag are per-compute-
+// thread state, held in ComputeThreadCtx (emule_thread_ctx.h) and reached via
+// __emule_compute_ctx().llk_*.

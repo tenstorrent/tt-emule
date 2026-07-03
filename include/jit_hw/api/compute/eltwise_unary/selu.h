@@ -20,8 +20,8 @@ ALWI void selu_tile(uint32_t idst, uint32_t param_scale = 0, uint32_t param_alph
     if (param_scale != 0) std::memcpy(&scale, &param_scale, sizeof(float));
     if (param_alpha != 0) std::memcpy(&alpha, &param_alpha, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
-        __emule_dst[idst][i] = scale * (x > 0.0f ? x : alpha * (std::exp(x) - 1.0f));
+        float x = __emule_compute_ctx().dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = scale * (x > 0.0f ? x : alpha * (std::exp(x) - 1.0f));
     }
 }
 
