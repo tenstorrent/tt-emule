@@ -128,11 +128,6 @@ struct ThreadCommonCtx {
     uint32_t cb_self_produce_mask = 0;            // was __emule_cb_self_produce_mask
     LocalCBInterface local_cb[__EMULE_CTX_MAX_CBS]{};  // per-RISC CB ring ptrs (was __emule_local_cb)
 
-    // Per-fiber one-shot for the NOC read-latency model: the first noc_async_read_barrier
-    // latency-parks the fiber so peers (other cores) progress first, reproducing the
-    // hardware ordering some kernels lean on (e.g. argmax). See docs/fiber-engine.md.
-    bool read_latency_pending = true;
-
     explicit ThreadCommonCtx(Kind k) : kind(k) {}
     virtual ~ThreadCommonCtx() = default;  // owned via base ptr (runner/fiber)
 };

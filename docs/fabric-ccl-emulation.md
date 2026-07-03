@@ -244,5 +244,5 @@ silicon/CI failure; the emule harness (`scripts/run_ttnn_pytests_bh_loudbox.sh`)
   window (the 8-chip loudbox fits comfortably); a larger mesh would need a shared-memory teleport transport
   behind the same `__emule_fabric_teleport` seam.
 
-The live workarounds (WA-2 mux no-op, DM-1 chip-relative remap) are catalogued in
+The live workarounds (WA-1 mux no-op, DM-1 chip-relative remap) are catalogued in
 `.claude/skills/workarounds/`.

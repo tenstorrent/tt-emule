@@ -127,7 +127,6 @@ extern "C" {
   void __emule_fiber_park_locked(const void* key);// pre: lock held; post: lock released
   void __emule_fiber_wake(const void* key);        // re-queue all fibers parked on key
   void __emule_fiber_yield(void);                  // voluntary reschedule (no park)
-  void __emule_fiber_read_latency(void);           // one-shot NOC read-latency park (argmax k==0 ordering)
   void __emule_fiber_note_publish(unsigned pages); // tier-2 progress (data published)
 }
 ```
@@ -209,11 +208,7 @@ CB/DFB `std::mutex` + condition variables are **dropped from the fiber path** (a
 occupancy + the scheduler lock carry correctness); the struct fields are retained for
 ABI/size stability where a non-jit TU embeds `CBSyncState`.
 
-Two special cases:
-- **argmax `first_read`** (`dataflow_api.h` `__emule_model_first_read_latency`): the
-  `usleep(200)` that let the starved reducer run becomes `__emule_fiber_yield()` —
-  yielding the worker is the workaround's actual intent (a `usleep` would stall the whole
-  worker).
+One special case:
 - **`kernel_start_barrier`**: a no-op stub — fibers park instead of spin, so "start
   together" is unneeded.
 
@@ -279,34 +274,7 @@ env and is **not** part of the JIT cache key, so a warm cache is reused across K
 
 ---
 
-## 8. NOC read-latency model
-
-A few kernels lean on **NOC read latency** for cross-core ordering instead of a semaphore
-handshake. The canonical case is the multi-core argmax reader: on its *first* reduction
-iteration it skips the `start_sem` handshake (later iterations use it), so the reducer's
-`done_sem.set(0)` reset must land before any worker's `done_sem.up()`. On silicon that always
-holds — every core stalls at its read barrier for the NOC round-trip while the reducer's quick
-local reset runs first. emule reads are an instant memcpy, so without modeling the latency a
-worker could `up()` before the reset (clobbering the increment, hanging the exact-match wait)
-at any worker count > 1.
-
-emule reproduces the ordering deterministically: on a fiber's **first** `noc_async_read_barrier`
-(`__emule_model_first_read_latency` → the `__emule_fiber_read_latency` bridge), the fiber is
-**latency-parked** — deferred as lowest-priority "in-flight" work via `FiberScheduler::
-latency_park()`. The scheduler releases all latency-parked fibers (back to ready) only at the
-**quiescence point** — exactly where it would otherwise declare a tier-1 deadlock (§6) — i.e.
-after every other runnable core has had its turn. So the reducer's reset (a quick store *before*
-its own read barrier) always precedes the release, which precedes every worker's post-barrier
-`up()`. This is timer-free (no wall-clock heuristic), deterministic, and reuses the park/wake
-machinery; it is a per-fiber one-shot (a worker's cross-core output comes after its first read
-barrier, so one park suffices) and **always on** (no env knob). It withholds only the reader's
-forward progress, never data (the read already completed), so a normal reader→CB→compute→writer
-pipeline still drains — the reader is released at the quiescence point that would otherwise
-deadlock. The diagnostic dump (§6) reports "N fiber(s) in read-latency flight".
-
----
-
-## 9. Multichip (mesh) execution — concurrent dispatch + cross-chip CCL
+## 8. Multichip (mesh) execution — concurrent dispatch + cross-chip CCL
 
 A dual-chip board modeled as a 1×2 mesh runs both **data-parallel eltwise (no inter-chip
 communication)** and **fabric CCL (cross-chip — all_gather, point_to_point, …)** on n300 (2× Wormhole,
@@ -366,18 +334,18 @@ documented future phase — see the design record — and is **out of scope** he
 
 ---
 
-## 10. Performance: known overheads & future work
+## 9. Performance: known overheads & future work
 
 The engine is correctness-first. Its scheduling overhead is real and, on per-op kernel
 execution, currently **larger** than the equivalent raw-OS-thread compute (measured 5–12×
 slower per op). The engine's advantage over the legacy OS-thread executor is **not**
 throughput — it is eliminating that executor's startup-barrier `sched_yield` storm (which
 spends 87–99% of its kernel-exec wall spinning ~192 threads through a rendezvous on a 64-core
-host). The fiber path has no global startup barrier (§4, §8), so it skips that storm; what
+host). The fiber path has no global startup barrier (§4), so it skips that storm; what
 remains are the overheads below, all of which sit **outside the kernels' own compute/sync**.
 
 Each item notes which worker count `K` it bites at (the shipping default is **K=64**, activating
-`min(K, fiber count)` workers per program — see §10.4/§10.8). Every fix that touches the
+`min(K, fiber count)` workers per program — see §9.4/§9.7). Every fix that touches the
 scheduler must be re-validated with the §7 WH+BH K-matrix — identical pass/fail at K=1 / moderate
 / high — before landing.
 
@@ -387,10 +355,9 @@ scheduler must be re-validated with the §7 WH+BH K-matrix — identical pass/fa
 | `cv_.notify_all()` thundering herd | active W>1 | single global `cv_`, pinned fibers (§2.4) |
 | global `mu_` contention | active W>1 | one scheduler lock for all active workers |
 | per-program fiber-stack mmap/munmap | all K | ucontext stacks allocated per program |
-| `latency_park` quiescence rendezvous | all K | read-latency model (§8) |
 | per-program `setup_core_state` | all K (runner, both executors) | CB/sem/DFB rebuilt per program |
 
-### 10.1 `swapcontext` signal-mask syscall — *all K*
+### 9.1 `swapcontext` signal-mask syscall — *all K*
 glibc `swapcontext` saves/restores the signal mask via a `sigprocmask` syscall on every call
 (§2.1), and a park/wake cycle is two `swapcontext` (fiber→scheduler, scheduler→next fiber) —
 tens of thousands of syscalls per op (e.g. an eltwise op does ~1,920 CB waits, each a
@@ -400,7 +367,7 @@ dependency — a ~20-line hand-rolled callee-saved-register switch that omits th
 syscall. (emule installs only a SIGFPE handler, which reads but never alters the mask, so
 dropping per-switch mask save/restore is safe.)
 
-### 10.2 `cv_.notify_all()` thundering herd — *K>1*
+### 9.2 `cv_.notify_all()` thundering herd — *K>1*
 Fibers are **pinned** to a home worker (§2.4): a woken fiber is enqueued on `ready_[home]` and
 only that worker can run it. But `wake()`/`yield()` call `notify_all()` on a single global
 `cv_`, waking **all K** idle workers — K−1 of them find nothing runnable and re-sleep. At
@@ -409,13 +376,13 @@ eltwise op, far above the ~3.8K CB operations. It is also the regime where the e
 parallelizes (best-K ≈ core count). **Fix:** per-worker condition variables — wake only the
 home worker's `cv`.
 
-### 10.3 Global `mu_` contention — *K>1*
+### 9.3 Global `mu_` contention — *K>1*
 A single `FiberSchedulerImpl::mu_` guards every park / wake / yield / queue manipulation across
 all K workers. The lock is held only briefly (released before `swapcontext` into a fiber), but
 at high K it serializes the scheduler. **Fix:** shard scheduler state per worker (naturally
-paired with 10.2).
+paired with 9.2).
 
-### 10.4 Per-program worker create/join — *ADDRESSED*
+### 9.4 Per-program worker create/join — *ADDRESSED*
 `run_until_idle` used to create K `std::thread` workers and join them every program. It now uses a
 **persistent pool** of K threads, created once (lazily, first run) and reused across every program:
 threads park on `start_cv_` between programs; `run_until_idle` bumps a generation counter +
@@ -426,20 +393,13 @@ K=64 pays one start `notify_all`, not a per-op thread create/join nor a per-fibe
 drained + joined in `~FiberScheduler` (process exit). (Remaining minor: the tier-2 watchdog is still a
 per-run thread — 1, not K.)
 
-### 10.5 Per-program fiber-stack mmap/munmap — *all K*
+### 9.5 Per-program fiber-stack mmap/munmap — *all K*
 Each fiber's ucontext stack (`TT_EMULE_FIBER_STACK_BYTES`, default 1 MB) is `mmap` + `mprotect`
 (guard page) at spawn and `munmap` at `run_until_idle` teardown — one per (core, RISC), ~192
 for a full 64-core program, i.e. hundreds of syscalls and ~100s of MB of virtual churn per op.
 **Fix:** a free-list of fixed-size stacks reused across programs.
 
-### 10.6 `latency_park` quiescence rendezvous — *all K*
-The read-latency model (§8) latency-parks **every** fiber on its first `noc_async_read_barrier`
-and releases the set only at the quiescence point — a per-program rendezvous, paid even by ops
-that don't depend on the argmax-style read-latency ordering it exists to protect. **Fix:**
-scope the latency-park to the readers that actually rely on it (e.g. gate on the op / kernel),
-leaving everything else to run without the rendezvous.
-
-### 10.7 Per-program `setup_core_state` — *all K (runner, both executors)*
+### 9.6 Per-program `setup_core_state` — *all K (runner, both executors)*
 `setup_core_state` rebuilds per-core CB / semaphore / DFB state
 (`init_core_cb_sync` / `init_core_semaphores` / `allocate_dfbs_on_core`) on every program. The
 device core map is already memoized per device (`g_core_map_cache`), and the device-invariant
@@ -447,11 +407,11 @@ bank/coord-map setup is cheap (O(banks)/O(grid)); `setup_core_state` is the prog
 remainder. **Fix:** a program-level cache keyed on the ttnn program-cache hit. (This is runner
 setup, *before* `launch_cores` — outside the kernel-exec metric, but real per-op latency.)
 
-### 10.8 The `K` knob — *config*
-`TT_EMULE_FIBER_WORKERS` now defaults to **64** (the persistent pool size; §10.4) and is still
+### 9.7 The `K` knob — *config*
+`TT_EMULE_FIBER_WORKERS` now defaults to **64** (the persistent pool size; §9.4) and is still
 uncapped above that. Per program only `W = min(K, fiber count)` workers are activated, so a high K
 never spawns more workers than a program has fibers, and — with the pool persistent — the old
-"K = N regresses because of per-program thread create/join" failure mode (10.4) is gone. What remains
-at high active W is genuine contention on the single global `cv_`/`mu_` (10.2/10.3): light /
+"K = N regresses because of per-program thread create/join" failure mode (9.4) is gone. What remains
+at high active W is genuine contention on the single global `cv_`/`mu_` (9.2/9.3): light /
 data-movement ops still do best at low W and compute-heavy ops at **W ≈ core count**. K is not capped
-to hardware concurrency; that and per-worker CVs (10.2) would let an arbitrarily high K stay flat.
+to hardware concurrency; that and per-worker CVs (9.2) would let an arbitrarily high K stay flat.

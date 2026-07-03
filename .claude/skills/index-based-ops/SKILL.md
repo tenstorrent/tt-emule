@@ -122,9 +122,15 @@ path unsupportable:
 2. **Instant reads + sequential thread spawn.** A worker can run to its increment
    before a peer has executed its prologue. If that peer is an *ungated* reducer
    resetting its counter (no start-sem gate that iteration), the reset clobbers the
-   early increment and the exact-match wait hangs — worse with more cores. Fixed
-   globally (not per-op) by the startup barrier + first-read latency in
-   `docs/noc-emulation.md` §1.1; both were needed (barrier alone still raced).
+   early increment and the exact-match wait hangs — worse with more cores. The
+   startup barrier (`docs/noc-emulation.md` §1.1) models simultaneous dispatch but
+   does **not** order a reducer's prologue against worker increments — that
+   ordering is the kernel's job. The fix is in the kernel, not emule: make the
+   reset timing-independent. A reset that only re-asserts the dispatcher's
+   zero-init is redundant — drop it (argmax's `k=0` case); a reset that clears a
+   prior iteration's count must sit behind the same start-sem handshake that gates
+   the increments (argmax's `k>0` case). Do not reintroduce a NOC-latency sleep to
+   paper over this — emule surfacing the race is correct.
 
 Symptom to recognize: `Semaphore::wait(N) stuck at M<N`, nondeterministic, scaling
 with core count. *Genuinely* unsupportable is different — see the sort multi-core
