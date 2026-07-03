@@ -24,10 +24,10 @@ inline void transpose_wh_dest(uint32_t idst) {
     float temp[1024];
     for (uint32_t r = 0; r < 32; r++) {
         for (uint32_t c = 0; c < 32; c++) {
-            temp[c * 32 + r] = __emule_dst[idst][r * 32 + c];
+            temp[c * 32 + r] = __emule_compute_ctx().dst[idst][r * 32 + c];
         }
     }
-    std::memcpy(__emule_dst[idst], temp, sizeof(temp));
+    std::memcpy(__emule_compute_ctx().dst[idst], temp, sizeof(temp));
 }
 
 }  // namespace ckernel
