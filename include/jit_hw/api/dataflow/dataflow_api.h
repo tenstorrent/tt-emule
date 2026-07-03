@@ -80,7 +80,20 @@ extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
 // matches by name only; a mismatch leaves the 4th arg as register garbage.
 extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src,
                                         uint32_t size, bool include_self);
-extern "C" bool __emule_noc_addr_is_dram(uint64_t noc_addr);
+
+inline bool __emule_noc_addr_is_dram(uint64_t noc_addr) {
+    const uint32_t noc_x = NOC_UNICAST_ADDR_X(noc_addr);
+    const uint32_t noc_y = NOC_UNICAST_ADDR_Y(noc_addr);
+    const uint16_t noc_xy = static_cast<uint16_t>((noc_y << NOC_ADDR_NODE_ID_BITS) | noc_x);
+    for (uint32_t noc = 0; noc < 2; ++noc) {
+        for (uint32_t bank = 0; bank < NUM_DRAM_BANKS; ++bank) {
+            if (dram_bank_to_noc_xy[noc][bank] == noc_xy) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 // ---- Debug logging (enabled by TT_EMULE_DEBUG_MULTICAST=1 env var) ----
 inline bool __emule_debug_multicast() {

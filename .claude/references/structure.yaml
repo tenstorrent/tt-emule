@@ -97,6 +97,10 @@ files:
   - {kind: global, name: MATH_DONE}
   - {kind: global, name: MATH_PACK}
   - {kind: global, name: PACK_DONE}
+  - {kind: function, name: t6_sem}
+  - {kind: global, name: DEST_TARGET_REG_CFG_MATH_Offset_ADDR32}
+  - {kind: namespace, name: packer}
+  - {kind: function, name: get_packer_dest_offset}
   - {kind: function, name: t6_semaphore_init}
   - {kind: function, name: t6_semaphore_get}
   - {kind: function, name: t6_semaphore_post}
@@ -873,8 +877,7 @@ files:
   - {kind: global, name: ELWADD}
   - {kind: global, name: ELWSUB}
   - {kind: global, name: ELWMUL}
-  - {kind: macro, name: __EMULE_MATH_FIDELITY_DEFINED}
-  - {kind: enum, name: MathFidelity}
+  - {kind: macro, name: MATH_FIDELITY}
   - {kind: enum, name: ReluType}
   - {kind: struct, name: ReluConfig}
   - {kind: enum, name: p_dim_stride_target}
@@ -1404,6 +1407,13 @@ files:
   - {kind: function, name: transpose_wh_init}
   - {kind: function, name: transpose_wh_init_short}
   - {kind: function, name: transpose_wh_tile}
+- path: include/jit_hw/api/compute/transpose_wh_dest.h
+  section: include/jit_hw/api/compute/
+  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: transpose_wh_dest_init_short}
+  - {kind: function, name: transpose_wh_dest}
 - path: include/jit_hw/api/compute/untilize.h
   section: include/jit_hw/api/compute/
   summary: '`untilize_block`, `untilize_init`, `untilize_init_short`, `untilize_uninit`, `copy_tile`'
@@ -2080,7 +2090,7 @@ files:
   - {kind: macro, name: NOC_UNICAST_ADDR_Y}
   - {kind: extern_c, name: __emule_resolve_noc_addr}
   - {kind: extern_c, name: __emule_multicast_write}
-  - {kind: extern_c, name: __emule_noc_addr_is_dram}
+  - {kind: function, name: __emule_noc_addr_is_dram}
   - {kind: function, name: __emule_debug_multicast}
   - {kind: function, name: __emule_addr_to_offset}
   - {kind: global, name: worker_logical_col_to_virtual_col}
@@ -2387,6 +2397,8 @@ files:
   - {kind: function, name: get_output_narrow_tile}
   - {kind: function, name: get_output_face_r_dim}
   - {kind: function, name: get_output_num_faces}
+  - {kind: function, name: get_operand_src_format}
+  - {kind: function, name: get_operand_dst_format}
 - path: include/jit_hw/internal/mod_div_lib.h
   section: include/jit_hw/internal/
   summary: '`mulsi3`; `fast_udiv_<N>` for N = 7, 12, 20, 48, 56, 63, 70, 72, 80, 94, 108, 110, 117, 120, 124, 126, 130, 140'
@@ -2654,7 +2666,6 @@ files:
   summary: NOC Transfer Alignment sanitizer (`__emule_check_noc_read_alignment` / `__emule_check_noc_write_alignment`), split out of dataflow_api.h; per-side absolute alignment (L1 16B, DRAM read 32/64B,
     DRAM write 16B). Gated by TT_METAL_EMULE_ASAN. See docs/ASAN.md §10.
   symbols:
-  - {kind: extern_c, name: __emule_noc_addr_is_dram}
   - {kind: function, name: __emule_check_noc_read_alignment}
   - {kind: function, name: __emule_check_noc_write_alignment}
 - path: include/jit_hw/asan/asan_cb.h

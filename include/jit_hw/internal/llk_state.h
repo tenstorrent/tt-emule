@@ -28,6 +28,11 @@ inline uint32_t get_output_num_faces(uint32_t) { return 4; }
 // does not include this header, so there is no include cycle.
 #include "jit_hw/api/cb_api.h"
 
+// Format accessors used by TTNN unary/converter kernels — thin single-site
+// wrappers over the existing unpack_src_format / unpack_dst_format arrays.
+inline uint32_t get_operand_src_format(uint32_t operand) { return unpack_src_format[operand]; }
+inline uint32_t get_operand_dst_format(uint32_t operand) { return unpack_dst_format[operand]; }
+
 // ---- Tilize/Untilize/Matmul trackers ----
 // The pack/unpack tilize trackers and the matmul-transpose flag are per-compute-
 // thread state, held in ComputeThreadCtx (emule_thread_ctx.h) and reached via
