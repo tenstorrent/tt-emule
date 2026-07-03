@@ -202,8 +202,117 @@ bool ziveli_conv_tilize_matmul_add_untilize_matches_cpu() {
     return true;
 }
 
+bool ziveli_conv_two_spatial_bands_keep_distinct_untilized_pages() {
+    constexpr uint32_t cb_im2col_rm = 3;
+    constexpr uint32_t cb_im2col = 2;
+    constexpr uint32_t cb_bmm = 5;
+    constexpr uint32_t cb_add = 6;
+    constexpr uint32_t cb_weight = 7;
+    constexpr uint32_t cb_bias = 8;
+    constexpr uint32_t cb_untilized = 10;
+    constexpr uint32_t kt = 9;
+    constexpr uint32_t nt = 2;
+    constexpr uint32_t bands = 2;
+    constexpr uint32_t in_cols = kt * kTileDim;
+    constexpr uint32_t out_cols = nt * kTileDim;
+    constexpr uint32_t rm_page_bytes = in_cols * kTileDim * sizeof(uint16_t);
+    constexpr uint32_t untilized_page_bytes = out_cols * kTileDim * sizeof(uint16_t);
+
+    Harness h;
+    uint8_t* rm = h.bind_cb(cb_im2col_rm, rm_page_bytes, bands);
+    h.bind_cb(cb_im2col, kBf16TileBytes, kt * bands);
+    h.bind_cb(cb_bmm, kBf16TileBytes, nt);
+    h.bind_cb(cb_add, kBf16TileBytes, nt);
+    uint8_t* weight = h.bind_cb(cb_weight, kBf16TileBytes, kt * nt);
+    uint8_t* bias = h.bind_cb(cb_bias, kBf16TileBytes, nt);
+    uint8_t* untilized = h.bind_cb(cb_untilized, untilized_page_bytes, bands);
+
+    std::array<float, bands * kTileDim * in_cols> a{};
+    std::array<float, in_cols * out_cols> b{};
+    std::array<float, out_cols> bias_vals{};
+
+    for (uint32_t band = 0; band < bands; ++band) {
+        uint8_t* band_rm = rm + band * rm_page_bytes;
+        for (uint32_t r = 0; r < kTileDim; ++r) {
+            for (uint32_t k = 0; k < in_cols; ++k) {
+                const float value = bf16_round(
+                    ((static_cast<int>((band + 1) * 31 + r * 17 + k * 13) % 37) - 18) / 23.0f);
+                a[(band * kTileDim + r) * in_cols + k] = value;
+                write_bf16(band_rm, r * in_cols + k, value);
+            }
+        }
+    }
+    for (uint32_t k = 0; k < in_cols; ++k) {
+        for (uint32_t n = 0; n < out_cols; ++n) {
+            const float value = bf16_round(((static_cast<int>(k * 7 + n * 5) % 23) - 11) / 31.0f);
+            b[k * out_cols + n] = value;
+            const uint32_t tile = (k / kTileDim) * nt + (n / kTileDim);
+            write_tile_nf(weight, tile, k % kTileDim, n % kTileDim, value);
+        }
+    }
+    for (uint32_t n = 0; n < out_cols; ++n) {
+        const float value = bf16_round(((static_cast<int>(n * 3) % 17) - 8) / 13.0f);
+        bias_vals[n] = value;
+        write_tile_nf(bias, n / kTileDim, 0, n % kTileDim, value);
+    }
+
+    for (uint32_t band = 0; band < bands; ++band) {
+        tilize_block(cb_im2col_rm, kt, cb_im2col);
+
+        tile_regs_acquire();
+        for (uint32_t k = 0; k < kt; ++k) {
+            ckernel::matmul_block(cb_im2col, cb_weight, k, k * nt, 0, 0, nt, 1, kt);
+        }
+        tile_regs_commit();
+        tile_regs_wait();
+        pack_tile_block(0, cb_bmm, nt);
+        tile_regs_release();
+
+        tile_regs_acquire();
+        ckernel::add_tiles_bcast_rows(cb_bmm, cb_bias, 0, 0, 0);
+        ckernel::add_tiles_bcast_rows(cb_bmm, cb_bias, 1, 1, 1);
+        tile_regs_commit();
+        tile_regs_wait();
+        pack_tile_block(0, cb_add, nt);
+        tile_regs_release();
+
+        untilize_block(cb_add, nt, cb_untilized);
+
+        __emule_cb_advance_rd(cb_im2col_rm, 1);
+        __emule_cb_advance_wr(cb_im2col, kt);
+        __emule_cb_advance_rd(cb_im2col, kt);
+        __emule_compute_ctx().pack_offset[cb_bmm] = 0;
+        __emule_compute_ctx().pack_offset[cb_add] = 0;
+        __emule_cb_advance_wr(cb_untilized, 1);
+    }
+
+    for (uint32_t band = 0; band < bands; ++band) {
+        const uint8_t* band_untilized = untilized + band * untilized_page_bytes;
+        for (uint32_t r = 0; r < kTileDim; ++r) {
+            for (uint32_t n = 0; n < out_cols; ++n) {
+                float expected = 0.0f;
+                for (uint32_t k = 0; k < in_cols; ++k) {
+                    expected += a[(band * kTileDim + r) * in_cols + k] * b[k * out_cols + n];
+                }
+                expected = bf16_round(expected + bias_vals[n]);
+                const float got = read_dense_bf16(band_untilized, r, n, out_cols);
+                if (!require_close(got, expected, "two-band conv chain", band * kTileDim + r, n)) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
 }  // namespace
 
 int main() {
-    return ziveli_conv_tilize_matmul_add_untilize_matches_cpu() ? EXIT_SUCCESS : EXIT_FAILURE;
+    if (!ziveli_conv_tilize_matmul_add_untilize_matches_cpu()) {
+        return EXIT_FAILURE;
+    }
+    if (!ziveli_conv_two_spatial_bands_keep_distinct_untilized_pages()) {
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
 }
