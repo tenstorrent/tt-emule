@@ -19,7 +19,7 @@ set -euo pipefail
 : "${SHARD_INDEX:?SHARD_INDEX must be set}"
 : "${SHARD_COUNT:?SHARD_COUNT must be set}"
 
-MANIFEST="${MANIFEST:-$TT_METAL_DIR/tests/pipeline_reorg/ttnn-tests.yaml}"
+MANIFEST="${MANIFEST:-$TT_METAL_DIR/tests/pipeline_reorg/ttnn_sanity_tests.yaml}"
 PYTEST_BIN="${PYTEST_BIN:-/opt/ttmlir-toolchain/venv/bin/pytest}"
 GTEST_XML_DIR="${GTEST_XML_DIR:-${RUNNER_TEMP:-/tmp}/sweep-xml}"
 
