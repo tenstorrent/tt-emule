@@ -7,6 +7,7 @@
 // Matches the real tt-metal enum values we need.
 #include <cstdint>
 #include "tt-metalium/circular_buffer_constants.h"  // NUM_CIRCULAR_BUFFERS (32 WH / 64 BH)
+#include "jit_hw/internal/emule_thread_ctx.h"
 
 enum class DataFormat : uint8_t {
     Float32   = 0,
@@ -40,16 +41,16 @@ enum class DataFormat : uint8_t {
 // pack_tile, reset to 0 on cb_push_back (the batch commit — matching silicon
 // pack.h, which resets the sequential pack pointer after cb_push_back, NOT on
 // cb_reserve_back; a run of reserve_back calls with no push keeps advancing).
-static thread_local uint32_t __emule_pack_offset[NUM_CIRCULAR_BUFFERS] = {};
 
 // PACK blocked-width: silicon's llk_pack_init(ocb, pack_width) programs the packer
 // MOP to emit `pack_width` consecutive tiles per single pack_tile issue (the SDPA
 // streaming "blocked pack", used on Blackhole at width>=4; Wormhole packs single-
 // tile below width 8). Recorded per-CB by llk_pack_init; a stored 0 means
 // "not configured" and is treated as width 1. pack_tile reads DST[idst..idst+w-1]
-// and writes w consecutive CB slots. Every kernel's pack_init re-establishes this
-// (default 1), so a width set by one kernel can't leak into the next.
-static thread_local uint32_t __emule_pack_width[NUM_CIRCULAR_BUFFERS] = {};
+// and writes w consecutive CB slots. Lives in ComputeThreadCtx (fiber-local, like
+// pack_offset): a fiber can yield between pack_init and the pack_tile that reads the
+// width, so a thread_local global would let another fiber on the same worker clobber
+// it. See ComputeThreadCtx::pack_width.
 
 // Per-DST-slot "fresh since acquire" flag.  Set true by tile_regs_acquire,
 // cleared by any op that writes meaningful values into the slot (copy_tile,
@@ -64,12 +65,10 @@ static thread_local uint32_t __emule_pack_width[NUM_CIRCULAR_BUFFERS] = {};
 // max-accumulating; subsequent calls within the same acquire cycle (or after
 // a copy_tile load of a running accumulator) see fresh=false and use the
 // existing accumulator semantics.
-static thread_local bool __emule_dst_fresh[16] = {true, true, true, true, true, true, true, true,
-                                                  true, true, true, true, true, true, true, true};
 
 inline void __emule_dst_mark_dirty(uint32_t slot) {
     if (slot < 16) {
-        __emule_dst_fresh[slot] = false;
+        __emule_compute_ctx().dst_fresh[slot] = false;
     }
 }
 
@@ -94,7 +93,7 @@ inline bool __emule_dst_take_fresh(uint32_t slot) {
     if (slot >= 16) {
         return false;
     }
-    bool was_fresh = __emule_dst_fresh[slot];
-    __emule_dst_fresh[slot] = false;
+    bool was_fresh = __emule_compute_ctx().dst_fresh[slot];
+    __emule_compute_ctx().dst_fresh[slot] = false;
     return was_fresh;
 }

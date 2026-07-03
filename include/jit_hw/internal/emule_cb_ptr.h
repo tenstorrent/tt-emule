@@ -18,7 +18,7 @@
 // reader and writer both call get_write_ptr() on the output-shard CB at startup.
 //
 // Here the per-RISC pointer lives in a per-thread `LocalCBInterface`
-// (`__emule_local_cb`), which mirrors silicon's per-RISC CB register file. ALL
+// (`__emule_self->local_cb`), which mirrors silicon's per-RISC CB register file. ALL
 // pointer accessors — dataflow get_write_ptr/get_read_ptr (api/cb_api.h), compute
 // cb_write_ptr*/cb_read_ptr_at (api/compute/common.h), and get_local_cb_interface
 // (internal/cb_interface.h) — read this one storage. Because the returned
@@ -26,13 +26,15 @@
 // (e.g. CB-reconfig paths) take effect automatically (write-back), and the next
 // cb_push_back / get_*_ptr advances/reads from the written value.
 //
-// RESET INVARIANT (load-bearing): `thread_local` zero-initialises for every new
-// std::thread. emule's runner creates a fresh std::thread per kernel per launch
-// and joins it (no thread pool), so each RISC starts every launch with all CB
-// pointers cleared — exactly mirroring silicon's per-RISC register reset at
-// kernel launch. `fifo_page_size == 0` is the per-(thread,cb) "uninitialised"
-// sentinel; first touch lazily seats the pointer at the shard base (index 0)
-// from the shared CBSyncState geometry.
+// RESET INVARIANT (load-bearing): each RISC must start every launch with all CB
+// pointers cleared — mirroring silicon's per-RISC register reset at kernel launch.
+// This `local_cb` array lives in the per-fiber ThreadCommonCtx, which the runner
+// allocates fresh (zero-initialised) per (core,RISC) for every program and the
+// scheduler repoints `__emule_self` to on each swap-in — so the reset holds even
+// though the fiber-engine worker OS-threads are a persistent pool reused across
+// programs (it does NOT depend on a fresh std::thread per launch). `fifo_page_size
+// == 0` is the per-(ctx,cb) "uninitialised" sentinel; first touch lazily seats the
+// pointer at the shard base (index 0) from the shared CBSyncState geometry.
 //
 // SPSC INVARIANT: a CB has exactly one producer thread and one consumer thread
 // (never same-thread produce+consume). Independent per-RISC pointers that both
@@ -45,52 +47,29 @@
 #include <atomic>
 
 #include "tt-metalium/circular_buffer_constants.h"  // NUM_CIRCULAR_BUFFERS (32 WH / 64 BH)
-#include "jit_hw/emule_cb_state.h"                   // __emule_cbs (tt_emule::CBSyncState*)
+#include "jit_hw/emule_cb_state.h"                   // __emule_cb_state alias (tt_emule::CBSyncState)
+#include "jit_hw/internal/emule_thread_ctx.h"        // __emule_self->cbs
 
 // Silicon convention: CB fifo addresses are encoded in 16-byte units. The kernel
 // reconstitutes a byte pointer with `<< cb_addr_shift`. (Mirror of the upstream
 // LocalCBInterface fifo_{rd,wr}_ptr encoding.)
 inline constexpr uint32_t cb_addr_shift = 4;
 
-// Mirror of upstream's LocalCBInterface struct shape so kernels written against
-// the real device API compile and run unchanged. fifo_{rd,wr}_ptr are 16-byte
-// encoded host addresses (kernel does `<< 4`).
-struct LocalCBInterface {
-    uint32_t fifo_size;
-    uint32_t fifo_limit;  // 16-byte-encoded exclusive end = base + size; wrap when ptr >= fifo_limit.
-                          // (Value matches upstream circular_buffer_init.h; upstream's struct comment
-                          //  says "inclusive" but the value and the `>= fifo_limit` wrap are exclusive.)
-    uint32_t fifo_page_size;
-    uint32_t fifo_num_pages;
-
-    uint32_t fifo_rd_ptr;
-    uint32_t fifo_wr_ptr;
-
-    union {
-        uint32_t tiles_acked_received_init;
-        struct {
-            uint16_t tiles_acked;
-            uint16_t tiles_received;
-        };
-    };
-
-    uint32_t fifo_wr_tile_ptr;
-};
-
-// The per-RISC CB register file (single source of truth for CB pointers).
-inline thread_local LocalCBInterface __emule_local_cb[NUM_CIRCULAR_BUFFERS]{};
+// LocalCBInterface (the per-RISC CB register-file shape) and the per-RISC array
+// now live in ThreadCommonCtx (jit_hw/internal/emule_thread_ctx.h, included above)
+// as `__emule_self->local_cb` — the single source of truth for CB pointers.
 
 // ---- internal helpers -----------------------------------------------------
 
 // 16-byte-encoded base address of CB `cb_id`.
 inline uint32_t __emule_cb_base16(uint32_t cb_id) {
     return static_cast<uint32_t>(
-        reinterpret_cast<uintptr_t>(__emule_cbs[cb_id].base) >> cb_addr_shift);
+        reinterpret_cast<uintptr_t>(__emule_self->cbs[cb_id].base) >> cb_addr_shift);
 }
 
 // Total ring span of CB `cb_id` in 16-byte units (page_size * num_pages).
 inline uint32_t __emule_cb_span16(uint32_t cb_id) {
-    const auto& g = __emule_cbs[cb_id];
+    const auto& g = __emule_self->cbs[cb_id];
     return (g.page_size * g.num_pages) >> cb_addr_shift;
 }
 
@@ -98,8 +77,8 @@ inline uint32_t __emule_cb_span16(uint32_t cb_id) {
 // mirroring the silicon per-RISC register reset at kernel launch. No-op once
 // seated (so kernel writes to fifo_{wr,rd}_ptr persist) and when the CB is unset.
 inline void __emule_cb_view_init(uint32_t cb_id) {
-    auto& v = __emule_local_cb[cb_id];
-    const auto& g = __emule_cbs[cb_id];
+    auto& v = __emule_self->local_cb[cb_id];
+    const auto& g = __emule_self->cbs[cb_id];
     if (v.fifo_page_size != 0 || g.page_size == 0) {
         return;
     }
@@ -120,7 +99,7 @@ inline void __emule_cb_view_init(uint32_t cb_id) {
     // (matching fifo_limit/rd/wr below) — dataflow addresses still resolve correctly
     // because dataflow reads addresses via get_write_ptr/get_read_ptr (which convert),
     // not via raw fifo_{wr,rd}_ptr. emule's own addressing derives the page stride from
-    // the shared __emule_cbs[].page_size (bytes) >> cb_addr_shift, decoupled from these
+    // the shared __emule_self->cbs[].page_size (bytes) >> cb_addr_shift, decoupled from these
     // view fields.
 #if defined(TRISC_MATH) || defined(TRISC_PACK) || defined(TRISC_UNPACK)
     v.fifo_page_size = g.page_size >> cb_addr_shift;   // compute: 16-byte words
@@ -147,7 +126,7 @@ inline uint32_t __emule_cb_wrap(uint32_t p, uint32_t base16, uint32_t span16) {
 inline uint8_t* __emule_cb_wr_addr(uint32_t cb_id, uint32_t off = 0) {
     __emule_cb_view_init(cb_id);
     const uint32_t p = __emule_cb_wrap(
-        __emule_local_cb[cb_id].fifo_wr_ptr + off * (__emule_cbs[cb_id].page_size >> cb_addr_shift),
+        __emule_self->local_cb[cb_id].fifo_wr_ptr + off * (__emule_self->cbs[cb_id].page_size >> cb_addr_shift),
         __emule_cb_base16(cb_id), __emule_cb_span16(cb_id));
     return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(p) << cb_addr_shift);
 }
@@ -156,7 +135,7 @@ inline uint8_t* __emule_cb_wr_addr(uint32_t cb_id, uint32_t off = 0) {
 inline uint8_t* __emule_cb_rd_addr(uint32_t cb_id, uint32_t off = 0) {
     __emule_cb_view_init(cb_id);
     const uint32_t p = __emule_cb_wrap(
-        __emule_local_cb[cb_id].fifo_rd_ptr + off * (__emule_cbs[cb_id].page_size >> cb_addr_shift),
+        __emule_self->local_cb[cb_id].fifo_rd_ptr + off * (__emule_self->cbs[cb_id].page_size >> cb_addr_shift),
         __emule_cb_base16(cb_id), __emule_cb_span16(cb_id));
     return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(p) << cb_addr_shift);
 }
@@ -164,18 +143,18 @@ inline uint8_t* __emule_cb_rd_addr(uint32_t cb_id, uint32_t off = 0) {
 // Advance this thread's write/read pointer by `n` pages, wrapping at the ring end.
 inline void __emule_cb_advance_wr(uint32_t cb_id, uint32_t n) {
     __emule_cb_view_init(cb_id);
-    auto& v = __emule_local_cb[cb_id];
+    auto& v = __emule_self->local_cb[cb_id];
     v.fifo_wr_ptr = __emule_cb_wrap(
-        v.fifo_wr_ptr + n * (__emule_cbs[cb_id].page_size >> cb_addr_shift),
+        v.fifo_wr_ptr + n * (__emule_self->cbs[cb_id].page_size >> cb_addr_shift),
         __emule_cb_base16(cb_id), __emule_cb_span16(cb_id));
     v.fifo_wr_tile_ptr = v.fifo_wr_ptr;
 }
 
 inline void __emule_cb_advance_rd(uint32_t cb_id, uint32_t n) {
     __emule_cb_view_init(cb_id);
-    auto& v = __emule_local_cb[cb_id];
+    auto& v = __emule_self->local_cb[cb_id];
     v.fifo_rd_ptr = __emule_cb_wrap(
-        v.fifo_rd_ptr + n * (__emule_cbs[cb_id].page_size >> cb_addr_shift),
+        v.fifo_rd_ptr + n * (__emule_self->cbs[cb_id].page_size >> cb_addr_shift),
         __emule_cb_base16(cb_id), __emule_cb_span16(cb_id));
 }
 
@@ -184,12 +163,12 @@ inline void __emule_cb_advance_rd(uint32_t cb_id, uint32_t n) {
 // so it marks the start of the active reserve/wait window.
 inline uint32_t __emule_cb_wr_page(uint32_t cb_id) {
     __emule_cb_view_init(cb_id);
-    const uint32_t pg16 = __emule_cbs[cb_id].page_size >> cb_addr_shift;
-    return pg16 ? ((__emule_local_cb[cb_id].fifo_wr_ptr - __emule_cb_base16(cb_id)) / pg16) : 0;
+    const uint32_t pg16 = __emule_self->cbs[cb_id].page_size >> cb_addr_shift;
+    return pg16 ? ((__emule_self->local_cb[cb_id].fifo_wr_ptr - __emule_cb_base16(cb_id)) / pg16) : 0;
 }
 
 inline uint32_t __emule_cb_rd_page(uint32_t cb_id) {
     __emule_cb_view_init(cb_id);
-    const uint32_t pg16 = __emule_cbs[cb_id].page_size >> cb_addr_shift;
-    return pg16 ? ((__emule_local_cb[cb_id].fifo_rd_ptr - __emule_cb_base16(cb_id)) / pg16) : 0;
+    const uint32_t pg16 = __emule_self->cbs[cb_id].page_size >> cb_addr_shift;
+    return pg16 ? ((__emule_self->local_cb[cb_id].fifo_rd_ptr - __emule_cb_base16(cb_id)) / pg16) : 0;
 }

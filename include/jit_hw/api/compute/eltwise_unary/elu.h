@@ -25,8 +25,8 @@ ALWI void elu_tile(uint32_t idst, uint32_t param0) {
     float slope;
     std::memcpy(&slope, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
-        __emule_dst[idst][i] = x > 0.0f ? x : slope * (std::exp(x) - 1.0f);
+        float x = __emule_compute_ctx().dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = x > 0.0f ? x : slope * (std::exp(x) - 1.0f);
     }
 }
 

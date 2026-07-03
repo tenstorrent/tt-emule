@@ -23,14 +23,14 @@
 // emule's startup is a state reset, so the mapping is accepted-and-ignored.
 enum class SrcOrder : uint8_t { Regular = 0, Reverse = 1 };
 inline void compute_kernel_hw_startup(uint32_t, uint32_t) {
-    __llk_pack_offset = 0;
-    __llk_pack_is_untilize = false;
-    __llk_unpack_is_tilize = false;
-    __llk_matmul_transpose = false;
+    __emule_compute_ctx().llk_pack_offset = 0;
+    __emule_compute_ctx().llk_pack_is_untilize = false;
+    __emule_compute_ctx().llk_unpack_is_tilize = false;
+    __emule_compute_ctx().llk_matmul_transpose = false;
     // Reset PACK engine auto-advance offsets and L1 acc flag to prevent
     // stale state from prior kernel invocations in the same thread.
-    std::memset(__emule_pack_offset, 0, sizeof(__emule_pack_offset));
-    __emule_l1_acc_enabled = false;
+    std::memset(__emule_compute_ctx().pack_offset, 0, sizeof(__emule_compute_ctx().pack_offset));
+    __emule_compute_ctx().l1_acc_enabled = false;
     // Same rationale for the pack-subrect (TTI_SETADCXX / _llk_pack_mop_config_)
     // capture — restore the full-tile defaults so a prior kernel's sub-rectangle
     // config doesn't leak into this one.

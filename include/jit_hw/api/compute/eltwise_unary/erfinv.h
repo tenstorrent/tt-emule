@@ -22,11 +22,11 @@ ALWI void erfinv_tile(uint32_t idst) {
     constexpr float a = 0.147f;
     constexpr float two_over_pi_a = 2.0f / (std::numbers::pi_v<float> * a);
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
+        float x = __emule_compute_ctx().dst[idst][i];
         float sgn = (x < 0.0f) ? -1.0f : 1.0f;
         float ln = std::log(1.0f - x * x);
         float term = two_over_pi_a + ln / 2.0f;
-        __emule_dst[idst][i] = sgn * std::sqrt(std::sqrt(term * term - ln / a) - term);
+        __emule_compute_ctx().dst[idst][i] = sgn * std::sqrt(std::sqrt(term * term - ln / a) - term);
     }
 }
 

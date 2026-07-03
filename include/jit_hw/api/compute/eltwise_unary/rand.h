@@ -64,7 +64,7 @@ ALWI void rand_tile(uint32_t idst, uint32_t from = 0, uint32_t scale = 0) {
 
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        __emule_dst[idst][i] = from_f + dist(__emule_rand_engine) * scale_f;
+        __emule_compute_ctx().dst[idst][i] = from_f + dist(__emule_rand_engine) * scale_f;
     }
 }
 

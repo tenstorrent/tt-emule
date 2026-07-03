@@ -20,7 +20,7 @@ enum class InputClamping : uint8_t {
 // Raw-Tensix SFPU surface for kernels whose (possibly never-instantiated) branches
 // reference it — e.g. SDPA's `calculate_exponential_polynomial` (exp_approx_mode=false).
 // The TTI_SFP* instruction *semantics* live in the sfpi backend (`sfpi.h`'s
-// `__emule_sfp_*` on the single `__emule_lreg` + `__emule_sfpi_mask`) and are bound
+// `__emule_sfp_*` on the single `__emule_compute_ctx().sfpu.lreg` + `__emule_compute_ctx().sfpu.mask`) and are bound
 // to the macros in `ckernel_ops.h`; only the ckernel scaffolding the kernel
 // references by name lives here.
 #include "jit_hw/sfpi.h"
@@ -77,23 +77,23 @@ struct p_setrwc {
 // DST region for the raw-TTI direct-SFPU path (recip_tile_first_column_wh_idst0_direct).
 namespace math {
 inline void set_addr_mod_base() {
-    ::__emule_sfpi_dst_base = &__emule_dst[0][0];
-    ::__emule_sfpi_cursor = 0;
-    ::sfpi::__emule_sfpi_mask.fill(true);
-    ::sfpi::__emule_sfp_cc_active = false;  // fresh CC scope (defensive; SFPENCC clears it)
-    ::__emule_sfpi_first_col_mode = true;
+    ::__emule_compute_ctx().sfpu.dst_base = &__emule_compute_ctx().dst[0][0];
+    ::__emule_compute_ctx().sfpu.cursor = 0;
+    ::__emule_compute_ctx().sfpu.mask.fill(true);
+    ::__emule_compute_ctx().sfpu.sfp_cc_active = false;  // fresh CC scope (defensive; SFPENCC clears it)
+    ::__emule_compute_ctx().sfpu.first_col_mode = true;
 }
 inline void clear_addr_mod_base() {
-    ::__emule_sfpi_dst_base = nullptr;
-    ::__emule_sfpi_cursor = 0;
-    ::__emule_sfpi_first_col_mode = false;
+    ::__emule_compute_ctx().sfpu.dst_base = nullptr;
+    ::__emule_compute_ctx().sfpu.cursor = 0;
+    ::__emule_compute_ctx().sfpu.first_col_mode = false;
 }
 }  // namespace math
 }  // namespace ckernel
 
 // SFPU functor dispatcher `_llk_math_eltwise_unary_sfpu_params_` used by SDPA's
 // first-column exp/recip/softplus helpers. Functional: it points the sfpi cursor at
-// __emule_dst[idst], resets the cursor/active-lane mask, and invokes the functor —
+// __emule_compute_ctx().dst[idst], resets the cursor/active-lane mask, and invokes the functor —
 // once per active face, and twice under VectorMode::C (the SDPA first-column case) so
 // col-0 rows 0..31 are all covered (mirrors silicon's per-face walk). See
 // llk_math_eltwise_unary_sfpu_params.h for the per-face C-iteration detail.
@@ -146,7 +146,7 @@ ALWI void exp_tile(uint32_t idst, VectorMode vector_mode = VectorMode::RC,
     }
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
         if (!__emule_vector_mode_active(i, vector_mode, iterations)) continue;
-        float r = std::exp(__emule_dst[idst][i] * s);
+        float r = std::exp(__emule_compute_ctx().dst[idst][i] * s);
         if constexpr (approx) {
             // Fully-masked-row degeneracy (APPROX path only — silicon's LUT/polynomial
             // exp, which makes no IEEE special-value guarantee). SDPA masks out-of-window
@@ -159,12 +159,12 @@ ALWI void exp_tile(uint32_t idst, VectorMode vector_mode = VectorMode::RC,
             // this chunk's 0 away). So collapse the NaN to 0, matching silicon's valid
             // (non-NaN) output for these rows. Partially-masked rows have a finite max, so
             // exp(-inf - finite)=0 already; finite masks (e.g. -1e9) never produce -inf.
-            __emule_dst[idst][i] = std::isnan(r) ? 0.0f : r;
+            __emule_compute_ctx().dst[idst][i] = std::isnan(r) ? 0.0f : r;
         } else {
             // Accurate path: faithful IEEE semantics (exp(NaN)=NaN, exp(+inf)=+inf,
             // exp(-inf)=0) — required by ttnn.exp fp32 special-values. The NaN→0 collapse
             // above is a property of the approx polynomial exp, not the accurate exp.
-            __emule_dst[idst][i] = r;
+            __emule_compute_ctx().dst[idst][i] = r;
         }
     }
 }

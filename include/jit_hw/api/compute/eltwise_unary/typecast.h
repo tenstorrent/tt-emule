@@ -40,10 +40,10 @@ ALWI void typecast_tile(uint32_t idst) {
         if constexpr (in_is_int && !out_is_int) {
             // int → float: read int32 bit pattern, write as float
             int32_t iv = __emule_dst_load_i32(idst, i);
-            __emule_dst[idst][i] = static_cast<float>(iv);
+            __emule_compute_ctx().dst[idst][i] = static_cast<float>(iv);
         } else if constexpr (!in_is_int && out_is_int) {
             // float → int: read float, store as int32 bit pattern
-            float fv = __emule_dst[idst][i];
+            float fv = __emule_compute_ctx().dst[idst][i];
             int32_t iv = static_cast<int32_t>(std::roundf(fv));
             __emule_dst_store_i32(idst, i, iv);
         } else if constexpr (in_is_int && out_is_int) {

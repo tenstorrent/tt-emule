@@ -47,7 +47,7 @@ ALWI void clamped_silu_tile(uint32_t idst,
         ? (__EMULE_TILE_ELEMS / 2)
         : __EMULE_TILE_ELEMS;
 
-    float* d = __emule_dst[idst];
+    float* d = __emule_compute_ctx().dst[idst];
     float limit;
     std::memcpy(&limit, &limit_bits, sizeof(float));
 

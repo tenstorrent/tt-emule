@@ -21,10 +21,10 @@ namespace ckernel {
 // pipelines; in emulation the only observable effect is the accumulate-into-DST
 // mode (acc_to_dest), which the following *_tiles calls honour (see common.h).
 ALWI void add_tiles_init(uint32_t /*icb0*/ = 0, uint32_t /*icb1*/ = 0,
-                         bool acc_to_dest = false) { __emule_dest_accum_en = acc_to_dest; }
+                         bool acc_to_dest = false) { __emule_compute_ctx().dest_accum_en = acc_to_dest; }
 
 ALWI void sub_tiles_init(uint32_t /*icb0*/ = 0, uint32_t /*icb1*/ = 0,
-                         bool acc_to_dest = false) { __emule_dest_accum_en = acc_to_dest; }
+                         bool acc_to_dest = false) { __emule_compute_ctx().dest_accum_en = acc_to_dest; }
 
 // Silicon's 2-arg mul_tiles_init sets acc_to_dest=true: on WH/BH "accumulation
 // is default behaviour" for mul (tt_metal/hw/inc/api/compute/eltwise_binary.h),
@@ -33,10 +33,10 @@ ALWI void sub_tiles_init(uint32_t /*icb0*/ = 0, uint32_t /*icb1*/ = 0,
 // lone mul still behaves like an overwrite. The 3-arg form honours the caller's
 // explicit flag (e.g. Quasar control / explicit acc_to_dest=false).
 ALWI void mul_tiles_init(uint32_t /*icb0*/ = 0, uint32_t /*icb1*/ = 0,
-                         bool acc_to_dest = true) { __emule_dest_accum_en = acc_to_dest; }
+                         bool acc_to_dest = true) { __emule_compute_ctx().dest_accum_en = acc_to_dest; }
 
 // Silicon's overload (eltwise_binary.h:111) has a trailing call_line arg; emule ignores it.
 ALWI void mul_tiles_init(uint32_t /*icb0*/, uint32_t /*icb1*/, uint32_t acc_to_dest,
-                         uint32_t /*call_line*/ = __builtin_LINE()) { __emule_dest_accum_en = (acc_to_dest != 0); }
+                         uint32_t /*call_line*/ = __builtin_LINE()) { __emule_compute_ctx().dest_accum_en = (acc_to_dest != 0); }
 
 } // namespace ckernel

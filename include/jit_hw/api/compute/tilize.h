@@ -25,19 +25,19 @@
 #include "jit_hw/api/bfloat16.h"
 
 inline void tilize_init(uint32_t, uint32_t, uint32_t) {
-    __llk_unpack_is_tilize = true;
-    __llk_pack_is_untilize = false;
+    __emule_compute_ctx().llk_unpack_is_tilize = true;
+    __emule_compute_ctx().llk_pack_is_untilize = false;
 }
 inline void tilize_init_short(uint32_t, uint32_t) {
-    __llk_unpack_is_tilize = true;
-    __llk_pack_is_untilize = false;
+    __emule_compute_ctx().llk_unpack_is_tilize = true;
+    __emule_compute_ctx().llk_pack_is_untilize = false;
 }
 inline void tilize_init_short_with_dt(uint32_t, uint32_t, uint32_t) {
-    __llk_unpack_is_tilize = true;
-    __llk_pack_is_untilize = false;
+    __emule_compute_ctx().llk_unpack_is_tilize = true;
+    __emule_compute_ctx().llk_pack_is_untilize = false;
 }
 inline void tilize_uninit(uint32_t = 0, uint32_t = 0) {
-    __llk_unpack_is_tilize = false;
+    __emule_compute_ctx().llk_unpack_is_tilize = false;
     // Note: we do NOT clear __llk_pack_is_untilize here.  Silicon's
     // tilize_uninit reverts the unpacker config but does not touch the
     // packer state.  Clearing the pack flag here regresses kernels that
@@ -98,7 +98,7 @@ inline void tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb) {
     // __llk_pack_tiled for the BFP8_b OCB path.
     if (__emule_compute::cb_is_bfp8_b_format(ocb)) {
         for (uint32_t t = 0; t < ntiles; ++t) {
-            uint8_t* const out = __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++);
+            uint8_t* const out = __emule_compute::cb_write_ptr_at(ocb, __emule_compute_ctx().pack_offset[ocb]++);
             uint8_t* const exp_base  = out;
             uint8_t* const mant_base = out + 64;
             for (uint32_t fr = 0; fr < 64; ++fr) {
@@ -120,7 +120,7 @@ inline void tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb) {
     // per byte). Mirrors the bfp8 path and __llk_pack_tiled's Bfp4_b branch.
     if (__emule_compute::cb_is_bfp4_b_format(ocb)) {
         for (uint32_t t = 0; t < ntiles; ++t) {
-            uint8_t* const out = __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++);
+            uint8_t* const out = __emule_compute::cb_write_ptr_at(ocb, __emule_compute_ctx().pack_offset[ocb]++);
             uint8_t* const exp_base  = out;
             uint8_t* const mant_base = out + 64;
             for (uint32_t fr = 0; fr < 64; ++fr) {
@@ -141,7 +141,7 @@ inline void tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb) {
     }
 
     for (uint32_t t = 0; t < ntiles; ++t) {
-        uint8_t* const out = __emule_compute::cb_write_ptr_at(ocb, __emule_pack_offset[ocb]++);
+        uint8_t* const out = __emule_compute::cb_write_ptr_at(ocb, __emule_compute_ctx().pack_offset[ocb]++);
         for (uint32_t r = 0; r < out_rows; ++r) {
             const uint8_t* row_in =
                 in_base + r * row_stride + t * TILE_DIM * in_elem_size;

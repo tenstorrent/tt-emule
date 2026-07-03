@@ -20,6 +20,7 @@
 #include <cstdlib>
 
 #include "jit_hw/emule_cb_state.h"   // __emule_cbs (CBSyncState*)
+#include "jit_hw/internal/emule_thread_ctx.h"  // __emule_self (fiber ctx)
 #include "jit_hw/asan/emule_asan.h"  // __emule_asan_enabled / __emule_asan_panic
 
 // Identity thread-locals (for the panic diagnostics) + the NoC-read counter.
@@ -56,7 +57,7 @@ inline void __emule_asan_cb_on_reserve(
     __emule_cb_reserve_file[cb_id] = site_file;
     __emule_cb_reserve_line[cb_id] = site_line;
     __emule_cb_reserve_dangling[cb_id] = true;
-    const auto& cb = __emule_cbs[cb_id];
+    const auto& cb = __emule_self->cbs[cb_id];
     if (n > cb.num_pages) {
         __emule_asan_panic(
                 "[ASAN ERROR] CB Reservation Overflow: CB %u has %u total pages, "

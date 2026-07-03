@@ -4,13 +4,14 @@
 
 #pragma once
 #include <cstdint>
+#include "jit_hw/internal/emule_thread_ctx.h"
 
 // emule shim for the per-arch firmware `dev_mem_map.h`.  Two purposes:
 //
 // 1. `MEM_L1_UNCACHED_BASE` — silicon kernels cast L1 offsets to pointers via
 //    `(void*)(addr + MEM_L1_UNCACHED_BASE)`.  On silicon, that constant is the
 //    fixed L1 base.  In emule, L1 is heap memory mmap'd per-core, so we
-//    redirect to the per-thread `__emule_bridge_l1` pointer that the runner
+//    redirect to the per-thread `__emule_self->bridge_l1` pointer that the runner
 //    sets before each kernel launch.
 //
 // 2. `MEM_ZEROS_BASE` / `MEM_ZEROS_SIZE` — the firmware-reserved L1 zeros
@@ -23,8 +24,7 @@
 //      BH: tt_metal/hw/inc/internal/tt-1xx/blackhole/dev_mem_map.h
 //      Q:  tt_metal/hw/inc/internal/tt-2xx/quasar/dev_mem_map.h
 
-extern thread_local uint8_t* __emule_bridge_l1;
-#define MEM_L1_UNCACHED_BASE ((uintptr_t)__emule_bridge_l1)
+#define MEM_L1_UNCACHED_BASE ((uintptr_t)__emule_self->bridge_l1)
 
 // MEM_ZEROS_SIZE is typed `int` to match upstream's `#define MEM_ZEROS_SIZE 512`
 // (defaults to int).  `std::min(bytes, MEM_ZEROS_SIZE)` where `bytes` is int
@@ -48,5 +48,22 @@ constexpr uint32_t MEM_ZEROS_BASE = 0x3280;
 #ifndef NUM_TRISC_CORES
 #  if defined(ARCH_QUASAR)
 #    define NUM_TRISC_CORES 4
+#  endif
+#endif
+
+// Fabric packet-header pool — reserved firmware L1 region the buffer/CB allocator never touches.
+// emule's PacketHeaderPool shadow hands out (chip-local) host pointers into this region so fabric
+// kernels' packet headers live in real worker L1 (see tt_metal/fabric/hw/inc/packet_header_pool.h).
+// Values mirror the per-arch upstream macro chain (MEM_TENSIX_FABRIC_CONNECTIONS_BASE +
+// MEM_TENSIX_FABRIC_CONNECTIONS_SIZE, sized PACKET_HEADER_MAX_SIZE * NUM_PACKET_HEADERS):
+//   WH: tt_metal/hw/inc/internal/tt-1xx/wormhole/dev_mem_map.h
+//   BH: tt_metal/hw/inc/internal/tt-1xx/blackhole/dev_mem_map.h
+#ifndef MEM_PACKET_HEADER_POOL_BASE
+#  if defined(ARCH_BLACKHOLE)
+constexpr uint32_t MEM_PACKET_HEADER_POOL_BASE = 37248;
+constexpr uint32_t MEM_PACKET_HEADER_POOL_SIZE = 3456;
+#  else  // ARCH_WORMHOLE (or unspecified) — Quasar falls back here until it is in emule scope
+constexpr uint32_t MEM_PACKET_HEADER_POOL_BASE = 31264;
+constexpr uint32_t MEM_PACKET_HEADER_POOL_SIZE = 2304;
 #  endif
 #endif

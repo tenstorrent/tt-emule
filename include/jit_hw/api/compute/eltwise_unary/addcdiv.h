@@ -25,7 +25,7 @@ ALWI void addcdiv_tile(uint32_t idst0, uint32_t idst1, uint32_t idst2, uint32_t 
     float v;
     std::memcpy(&v, &value, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        __emule_dst[odst][i] = __emule_dst[idst0][i] + v * (__emule_dst[idst1][i] / __emule_dst[idst2][i]);
+        __emule_compute_ctx().dst[odst][i] = __emule_compute_ctx().dst[idst0][i] + v * (__emule_compute_ctx().dst[idst1][i] / __emule_compute_ctx().dst[idst2][i]);
     }
 }
 

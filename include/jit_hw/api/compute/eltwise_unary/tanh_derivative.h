@@ -20,9 +20,9 @@ template <bool fast_and_approx = false>
 ALWI void tanh_derivative_tile(uint32_t idst) {
     __emule_dst_check(idst, "tanh_derivative_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        const float e = std::exp(-2.0f * std::fabs(__emule_dst[idst][i]));
+        const float e = std::exp(-2.0f * std::fabs(__emule_compute_ctx().dst[idst][i]));
         const float d = 1.0f + e;
-        __emule_dst[idst][i] = 4.0f * e / (d * d);
+        __emule_compute_ctx().dst[idst][i] = 4.0f * e / (d * d);
     }
 }
 

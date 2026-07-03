@@ -22,6 +22,8 @@
 #include <mutex>
 #include <condition_variable>
 
+#include "jit_hw/internal/emule_fiber_bridge.h"
+
 namespace tt_emule {
 
 struct CBSyncState {
@@ -31,6 +33,9 @@ struct CBSyncState {
     uint32_t  page_mask = 0;        // num_pages - 1 (for bitmask modulo; 0 if non-power-of-2)
     bool      globally_allocated = false;  // exempt from CB-Boundary window check; see docs/ASAN.md
     std::atomic<uint32_t> occupied{0};  // Number of occupied pages (the shared semaphore)
+    // mu/space_cv/data_cv are unused under the fiber engine (the cb_reserve/cb_wait
+    // park on &cb and are woken below); retained for ABI/size stability (Core embeds
+    // CBSyncState, parsed by the umd TU). See docs/fiber-engine.md.
     std::mutex              mu;
     std::condition_variable space_cv;
     std::condition_variable data_cv;
@@ -39,20 +44,21 @@ struct CBSyncState {
 // ---- Semaphore operations on CBSyncState ----
 //
 // These manage ONLY the shared pages-occupied count + producer/consumer wakeups.
-// Per-RISC pointer advance lives in jit_hw/internal/emule_cb_ptr.h.
+// Per-RISC pointer advance lives in jit_hw/internal/emule_cb_ptr.h. The wake key is
+// &cb (the CBSyncState host address) — the same key cb_reserve_back/cb_wait_front
+// park on.
 
 inline void cb_sync_push(CBSyncState& cb, uint32_t n) {
     // Producer published n pages: bump the semaphore and wake a waiting consumer.
-    std::unique_lock<std::mutex> lk(cb.mu);
     cb.occupied.fetch_add(n, std::memory_order_release);
-    cb.data_cv.notify_one();
+    __emule_fiber_note_publish(n);  // tier-2 watchdog: real forward progress
+    __emule_fiber_wake(&cb);
 }
 
 inline void cb_sync_pop(CBSyncState& cb, uint32_t n) {
     // Consumer freed n pages: drop the semaphore and wake a waiting producer.
-    std::unique_lock<std::mutex> lk(cb.mu);
     cb.occupied.fetch_sub(n, std::memory_order_release);
-    cb.space_cv.notify_one();
+    __emule_fiber_wake(&cb);
 }
 
 } // namespace tt_emule

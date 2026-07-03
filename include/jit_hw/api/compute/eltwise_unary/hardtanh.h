@@ -22,13 +22,13 @@ ALWI void hardtanh_tile(uint32_t idst, uint32_t param0, uint32_t param1) {
     std::memcpy(&low, &param0, sizeof(float));
     std::memcpy(&high, &param1, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
+        float x = __emule_compute_ctx().dst[idst][i];
         if (x < low) {
             x = low;
         } else if (x > high) {
             x = high;
         }
-        __emule_dst[idst][i] = x;
+        __emule_compute_ctx().dst[idst][i] = x;
     }
 }
 

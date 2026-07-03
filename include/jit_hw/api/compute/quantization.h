@@ -41,9 +41,6 @@ namespace ckernel {
 
 // Per-op zero-point state, populated by *_tile_init and consumed by *_tile.
 // Stored as fp32 (decoded from the uint32 bit-pattern the caller supplies).
-static thread_local float __emule_quant_zero_point = 0.0f;
-static thread_local float __emule_requant_zero_point = 0.0f;
-static thread_local float __emule_dequant_zero_point = 0.0f;
 
 namespace {
 
@@ -74,35 +71,35 @@ inline int32_t __emule_quant_fp32_to_int8_sat(float x) {
 }  // namespace
 
 ALWI void quant_tile_init(uint32_t zero_point) {
-    __emule_quant_zero_point = __emule_quant_decode_fp32(zero_point);
+    __emule_compute_ctx().quant_zero_point = __emule_quant_decode_fp32(zero_point);
 }
 
 ALWI void quant_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     __emule_dst_check(idst0, "quant_tile");
     __emule_dst_check(idst1, "quant_tile");
     __emule_dst_check(odst, "quant_tile");
-    const float zp = __emule_quant_zero_point;
+    const float zp = __emule_compute_ctx().quant_zero_point;
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float a = __emule_dst[idst0][i];
-        float b = __emule_dst[idst1][i];
+        float a = __emule_compute_ctx().dst[idst0][i];
+        float b = __emule_compute_ctx().dst[idst1][i];
         int32_t q = __emule_quant_fp32_to_int8_sat(a * b + zp);
         __emule_dst_store_i32(odst, i, q);
     }
 }
 
 ALWI void requant_tile_init(uint32_t zero_point) {
-    __emule_requant_zero_point = __emule_quant_decode_fp32(zero_point);
+    __emule_compute_ctx().requant_zero_point = __emule_quant_decode_fp32(zero_point);
 }
 
 ALWI void requant_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     __emule_dst_check(idst0, "requant_tile");
     __emule_dst_check(idst1, "requant_tile");
     __emule_dst_check(odst, "requant_tile");
-    const float zp = __emule_requant_zero_point;
+    const float zp = __emule_compute_ctx().requant_zero_point;
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
         int32_t a_int = __emule_dst_load_i32(idst0, i);
         float a = static_cast<float>(a_int);
-        float b = __emule_dst[idst1][i];
+        float b = __emule_compute_ctx().dst[idst1][i];
         int32_t q = __emule_quant_fp32_to_int8_sat(a * b + zp);
         __emule_dst_store_i32(odst, i, q);
     }
@@ -112,19 +109,19 @@ ALWI void dequant_tile_init(uint32_t zero_point) {
     // LLK convention: caller passes the negated zero point so the recorded
     // body can use SFPADD rather than SFPADD-with-negate. Mirror that here so
     // dequant_tile's add is correct without sign-flipping at the call site.
-    __emule_dequant_zero_point = __emule_quant_decode_fp32(zero_point);
+    __emule_compute_ctx().dequant_zero_point = __emule_quant_decode_fp32(zero_point);
 }
 
 ALWI void dequant_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     __emule_dst_check(idst0, "dequant_tile");
     __emule_dst_check(idst1, "dequant_tile");
     __emule_dst_check(odst, "dequant_tile");
-    const float zp = __emule_dequant_zero_point;
+    const float zp = __emule_compute_ctx().dequant_zero_point;
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
         int32_t a_int = __emule_dst_load_i32(idst0, i);
         float a = static_cast<float>(a_int);
-        float b = __emule_dst[idst1][i];
-        __emule_dst[odst][i] = (a + zp) * b;
+        float b = __emule_compute_ctx().dst[idst1][i];
+        __emule_compute_ctx().dst[odst][i] = (a + zp) * b;
     }
 }
 
