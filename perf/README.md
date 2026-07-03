@@ -45,6 +45,25 @@ none of them): `ARCH_NAME=wormhole_b0` (the runner rejects the box default
 `compute`), and `TT_SMI_RESET_COMMAND=true` + `TT_SMI_RESET_FALLBACK_COMMAND=none`
 (no device/tt-smi to reset — point the reset hook at a no-op).
 
+## One command for the whole battery: `run_all.py`
+
+`run_all.py` is self-contained (only `import ttnn` + torch) and runs every
+experiment in the comparison deck in a single device session, writing one CSV
+per experiment into `--outdir`, prefixed by `--backend`, with schemas matching
+the emule CSVs here. Smoke-tested end-to-end on emule (all 10 experiments pass).
+
+On **silicon** (aus-wh-10), normal tt-metal env, no emule vars:
+
+```bash
+scp mkamran@<this-box>:/localdev/mkamran/emule/tt-emule/perf/run_all.py /tmp/run_all.py
+python /tmp/run_all.py --backend silicon-wh --outdir /tmp/sil       # add --quick to smoke-test first
+scp /tmp/sil/*.csv mkamran@<this-box>:/localdev/mkamran/emule/tt-emule/perf/
+```
+
+Produces `silicon-wh_{exp_size,core_scaling,dtype,memcfg,sfpu,matmul,matmul_fidelity,chain_tax,composite,batch_matmul}.csv`
+— one per outstanding slide. On emule, run the same file under the emule env
+(`--backend emule-wh`) for method-matched parity.
+
 ## Run on silicon (upstream, unmodified)
 
 On a box with a real device and the normal tt-metal python env, run the same two
