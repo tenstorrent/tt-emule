@@ -21,6 +21,7 @@ inline void transpose_wh_dest_init_short() {}
 
 template <bool is_32bit = false, bool transpose_of_faces = true>
 inline void transpose_wh_dest(uint32_t idst) {
+    __emule_dst_check(idst, "transpose_wh_dest");
     float temp[1024];
     for (uint32_t r = 0; r < 32; r++) {
         for (uint32_t c = 0; c < 32; c++) {

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 #include "jit_hw/jit_kernel_stubs.hpp"
@@ -16,19 +17,56 @@
 uint64_t get_noc_addr(uint32_t noc_x, uint32_t noc_y, uint32_t addr, uint8_t noc);
 uint64_t get_noc_addr(uint32_t addr, uint8_t noc);
 
-template <std::size_t CTA_OFFSET, std::size_t CRTA_OFFSET = 0>
+namespace tensor_accessor {
+
+constexpr std::size_t UNKNOWN = static_cast<std::size_t>(-1);
+
+}  // namespace tensor_accessor
+
+template <std::size_t CTA_OFFSET, std::size_t CRTA_OFFSET = tensor_accessor::UNKNOWN>
 struct TensorAccessorArgs {
     static constexpr uint32_t ArgsConfig = get_compile_time_arg_val(CTA_OFFSET);
     static constexpr bool is_sharded = (ArgsConfig & (1u << 0)) != 0;
     static constexpr bool is_dram = (ArgsConfig & (1u << 1)) != 0;
+    static constexpr bool is_interleaved = !is_sharded;
     static constexpr uint32_t AlignedPageSize = get_compile_time_arg_val(CTA_OFFSET + 1);
+
+    uint32_t crta_offset_rt = 0;
+
+    constexpr TensorAccessorArgs() = default;
+    constexpr explicit TensorAccessorArgs(uint32_t crta_offset) : crta_offset_rt(crta_offset) {}
 
     static constexpr uint32_t get_aligned_page_size() { return AlignedPageSize; }
     static constexpr uint32_t num_compile_time_args() { return 2; }
     static constexpr uint32_t next_compile_time_args_offset() { return CTA_OFFSET + num_compile_time_args(); }
+
+    constexpr uint32_t crta_offset() const {
+        if constexpr (CRTA_OFFSET != tensor_accessor::UNKNOWN) {
+            return CRTA_OFFSET;
+        } else {
+            return crta_offset_rt;
+        }
+    }
+
+    constexpr uint32_t num_common_runtime_args() const { return 0; }
+    constexpr uint32_t next_common_runtime_args_offset() const { return crta_offset() + num_common_runtime_args(); }
+
+    constexpr uint32_t rank() const { return 1; }
+    constexpr std::array<uint32_t, 1> tensor_shape() const { return {1}; }
+    constexpr std::array<uint32_t, 1> shard_shape() const { return {1}; }
 };
 
 namespace tensor_accessor {
+
+namespace detail {
+
+template <typename T, typename = void>
+struct has_aligned_page_size : std::false_type {};
+
+template <typename T>
+struct has_aligned_page_size<T, std::void_t<decltype(T::AlignedPageSize)>> : std::true_type {};
+
+}  // namespace detail
 
 template <uint32_t CTA_OFFSET, uint32_t ADDR_CRTA_OFFSET>
 struct TensorAccessorBindingToken {
@@ -58,7 +96,7 @@ struct TensorAccessor {
     static constexpr bool is_dram = DSpec::is_dram;
 
     static constexpr uint32_t default_aligned_page_size() {
-        if constexpr (requires { DSpec::AlignedPageSize; }) {
+        if constexpr (tensor_accessor::detail::has_aligned_page_size<DSpec>::value) {
             return DSpec::AlignedPageSize;
         } else {
             return 0;

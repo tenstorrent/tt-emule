@@ -49,8 +49,31 @@ bool tensor_binding_token_matches_current_metal2_binding_name() {
     return true;
 }
 
+bool tensor_accessor_args_matches_current_offset_api() {
+    using Args = TensorAccessorArgs<0, 7>;
+    static_assert(Args::is_dram);
+    static_assert(!Args::is_sharded);
+    static_assert(Args::is_interleaved);
+    static_assert(Args::AlignedPageSize == 64);
+    static_assert(Args::next_compile_time_args_offset() == 2);
+
+    constexpr Args args;
+    static_assert(args.num_common_runtime_args() == 0);
+    static_assert(args.next_common_runtime_args_offset() == 7);
+
+    TensorAccessorArgs<0> runtime_offset_args(11);
+    if (runtime_offset_args.next_common_runtime_args_offset() != 11) {
+        std::cerr << "TensorAccessorArgs decoded wrong runtime offset\n";
+        return false;
+    }
+    return true;
+}
+
 }  // namespace
 
 int main() {
-    return tensor_binding_token_matches_current_metal2_binding_name() ? EXIT_SUCCESS : EXIT_FAILURE;
+    return tensor_binding_token_matches_current_metal2_binding_name() &&
+                   tensor_accessor_args_matches_current_offset_api()
+               ? EXIT_SUCCESS
+               : EXIT_FAILURE;
 }

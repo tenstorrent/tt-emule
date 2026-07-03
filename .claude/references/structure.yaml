@@ -2263,8 +2263,11 @@ files:
   summary: '`TensorAccessor`/`TensorAccessorArgs` and type-erased accessor wrappers for JIT kernels'
   symbols:
   - {kind: function, name: get_noc_addr}
-  - {kind: struct, name: TensorAccessorArgs}
   - {kind: namespace, name: tensor_accessor}
+  - {kind: global, name: UNKNOWN}
+  - {kind: struct, name: TensorAccessorArgs}
+  - {kind: namespace, name: detail}
+  - {kind: struct, name: has_aligned_page_size}
   - {kind: struct, name: TensorAccessorBindingToken}
   - {kind: using, name: TensorBindingToken}
   - {kind: struct, name: Page}
