@@ -57,8 +57,17 @@ inline void llk_unpack_AB_init(
     ckernel::Transpose /*transpose*/ = ckernel::Transpose::NoneT) {}
 
 template <ckernel::BroadcastType BType = ckernel::BroadcastType::NONE>
-inline void llk_unpack_AB(uint32_t /*icb0*/, uint32_t /*icb1*/,
-                          uint32_t /*tile_idx0*/, uint32_t /*tile_idx1*/) {}
+inline void llk_unpack_AB(
+    uint32_t icb0,
+    uint32_t icb1,
+    uint32_t tile_idx0,
+    uint32_t tile_idx1) {
+    auto& ctx = __emule_compute_ctx();
+    ctx.llk_binary_icb0 = icb0;
+    ctx.llk_binary_icb1 = icb1;
+    ctx.llk_binary_itile0 = tile_idx0;
+    ctx.llk_binary_itile1 = tile_idx1;
+}
 
 inline void llk_unpack_tilize_init(
     uint32_t /*operand*/ = 0,

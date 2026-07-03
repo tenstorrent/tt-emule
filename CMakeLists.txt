@@ -70,6 +70,22 @@ if(TT_EMULE_BUILD_TESTS)
         ${TT_METAL_DIR}/tt_metal/hostdevcommon/api
     )
     add_test(NAME test_tensor_accessor_binding_token COMMAND test_tensor_accessor_binding_token)
+
+    add_executable(test_ziveli_compat
+        tests/jit_hw/test_ziveli_compat.cpp
+    )
+    target_link_libraries(test_ziveli_compat PRIVATE tt-emule::headers)
+    target_compile_definitions(test_ziveli_compat PRIVATE
+        ARCH_WORMHOLE=1
+        EMULE_SEM_BASE=0
+    )
+    target_include_directories(test_ziveli_compat PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/jit_hw
+        ${TT_METAL_DIR}
+        ${TT_METAL_DIR}/tt_metal/api
+        ${TT_METAL_DIR}/tt_metal/hostdevcommon/api
+    )
+    add_test(NAME test_ziveli_compat COMMAND test_ziveli_compat)
 endif()
 
 # ---- Install rules ----

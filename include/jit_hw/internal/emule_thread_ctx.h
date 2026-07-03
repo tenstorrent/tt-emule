@@ -240,6 +240,10 @@ struct ComputeThreadCtx : ThreadCommonCtx {
     bool     llk_matmul_transpose = false;
     uint32_t pack_rows_num = 32;             // was __emule_compute_ctx().pack_rows_num (llk_pack.h)
     __emule_matmul_bridge matmul_state{};    // was __emule_compute_ctx().matmul_state
+    uint32_t llk_binary_icb0 = 0;
+    uint32_t llk_binary_icb1 = 0;
+    uint32_t llk_binary_itile0 = 0;
+    uint32_t llk_binary_itile1 = 0;
 
     // Pack-fused ReLU clamp (was __emule_pack_relu_mode / _threshold in common.h).
     // pack_relu_mode value-inits to 0 == ReluType::NO_RELU.

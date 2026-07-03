@@ -53,4 +53,10 @@ ALWI void frac_tile(uint32_t idst) {
     }
 }
 
+ALWI void stochastic_round_tile(uint32_t idst) {
+    __emule_dst_check(idst, "stochastic_round_tile");
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
+        __emule_compute_ctx().dst[idst][i] = std::nearbyint(__emule_compute_ctx().dst[idst][i]);
+}
+
 } // namespace ckernel

@@ -14,6 +14,7 @@
 #include <cstdint>
 
 #include "jit_hw/api/compute/common.h"   // EltwiseBinaryType, BroadcastType, EltwiseBinaryReuseDestType
+#include "jit_hw/api/compute/bcast.h"    // any_tiles_bcast
 #include "jit_hw/llk_types.h"             // MathFidelity
 
 // Mirrors tt-metal's tt_metal/hw/ckernels/blackhole/metal/llk_api/
@@ -28,3 +29,30 @@ inline void llk_math_eltwise_binary_init(
     const std::uint32_t /*operand_A*/,
     const std::uint32_t /*operand_B*/,
     const std::uint32_t /*acc_to_dest*/ = 0) {}
+
+template <
+    ckernel::EltwiseBinaryType eltwise_binary_type,
+    ckernel::BroadcastType src_b_bcast_type,
+    bool /*dst_sync*/,
+    ckernel::MathFidelity /*math_fidelity*/,
+    ckernel::EltwiseBinaryReuseDestType /*binary_reuse_dest*/ = ckernel::EltwiseBinaryReuseDestType::NONE>
+inline void llk_math_eltwise_binary(
+    const std::uint32_t operand_A,
+    const std::uint32_t operand_B,
+    const std::uint32_t dst_index,
+    const bool acc_to_dest = false) {
+    auto& ctx = __emule_compute_ctx();
+    const std::uint32_t icb0 = ctx.llk_binary_icb0;
+    const std::uint32_t icb1 = ctx.llk_binary_icb1;
+    const std::uint32_t itile0 = ctx.llk_binary_itile0;
+    const std::uint32_t itile1 = ctx.llk_binary_itile1;
+    (void)operand_A;
+    (void)operand_B;
+    if (acc_to_dest) {
+        ckernel::any_tiles_bcast<eltwise_binary_type, src_b_bcast_type, true>(
+            icb0, icb1, itile0, itile1, dst_index);
+    } else {
+        ckernel::any_tiles_bcast<eltwise_binary_type, src_b_bcast_type, false>(
+            icb0, icb1, itile0, itile1, dst_index);
+    }
+}

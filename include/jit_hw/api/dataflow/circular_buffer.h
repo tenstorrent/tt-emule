@@ -64,6 +64,10 @@ private:
     uint32_t cb_id_;
 };
 
+namespace experimental {
+using CircularBuffer = ::CircularBuffer;
+}
+
 // ---- noc_traits_t<CircularBuffer> ----
 // As NOC src: read from the current read pointer.
 // As NOC dst (local L1 write): write to the current write pointer.
