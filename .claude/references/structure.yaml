@@ -311,6 +311,7 @@ files:
   summary: empty shim (pragma-once only)
   symbols:
   - {kind: function, name: llk_math_eltwise_binary_init}
+  - {kind: function, name: llk_math_eltwise_binary}
 - path: include/jit_hw/llk_math_eltwise_unary_datacopy.h
   section: include/jit_hw/
   summary: '`enum class DataCopyType`; `copy_tile` datacopy helper'
@@ -1861,6 +1862,7 @@ files:
   - {kind: function, name: ceil_tile}
   - {kind: function, name: floor_tile}
   - {kind: function, name: frac_tile}
+  - {kind: function, name: stochastic_round_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/rpow.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `rpow_tile` (+`_init`)'
@@ -2068,6 +2070,8 @@ files:
   summary: '`class CircularBuffer`, `struct CircularBufferView`; `enum class AddrSelector`; `noc_traits_t<CircularBuffer>` + `noc_traits_t<CircularBufferView>` specializations'
   symbols:
   - {kind: class, name: CircularBuffer}
+  - {kind: namespace, name: experimental}
+  - {kind: using, name: CircularBuffer}
   - {kind: struct, name: noc_traits_t}
   - {kind: struct, name: CircularBufferView}
   - {kind: function, name: use}
