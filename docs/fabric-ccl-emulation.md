@@ -25,7 +25,7 @@ that address. Delivery is bit-exact and immediate.
 
 Three principles follow:
 
-- **One interception point.** *All* cross-chip traffic — every CCL, ttnn and tt-blaze alike — funnels
+- **One interception point.** *All* cross-chip traffic — every CCL and ttnn op alike — funnels
   through one shim and one teleport hook. There is exactly one place to get the cross-chip semantics right.
 - **Single code path, faithful to silicon.** The terminal NOC commands are applied with the same semantics
   silicon would produce, and the multi-chip destination resolution *subsumes* the 2-chip case (2 chips = the
