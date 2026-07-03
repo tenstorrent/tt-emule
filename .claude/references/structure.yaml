@@ -2631,7 +2631,7 @@ files:
   summary: fabric include-path shim → `jit_hw/__emule_fabric_stubs.h` (multichip fabric out of scope)
 - path: include/jit_hw/sfpu/ckernel_sfpu_converter.h
   section: include/jit_hw/sfpu/
-  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+  summary: include-path shim — resolves `sfpu/ckernel_sfpu_converter.h` on emule's JIT -I set by pulling in `jit_hw/sfpi.h` (the emule sfpi shadow) instead of the per-arch silicon header.
 - path: include/jit_hw/sfpu/ckernel_sfpu_rsqrt_compat.h
   section: include/jit_hw/sfpu/
   summary: forwarder → real per-arch `sfpu/ckernel_sfpu_rsqrt_compat.h` so the metal-layer `ckernel_sfpu_sqrt.h` include resolves on emule's JIT -I set

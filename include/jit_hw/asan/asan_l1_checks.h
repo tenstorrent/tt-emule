@@ -20,9 +20,11 @@
 #include "jit_hw/asan/emule_asan.h"         // __emule_asan_panic
 
 // L1 bridge base + sanitizer thread-locals these checks (and the chokepoint's
-// plain translation) consume. Defined in the runner (emulated_program_runner.cpp
-// / kernel_runner.cpp) and threaded in per launch; see docs/ASAN.md
-// "Thread-local handshake".
+// plain translation) consume. Distinct from the header-defined inline
+// `thread_local` storage in `asan_cb_state.h` / `asan_l1_state.h` — these
+// per-launch range descriptors are still runner-defined (in
+// emulated_program_runner.cpp / kernel_runner.cpp) and threaded in on each
+// launch. See docs/ASAN.md "Thread-local handshake".
 extern thread_local uint32_t __emule_sem_l1_range_start;
 extern thread_local uint32_t __emule_sem_l1_range_end;
 extern thread_local uint32_t __emule_l1_unreserved_base;

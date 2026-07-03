@@ -152,8 +152,20 @@ public:
     vInt& operator&=(const vInt& o) { for (uint32_t i = 0; i < 32; ++i) v[i] &= o.v[i]; return *this; }
     vInt& operator|=(const vInt& o) { for (uint32_t i = 0; i < 32; ++i) v[i] |= o.v[i]; return *this; }
     vInt& operator^=(const vInt& o) { for (uint32_t i = 0; i < 32; ++i) v[i] ^= o.v[i]; return *this; }
-    vInt& operator<<=(int shift) { for (uint32_t i = 0; i < 32; ++i) v[i] <<= shift; return *this; }
-    vInt& operator>>=(int shift) { for (uint32_t i = 0; i < 32; ++i) v[i] >>= shift; return *this; }
+    // Silicon SFPU SHFT uses the low 5 bits of the shift operand; mask to
+    // match, avoiding signed-shift UB on shifts >=32 or <0. Left-shift is
+    // done through unsigned to avoid the signed-overflow UB (see #237 review).
+    vInt& operator<<=(int shift) {
+        uint32_t s = static_cast<uint32_t>(shift) & 31u;
+        for (uint32_t i = 0; i < 32; ++i)
+            v[i] = static_cast<int32_t>(static_cast<uint32_t>(v[i]) << s);
+        return *this;
+    }
+    vInt& operator>>=(int shift) {
+        uint32_t s = static_cast<uint32_t>(shift) & 31u;
+        for (uint32_t i = 0; i < 32; ++i) v[i] >>= s;
+        return *this;
+    }
 };
 
 class vSMag {
@@ -229,8 +241,19 @@ inline vInt operator&(const vInt& a, const vInt& b) { vInt r; for (uint32_t i = 
 inline vInt operator|(const vInt& a, const vInt& b) { vInt r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] | b.v[i]; return r; }
 inline vInt operator^(const vInt& a, const vInt& b) { vInt r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] ^ b.v[i]; return r; }
 inline vInt operator-(const vInt& a) { vInt r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = -a.v[i]; return r; }
-inline vInt operator<<(const vInt& a, int shift) { vInt r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] << shift; return r; }
-inline vInt operator>>(const vInt& a, int shift) { vInt r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] >> shift; return r; }
+inline vInt operator<<(const vInt& a, int shift) {
+    uint32_t s = static_cast<uint32_t>(shift) & 31u;
+    vInt r;
+    for (uint32_t i = 0; i < 32; ++i)
+        r.v[i] = static_cast<int32_t>(static_cast<uint32_t>(a.v[i]) << s);
+    return r;
+}
+inline vInt operator>>(const vInt& a, int shift) {
+    uint32_t s = static_cast<uint32_t>(shift) & 31u;
+    vInt r;
+    for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] >> s;
+    return r;
+}
 
 // Per-lane condition (mask) — produced by comparison operators, consumed by v_if.
 struct vCond {
@@ -813,18 +836,23 @@ inline vMag exman(const vFloat& vf, MantissaMode mode = MantissaMode::Fraction) 
     return r;
 }
 inline vInt shft(const vInt& value, const vInt& shift, ShiftMode mode = ShiftMode::Arithmetic) {
+    // Silicon SFPU SHFT uses the low 5 bits of the (signed) shift operand — an
+    // input of 32 shifts by 0 on silicon, not 31. Mask instead of clamping to
+    // stay faithful, per #237 review. Left-shift goes through unsigned to avoid
+    // signed-overflow UB on sign-bit set (e.g. value.v[i] << 31).
     vInt r;
     for (uint32_t i = 0; i < 32; ++i) {
         int s = shift.v[i];
         if (s >= 0) {
-            r.v[i] = value.v[i] << (s > 31 ? 31 : s);
-        } else if (mode == ShiftMode::Logical) {
-            uint32_t v = static_cast<uint32_t>(value.v[i]);
-            int rs = -s;
-            r.v[i] = static_cast<int32_t>(v >> (rs > 31 ? 31 : rs));
+            uint32_t ls = static_cast<uint32_t>(s) & 31u;
+            r.v[i] = static_cast<int32_t>(static_cast<uint32_t>(value.v[i]) << ls);
         } else {
-            int rs = -s;
-            r.v[i] = value.v[i] >> (rs > 31 ? 31 : rs);
+            uint32_t rs = static_cast<uint32_t>(-s) & 31u;
+            if (mode == ShiftMode::Logical) {
+                r.v[i] = static_cast<int32_t>(static_cast<uint32_t>(value.v[i]) >> rs);
+            } else {
+                r.v[i] = value.v[i] >> rs;
+            }
         }
     }
     return r;
