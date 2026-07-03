@@ -2262,6 +2262,7 @@ files:
   - {kind: struct, name: TensorAccessorArgs}
   - {kind: namespace, name: tensor_accessor}
   - {kind: struct, name: TensorAccessorBindingToken}
+  - {kind: using, name: TensorBindingToken}
   - {kind: struct, name: Page}
   - {kind: struct, name: TensorAccessor}
   - {kind: struct, name: ShardView}

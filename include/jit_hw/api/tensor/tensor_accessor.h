@@ -10,8 +10,8 @@
 #include <tuple>
 #include <utility>
 
-#include "jit_hw/internal/dataflow/dataflow_api_addrgen.h"
 #include "jit_hw/jit_kernel_stubs.hpp"
+#include "jit_hw/internal/dataflow/dataflow_api_addrgen.h"
 
 uint64_t get_noc_addr(uint32_t noc_x, uint32_t noc_y, uint32_t addr, uint8_t noc);
 uint64_t get_noc_addr(uint32_t addr, uint8_t noc);
@@ -31,7 +31,15 @@ struct TensorAccessorArgs {
 namespace tensor_accessor {
 
 template <uint32_t CTA_OFFSET, uint32_t ADDR_CRTA_OFFSET>
-struct TensorAccessorBindingToken {};
+struct TensorAccessorBindingToken {
+    static constexpr uint32_t ArgsConfig = get_compile_time_arg_val(CTA_OFFSET);
+    static constexpr bool is_sharded = (ArgsConfig & (1u << 0)) != 0;
+    static constexpr bool is_dram = (ArgsConfig & (1u << 1)) != 0;
+    static constexpr uint32_t AlignedPageSize = get_compile_time_arg_val(CTA_OFFSET + 1);
+};
+
+template <uint32_t CTA_OFFSET, uint32_t ADDR_CRTA_OFFSET>
+using TensorBindingToken = TensorAccessorBindingToken<CTA_OFFSET, ADDR_CRTA_OFFSET>;
 
 struct Page {
     uint64_t noc_addr_value = 0;
@@ -101,6 +109,10 @@ struct TensorAccessor {
         return get_noc_addr(shard_id, offset, noc);
     }
 };
+
+template <uint32_t CTA_OFFSET, uint32_t ADDR_CRTA_OFFSET>
+TensorAccessor(tensor_accessor::TensorAccessorBindingToken<CTA_OFFSET, ADDR_CRTA_OFFSET>)
+    -> TensorAccessor<tensor_accessor::TensorAccessorBindingToken<CTA_OFFSET, ADDR_CRTA_OFFSET>>;
 
 template <typename Accessor>
 struct ShardView {

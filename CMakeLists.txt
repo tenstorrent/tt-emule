@@ -59,6 +59,17 @@ if(TT_EMULE_BUILD_TESTS)
         ${TT_METAL_DIR}/tt_metal/hostdevcommon/api
     )
     add_test(NAME test_tilize_pack_offset COMMAND test_tilize_pack_offset)
+
+    add_executable(test_tensor_accessor_binding_token
+        tests/jit_hw/test_tensor_accessor_binding_token.cpp
+    )
+    target_link_libraries(test_tensor_accessor_binding_token PRIVATE tt-emule::headers)
+    target_include_directories(test_tensor_accessor_binding_token PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/jit_hw
+        ${TT_METAL_DIR}/tt_metal/api
+        ${TT_METAL_DIR}/tt_metal/hostdevcommon/api
+    )
+    add_test(NAME test_tensor_accessor_binding_token COMMAND test_tensor_accessor_binding_token)
 endif()
 
 # ---- Install rules ----
