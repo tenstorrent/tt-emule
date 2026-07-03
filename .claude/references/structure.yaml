@@ -673,6 +673,11 @@ files:
   symbols:
   - {kind: function, name: get_num_threads}
   - {kind: function, name: get_my_thread_id}
+- path: include/jit_hw/api/lock.h
+  section: include/jit_hw/api/
+  summary: '`Lock<ReleaseFunc>` RAII helper that invokes a release callback on scope exit'
+  symbols:
+  - {kind: class, name: Lock}
 - path: include/jit_hw/api/rt_arg.h
   section: include/jit_hw/api/
   summary: '`namespace rt_args`: `enum class Dispatch`, `struct Arg`/`ArrayArg`, `get<>()` template'
@@ -1404,7 +1409,7 @@ files:
   - {kind: function, name: transpose_wh_tile}
 - path: include/jit_hw/api/compute/transpose_wh_dest.h
   section: include/jit_hw/api/compute/
-  summary: 'TODO: one-line summary (auto-inserted by gen_structure.py — replace me)'
+  summary: '`ckernel::transpose_wh_dest_init_short`, `transpose_wh_dest` full-tile DST transpose helpers'
   symbols:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: transpose_wh_dest_init_short}
@@ -2249,6 +2254,19 @@ files:
   symbols:
   - {kind: macro, name: NOC_ADDR_LOCAL_BITS}
   - {kind: struct, name: noc_traits_t}
+- path: include/jit_hw/api/tensor/tensor_accessor.h
+  section: include/jit_hw/api/tensor/
+  summary: '`TensorAccessor`/`TensorAccessorArgs` and type-erased accessor wrappers for JIT kernels'
+  symbols:
+  - {kind: function, name: get_noc_addr}
+  - {kind: struct, name: TensorAccessorArgs}
+  - {kind: namespace, name: tensor_accessor}
+  - {kind: struct, name: TensorAccessorBindingToken}
+  - {kind: struct, name: Page}
+  - {kind: struct, name: TensorAccessor}
+  - {kind: struct, name: ShardView}
+  - {kind: struct, name: AbstractTensorAccessorWrapper}
+  - {kind: function, name: make_abstract_tensor_accessor_wrappers}
 - path: include/jit_hw/cpp/ttnn/operations/data_movement/common/kernels/common.hpp
   section: include/jit_hw/cpp/ttnn/operations/data_movement/common/kernels/
   summary: forwarding shim → `ttnn/operations/data_movement/common/kernels/common.hpp`
