@@ -988,9 +988,6 @@ files:
   - {kind: function, name: power_tile}
   - {kind: function, name: sigmoid_tile_init}
   - {kind: function, name: sigmoid_tile}
-  - {kind: macro, name: EMULE_SIGMOID_PACK_WRAPPERS_DEFINED}
-  - {kind: function, name: sigmoid_tile_init_pack}
-  - {kind: function, name: sigmoid_tile_pack}
   - {kind: function, name: sign_tile_init}
   - {kind: function, name: sign_tile}
   - {kind: function, name: heaviside_tile_init}
@@ -1021,8 +1018,6 @@ files:
   - {kind: function, name: alt_complex_rotate90_tile}
   - {kind: function, name: silu_tile_init}
   - {kind: function, name: silu_tile}
-  - {kind: function, name: silu_tile_init_pack}
-  - {kind: function, name: silu_tile_pack}
   - {kind: function, name: sfpu_reduce}
   - {kind: function, name: sfpu_reduce_init}
   - {kind: namespace, name: __emule_topk}
@@ -1911,7 +1906,6 @@ files:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: sigmoid_tile_init}
   - {kind: function, name: sigmoid_tile}
-  - {kind: macro, name: EMULE_SIGMOID_PACK_WRAPPERS_DEFINED}
   - {kind: function, name: sigmoid_tile_init_pack}
   - {kind: function, name: sigmoid_tile_pack}
 - path: include/jit_hw/api/compute/eltwise_unary/silu.h

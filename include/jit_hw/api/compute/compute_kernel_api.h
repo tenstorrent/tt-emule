@@ -128,18 +128,8 @@ ALWI void sigmoid_tile(uint32_t idst) {
     }
 }
 
-#ifndef EMULE_SIGMOID_PACK_WRAPPERS_DEFINED
-#define EMULE_SIGMOID_PACK_WRAPPERS_DEFINED
-template <bool approx = false>
-ALWI void sigmoid_tile_init_pack() {
-    sigmoid_tile_init<approx>();
-}
-
-template <VectorMode vector_mode = VectorMode::RC, bool approx = false>
-ALWI void sigmoid_tile_pack(uint32_t idst) {
-    sigmoid_tile<vector_mode, approx>(idst);
-}
-#endif
+// sigmoid_tile_init_pack / sigmoid_tile_pack live in
+// api/compute/eltwise_unary/sigmoid.h (already included above) — single site.
 
 // --- sign (-1, 0, +1) ---
 ALWI void sign_tile_init() {}
@@ -299,11 +289,8 @@ ALWI void silu_tile(uint32_t idst) {
         __emule_compute_ctx().dst[idst][i] = x / (1.0f + std::exp(-x));
     }
 }
-// Upstream routes the same SFPU LLK on the PACK thread to overlap activation
-// with the pack pipeline (matmul fused-activation, #79). emule has no
-// MATH/PACK thread split — forward to the existing tile body.
-ALWI void silu_tile_init_pack() { silu_tile_init(); }
-ALWI void silu_tile_pack(uint32_t idst) { silu_tile(idst); }
+// silu_tile_init_pack / silu_tile_pack live in
+// api/compute/eltwise_unary/silu.h (already included above) — single site.
 
 // --- sfpu_reduce — SFPU-based reduction helper; emule reduces via other paths.
 // No-op stubs let JIT compile. Upstream now calls these with non-type (enum)
