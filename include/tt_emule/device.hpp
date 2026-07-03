@@ -19,8 +19,11 @@
 namespace tt_emule {
 
 // Optional caller-context hints that Core::l1_ptr will include in the OOB
-// message before aborting. All three default to zero and are omitted from the
-// message when unset, so no existing caller has to change.
+// message before aborting. Each hint defaults to a distinct "unset" sentinel
+// (UINT64_MAX for the NOC address, UINT32_MAX for coordinates, nullptr for
+// the tag) so that valid values like `self=(0,0)` — which is a real caller
+// coord in single-core / one-worker tests — are not suppressed. When a hint
+// equals its sentinel it is omitted from the message; otherwise it appears.
 //
 // Intended use: a caller that has richer context than Core::l1_ptr sees (a
 // full NOC address, the calling core's coord, a symbolic tag like a kernel
@@ -32,16 +35,20 @@ namespace tt_emule {
 //     tt_emule::l1_ptr_hint_self_x   = my_x;
 //     tt_emule::l1_ptr_hint_self_y   = my_y;
 //     uint8_t* p = target_core->l1_ptr(offset);
-//     tt_emule::l1_ptr_hint_noc_addr = 0;   // clear on the way out
+//     tt_emule::l1_ptr_hint_noc_addr = tt_emule::L1_PTR_HINT_NOC_ADDR_UNSET;
+//     tt_emule::l1_ptr_hint_self_x   = tt_emule::L1_PTR_HINT_COORD_UNSET;
+//     tt_emule::l1_ptr_hint_self_y   = tt_emule::L1_PTR_HINT_COORD_UNSET;
 //
 // Motivation: on a matmul mcast_in1 OOB, the original message told us the
 // target coord + offset but not the source coord or the raw NOC address. That
 // forced hand-instrumentation of __emule_resolve_noc_addr / TensorAccessor to
 // identify the offending write. Making these hints a first-class part of the
 // abort output keeps the next debug session to minutes instead of an hour.
-inline thread_local uint64_t l1_ptr_hint_noc_addr = 0;
-inline thread_local uint32_t l1_ptr_hint_self_x   = 0;
-inline thread_local uint32_t l1_ptr_hint_self_y   = 0;
+inline constexpr uint64_t L1_PTR_HINT_NOC_ADDR_UNSET = UINT64_MAX;
+inline constexpr uint32_t L1_PTR_HINT_COORD_UNSET    = UINT32_MAX;
+inline thread_local uint64_t l1_ptr_hint_noc_addr = L1_PTR_HINT_NOC_ADDR_UNSET;
+inline thread_local uint32_t l1_ptr_hint_self_x   = L1_PTR_HINT_COORD_UNSET;
+inline thread_local uint32_t l1_ptr_hint_self_y   = L1_PTR_HINT_COORD_UNSET;
 inline thread_local const char* l1_ptr_hint_tag   = nullptr;
 
 // Role of a Core — determines how its mmap'd region is used.
@@ -102,13 +109,16 @@ public:
                 static_cast<unsigned long long>(offset),
                 l1_size_);
             // Emit caller-context hints if any have been populated. Each hint
-            // is checked independently so partial context still prints.
-            if (l1_ptr_hint_noc_addr != 0) {
+            // is checked independently against its own sentinel so partial
+            // context still prints and legitimately-zero coords / noc_addrs
+            // are not suppressed.
+            if (l1_ptr_hint_noc_addr != L1_PTR_HINT_NOC_ADDR_UNSET) {
                 std::fprintf(stderr,
                     " noc_addr=0x%llx",
                     static_cast<unsigned long long>(l1_ptr_hint_noc_addr));
             }
-            if (l1_ptr_hint_self_x != 0 || l1_ptr_hint_self_y != 0) {
+            if (l1_ptr_hint_self_x != L1_PTR_HINT_COORD_UNSET ||
+                l1_ptr_hint_self_y != L1_PTR_HINT_COORD_UNSET) {
                 std::fprintf(stderr,
                     " self=(%u,%u)",
                     l1_ptr_hint_self_x, l1_ptr_hint_self_y);

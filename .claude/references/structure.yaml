@@ -12,6 +12,8 @@ files:
   summary: '`class Core` (per-core L1/DRAM mmap, `CBSyncState[]`, DFB/tile-counter state); `enum class CoreRole`; `struct CoreCoord`'
   symbols:
   - {kind: namespace, name: tt_emule}
+  - {kind: global, name: L1_PTR_HINT_NOC_ADDR_UNSET}
+  - {kind: global, name: L1_PTR_HINT_COORD_UNSET}
   - {kind: global, name: l1_ptr_hint_noc_addr}
   - {kind: global, name: l1_ptr_hint_self_x}
   - {kind: global, name: l1_ptr_hint_self_y}
