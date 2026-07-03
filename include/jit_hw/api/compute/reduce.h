@@ -113,8 +113,10 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
                 result = acc * scaler;
             } else {  // SUM / AVG: fold the per-row scaler (scale + mask) into the sum
                 float acc = 0.0f;
-                for (uint32_t r = 0; r < th; r++)
-                    acc += src[r * 32 + c] * scaler_tile[r];
+                for (uint32_t r = 0; r < th; r++) {
+                    const float row_scaler = scaler_tile[r];
+                    if (row_scaler != 0.0f) acc += src[r * 32 + c] * row_scaler;
+                }
                 result = acc;
             }
             if constexpr (reduce_type == PoolType::MAX) {
@@ -139,8 +141,10 @@ inline void reduce_tile(uint32_t icb, uint32_t icb_scaler,
                 result = acc * scaler;
             } else {  // SUM / AVG: fold the per-column scaler (scale + mask) into the sum
                 float acc = 0.0f;
-                for (uint32_t c = 0; c < tw; c++)
-                    acc += src[r * 32 + c] * scaler_tile[c];
+                for (uint32_t c = 0; c < tw; c++) {
+                    const float col_scaler = scaler_tile[c];
+                    if (col_scaler != 0.0f) acc += src[r * 32 + c] * col_scaler;
+                }
                 result = acc;
             }
             if constexpr (reduce_type == PoolType::MAX) {
