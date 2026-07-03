@@ -13,12 +13,15 @@
 # MESH_DEVICE token. Measured per-suite status + CI baseline: docs/fabric-ccl-emulation.md (Current state).
 #
 # Sub-device / trace nodes hard-TT_FATAL under slow dispatch (sub_device_manager_tracker.cpp:96-98). Trace
-# PARAMETRIZATIONS are auto-deselected under emule by each dir's conftest.py hook (enable_trace/trace_mode);
-# trace-only FUNCTIONS and sub-device / perf files are skipped here (see docs/fabric-ccl-emulation.md).
+# PARAMETRIZATIONS (enable_trace/trace_mode=True) need fast dispatch; they are deselected under emule by the
+# emule_ccl_trace_deselect pytest plugin (loaded via PYTEST_ADDOPTS below — #242; it replaces the emule-only
+# box conftest that tt-metal a0f5d8e4 reverted). Trace-only FUNCTIONS and sub-device / perf files are skipped
+# here (see docs/fabric-ccl-emulation.md).
 #
 # Usage: TT_METAL_DIR=<...> bash scripts/run_ttnn_pytests_bh_loudbox.sh
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TT_METAL_DIR="${TT_METAL_DIR:?TT_METAL_DIR must be set}"
 BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule}"
 PYTEST_BIN="${PYTEST_BIN:-/opt/ttmlir-toolchain/venv/bin/pytest}"
@@ -30,8 +33,11 @@ APC="$TT_METAL_DIR/$BOX_REL/all_post_commit"
 NIGHTLY="$TT_METAL_DIR/$BOX_REL/nightly"
 
 export TT_METAL_HOME="$TT_METAL_DIR" TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
-export PYTHONPATH="$TT_METAL_DIR/ttnn:$TT_METAL_DIR/tools:$BUILD_DIR/lib:$TT_METAL_DIR"
+# SCRIPT_DIR on PYTHONPATH so pytest can import the emule_ccl_trace_deselect plugin (#242).
+export PYTHONPATH="$SCRIPT_DIR:$TT_METAL_DIR/ttnn:$TT_METAL_DIR/tools:$BUILD_DIR/lib:$TT_METAL_DIR"
 export LD_LIBRARY_PATH="$BUILD_DIR/lib"
+# Deselect trace parametrizations under emule (need fast dispatch); no-op off emule. See #242.
+export PYTEST_ADDOPTS="${PYTEST_ADDOPTS:+$PYTEST_ADDOPTS }-p emule_ccl_trace_deselect"
 export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/blackhole_8xP150.yaml"
 export TT_METAL_EMULE_MODE=1 TT_METAL_SLOW_DISPATCH_MODE=1
 export TT_EMULE_FIBER_WORKERS="${TT_EMULE_FIBER_WORKERS:-64}"

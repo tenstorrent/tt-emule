@@ -128,6 +128,18 @@ struct ThreadCommonCtx {
     uint32_t cb_self_produce_mask = 0;            // was __emule_cb_self_produce_mask
     LocalCBInterface local_cb[__EMULE_CTX_MAX_CBS]{};  // per-RISC CB ring ptrs (was __emule_local_cb)
 
+    // Object-Intent (ASAN) per-fiber resolved-range log. The kernel-side OOB check
+    // records the live-tensor extent behind each pointer it resolved into
+    // *__emule_l1_resolved_ranges (a buffer on THIS fiber's stack); the runner diffs
+    // any snapshotted extent that was modified without being recorded. Because a worker
+    // hosts many fibers, the scheduler restores the resolved-range thread-locals from
+    // these on swap-in — mirroring __emule_self — so a parked fiber's log survives a
+    // peer running on the same worker. nullptr ⇒ Object-Intent inactive for this fiber.
+    // See tt-emule #241, docs/ASAN.md, and emule_sanitizers.cpp (ObjectIntentTracker).
+    uint64_t* san_resolved_log = nullptr;
+    uint32_t* san_resolved_count = nullptr;
+    uint32_t  san_resolved_cap = 0;
+
     explicit ThreadCommonCtx(Kind k) : kind(k) {}
     virtual ~ThreadCommonCtx() = default;  // owned via base ptr (runner/fiber)
 };

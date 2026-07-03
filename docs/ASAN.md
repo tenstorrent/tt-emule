@@ -314,11 +314,23 @@ target.
 
 Detection has 6 stages, split between the runner (host) and the kernel:
 
+**Fiber-engine realization.** Kernels run as cooperatively-scheduled
+fibers on a shared worker pool, not one OS thread per (core, RISC). The
+stages below map on unchanged, with three fiber-specific points: (a) the
+per-core `ObjectIntentTracker` is owned by `launch_cores` so it outlives
+the fiber run; (b) each kernel fiber's `local_resolved` log lives on that
+fiber's own stack, and the scheduler restores the resolved-range
+thread-locals from the fiber ctx on every swap-in (`install_fiber`), so a
+fiber that parks keeps recording into its own log rather than a peer's;
+(c) "after join" means at the single-kernel core's fiber completion.
+Object Intent runs on the non-deferred (single-device) dispatch path;
+deferred multi-chip mesh runs skip it (ASAN is single-device-scoped).
+
 **Stage 1: pre-launch snapshot (runner, in `launch_cores`).**
 For each core: if `object_intent_strict && tensor_ranges != null`,
-allocate an `oi_snapshots` vector. For every live L1 tensor extent,
-`memcpy` the current bytes of L1 in that range into a local snapshot.
-Held on the stack of the core thread for the launch's duration.
+snapshot into the per-core `ObjectIntentTracker`. For every live L1
+tensor extent, `memcpy` the current bytes of L1 in that range into the
+snapshot, on the dispatch thread before the core's fiber runs.
 
 **Stage 2: refuse multi-kernel launches.**
 Exact attribution requires being able to tell, after join, which
