@@ -1018,14 +1018,14 @@ template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
 ALWI void reconfig_data_format_srcb(uint32_t) {}
 template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
 ALWI void reconfig_data_format_srcb(uint32_t, uint32_t) {}
-ALWI void pack_reconfig_data_format(uint32_t) {}
-ALWI void pack_reconfig_data_format(uint32_t, uint32_t) {}
+ALWI void pack_reconfig_data_format(uint32_t) { __emule_reset_pack_subrect(); }
+ALWI void pack_reconfig_data_format(uint32_t, uint32_t) { __emule_reset_pack_subrect(); }
 template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
-ALWI void pack_reconfig_data_format() {}
+ALWI void pack_reconfig_data_format() { __emule_reset_pack_subrect(); }
 template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
-ALWI void pack_reconfig_data_format(uint32_t) {}
+ALWI void pack_reconfig_data_format(uint32_t) { __emule_reset_pack_subrect(); }
 template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
-ALWI void pack_reconfig_data_format(uint32_t, uint32_t) {}
+ALWI void pack_reconfig_data_format(uint32_t, uint32_t) { __emule_reset_pack_subrect(); }
 
 // ---- Pack-fused ReLU configuration ----
 // Silicon STACC_RELU is a single packer CFG reg that clamps PACK output

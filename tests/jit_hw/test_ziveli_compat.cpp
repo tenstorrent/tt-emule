@@ -26,6 +26,7 @@
 #include "jit_hw/api/compute/cb_api.h"
 #include "jit_hw/api/compute/eltwise_unary/rounding.h"
 #include "jit_hw/api/dataflow/circular_buffer.h"
+#include "jit_hw/llk_pack.h"
 #include "jit_hw/llk_math_eltwise_binary.h"
 #include "jit_hw/llk_unpack_a.h"
 
@@ -133,11 +134,33 @@ bool llk_binary_uses_unpack_tile_indices() {
     return require(h.ctx.dst[0][0] == 7.0f, "llk binary path ignored llk_unpack_AB tile indices");
 }
 
+bool pack_init_clears_stale_subrect_state() {
+    Harness h;
+    float* out = h.alloc_tile(2);
+    h.bind_cb(2, out);
+
+    TTI_SETADCXX(p_setadc::PAC, 0, 0);
+    _llk_pack_mop_config_(31, 16, 16, 1);
+    if (!require(__emule_pack_subrect_active(), "test failed to poison pack-subrect state")) {
+        return false;
+    }
+
+    llk_pack_init<false, false, false>(2);
+    if (!require(!__emule_pack_subrect_active(), "llk_pack_init did not clear stale pack-subrect state")) {
+        return false;
+    }
+
+    h.ctx.dst[0][0] = 1.25f;
+    pack_tile(0, 2);
+    return require(out[0] == 1.25f, "pack_tile did not recover after stale pack-subrect reset");
+}
+
 }  // namespace
 
 int main() {
     const bool ok = experimental_circular_buffer_alias_compiles() &&
                     stochastic_round_symbol_is_available() &&
-                    llk_binary_uses_unpack_tile_indices();
+                    llk_binary_uses_unpack_tile_indices() &&
+                    pack_init_clears_stale_subrect_state();
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
