@@ -185,6 +185,25 @@ device-bringup cost that motivated the question. It is a one-time "chip is off"
 cost, not a steady-state property: keep the device warm and it vanishes (silicon
 wins at all N, per the warm result above).
 
+## Op-class survey — emule perf is bimodal
+
+`bench_ops.py` times a spread of op classes; run at several sizes it reveals two
+distinct emule cost shapes (`emule_ops_scaling.png`, `emule_ops_scaling.csv`;
+single-size bar chart `emule_ops.png`):
+
+| behavior | ops | 1 tile | 256 tiles | 4096 tiles |
+|---|---|---|---|---|
+| **fixed-floor** (flat, size-independent until huge) | unary (exp/gelu/…), binary (add/mul/sub), softmax, transpose | ~90–220ms | ~120–195ms | ~125–205ms |
+| **per-tile-scaling** (near-zero fixed cost, rises ~linearly) | matmul, reduce (sum/max/mean), tilize, untilize | ~0.6–1ms | ~6–130ms | ~150–285ms |
+
+So the "~90ms floor" is **not universal** — it belongs to the fixed-floor class.
+Those ops pay a large per-launch program cost independent of tensor size (even a
+1-tile exp is ~150ms), while matmul/reduce/tilize/untilize scale with tiles from
+~0.6ms and only cross the floor around ~30 (matmul) to ~1000 (reduce) tiles. The
+two classes converge (~125–285ms) at 4096 tiles. emule per-op cost is set by
+**program structure** (fixed full-grid MATH setup vs per-tile work), not data
+volume — the key lever for any emule speedup is that fixed-program overhead.
+
 ## matmul — the FLOP-heavy op
 
 `bench_matmul.py` sweeps square S×S @ S×S bf16 (FLOP = 2·S³), the compute-bound
