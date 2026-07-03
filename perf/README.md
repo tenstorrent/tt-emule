@@ -185,6 +185,24 @@ device-bringup cost that motivated the question. It is a one-time "chip is off"
 cost, not a steady-state property: keep the device warm and it vanishes (silicon
 wins at all N, per the warm result above).
 
+## SFPU op complexity — emule reflects per-element math cost
+
+At a compute-bound size (67M elems), 16 unary ops from simple to transcendental
+(`emule_sfpu_complexity.png`, min wall-clock, cleaner than median here):
+
+| tier | ops | cost |
+|---|---|---|
+| simple | relu 89, rsqrt 107, gelu 108, exp 114, exp2 121 | ~90–120ms |
+| moderate | sigmoid 136, cos 151, sqrt 156, abs 159, log 162, sin 168 | ~130–170ms |
+| heavy | tanh 215, erf 219 | ~215ms |
+| **Bessel i0** | | **1420ms** |
+
+Because emule runs the actual SFPU math per element on the host, op complexity
+**does** show up — a ~2.5× spread among common ops and a dramatic **16×** for the
+iterative Bessel `i0`. (This only surfaces at compute-bound sizes; below the ~40M
+knee the fixed per-program floor hides it.) So expensive activations cost real
+emule wall-clock, and `i0`-class ops are outliers to watch in model bring-up.
+
 ## Core-count scaling — what the fixed floor actually is
 
 `bench_core_scaling.py` holds per-core work fixed (1 tile/core) and varies how
