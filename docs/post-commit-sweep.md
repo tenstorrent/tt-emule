@@ -20,7 +20,7 @@ reproducible locally with the same scripts.
 
 ## What "the post-commit lane" means
 
-The source of truth is tt-metal's `tests/pipeline_reorg/ttnn-tests.yaml` — the
+The source of truth is tt-metal's `tests/pipeline_reorg/ttnn_sanity_tests.yaml` — the
 same manifest tt-metal's own CI consumes. The sweep selects the entries where
 **`merge_gate` is falsy AND the arch's SKU is in `skus`**:
 
@@ -159,7 +159,7 @@ TT_METAL_DIR=../tt-metal SWEEP_ONLY=ttnn-data-movement-group \
 
 # Just expand + audit the entry list (no execution):
 python3 scripts/post_commit_sweep/sweep.py expand \
-  --arch blackhole --manifest ../tt-metal/tests/pipeline_reorg/ttnn-tests.yaml
+  --arch blackhole --manifest ../tt-metal/tests/pipeline_reorg/ttnn_sanity_tests.yaml
 ```
 
 Reports land in `$OUT_DIR` (default `../sweep-out/<arch>/`). `pytest-timeout` is
