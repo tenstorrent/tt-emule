@@ -277,6 +277,30 @@ span, not a universal dispatch tax; the ~90ms eltwise "floor" is a property of
 that op's 64-core program, not all ops. (Large-S emule matmul is noisy: S=1024
 swung 120–193ms across runs.)
 
+## Extended experiments (emule)
+
+- **MathFidelity matmul** (`emule_matmul_fidelity.png`): matmul at LoFi/HiFi2/
+  HiFi3/HiFi4, S=512 & 1024 — **flat ~110–148ms across all fidelities**. emule
+  **ignores MathFidelity** (on silicon HiFi4 is ~4× LoFi — extra bf16 passes).
+  Another axis emule doesn't model, like dtype and L1/DRAM.
+- **Composite / real-model ops** (`emule_composite_ops.png`, 256 tiles): split by
+  the same bimodal rule — reduction-based norms are cheap (layer_norm 3.5ms,
+  rms_norm 3.9ms, +weight 4–8ms), while SFPU/data-movement ops sit on the floor
+  (sdpa 68ms, embedding 96ms, silu 115ms). Good bridge from microbench to model
+  relevance; all run on emule.
+- **Per-program tax / fusion** (`emule_chain_tax.png`): a chain of K sequential
+  `exp` calls costs ~K× the floor (K=1→69ms, 4→498ms, 16→1448ms; ~90–140ms per
+  added program). Each op is its own program launch, so **fusing K ops into one
+  program would collapse ~(K−1)×~120ms** — emule rewards fewer/fatter programs
+  far more than silicon does. (True fused-vs-unfused needs a fused kernel; this
+  quantifies the tax that motivates it.)
+- **Batched matmul** (`emule_batch_matmul.csv`): [B,1,256,256]² rises with batch
+  (B=1→64: 59→215ms) — batch is just more per-tile work (per-tile-scaling class).
+- **Capacity** (`emule_capacity.csv`): single-tensor `exp` runs at **2GiB (1B
+  elems, 616ms) and 4GiB (2.1B elems, 1662ms)** in host RAM. emule keeps scaling
+  past what a single silicon buffer comfortably holds — the capacity axis where
+  emule "wins" by running the problem at all.
+
 ## Additional views
 
 - **Throughput vs size** (`plot_throughput.py` → `throughput_vs_size.png`):
