@@ -205,9 +205,3 @@ ALWI void matmul_block(uint32_t in0_cb_id, uint32_t in1_cb_id,
     }
 }
 } // namespace experimental
-
-// TTNN's fused-activation matmul helper is a sibling include of the kernel
-// source, so emule cannot shadow it through -I ordering. Pull the emule-only
-// symbols it expects from the already-shadowed matmul API before that helper
-// is included.
-#include "jit_hw/api/compute/matmul_fused_act_emule.h"

@@ -20,6 +20,8 @@
 #include <cstdint>
 
 #include "api/compute/matmul.h"  // pulls ckernel::matmul_block
+#include "api/compute/eltwise_unary/sigmoid.h"
+#include "api/compute/eltwise_unary/silu.h"
 
 namespace ckernel {
 
@@ -91,30 +93,25 @@ ALWI void custom_mm_block_uninit() {}
 
 // ---- LLK silu/sigmoid init+apply (lowered from upstream TRISC_PACK path) ----
 template <bool approx = false>
-ALWI void llk_math_eltwise_unary_sfpu_silu_init() {}
+ALWI void llk_math_eltwise_unary_sfpu_silu_init() {
+    silu_tile_init<approx>();
+}
 
 template <bool approx = false, bool acc = false, int iter = 2>
 ALWI void llk_math_eltwise_unary_sfpu_silu(uint32_t idst, int vector_mode) {
     (void)vector_mode;
-    __emule_dst_check(idst, "llk_math_eltwise_unary_sfpu_silu");
-    float* d = __emule_compute_ctx().dst[idst];
-    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; ++i) {
-        float x = d[i];
-        d[i] = x / (1.0f + std::exp(-x));
-    }
+    silu_tile<(int)VectorMode::RC, approx>(idst);
 }
 
 template <bool approx = false>
-ALWI void llk_math_eltwise_unary_sfpu_sigmoid_init() {}
+ALWI void llk_math_eltwise_unary_sfpu_sigmoid_init() {
+    sigmoid_tile_init<approx>();
+}
 
 template <bool approx = false, bool acc = false, int iter = 2>
 ALWI void llk_math_eltwise_unary_sfpu_sigmoid(uint32_t idst, int vector_mode) {
     (void)vector_mode;
-    __emule_dst_check(idst, "llk_math_eltwise_unary_sfpu_sigmoid");
-    float* d = __emule_compute_ctx().dst[idst];
-    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; ++i) {
-        d[i] = 1.0f / (1.0f + std::exp(-d[i]));
-    }
+    sigmoid_tile<(int)VectorMode::RC, approx>(idst);
 }
 
 }  // namespace ckernel

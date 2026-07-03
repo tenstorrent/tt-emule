@@ -1921,6 +1921,8 @@ files:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: silu_tile_init}
   - {kind: function, name: silu_tile}
+  - {kind: function, name: silu_tile_init_pack}
+  - {kind: function, name: silu_tile_pack}
 - path: include/jit_hw/api/compute/eltwise_unary/snake_beta.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `snake_beta_tile` (+`_init`)'

@@ -17,6 +17,8 @@
 #include "jit_hw/api/compute/experimental/fill_arange.h"
 #include "api/compute/eltwise_unary/activations.h"  // abs_tile, abs_tile_int32
 #include "api/compute/eltwise_unary/trigonometry.h"  // sole definer of tanh_tile (shared via #pragma once)
+#include "api/compute/eltwise_unary/sigmoid.h"
+#include "api/compute/eltwise_unary/silu.h"
 
 #include <algorithm>
 // Minimal sfpi:: shim for SFPU kernels that use vFloat/vInt/v_if.
