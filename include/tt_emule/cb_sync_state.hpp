@@ -19,8 +19,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <mutex>
-#include <condition_variable>
 
 #include "jit_hw/internal/emule_fiber_bridge.h"
 
@@ -33,12 +31,8 @@ struct CBSyncState {
     uint32_t  page_mask = 0;        // num_pages - 1 (for bitmask modulo; 0 if non-power-of-2)
     bool      globally_allocated = false;  // exempt from CB-Boundary window check; see docs/ASAN.md
     std::atomic<uint32_t> occupied{0};  // Number of occupied pages (the shared semaphore)
-    // mu/space_cv/data_cv are unused under the fiber engine (the cb_reserve/cb_wait
-    // park on &cb and are woken below); retained for ABI/size stability (Core embeds
-    // CBSyncState, parsed by the umd TU). See docs/fiber-engine.md.
-    std::mutex              mu;
-    std::condition_variable space_cv;
-    std::condition_variable data_cv;
+    // No mutex/CV here: under the fiber engine cb_reserve_back/cb_wait_front park on &cb
+    // and are woken by cb_sync_push/pop below. See docs/fiber-engine.md.
 };
 
 // ---- Semaphore operations on CBSyncState ----

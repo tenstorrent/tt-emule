@@ -194,8 +194,8 @@ inline void cb_push_back(uint32_t cb_id, uint32_t n) {
     if (__emule_self->kind == ThreadCommonCtx::Kind::Compute) {
         __emule_compute_ctx().pack_offset[cb_id] = 0;
     }
-    // Bridge CB→DFB: update tile counters so DM's dfb_wait_front sees compute's output.
-    // cb.mu already released; now safe to acquire tc.mu (consistent lock ordering).
+    // Bridge CB→DFB: update tile counters so DM's dfb_wait_front sees compute's output
+    // (lock-free under the fiber engine; the counters are atomics + fiber wake).
     if (__emule_self->dfbs && __emule_self->tc_array && __emule_self->dfbs[cb_id].active) {
         auto& iface = __emule_self->dfbs[cb_id];
         if (iface.broadcast_tc) {

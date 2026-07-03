@@ -10,8 +10,6 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
-#include <mutex>
-#include <condition_variable>
 
 #include "jit_hw/internal/emule_fiber_bridge.h"
 
@@ -23,11 +21,8 @@ struct TileCounter {
     std::atomic<uint32_t> posted{0};
     std::atomic<uint32_t> acked{0};
     uint32_t capacity{0};
-    // mu/space_cv/data_cv are unused under the fiber engine (dfb_* park on &tc, woken
-    // by inc_posted/inc_acked below); retained for ABI. See docs/fiber-engine.md.
-    std::mutex mu;
-    std::condition_variable space_cv;  // producer waits here
-    std::condition_variable data_cv;   // consumer waits here
+    // No mutex/CV here: under the fiber engine dfb_* park on &tc and are woken by
+    // inc_posted/inc_acked below. See docs/fiber-engine.md.
 
     uint32_t occupancy() const {
         return posted.load(std::memory_order_acquire)

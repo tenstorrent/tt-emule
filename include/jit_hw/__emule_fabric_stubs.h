@@ -29,6 +29,8 @@
 #include <type_traits>
 #include <utility>
 
+#include "jit_hw/tt-metalium/experimental/fabric/fabric_edm_types.hpp"  // tt::tt_fabric::Topology (single def)
+
 // Runtime teleport hooks (resolved at JIT link time to the runner symbols).
 extern "C" void __emule_fabric_teleport(const void* packet_header, const void* payload, uint32_t payload_size);
 // Record the route metadata for a packet header (keyed by its L1-alias address); the teleport resolves it
@@ -80,15 +82,7 @@ struct WorkerXY {
 // do NOT redefine it here or `using` it into global scope — that creates an ambiguity for the
 // templated Semaphore<ProgrammableCoreType> path. CCL kernels resolve it to the existing global enum.
 
-// Fabric topology (silicon: tt::tt_fabric::Topology). Guarded so the fabric_edm_types.hpp shadow
-// (which ccl_host_types.hpp pulls in via `using tt::tt_fabric::Topology`) and this stub agree on one def.
-#ifndef __EMULE_TT_FABRIC_TOPOLOGY_DEFINED
-#define __EMULE_TT_FABRIC_TOPOLOGY_DEFINED
-// Values MUST match silicon tt::tt_fabric::Topology (fabric_edm_types.hpp) exactly — kernels decode a
-// host-passed compile-time arg via static_cast<Topology>(arg), so a value mismatch silently selects the
-// wrong topology branch (e.g. Linear→Ring), which broke the all_gather barrier (2 incs vs 1).
-enum class Topology : uint8_t { NeighborExchange = 0, Linear = 1, Ring = 2, Mesh = 3, Torus = 4 };
-#endif
+// tt::tt_fabric::Topology comes from fabric_edm_types.hpp (included above) — single definition.
 
 // Endpoint teardown (mux) — emule has no real endpoint, so no-op.
 template <typename... A>
