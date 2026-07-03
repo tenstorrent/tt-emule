@@ -40,10 +40,9 @@ ALWI void reduce_block_max_row_uninit(uint32_t icb) {}
 // call and consumed by the execute call (on silicon it lives in the unpack/MOP HW
 // state programmed by init; the execute replays it). emule carries it across the
 // pair in a thread_local, mirroring that config-then-execute handoff.
-static thread_local uint32_t __emule_reduce_block_ct_dim = 1;
 
 ALWI void reduce_block_max_row_init_runtime(uint32_t ocb, uint32_t block_ct_dim, bool respect_trigger = false) {
-    __emule_reduce_block_ct_dim = block_ct_dim;
+    __emule_compute_ctx().reduce_block_ct_dim = block_ct_dim;
 }
 
 // respect_trigger + overlap_first_half are silicon MOP-split / unpacker-scheduling
@@ -57,7 +56,7 @@ ALWI void reduce_block_max_row_runtime(
     uint32_t idst,
     bool respect_trigger = false,
     bool overlap_first_half = false) {
-    for (uint32_t t = 0; t < __emule_reduce_block_ct_dim; t++) {
+    for (uint32_t t = 0; t < __emule_compute_ctx().reduce_block_ct_dim; t++) {
         reduce_tile<PoolType::MAX, ReduceDim::REDUCE_ROW>(icb, icb_scaler, row_start_index + t, 0, idst);
     }
 }

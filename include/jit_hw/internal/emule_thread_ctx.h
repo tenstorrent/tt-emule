@@ -26,6 +26,7 @@
 // typed accessors).
 
 #include <cstdint>
+#include <random>  // std::mt19937 (per-fiber rand engine, #243)
 #include <unordered_map>
 // CoreState (per-core) lives in its own minimal header so device.hpp/umd can embed
 // it without parsing the kernel-only ThreadCommonCtx/ComputeThreadCtx below (whose
@@ -173,6 +174,14 @@ struct ComputeThreadCtx : ThreadCommonCtx {
     float    quant_zero_point = 0.0f;        // was __emule_quant_zero_point
     float    requant_zero_point = 0.0f;      // was __emule_requant_zero_point
     float    dequant_zero_point = 0.0f;      // was __emule_dequant_zero_point
+    // Op-state carried across an init→execute pair or a multi-tile draw (were per-worker
+    // thread_locals; per-fiber here so co-scheduled fibers at >1 fiber/worker don't race — #243).
+    bool     dst_holds_int[16] = {};         // was __emule_dst_holds_int (common_globals.h)
+    float    exp_init_scale = 1.0f;          // was __emule_exp_init_scale (exp.h)
+    uint32_t reduce_block_ct_dim = 1;        // was __emule_reduce_block_ct_dim (reduce_custom.h)
+    std::mt19937 rand_engine{};              // was __emule_rand_engine (rand.h)
+    bool     rand_deterministic = false;     // was __emule_rand_deterministic
+    uint64_t rand_nonce = 0;                 // was __emule_rand_nonce
 
     // SFPU/sfpi intrinsic state — all grouped (DST window, predication stack,
     // LReg file, programmable const regs). See sfpi_types.h::SfpuState; reached

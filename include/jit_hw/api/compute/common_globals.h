@@ -77,16 +77,15 @@ inline void __emule_dst_mark_dirty(uint32_t slot) {
 // emule's DST is untyped float32, so eqz consults this to emit an integer 1/0
 // (silicon's integer-mode SFPU result) which then packs bit-exact, vs a float
 // 1.0f/0.0f. Set by copy_tile from the source CB format; cleared on acquire.
-static thread_local bool __emule_dst_holds_int[16] = {};
 
 inline void __emule_dst_set_int(uint32_t slot, bool is_int) {
     if (slot < 16) {
-        __emule_dst_holds_int[slot] = is_int;
+        __emule_compute_ctx().dst_holds_int[slot] = is_int;
     }
 }
 
 inline bool __emule_dst_is_int(uint32_t slot) {
-    return slot < 16 && __emule_dst_holds_int[slot];
+    return slot < 16 && __emule_compute_ctx().dst_holds_int[slot];
 }
 
 inline bool __emule_dst_take_fresh(uint32_t slot) {

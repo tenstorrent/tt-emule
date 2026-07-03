@@ -962,7 +962,6 @@ files:
   symbols:
   - {kind: enum, name: DataFormat}
   - {kind: function, name: __emule_dst_mark_dirty}
-  - {kind: global, name: __emule_dst_holds_int}
   - {kind: function, name: __emule_dst_set_int}
   - {kind: function, name: __emule_dst_is_int}
   - {kind: function, name: __emule_dst_take_fresh}
@@ -1301,7 +1300,6 @@ files:
   - {kind: function, name: reduce_block_max_row_init}
   - {kind: function, name: reduce_block_max_row}
   - {kind: function, name: reduce_block_max_row_uninit}
-  - {kind: global, name: __emule_reduce_block_ct_dim}
   - {kind: function, name: reduce_block_max_row_init_runtime}
   - {kind: function, name: reduce_block_max_row_runtime}
   - {kind: function, name: reduce_block_max_row_uninit_runtime}
@@ -1649,7 +1647,6 @@ files:
   - {kind: function, name: set_addr_mod_base}
   - {kind: function, name: clear_addr_mod_base}
   - {kind: global, name: kCONST_1_FP16B}
-  - {kind: global, name: __emule_exp_init_scale}
   - {kind: global, name: input_clamping}
   - {kind: function, name: exp_tile_init}
   - {kind: function, name: exp_tile}
@@ -1799,9 +1796,6 @@ files:
   summary: '`ckernel::` `rand_tile` (+`_init`)'
   symbols:
   - {kind: namespace, name: ckernel}
-  - {kind: global, name: __emule_rand_engine}
-  - {kind: global, name: __emule_rand_deterministic}
-  - {kind: global, name: __emule_rand_nonce}
   - {kind: function, name: rand_tile_init}
   - {kind: function, name: rand_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/rdiv.h

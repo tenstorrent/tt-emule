@@ -113,7 +113,6 @@ namespace ckernel {
 // regardless of the runtime scale_en flag. SDPA fuses the 1/sqrt(d) softmax scale
 // here (exp_tile_init<true, scale_fp32, None> in compute_common.hpp). Persists
 // across calls until the next init, mirroring the SFPU constant register.
-static thread_local float __emule_exp_init_scale = 1.0f;
 
 // Signatures mirror current upstream api/compute/eltwise_unary/exp.h.
 template <bool approx = false, uint32_t scale = 0x3F800000,
@@ -122,7 +121,7 @@ ALWI void exp_tile_init() {
     float s;
     uint32_t b = scale;
     std::memcpy(&s, &b, sizeof(s));
-    __emule_exp_init_scale = s;
+    __emule_compute_ctx().exp_init_scale = s;
 }
 
 // exp(x * scale). The effective scale follows silicon:
@@ -139,7 +138,7 @@ ALWI void exp_tile(uint32_t idst, VectorMode vector_mode = VectorMode::RC,
     __emule_dst_check(idst, "exp_tile");
     float s = 1.0f;
     if constexpr (approx) {
-        s = __emule_exp_init_scale;
+        s = __emule_compute_ctx().exp_init_scale;
     } else if constexpr (scale_en) {
         uint32_t b = static_cast<uint32_t>(scale) << 16;
         std::memcpy(&s, &b, sizeof(s));
