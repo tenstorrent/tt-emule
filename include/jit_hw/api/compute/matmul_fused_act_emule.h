@@ -25,23 +25,12 @@ namespace ckernel {
 
 // TTI_SEMWAIT / TTI_STALLWAIT / TT_SETC16 (no-ops in emule) come from common.h
 // via the matmul.h include above — single definition site, not redefined here.
-
-// ---- Silicon firmware constants (referenced by TT_SETC16 sites) ----
-#ifndef DEST_TARGET_REG_CFG_MATH_Offset_ADDR32
-constexpr uint32_t DEST_TARGET_REG_CFG_MATH_Offset_ADDR32 = 0;
-#endif
-
-// ---- Packer helper ----
-namespace packer {
-ALWI uint32_t get_packer_dest_offset() { return 0; }
-}  // namespace packer
-
-// ---- Semaphore helper ----
-// On silicon, semaphore::t6_sem(MATH_PACK) returns a register address;
-// here it's used as an opaque token argument to TTI_SEMWAIT (no-op).
-namespace semaphore {
-ALWI uint32_t t6_sem(uint32_t sem_id) { (void)sem_id; return 0; }
-}  // namespace semaphore
+//
+// DEST_TARGET_REG_CFG_MATH_Offset_ADDR32, ckernel::packer::get_packer_dest_offset,
+// and ckernel::semaphore::t6_sem are defined once in `include/jit_hw/ckernel.h`
+// (transitively included via matmul.h -> common.h -> ckernel.h) — no shadow
+// definitions here, otherwise TUs that pull this header get a redefinition and
+// a semantically divergent t6_sem.
 
 // ---- custom_mm_block_* templates ----
 // Silicon: highly optimized matmul-with-pack. Emule: delegate to
