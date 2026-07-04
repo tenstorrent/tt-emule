@@ -2275,6 +2275,12 @@ files:
   - {kind: struct, name: ShardView}
   - {kind: struct, name: AbstractTensorAccessorWrapper}
   - {kind: function, name: make_abstract_tensor_accessor_wrappers}
+- path: include/jit_hw/api/tensor/tensor_accessor_args.h
+  section: include/jit_hw/api/tensor/
+  summary: forwarding shim for generated-kernel `TensorAccessorArgs` includes
+- path: include/jit_hw/api/tensor/tensor_binding_token.h
+  section: include/jit_hw/api/tensor/
+  summary: forwarding shim for generated-kernel `TensorBindingToken` includes
 - path: include/jit_hw/cpp/ttnn/operations/data_movement/common/kernels/common.hpp
   section: include/jit_hw/cpp/ttnn/operations/data_movement/common/kernels/
   summary: forwarding shim → `ttnn/operations/data_movement/common/kernels/common.hpp`
