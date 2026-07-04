@@ -111,7 +111,20 @@ inline bool __emule_debug_multicast() {
 // pointer.  It must NOT be applied to firmware-style offsets like DRAM
 // bank addresses from get_noc_addr_from_bank_id (which can exceed 2MB).
 inline uint32_t __emule_addr_to_offset(uint32_t addr) {
-    return addr & 0x1FFFFF;  // SLOT_MASK = 2 MB - 1
+    // The input is a LOCAL L1 address on the calling core (get_noc_addr / _multicast
+    // contract). Recover its L1 offset so the destination core can re-base it.
+    //
+    // Under TT_EMULE_L1_POOL_SLOTS_PER_CHIP=0 each core is individually mmap'd at an
+    // arbitrary (non-2MB-aligned) base, so a fixed SLOT_MASK does NOT recover the offset
+    // from an absolute host pointer (the sender's base would leak into the encoded NOC
+    // offset and the destination re-base would miss — this silently broke every
+    // get_noc_addr(x, y, get_semaphore(id)) CCL handshake, e.g. AGMM's receiver-sem
+    // set_remote). Subtract this core's bridge_l1 when addr is an absolute local pointer
+    // (>= base); pass sub-base values through the legacy 2 MB mask (raw offsets / the
+    // L1Pool 2MB-aligned mode). Semaphores and CBs live at the same offset on every core,
+    // so the re-based NOC address lands on the destination's matching object.
+    uint32_t base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
+    return (addr >= base) ? (addr - base) : (addr & 0x1FFFFF);
 }
 
 // L1 access chokepoint (__emule_local_l1_to_ptr) — single definition shared with

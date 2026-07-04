@@ -13,6 +13,7 @@
 // sharded-tensor false negative.
 
 #include <cstdint>
+#include <cstdlib>
 #include "jit_hw/internal/emule_thread_ctx.h"  // __emule_self (fiber ctx)
 
 #include "jit_hw/emule_cb_state.h"          // __emule_cbs (CBSyncState*)
@@ -36,13 +37,39 @@ extern thread_local uint32_t __emule_cb_reserved_pages[32];
 extern thread_local uint32_t __emule_cb_waited_pages[32];
 extern thread_local bool __emule_cb_boundary_strict;
 
+inline uint32_t __emule_worker_l1_slot_mask() {
+    static const uint32_t mask = [] {
+        uint32_t slot_size = 2u * 1024 * 1024;
+        if (const char* env = std::getenv("TT_EMULE_WORKER_L1_SIZE")) {
+            char* end = nullptr;
+            unsigned long parsed = std::strtoul(env, &end, 0);
+            if (end != env && parsed != 0 && (parsed & (parsed - 1)) == 0) {
+                slot_size = static_cast<uint32_t>(parsed);
+            }
+        }
+        return slot_size - 1;
+    }();
+    return mask;
+}
+
+inline uint32_t __emule_worker_l1_slot_size() {
+    return __emule_worker_l1_slot_mask() + 1;
+}
+
 // Plain address->host-pointer translation (the tail every chokepoint path ends
-// in). A firmware-style offset is rebased onto __emule_self->bridge_l1; an already-
-// absolute host pointer (l1_alloc / CB / DFB) passes through.
+// in). A firmware-style offset is rebased onto __emule_self->bridge_l1; an
+// already-absolute host pointer passes through only when it lands inside this
+// core's active L1 mapping. Cross-chip/fabric paths can carry a 32-bit host
+// value from another low4G slot; treating that as a local pointer segfaults, so
+// fold it back to the per-worker slot offset.
 inline uint8_t* __emule_l1_translate(uint32_t l1_addr) {
     uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
-    if (l1_addr >= l1_base) {
+    uint32_t l1_size = __emule_worker_l1_slot_size();
+    if (l1_addr >= l1_base && l1_addr < l1_base + l1_size) {
         return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
+    }
+    if (l1_addr >= l1_size) {
+        return __emule_self->bridge_l1 + (l1_addr & __emule_worker_l1_slot_mask());
     }
     return __emule_self->bridge_l1 + l1_addr;
 }

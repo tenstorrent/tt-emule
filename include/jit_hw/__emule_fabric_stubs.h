@@ -53,6 +53,12 @@ enum class ProgrammableCoreType : uint8_t { TENSIX = 0, ACTIVE_ETH = 1, IDLE_ETH
 
 namespace tt::tt_fabric {
 
+enum TerminationSignal : uint32_t {
+    KEEP_RUNNING = 0,
+    GRACEFULLY_TERMINATE = 1,
+    IMMEDIATELY_TERMINATE = 2,
+};
+
 // --- NOC send types (silicon enum values; teleport switches on these) ---
 enum NocSendType : uint8_t {
     NOC_UNICAST_WRITE = 0,
@@ -272,6 +278,12 @@ struct PacketHeader {
     PacketHeader& to_chip_multicast(A&&...) volatile {
         return const_cast<PacketHeader&>(*this);
     }
+    uint32_t get_payload_size_including_header() const {
+        return payload_size_bytes + sizeof(PacketHeader);
+    }
+    uint32_t get_payload_size_including_header() volatile const {
+        return payload_size_bytes + sizeof(PacketHeader);
+    }
 };
 static_assert(sizeof(PacketHeader) == 48, "emule PacketHeader must match silicon LowLatencyPacketHeader size");
 
@@ -286,6 +298,8 @@ using UDMHybridMeshPacketHeader = PacketHeader;
 struct WorkerToFabricEdmSender {
     const uint8_t* pending_payload = nullptr;
     uint32_t pending_size = 0;
+    uint8_t edm_noc_x = 0;
+    uint8_t edm_noc_y = 0;
     uint8_t emule_conn_index = 0;  // fwd=0/bwd=1 (set by FabricConnectionManager) — for 1D dst resolution
     // Mux-path direction hint (0xFFFF = unset): the mux's NOC coords, set on the fabric MUX path
     // (build_connection_to_fabric_endpoint) so the teleport can recover the mux's host-recorded direction.
@@ -299,7 +313,7 @@ struct WorkerToFabricEdmSender {
     }
 
     // Connection lifecycle — bookkeeping no-ops (no real EDM connection to open/close).
-    template <typename... A> void open(A&&...) {}
+    template <bool use_worker_allocated_credit_address = false, typename... A> void open(A&&...) {}
     template <typename... A> void open_start(A&&...) {}
     template <typename... A> void open_finish(A&&...) {}
     template <typename... A> void close(A&&...) {}
@@ -353,6 +367,95 @@ private:
         pending_payload = nullptr;
         pending_size = 0;
     }
+};
+
+template <bool USE_DYNAMIC_CREDIT_ADDR = false, uint8_t NUM_BUFFERS = 0>
+struct WorkerToFabricEdmSenderImpl : WorkerToFabricEdmSender {
+    using WorkerToFabricEdmSender::WorkerToFabricEdmSender;
+
+    template <auto CoreType = 0, typename... A>
+    static WorkerToFabricEdmSenderImpl build_from_args(A&&...) {
+        return WorkerToFabricEdmSenderImpl{};
+    }
+};
+
+inline constexpr uint8_t worker_handshake_noc = 0;
+inline constexpr size_t MUX_TO_WORKER_INTERFACE_STARTING_READ_COUNTER_VALUE = 0;
+
+namespace connection_interface {
+inline constexpr uint32_t open_connection_value = 1;
+inline constexpr uint32_t close_connection_request_value = 2;
+}  // namespace connection_interface
+
+enum FabricMuxStatus : uint32_t {
+    STARTED = 0xA0B0C0D0,
+    READY_FOR_TRAFFIC = 0xA3B3C3D3,
+    TERMINATED = 0xA4B4C4D4,
+};
+
+struct FabricMuxChannelClientLocationInfo {
+    uint32_t noc_x = 0;
+    uint32_t noc_y = 0;
+    uint32_t write_counter_address = 0;
+};
+
+template <uint8_t NUM_BUFFERS>
+struct FabricMuxChannelBuffer {
+    size_t base_address = 0;
+    size_t buffer_size_bytes = 0;
+    size_t header_size_bytes = 0;
+
+    FabricMuxChannelBuffer() = default;
+    FabricMuxChannelBuffer(size_t base, size_t buffer_size, size_t header_size) :
+        base_address(base), buffer_size_bytes(buffer_size), header_size_bytes(header_size) {}
+
+    size_t get_buffer_address(uint32_t index) const {
+        const size_t slots = NUM_BUFFERS == 0 ? 1 : NUM_BUFFERS;
+        return base_address + (index % slots) * buffer_size_bytes;
+    }
+};
+
+struct EmuleMuxCounter {
+    uint32_t value = 0;
+    uint32_t get_buffer_index() const { return value; }
+    void increment() { ++value; }
+};
+
+template <uint8_t WORKER_HANDSHAKE_NOC, uint8_t NUM_BUFFERS>
+struct StaticSizedSenderChannelWorkerInterface {
+    volatile uint32_t* connection_live_semaphore = nullptr;
+    uint32_t dummy_connection_live_semaphore = connection_interface::open_connection_value;
+    EmuleMuxCounter local_write_counter{};
+    EmuleMuxCounter local_read_counter{};
+
+    StaticSizedSenderChannelWorkerInterface() : connection_live_semaphore(&dummy_connection_live_semaphore) {}
+
+    template <typename... A>
+    StaticSizedSenderChannelWorkerInterface(
+        volatile FabricMuxChannelClientLocationInfo* /*connection_info*/,
+        volatile uint32_t* connection_live_semaphore_in,
+        volatile uint32_t* /*connection_handshake*/,
+        A&&...) :
+        connection_live_semaphore(connection_live_semaphore_in == nullptr ? &dummy_connection_live_semaphore
+                                                                          : connection_live_semaphore_in) {}
+
+    template <bool RISC_CPU_DATA_CACHE_ENABLED = false, uint8_t MY_ETH_CHANNEL = 0>
+    void cache_producer_noc_addr() {}
+
+    void notify_worker_of_read_counter_update() {}
+    bool has_worker_teardown_request() const { return false; }
+
+    template <bool notify_worker = true, bool RISC_CPU_DATA_CACHE_ENABLED = false>
+    void teardown_worker_connection() {}
+};
+
+template <uint8_t NUM_BUFFERS>
+using FabricMuxStaticSizedChannelWorkerInterface =
+    StaticSizedSenderChannelWorkerInterface<worker_handshake_noc, NUM_BUFFERS>;
+
+template <uint8_t NUM_BUFFERS>
+struct WorkerToFabricMuxSender : WorkerToFabricEdmSenderImpl<false, NUM_BUFFERS> {
+    using WorkerToFabricEdmSenderImpl<false, NUM_BUFFERS>::WorkerToFabricEdmSenderImpl;
 };
 
 // --- RoutingPlaneConnectionManager (blaze N-slot; also reached via .get(i).sender) ---
@@ -441,11 +544,6 @@ template <typename... A> inline bool fabric_set_sparse_multicast_route(A&&...) {
 template <typename... A> inline void open_connections(A&&...) {}
 template <typename... A> inline void close_connections(A&&...) {}
 
-// Mux sender (tt_fabric_mux_interface.hpp) — same teleport-backed sender. Templated on the
-// compile-time buffer count, as the real one is (kernels use WorkerToFabricMuxSender<N>).
-template <uint8_t NUM_BUFFERS = 0>
-struct WorkerToFabricMuxSender : WorkerToFabricEdmSender {};
-
 // Mux façade: stage payload then teleport the header (matches fabric_async_write semantics).
 template <typename Conn, typename Hdr>
 inline void fabric_async_write(Conn& connection_handle, Hdr* packet_header, uint32_t src_addr, uint32_t size) {
@@ -506,14 +604,15 @@ constexpr bool __mask_has(M mask, M bit) {
 // ---- Unicast write ----
 template <UnicastWriteUpdateMask Mask = UnicastWriteUpdateMask::None, typename Cmd = std::nullptr_t>
 inline void fabric_unicast_noc_unicast_write_set_state(
-    PacketHeader* hdr, uint8_t /*num_hops*/, Cmd cmd = nullptr, uint16_t payload_size = 0) {
-    hdr->noc_send_type = NOC_UNICAST_WRITE;
+    volatile PacketHeader* hdr, uint8_t /*num_hops*/, Cmd cmd = nullptr, uint16_t payload_size = 0) {
+    auto* mhdr = const_cast<PacketHeader*>(hdr);
+    mhdr->noc_send_type = NOC_UNICAST_WRITE;
     if constexpr (__mask_has(Mask, UnicastWriteUpdateMask::PayloadSize)) {
-        hdr->payload_size_bytes = payload_size;
+        mhdr->payload_size_bytes = payload_size;
     }
     if constexpr (!std::is_same_v<Cmd, std::nullptr_t>) {
         if constexpr (__mask_has(Mask, UnicastWriteUpdateMask::DstAddr)) {
-            hdr->cmd_noc_address = cmd.noc_address;
+            mhdr->cmd_noc_address = cmd.noc_address;
         }
     }
 }
@@ -522,31 +621,33 @@ template <
     typename Conn,
     typename Cmd = std::nullptr_t>
 inline void fabric_unicast_noc_unicast_write_with_state(
-    Conn* client, PacketHeader* hdr, uint32_t src_addr, Cmd cmd = nullptr, uint16_t payload_size = 0) {
+    Conn* client, volatile PacketHeader* hdr, uint32_t src_addr, Cmd cmd = nullptr, uint16_t payload_size = 0) {
+    auto* mhdr = const_cast<PacketHeader*>(hdr);
     if constexpr (!std::is_same_v<Cmd, std::nullptr_t>) {
         if constexpr (__mask_has(Mask, UnicastWriteUpdateMask::DstAddr)) {
-            hdr->cmd_noc_address = cmd.noc_address;
+            mhdr->cmd_noc_address = cmd.noc_address;
         }
     }
     if constexpr (__mask_has(Mask, UnicastWriteUpdateMask::PayloadSize)) {
-        hdr->payload_size_bytes = payload_size;
+        mhdr->payload_size_bytes = payload_size;
     }
     client->wait_for_empty_write_slot();
-    client->send_payload_without_header_non_blocking_from_address(src_addr, hdr->payload_size_bytes);
+    client->send_payload_without_header_non_blocking_from_address(src_addr, mhdr->payload_size_bytes);
     client->send_payload_flush_non_blocking_from_address(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hdr)), sizeof(PacketHeader));
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mhdr)), sizeof(PacketHeader));
 }
 
 // ---- Scatter write (stateful: set_state lays the static fields once, with_state patches only the masked
 // dynamic fields and reuses the rest — so both must honor the UpdateMask, not re-lay the whole command). ----
 template <UnicastScatterWriteUpdateMask Mask = UnicastScatterWriteUpdateMask::None, typename Cmd = std::nullptr_t>
 inline void fabric_unicast_noc_scatter_write_set_state(
-    PacketHeader* hdr, uint8_t /*num_hops*/, Cmd cmd = nullptr, uint16_t payload_size = 0) {
-    hdr->noc_send_type = NOC_UNICAST_SCATTER_WRITE;
+    volatile PacketHeader* hdr, uint8_t /*num_hops*/, Cmd cmd = nullptr, uint16_t payload_size = 0) {
+    auto* mhdr = const_cast<PacketHeader*>(hdr);
+    mhdr->noc_send_type = NOC_UNICAST_SCATTER_WRITE;
     if constexpr (!std::is_same_v<Cmd, std::nullptr_t>) {
-        hdr->template apply_scatter_fields<static_cast<uint32_t>(Mask)>(payload_size, cmd);
+        mhdr->template apply_scatter_fields<static_cast<uint32_t>(Mask)>(payload_size, cmd);
     } else if constexpr (__mask_has(Mask, UnicastScatterWriteUpdateMask::PayloadSize)) {
-        hdr->payload_size_bytes = payload_size;
+        mhdr->payload_size_bytes = payload_size;
     }
 }
 template <
@@ -554,30 +655,32 @@ template <
     typename Conn,
     typename Cmd = std::nullptr_t>
 inline void fabric_unicast_noc_scatter_write_with_state(
-    Conn* client, PacketHeader* hdr, uint32_t src_addr, Cmd cmd = nullptr, uint16_t payload_size = 0) {
+    Conn* client, volatile PacketHeader* hdr, uint32_t src_addr, Cmd cmd = nullptr, uint16_t payload_size = 0) {
+    auto* mhdr = const_cast<PacketHeader*>(hdr);
     if constexpr (!std::is_same_v<Cmd, std::nullptr_t>) {
-        hdr->template apply_scatter_fields<static_cast<uint32_t>(Mask)>(payload_size, cmd);
+        mhdr->template apply_scatter_fields<static_cast<uint32_t>(Mask)>(payload_size, cmd);
     } else if constexpr (__mask_has(Mask, UnicastScatterWriteUpdateMask::PayloadSize)) {
-        hdr->payload_size_bytes = payload_size;
+        mhdr->payload_size_bytes = payload_size;
     }
     client->wait_for_empty_write_slot();
-    client->send_payload_without_header_non_blocking_from_address(src_addr, hdr->payload_size_bytes);
+    client->send_payload_without_header_non_blocking_from_address(src_addr, mhdr->payload_size_bytes);
     client->send_payload_flush_non_blocking_from_address(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hdr)), sizeof(PacketHeader));
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mhdr)), sizeof(PacketHeader));
 }
 
 // ---- Unicast atomic inc (no payload; the teleport increments val@8 at the dst noc address) ----
 template <UnicastAtomicIncUpdateMask Mask = UnicastAtomicIncUpdateMask::None, typename Cmd = std::nullptr_t>
 inline void fabric_unicast_noc_unicast_atomic_inc_set_state(
-    PacketHeader* hdr, uint8_t /*num_hops*/, Cmd cmd = nullptr) {
-    hdr->noc_send_type = NOC_UNICAST_ATOMIC_INC;
-    hdr->payload_size_bytes = 0;
+    volatile PacketHeader* hdr, uint8_t /*num_hops*/, Cmd cmd = nullptr) {
+    auto* mhdr = const_cast<PacketHeader*>(hdr);
+    mhdr->noc_send_type = NOC_UNICAST_ATOMIC_INC;
+    mhdr->payload_size_bytes = 0;
     if constexpr (!std::is_same_v<Cmd, std::nullptr_t>) {
         if constexpr (__mask_has(Mask, UnicastAtomicIncUpdateMask::Val)) {
-            *reinterpret_cast<uint32_t*>(&hdr->cmd_rest[0]) = cmd.val;  // val @8
+            *reinterpret_cast<uint32_t*>(&mhdr->cmd_rest[0]) = cmd.val;  // val @8
         }
         if constexpr (__mask_has(Mask, UnicastAtomicIncUpdateMask::DstAddr)) {
-            hdr->cmd_noc_address = cmd.noc_address;
+            mhdr->cmd_noc_address = cmd.noc_address;
         }
     }
 }
@@ -585,18 +688,19 @@ template <
     UnicastAtomicIncUpdateMask Mask = UnicastAtomicIncUpdateMask::None,
     typename Conn,
     typename Cmd = std::nullptr_t>
-inline void fabric_unicast_noc_unicast_atomic_inc_with_state(Conn* client, PacketHeader* hdr, Cmd cmd = nullptr) {
+inline void fabric_unicast_noc_unicast_atomic_inc_with_state(Conn* client, volatile PacketHeader* hdr, Cmd cmd = nullptr) {
+    auto* mhdr = const_cast<PacketHeader*>(hdr);
     if constexpr (!std::is_same_v<Cmd, std::nullptr_t>) {
         if constexpr (__mask_has(Mask, UnicastAtomicIncUpdateMask::DstAddr)) {
-            hdr->cmd_noc_address = cmd.noc_address;
+            mhdr->cmd_noc_address = cmd.noc_address;
         }
         if constexpr (__mask_has(Mask, UnicastAtomicIncUpdateMask::Val)) {
-            *reinterpret_cast<uint32_t*>(&hdr->cmd_rest[0]) = cmd.val;
+            *reinterpret_cast<uint32_t*>(&mhdr->cmd_rest[0]) = cmd.val;
         }
     }
     client->wait_for_empty_write_slot();
     client->send_payload_flush_non_blocking_from_address(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hdr)), sizeof(PacketHeader));
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mhdr)), sizeof(PacketHeader));
 }
 
 // ---- Multicast atomic inc: emule has no real multicast; the teleport reaches the single neighbor
@@ -670,6 +774,38 @@ namespace mesh::experimental {}
 // --- PACKET_HEADER_TYPE + global FabricConnectionManager ---
 // Silicon exposes PACKET_HEADER_TYPE at global scope; keep that.
 using PACKET_HEADER_TYPE = tt::tt_fabric::PacketHeader;
+
+struct StreamId {
+    uint32_t value = 0;
+    constexpr uint32_t get() const { return value; }
+};
+
+inline int32_t get_ptr_val(uint8_t /*stream_id*/) { return 0; }
+
+template <uint32_t stream_id>
+inline int32_t get_ptr_val() {
+    return 0;
+}
+
+inline void increment_local_update_ptr_val(uint8_t /*stream_id*/, int32_t /*val*/) {}
+
+template <uint32_t stream_id>
+inline void increment_local_update_ptr_val(int32_t /*val*/) {}
+
+inline void init_ptr_val(uint32_t /*stream_id*/, int32_t /*val*/) {}
+inline void init_ptr_val(StreamId /*stream_id*/, int32_t /*val*/) {}
+
+template <uint32_t stream_id>
+inline void init_ptr_val(int32_t /*val*/) {}
+
+template <bool enabled>
+inline void set_l1_data_cache() {}
+
+inline void zero_l1_buf(uint32_t* ptr, size_t size) {
+    for (size_t i = 0; i < size / sizeof(uint32_t); ++i) {
+        ptr[i] = 0;
+    }
+}
 
 // Silicon's noc_addr.h declares get_noc_address_components at GLOBAL scope (returning
 // tt::tt_fabric::WorkerXY); CCL kernels call it unqualified. Decompose an emule NOC address
