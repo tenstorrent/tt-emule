@@ -132,7 +132,12 @@ FORCE_INLINE void unicast_read_with_state(
     }
     auto& rd = __emule_datamovement_ctx().uk_rd[noc];
     if constexpr (set_addresses) {
-        __emule_uk_set_local_bits(rd.noc_addr, src_local_addr);  // src noc low bits
+        // Canonicalize the source L1 offset before OR-ing it into the saved upper
+        // coords — src_local_addr can be a firmware-style offset or a truncated
+        // host pointer in emule. Mirrors noc_async_read_with_state in
+        // dataflow_api.h (__emule_addr_to_offset), so the replayed noc_async_read
+        // resolves the correct remote address.
+        __emule_uk_set_local_bits(rd.noc_addr, __emule_addr_to_offset(src_local_addr));
         rd.local_addr = dst_local_addr;
     }
     if constexpr (set_size) {
