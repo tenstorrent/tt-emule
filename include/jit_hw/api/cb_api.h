@@ -67,6 +67,9 @@ extern thread_local uint8_t my_y[2];
 // tile shape, so the arrays below fill directly from the defines. The #else
 // (no-metadata) fallbacks hardcode the same defaults across all slots.
 constexpr uint32_t EMULE_JIT_CB_SLOTS = 64;
+// The #else fallback arrays below hardcode EMULE_JIT_CB_SLOTS entries (64x255,
+// 64x32, etc.); fail loudly if the slot count is ever changed without updating them.
+static_assert(EMULE_JIT_CB_SLOTS == 64, "hardcoded fallback initializers below assume EMULE_JIT_CB_SLOTS == 64");
 
 #ifdef EMULE_TILE_SIZES
 constexpr uint16_t unpack_tile_size[EMULE_JIT_CB_SLOTS] = { EMULE_TILE_SIZES };
