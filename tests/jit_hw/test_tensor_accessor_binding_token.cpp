@@ -12,6 +12,8 @@
 #define KERNEL_COMPILE_TIME_ARGS 2, 64
 
 #include "jit_hw/api/tensor/tensor_accessor.h"
+#include "api/tensor/tensor_accessor_args.h"
+#include "api/tensor/tensor_binding_token.h"
 
 thread_local ThreadCommonCtx* __emule_self = nullptr;
 thread_local uint8_t my_x[2] = {};
