@@ -30,7 +30,11 @@ struct CoreCoord {
 class Core {
 public:
     static constexpr size_t L1_SIZE = 1024 * 1024; // 1 MB
-    static constexpr size_t MAX_CBS = 32;
+    // Blackhole supports 64 circular buffers (Wormhole 32); the emulator models
+    // Blackhole. Ziveli generic_op kernels (softmax/attention) allocate CBs at ids
+    // up to ~53, so cb_sync_states_ must have a slot for each or cbs[id] reads OOB
+    // (cb_wait_front then sees num_pages=0). Matches hal.get_arch_num_circular_buffers().
+    static constexpr size_t MAX_CBS = 64;
 
     // Default constructor: WORKER role, 1 MB L1 mmap'd below 4 GB.
     explicit Core(CoreCoord coord) : coord_(coord) {

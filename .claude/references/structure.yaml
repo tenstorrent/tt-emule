@@ -610,6 +610,7 @@ files:
   symbols:
   - {kind: global, name: my_x}
   - {kind: global, name: my_y}
+  - {kind: global, name: EMULE_JIT_CB_SLOTS}
   - {kind: global, name: unpack_tile_size}
   - {kind: global, name: unpack_src_format}
   - {kind: global, name: pack_dst_format}

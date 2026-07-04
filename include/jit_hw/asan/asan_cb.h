@@ -32,21 +32,21 @@ extern thread_local uint32_t __emule_pending_noc_reads;
 
 // Per-CB call site of the most recent reserve/wait, so the post-exit Dirty-CB
 // check (no kernel frame left to backtrace) can name the kernel file:line.
-extern thread_local const char* __emule_cb_reserve_file[32];
-extern thread_local uint32_t __emule_cb_reserve_line[32];
-extern thread_local const char* __emule_cb_wait_file[32];
-extern thread_local uint32_t __emule_cb_wait_line[32];
+extern thread_local const char* __emule_cb_reserve_file[64];
+extern thread_local uint32_t __emule_cb_reserve_line[64];
+extern thread_local const char* __emule_cb_wait_file[64];
+extern thread_local uint32_t __emule_cb_wait_line[64];
 
 // CB-Boundary *window* counters: pages reserved ahead of / waited behind the
 // FIFO pointer (read by the CB Boundary check in asan/asan_l1_checks.h).
-extern thread_local uint32_t __emule_cb_reserved_pages[32];
-extern thread_local uint32_t __emule_cb_waited_pages[32];
+extern thread_local uint32_t __emule_cb_reserved_pages[64];
+extern thread_local uint32_t __emule_cb_waited_pages[64];
 
 // Dirty-CB leak signal (decoupled from the window counters above): a flag still
 // set at kernel exit means a reserve with no following push (or a wait with no
 // following pop). See docs/ASAN.md §11 for why a flag, not a net count.
-extern thread_local bool __emule_cb_reserve_dangling[32];
-extern thread_local bool __emule_cb_wait_dangling[32];
+extern thread_local bool __emule_cb_reserve_dangling[64];
+extern thread_local bool __emule_cb_wait_dangling[64];
 
 // cb_reserve_back: record the site, mark a reserve outstanding, run the
 // always-on Reservation Overflow check, and grow the reserved window. The

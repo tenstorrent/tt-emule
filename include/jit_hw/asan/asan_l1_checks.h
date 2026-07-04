@@ -35,8 +35,8 @@ extern thread_local uint32_t __emule_l1_host_ranges_count;
 extern thread_local uint64_t* __emule_l1_resolved_ranges;
 extern thread_local uint32_t* __emule_l1_resolved_ranges_count;
 extern thread_local uint32_t __emule_l1_resolved_ranges_capacity;
-extern thread_local uint32_t __emule_cb_reserved_pages[32];
-extern thread_local uint32_t __emule_cb_waited_pages[32];
+extern thread_local uint32_t __emule_cb_reserved_pages[64];
+extern thread_local uint32_t __emule_cb_waited_pages[64];
 extern thread_local bool __emule_cb_boundary_strict;
 
 // Plain address->host-pointer translation (the tail every chokepoint path ends
