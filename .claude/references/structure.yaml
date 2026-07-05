@@ -2281,6 +2281,7 @@ files:
   - {kind: using, name: TensorBindingToken}
   - {kind: struct, name: Page}
   - {kind: struct, name: TensorAccessor}
+  - {kind: function, name: make_tensor_accessor_tuple}
   - {kind: struct, name: ShardView}
   - {kind: struct, name: AbstractTensorAccessorWrapper}
   - {kind: function, name: make_abstract_tensor_accessor_wrappers}
