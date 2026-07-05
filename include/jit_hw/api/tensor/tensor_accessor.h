@@ -184,6 +184,28 @@ template <uint32_t CTA_OFFSET, uint32_t ADDR_CRTA_OFFSET>
 TensorAccessor(tensor_accessor::TensorAccessorBindingToken<CTA_OFFSET, ADDR_CRTA_OFFSET>)
     -> TensorAccessor<tensor_accessor::TensorAccessorBindingToken<CTA_OFFSET, ADDR_CRTA_OFFSET>>;
 
+namespace tensor_accessor::detail {
+
+// Mirrors tt_metal/hw/inc/api/tensor/tensor_accessor.h: builds one TensorAccessor
+// per TensorAccessorArgs in the tuple, reading each tensor's base address from a
+// contiguous run of runtime args starting at address_rt_arg_index_start.
+template <typename... Args, uint32_t... Indexes>
+auto make_tensor_accessor_tuple(
+    const std::tuple<Args...>& args,
+    uint32_t address_rt_arg_index_start,
+    std::integer_sequence<uint32_t, Indexes...>) {
+    return std::make_tuple(
+        TensorAccessor(std::get<Indexes>(args), get_arg_val<uint32_t>(address_rt_arg_index_start + Indexes))...);
+}
+
+}  // namespace tensor_accessor::detail
+
+template <typename... Args>
+auto make_tensor_accessor_tuple(const std::tuple<Args...>& args, uint32_t address_rt_arg_index_start) {
+    return tensor_accessor::detail::make_tensor_accessor_tuple(
+        args, address_rt_arg_index_start, std::make_integer_sequence<uint32_t, sizeof...(Args)>());
+}
+
 template <typename Accessor>
 struct ShardView {
     const Accessor& accessor;
