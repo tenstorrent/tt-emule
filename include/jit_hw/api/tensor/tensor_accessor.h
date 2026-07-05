@@ -33,42 +33,57 @@ struct TensorAccessorArgs {
     static constexpr uint32_t AlignedPageSize = get_compile_time_arg_val(CTA_OFFSET + 1);
 
     // ArgsConfig runtime-relaxation bits (hostdevcommon/tensor_accessor/arg_config.hpp).
-    // The shadow only models the fully-static sharded case (all shard metadata is CTA),
-    // which is what the sharded reshape/tilize/concat kernels emit. If any field is a
-    // runtime (CRTA) arg, is_static_sharded is false and get_noc_addr falls back to the
-    // interleaved path (no worse than the pre-fix behavior).
+    // Each shard-metadata field is either compile-time (CTA) or runtime (CRTA, i.e. a
+    // common runtime arg). The shadow supports any combination as long as rank,
+    // num_banks and page_size are compile-time (always true for the sharded kernels
+    // emule runs — reshape/tilize/concat static; ttnn.permute makes only tensor_shape
+    // runtime). tensor_shape / shard_shape / bank_coords are read per-field from CTA
+    // or CRTA in TensorAccessor. Anything outside this (runtime rank/num_banks) falls
+    // back to the interleaved path.
     static constexpr bool rank_is_crta         = (ArgsConfig & (1u << 2)) != 0;
     static constexpr bool num_banks_is_crta    = (ArgsConfig & (1u << 3)) != 0;
     static constexpr bool tensor_shape_is_crta = (ArgsConfig & (1u << 4)) != 0;
     static constexpr bool shard_shape_is_crta  = (ArgsConfig & (1u << 5)) != 0;
     static constexpr bool bank_coords_is_crta  = (ArgsConfig & (1u << 6)) != 0;
     static constexpr bool page_size_is_crta    = (ArgsConfig & (1u << 7)) != 0;
-    static constexpr bool is_static_sharded = is_sharded && !rank_is_crta && !num_banks_is_crta &&
-                                              !tensor_shape_is_crta && !shard_shape_is_crta &&
-                                              !bank_coords_is_crta && !page_size_is_crta;
+    static constexpr bool is_sharded_supported =
+        is_sharded && !rank_is_crta && !num_banks_is_crta && !page_size_is_crta;
 
-    // Static-sharded CTA layout (mirrors tt_metal .../tensor_accessor_args.h):
+    // Sharded CTA layout (mirrors tt_metal .../tensor_accessor_args.h). Fields that
+    // live in CRTA are skipped in the CTA stream, so later CTA offsets shift down.
     //   [Cta+0]=config [Cta+1]=page_size [Cta+2]=rank [Cta+3]=num_banks(raw)
-    //   [Cta+4 .. +4+rank)      = tensor_shape
-    //   [+4+rank .. +4+2*rank)  = shard_shape
-    //   [+4+2*rank ..)          = bank coords (2 packed u16 per u32 word)
-    static constexpr uint32_t ShardedRank        = is_static_sharded ? get_compile_time_arg_val(CTA_OFFSET + 2) : 0;
-    static constexpr uint32_t ShardedNumBanksRaw = is_static_sharded ? get_compile_time_arg_val(CTA_OFFSET + 3) : 0;
+    //   then, in order and only if NOT crta: tensor_shape[rank], shard_shape[rank],
+    //   bank_coords[ceil(num_banks/2)] (2 packed u16 per u32 word).
+    static constexpr uint32_t ShardedRank        = is_sharded_supported ? get_compile_time_arg_val(CTA_OFFSET + 2) : 0;
+    static constexpr uint32_t ShardedNumBanksRaw = is_sharded_supported ? get_compile_time_arg_val(CTA_OFFSET + 3) : 0;
     static constexpr uint32_t ShardedNumBanks    = ShardedNumBanksRaw & 0x7FFFFFFFu;
     static constexpr bool ShardedContiguous      = (ShardedNumBanksRaw & 0x80000000u) != 0;
     static constexpr std::size_t ShardedTensorShapeCta = CTA_OFFSET + 4;
-    static constexpr std::size_t ShardedShardShapeCta  = ShardedTensorShapeCta + ShardedRank;
-    static constexpr std::size_t ShardedBankCoordsCta  = ShardedShardShapeCta + ShardedRank;
+    static constexpr std::size_t ShardedShardShapeCta =
+        ShardedTensorShapeCta + (tensor_shape_is_crta ? 0 : ShardedRank);
+    static constexpr std::size_t ShardedBankCoordsCta =
+        ShardedShardShapeCta + (shard_shape_is_crta ? 0 : ShardedRank);
 
     uint32_t crta_offset_rt = 0;
 
     constexpr TensorAccessorArgs() = default;
     constexpr explicit TensorAccessorArgs(uint32_t crta_offset) : crta_offset_rt(crta_offset) {}
 
+    // CRTA offsets for the runtime shard-metadata fields (rank & num_banks are CT here,
+    // so they contribute 0 to the CRTA stream). Matches tensor_accessor_args.h.
+    constexpr uint32_t sharded_tensor_shape_crta_offset() const { return crta_offset(); }
+    constexpr uint32_t sharded_shard_shape_crta_offset() const {
+        return sharded_tensor_shape_crta_offset() + (tensor_shape_is_crta ? ShardedRank : 0);
+    }
+    constexpr uint32_t sharded_bank_coords_crta_offset() const {
+        return sharded_shard_shape_crta_offset() + (shard_shape_is_crta ? ShardedRank : 0);
+    }
+
     static constexpr uint32_t get_aligned_page_size() { return AlignedPageSize; }
     static constexpr uint32_t num_compile_time_args() {
-        if constexpr (is_static_sharded) {
-            return 4 + 2 * ShardedRank + (ShardedNumBanks + 1) / 2;
+        if constexpr (is_sharded_supported) {
+            return 4 + (tensor_shape_is_crta ? 0 : ShardedRank) + (shard_shape_is_crta ? 0 : ShardedRank) +
+                   (bank_coords_is_crta ? 0 : (ShardedNumBanks + 1) / 2);
         } else {
             return 2;
         }
@@ -203,8 +218,8 @@ struct TensorAccessor {
 
     FORCE_INLINE uint64_t get_noc_addr(
         const uint32_t page_id, const uint32_t offset = 0, uint8_t noc = noc_index) const {
-        if constexpr (requires { DSpec::is_static_sharded; }) {
-            if constexpr (DSpec::is_static_sharded && !DSpec::is_dram) {
+        if constexpr (requires { DSpec::is_sharded_supported; }) {
+            if constexpr (DSpec::is_sharded_supported && !DSpec::is_dram) {
                 return sharded_noc_addr(page_id, offset, noc);
             }
         }
@@ -216,8 +231,8 @@ struct TensorAccessor {
 
     FORCE_INLINE uint64_t get_shard_noc_addr(
         const uint32_t shard_id, const uint32_t offset = 0, uint8_t noc = noc_index) const {
-        if constexpr (requires { DSpec::is_static_sharded; }) {
-            if constexpr (DSpec::is_static_sharded && !DSpec::is_dram) {
+        if constexpr (requires { DSpec::is_sharded_supported; }) {
+            if constexpr (DSpec::is_sharded_supported && !DSpec::is_dram) {
                 // A shard's first page: page offset within shard is 0.
                 return sharded_bank_noc_addr(shard_id, /*page_offset_within_shard=*/0, offset, noc);
             }
@@ -226,18 +241,59 @@ struct TensorAccessor {
     }
 
   private:
+    // Read the rank shard-metadata vectors from wherever they live: compile-time (CTA,
+    // unrolled) or runtime (CRTA, a common runtime arg — e.g. ttnn.permute makes
+    // tensor_shape runtime). rank & num_banks are always compile-time (is_sharded_supported).
+    FORCE_INLINE void load_tensor_shape(uint32_t* ts) const {
+        constexpr uint32_t R = DSpec::ShardedRank;
+        if constexpr (DSpec::tensor_shape_is_crta) {
+            const uint32_t base = dspec_instance.sharded_tensor_shape_crta_offset();
+            for (uint32_t i = 0; i < R; ++i) ts[i] = get_common_arg_val<uint32_t>(base + i);
+        } else {
+            [&]<std::size_t... I>(std::index_sequence<I...>) {
+                ((ts[I] = get_compile_time_arg_val(DSpec::ShardedTensorShapeCta + I)), ...);
+            }(std::make_index_sequence<R>{});
+        }
+    }
+    FORCE_INLINE void load_shard_shape(uint32_t* ss) const {
+        constexpr uint32_t R = DSpec::ShardedRank;
+        if constexpr (DSpec::shard_shape_is_crta) {
+            const uint32_t base = dspec_instance.sharded_shard_shape_crta_offset();
+            for (uint32_t i = 0; i < R; ++i) ss[i] = get_common_arg_val<uint32_t>(base + i);
+        } else {
+            [&]<std::size_t... I>(std::index_sequence<I...>) {
+                ((ss[I] = get_compile_time_arg_val(DSpec::ShardedShardShapeCta + I)), ...);
+            }(std::make_index_sequence<R>{});
+        }
+    }
+    FORCE_INLINE void load_bank_xy(uint16_t* bank_xy) const {
+        constexpr uint32_t NB = DSpec::ShardedNumBanks;
+        if constexpr (DSpec::bank_coords_is_crta) {
+            const uint32_t base = dspec_instance.sharded_bank_coords_crta_offset();
+            for (uint32_t i = 0; i < NB; ++i) {
+                const uint32_t w = get_common_arg_val<uint32_t>(base + i / 2);
+                bank_xy[i] = static_cast<uint16_t>((i % 2 == 0) ? (w & 0xffffu) : (w >> 16));
+            }
+        } else {
+            [&]<std::size_t... I>(std::index_sequence<I...>) {
+                ((bank_xy[I] = static_cast<uint16_t>(
+                      (I % 2 == 0) ? (get_compile_time_arg_val(DSpec::ShardedBankCoordsCta + I / 2) & 0xffffu)
+                                   : (get_compile_time_arg_val(DSpec::ShardedBankCoordsCta + I / 2) >> 16))),
+                 ...);
+            }(std::make_index_sequence<NB>{});
+        }
+    }
+
     // L1-sharded page addressing. Ports the static-rank path of
     // tt_metal/hw/inc/api/tensor/tensor_accessor.h::get_bank_and_offset onto emule's
-    // NoC helper. Only reached for is_static_sharded && !is_dram (guarded above); the
+    // NoC helper. Only reached for is_sharded_supported && !is_dram (guarded above); the
     // shadow otherwise routes through InterleavedAddrGen, which ignores sharding and
     // was the cause of the "column-0 only" corruption on sharded reshape/tilize.
     FORCE_INLINE uint64_t sharded_noc_addr(uint32_t page_id, uint32_t offset, uint8_t noc) const {
         constexpr uint32_t R = DSpec::ShardedRank;
         uint32_t ts[R]{}, ss[R]{};
-        [&]<std::size_t... I>(std::index_sequence<I...>) {
-            ((ts[I] = get_compile_time_arg_val(DSpec::ShardedTensorShapeCta + I)), ...);
-            ((ss[I] = get_compile_time_arg_val(DSpec::ShardedShardShapeCta + I)), ...);
-        }(std::make_index_sequence<R>{});
+        load_tensor_shape(ts);
+        load_shard_shape(ss);
 
         // shard strides (row-major within a shard) and shard-grid strides (over the shard grid)
         uint32_t shard_strides[R]{}, shard_grid_strides[R]{}, shard_volume = 1, num_shards = 1;
@@ -273,10 +329,8 @@ struct TensorAccessor {
         uint32_t sv = 1, num_shards = 1;
         constexpr uint32_t R = DSpec::ShardedRank;
         uint32_t ss[R]{}, ts[R]{};
-        [&]<std::size_t... I>(std::index_sequence<I...>) {
-            ((ss[I] = get_compile_time_arg_val(DSpec::ShardedShardShapeCta + I)), ...);
-            ((ts[I] = get_compile_time_arg_val(DSpec::ShardedTensorShapeCta + I)), ...);
-        }(std::make_index_sequence<R>{});
+        load_shard_shape(ss);
+        load_tensor_shape(ts);
         for (uint32_t i = 0; i < R; ++i) { sv *= ss[i]; num_shards *= (ts[i] + ss[i] - 1) / ss[i]; }
         return bank_addr_from_shard(flattened_shard_id, page_offset_within_shard, sv, num_shards, offset, noc);
     }
@@ -286,12 +340,7 @@ struct TensorAccessor {
         uint32_t num_shards, uint32_t offset, uint8_t noc) const {
         constexpr uint32_t NB = DSpec::ShardedNumBanks;
         uint16_t bank_xy[NB]{};
-        [&]<std::size_t... I>(std::index_sequence<I...>) {
-            ((bank_xy[I] = static_cast<uint16_t>(
-                  (I % 2 == 0) ? (get_compile_time_arg_val(DSpec::ShardedBankCoordsCta + I / 2) & 0xffffu)
-                               : (get_compile_time_arg_val(DSpec::ShardedBankCoordsCta + I / 2) >> 16))),
-             ...);
-        }(std::make_index_sequence<NB>{});
+        load_bank_xy(bank_xy);
 
         uint32_t bank_id, shard_in_bank;
         if constexpr (DSpec::ShardedContiguous) {
