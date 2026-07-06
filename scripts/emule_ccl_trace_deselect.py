@@ -22,6 +22,10 @@ import os
 
 
 def pytest_collection_modifyitems(config, items):
+    # Presence-based, matching the runtime: rtoptions.cpp enables emule mode whenever
+    # TT_METAL_EMULE_MODE is set (`if (value)`), regardless of the value — so even
+    # TT_METAL_EMULE_MODE=0 runs under emule (where trace TT_THROWs). Gating on == "1"
+    # here would diverge from that and let the trace cases run-and-fail in that case.
     if not os.environ.get("TT_METAL_EMULE_MODE"):
         return
     kept = []

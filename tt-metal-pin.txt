@@ -12,4 +12,4 @@
 # NOTE: this points at the head of the tt-metal #241 Object-Intent fiber fix
 # (dd2849b5 + the runner/scheduler change); re-pin to its squash-merge SHA on
 # tt-metal main once that PR lands.
-7078e141c07b95517f7b942863d05f1f2d018b17
+be4f397041c2ff2df4f827cb607d35b209a569f0

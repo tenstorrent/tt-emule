@@ -32,9 +32,6 @@ extern thread_local const uint64_t* __emule_l1_padding_ranges;
 extern thread_local uint32_t __emule_l1_padding_ranges_count;
 extern thread_local const uint64_t* __emule_l1_host_ranges;
 extern thread_local uint32_t __emule_l1_host_ranges_count;
-extern thread_local uint64_t* __emule_l1_resolved_ranges;
-extern thread_local uint32_t* __emule_l1_resolved_ranges_count;
-extern thread_local uint32_t __emule_l1_resolved_ranges_capacity;
 extern thread_local uint32_t __emule_cb_reserved_pages[32];
 extern thread_local uint32_t __emule_cb_waited_pages[32];
 extern thread_local bool __emule_cb_boundary_strict;
@@ -134,18 +131,21 @@ inline void __emule_asan_check_oob_tensor(uint32_t l1_off) {
                 "[ASAN ERROR] Out-of-Bounds Write: Attempted to access address 0x%x which is not part of any allocated tensor\n",
                 l1_off);
     }
-    if (__emule_l1_resolved_ranges != nullptr && __emule_l1_resolved_ranges_count != nullptr) {
-        uint32_t cur = *__emule_l1_resolved_ranges_count;
+    // Record the resolved extent for the runner's Object Intent check. The log lives in
+    // this fiber's ctx (__emule_self), so it needs no thread-local handshake and survives
+    // a fiber swap. Inactive unless Object Intent is armed for this kernel.
+    if (__emule_self->san_resolved_active) {
+        uint32_t cur = __emule_self->san_resolved_count;
         bool already = false;
         for (uint32_t i = 0; i < cur; ++i) {
-            if (__emule_l1_resolved_ranges[i] == matched_packed) {
+            if (__emule_self->san_resolved_log[i] == matched_packed) {
                 already = true;
                 break;
             }
         }
-        if (!already && cur < __emule_l1_resolved_ranges_capacity) {
-            __emule_l1_resolved_ranges[cur] = matched_packed;
-            *__emule_l1_resolved_ranges_count = cur + 1;
+        if (!already && cur < __EMULE_SAN_RESOLVED_CAP) {
+            __emule_self->san_resolved_log[cur] = matched_packed;
+            __emule_self->san_resolved_count = cur + 1;
         }
     }
 }
