@@ -1,0 +1,13 @@
+backend,graph,op,side,elements,dtype,in_mem,out_mem,layout,sharded,cores,fidelity,seq,flops,iters,ms_min,ms_med,ms_mean,ms_p90,error
+emule,layout_add,add,1,1024,bf16,dram,dram,tile,0,,,,,8,3.9569,4.642,4.5913,5.2604,
+emule,layout_add,add,2,4096,bf16,dram,dram,tile,0,,,,,8,3.9233,4.4024,4.5104,5.2853,
+emule,layout_add,add,4,16384,bf16,dram,dram,tile,0,,,,,8,4.055,4.5295,4.5164,4.8973,
+emule,layout_add,add,8,65536,bf16,dram,dram,tile,0,,,,,8,4.9141,5.1569,5.1443,5.3993,
+emule,layout_add,add,16,262144,bf16,dram,dram,tile,0,,,,,8,6.9641,7.2489,7.2522,7.536,
+emule,layout_add,add,32,1048576,bf16,dram,dram,tile,0,,,,,8,17.6593,18.0701,18.0887,18.5308,
+emule,layout_add,add,1,1024,bf16,dram,dram,tile,1,8,,,,8,3.1703,3.4919,3.462,3.6136,
+emule,layout_add,add,2,4096,bf16,dram,dram,tile,1,8,,,,8,3.2665,3.6924,3.7795,4.9032,
+emule,layout_add,add,4,16384,bf16,dram,dram,tile,1,8,,,,8,3.3762,3.4932,3.509,3.6536,
+emule,layout_add,add,8,65536,bf16,dram,dram,tile,1,8,,,,8,3.4262,3.5707,3.8089,4.6885,
+emule,layout_add,add,16,262144,bf16,dram,dram,tile,1,8,,,,8,3.502,3.6431,3.7027,3.9215,
+emule,layout_add,add,32,1048576,bf16,dram,dram,tile,1,8,,,,8,4.3515,4.854,4.9632,6.0611,

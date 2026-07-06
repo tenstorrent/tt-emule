@@ -1,0 +1,13 @@
+backend,graph,op,side,elements,dtype,in_mem,out_mem,layout,sharded,cores,fidelity,seq,flops,iters,ms_min,ms_med,ms_mean,ms_p90,error
+emule,datamov,transpose,1,1024,bf16,dram,dram,tile,0,,,,,8,2.8569,2.9658,2.982,3.2054,
+emule,datamov,transpose,2,4096,bf16,dram,dram,tile,0,,,,,8,3.0182,3.2529,3.2293,3.3195,
+emule,datamov,transpose,4,16384,bf16,dram,dram,tile,0,,,,,8,3.374,3.6455,3.6581,3.8409,
+emule,datamov,transpose,8,65536,bf16,dram,dram,tile,0,,,,,8,4.4893,4.9068,4.9301,5.7824,
+emule,datamov,transpose,16,262144,bf16,dram,dram,tile,0,,,,,8,6.1546,7.0062,7.0007,7.6644,
+emule,datamov,transpose,32,1048576,bf16,dram,dram,tile,0,,,,,8,15.715,16.3554,16.3564,16.8898,
+emule,datamov,tilize,1,1024,bf16,dram,dram,tile,0,,,,,8,0.2552,0.2627,0.2653,0.2866,
+emule,datamov,tilize,2,4096,bf16,dram,dram,tile,0,,,,,8,0.318,0.3368,0.34,0.366,
+emule,datamov,tilize,4,16384,bf16,dram,dram,tile,0,,,,,8,0.5019,0.5225,0.5209,0.5428,
+emule,datamov,tilize,8,65536,bf16,dram,dram,tile,0,,,,,8,0.7474,0.8702,0.8413,0.8907,
+emule,datamov,tilize,16,262144,bf16,dram,dram,tile,0,,,,,8,1.5924,1.7836,1.7698,1.9784,
+emule,datamov,tilize,32,1048576,bf16,dram,dram,tile,0,,,,,8,3.2322,3.5835,3.9551,6.8089,

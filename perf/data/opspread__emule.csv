@@ -1,0 +1,9 @@
+backend,graph,op,side,elements,dtype,in_mem,out_mem,layout,sharded,cores,fidelity,seq,flops,iters,ms_min,ms_med,ms_mean,ms_p90,error
+emule,opspread,exp,8,65536,bf16,dram,dram,tile,0,,,,,8,4.4888,4.9568,4.9986,5.7746,
+emule,opspread,add,8,65536,bf16,dram,dram,tile,0,,,,,8,4.4919,4.8217,4.8773,5.4356,
+emule,opspread,matmul,8,65536,bf16,dram,dram,tile,0,,,,33554432,8,23.6942,25.0484,25.2583,27.9259,
+emule,opspread,softmax,8,65536,bf16,dram,dram,tile,0,,,,,8,4.6355,4.8741,4.8798,5.0693,
+emule,opspread,transpose,8,65536,bf16,dram,dram,tile,0,,,,,8,4.9885,5.1582,5.2302,5.6247,
+emule,opspread,tilize,8,65536,bf16,dram,dram,tile,0,,,,,8,0.8538,0.8743,0.8853,0.9617,
+emule,opspread,layernorm,8,65536,bf16,dram,dram,tile,0,,,,,8,1.2953,1.3663,1.3742,1.4962,
+emule,opspread,sdpa,,524288,bf16,dram,dram,tile,0,,,512,1073741824,8,43.2315,45.7263,46.5301,51.0545,

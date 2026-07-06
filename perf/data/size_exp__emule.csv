@@ -1,0 +1,7 @@
+backend,graph,op,side,elements,dtype,in_mem,out_mem,layout,sharded,cores,fidelity,seq,flops,iters,ms_min,ms_med,ms_mean,ms_p90,error
+emule,size_exp,exp,1,1024,bf16,dram,dram,tile,0,,,,,8,2.9458,3.6031,3.6909,4.602,
+emule,size_exp,exp,2,4096,bf16,dram,dram,tile,0,,,,,8,3.1004,3.3678,3.3696,3.6127,
+emule,size_exp,exp,4,16384,bf16,dram,dram,tile,0,,,,,8,3.7013,3.9082,3.92,4.0584,
+emule,size_exp,exp,8,65536,bf16,dram,dram,tile,0,,,,,8,4.4544,4.8395,4.8965,5.6782,
+emule,size_exp,exp,16,262144,bf16,dram,dram,tile,0,,,,,8,6.1539,6.7906,6.719,7.3712,
+emule,size_exp,exp,32,1048576,bf16,dram,dram,tile,0,,,,,8,14.7926,15.6053,15.627,16.6535,
