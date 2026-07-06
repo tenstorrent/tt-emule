@@ -486,6 +486,8 @@ run_pytest "sdpa_test_prefill"  "$SDPA_TEST_DIR/test_sdpa_prefill.py" \
     --deselect "tests/ttnn/unit_tests/operations/sdpa/test_sdpa_prefill.py::test_sdpa_with_attention_sink[b=1-nh=8-nkv=1-s=256-d=32-k128-q32-noncausal-bf16]"
 run_pytest "sdpa_test_chunked"  "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_chunked.py"  # 18 passed, 16 skipped
 run_pytest "sdpa_test_joint"    "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_joint.py"    # 168 passed, 32 skipped
+run_pytest "sdpa_test_decode"   "$SDPA_TEST_DIR/test_sdpa_decode.py"           # 13 passed, 1 skipped (fiber yield + multi-core softmax fix)
+run_pytest "mla_test_decode"    "$SDPA_TEST_DIR/test_mla_decode.py"            # multi-core reduction fix
 
 run_pytest "matmul_test_linear" "$MATMUL_TEST_DIR/test_linear.py" -k 'test_linear_fp32_acc or test_vector_linear'
 
