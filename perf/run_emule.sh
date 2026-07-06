@@ -2,11 +2,14 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Run perf/bench.py against tt-emule (host software emulation, slow dispatch,
+# Run a perf collector against tt-emule (host software emulation, slow dispatch,
 # wormhole N150). Mirrors the env block from scripts/run_ttnn_pytests_wormhole.sh.
-# Any args are forwarded to bench.py.
+# Runs bench.py by default; set EMULE_SCRIPT to point at another collector.
+# Any args are forwarded to that script. Backend is auto-detected from the
+# TT_METAL_EMULE_MODE this script exports (so no --backend needed).
 #
 #   TT_METAL_DIR=/path/to/tt-metal perf/run_emule.sh --graph all
+#   EMULE_SCRIPT=perf/bench_cold.py TT_METAL_DIR=... perf/run_emule.sh --op exp
 #
 set -euo pipefail
 
@@ -25,4 +28,4 @@ export TT_METAL_EMULE_MODE=1
 export TT_METAL_SLOW_DISPATCH_MODE=1
 export MESH_DEVICE=N150
 
-exec "$PYTHON_BIN" "$HERE/bench.py" --backend emule "$@"
+exec "$PYTHON_BIN" "${EMULE_SCRIPT:-$HERE/bench.py}" "$@"

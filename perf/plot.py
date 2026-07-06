@@ -51,6 +51,9 @@ PLOT = {
                             title="data movement — transpose / tilize"),
     "composite":       dict(kind="line", x="elements", xlabel="elements", series=["op"],
                             title="composite / model ops"),
+    "coldstart":       dict(kind="line", x="ops_n", xlabel="ops per session (N)", series=None,
+                            ycol="total_med_s", ylabel="total cold wall-clock (s)",
+                            logx=False, logy=False, title="cold-start lifecycle — total time to run N ops from cold"),
 }
 
 
@@ -82,7 +85,10 @@ def fnum(v):
 
 def plot_line(graph, spec, data):
     xcol = spec["x"]
+    ycol = spec.get("ycol", "ms_med")
     scols = spec["series"]
+    logx = spec.get("logx", True)
+    logy = spec.get("logy", True)
     fig, (ax, axr) = plt.subplots(2, 1, figsize=(9, 7), sharex=True,
                                   gridspec_kw=dict(height_ratios=[3, 1]))
     # collect per (backend, series) -> {x: med}
@@ -90,7 +96,7 @@ def plot_line(graph, spec, data):
     seriesset = set()
     for backend, rows in data.items():
         for r in rows:
-            x = fnum(r[xcol]); y = fnum(r["ms_med"])
+            x = fnum(r[xcol]); y = fnum(r.get(ycol))
             if x is None or y is None:
                 continue
             s = series_key(r, scols)
@@ -116,9 +122,12 @@ def plot_line(graph, spec, data):
                      color="#555", marker="d", label=(s or "ratio"))
     axr.axhline(1.0, color="k", lw=0.6, ls=":")
 
-    ax.set_xscale("log"); ax.set_yscale("log")
-    axr.set_xscale("log"); axr.set_yscale("log")
-    ax.set_ylabel("median e2e latency (ms)")
+    if logx:
+        ax.set_xscale("log"); axr.set_xscale("log")
+    if logy:
+        ax.set_yscale("log")
+    axr.set_yscale("log")
+    ax.set_ylabel(spec.get("ylabel", "median e2e latency (ms)"))
     axr.set_ylabel("emule / silicon\n(×silicon faster)")
     axr.set_xlabel(spec.get("xlabel", xcol))
     ax.set_title(spec["title"])

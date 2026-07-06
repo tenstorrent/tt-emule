@@ -38,7 +38,31 @@ arch). No CCL/multichip ops in this pass.
 | `datamov` | transpose, tilize | size | bf16 | NoC-bound vs memcpy |
 | `composite` | layernorm, softmax, sdpa | size / seq | bf16 | multi-kernel per-program floor |
 
-## Run it
+## Cold-start (the regime where emule wins)
+
+`bench_cold.py` is a separate lifecycle experiment: total wall-clock to run a
+run-once job of N ops **from cold**, swept over N to find the crossover. "Cold"
+means the fixed bring-up cost is paid fresh every point — the opposite of the
+steady-state bench above.
+
+- **emule:** fresh process + wiped JIT cache each point → pays import + first-time
+  kernel JIT-compile + execute (no warmup, no reuse). ~3.5s flat intercept.
+- **silicon:** `tt-smi -r` (full board reset) + bring-up + first compile → ~11s
+  intercept. Pass the reset via `--pre-cmd "tt-smi -r"`.
+
+Each (N, rep) is a fresh subprocess; the outer driver times the whole thing
+(and, on emule, wipes `/tmp/tt_emule_jit_cache_$(id -u)` first). Output:
+`coldstart__<backend>.csv`. The `coldstart` plot overlays both as total-seconds
+vs N (linear axes); the ratio panel crosses 1.0 at the crossover N*.
+
+```bash
+# emule (cache wiped automatically each point):
+EMULE_SCRIPT=perf/bench_cold.py TT_METAL_DIR=/path/to/tt-metal perf/run_emule.sh --op exp --reps 3
+# silicon (on the n150 box, at the same pin):
+python bench_cold.py --op exp --pre-cmd "tt-smi -r" --reps 3 --outdir perf/data
+```
+
+## Run it (steady-state)
 
 ### emule (this box)
 ```bash
