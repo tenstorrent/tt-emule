@@ -77,6 +77,44 @@ surface: real packet header + faithful mux); also documented in `docs/fabric-ccl
 
 ---
 
+## WA-2 — reduce/matmul skip zero-multiplier lanes to suppress `inf * 0 → NaN`
+
+**Code site:** `include/jit_hw/api/compute/reduce.h` (the SUM/AVG accumulation loops in
+`reduce_tile`, both REDUCE_COL and REDUCE_ROW) and `include/jit_hw/api/compute/matmul.h`
+(`matmul_tiles`, both the AVX2 blend path and the scalar path). Each skips a lane whose
+scaler / B-multiplier is exactly `0.0f`.
+
+**What it does:** when a masked/padded lane holds `inf` (or `nan`) and its scaler/multiplier is
+`0`, emule skips the term instead of computing `inf * 0`. This stops masked-reduction outputs
+(e.g. `prod_last`, log/reciprocal reductions over padded regions) from turning into `NaN`.
+
+**Why it is a workaround (bends a rule):**
+- On IEEE-754 — and the WH/BH FPU — `0 * inf = NaN`. Real silicon, given the same `inf` in a
+  masked lane, would also produce `NaN`. Skipping the lane is therefore a **behavioral divergence
+  from silicon**, not a faithful model.
+- For all finite inputs the skip is a mathematical no-op (`x * 0 == 0`), so it changes results
+  only in the `inf/nan * 0` corner — but it changes that corner for **every** `matmul_tiles`
+  call, not just reductions.
+- It is unconditional (no runtime gate/log): gating a hot matmul inner loop is not viable, and the
+  skip is inert for the common finite case.
+
+**Real root cause:** emule leaves `inf`/`nan` in padded lanes that silicon fills with a finite pad
+value (or the kernel only computes `log`/`recip` on valid lanes). The NaN is a *symptom*; the
+actual defect is upstream in the emule im2col/tilize/pad path for the NHWC reduction case. This
+change masks the symptom — the underlying numeric divergence on that path is still open (the
+`conv2d_nhwc` point still fails at PCC ~0.92, [#247]).
+
+**Proper fix (removes this workaround):** make emule pad the reduced/matmul input lanes with the
+same finite value silicon uses (so `finite * 0 = 0` naturally), then revert the reduce/matmul skip
+so the core ops reproduce silicon FP exactly. Until the padding path is fixed, the skip keeps
+masked reductions usable.
+
+**Tracking:** [#248](https://github.com/tenstorrent/tt-emule/issues/248) (masked reductions
+propagate NaNs from zero-multiplier lanes) and [#247](https://github.com/tenstorrent/tt-emule/issues/247)
+(the residual `conv2d_nhwc` numeric divergence this sits under).
+
+---
+
 # Design divergences (faithful mechanisms — NOT workarounds)
 
 These are deliberate emule mechanisms that *diverge from how silicon addresses memory* but are

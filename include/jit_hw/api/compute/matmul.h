@@ -103,6 +103,8 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
     // MATH: DST[m,n] += A[m,k] * B[k,n], accumulating into the 32-strided DST.
     // Matmul-backed reductions use zero B lanes as masks for padded positions.
     // Skip those lanes so log/reciprocal reductions do not turn inf * 0 into NaN.
+    // WORKAROUND (WA-2): silicon computes inf*0=NaN here; skipping is a divergence
+    // that masks an upstream padded-lane inf. See .claude/skills/workarounds/SKILL.md.
 #ifdef EMULE_MATMUL_USE_AVX2
     const __m256 zero_vec = _mm256_setzero_ps();
     for (uint32_t m = 0; m < M; m++) {
