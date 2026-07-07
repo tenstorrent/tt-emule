@@ -622,13 +622,20 @@ inline void fabric_multicast_noc_unicast_atomic_inc_with_state(Conn* client, Pac
     fabric_unicast_noc_unicast_atomic_inc_with_state<Mask>(client, hdr, cmd);
 }
 
-// ---- Per-header multicast unicast write / scatter write. The chip-multicast routing metadata
-// (start_distance, range) is inert under emule (the teleport reaches the single neighbor regardless of
-// routing fields), so these delegate to the unicast per-header forms which set the command + payload. ----
+// ---- Per-header multicast unicast write / scatter write. The set_state form must stamp the multicast
+// extent (start_distance, range) the same way the atomic-inc form above does: under EMULE_FABRIC8 the
+// teleport resolves the destination chip(s) from this recorded route, so a data multicast write must
+// replay to every chip in [start, start+range) in the worker's direction. Without this stamp the header
+// carries no route (kind UNSET) and the teleport falls back to the single physical neighbor — which on a
+// >2-chip mesh is the wrong chip, so all relayed shards are dropped (tt-emule #221). The 1D form is
+// stamped here; the 2D extent (e/w/n/s) is set by the route setters. ----
 template <UnicastWriteUpdateMask Mask = UnicastWriteUpdateMask::None, typename Cmd = std::nullptr_t>
 inline void fabric_multicast_noc_unicast_write_set_state(
-    PacketHeader* hdr, uint8_t start_hops, uint8_t /*range*/, Cmd cmd = nullptr, uint16_t payload_size = 0) {
+    PacketHeader* hdr, uint8_t start_hops, uint8_t range, Cmd cmd = nullptr, uint16_t payload_size = 0) {
     fabric_unicast_noc_unicast_write_set_state<Mask>(hdr, start_hops, cmd, payload_size);
+#ifndef EMULE_FABRIC_2D
+    __emule_fabric_set_route(emule_route::key(hdr), emule_route::MCAST_1D, start_hops, range, 0, 0, 0, 0);
+#endif
 }
 template <UnicastWriteUpdateMask Mask = UnicastWriteUpdateMask::None, typename Conn, typename Cmd = std::nullptr_t>
 inline void fabric_multicast_noc_unicast_write_with_state(
@@ -637,8 +644,11 @@ inline void fabric_multicast_noc_unicast_write_with_state(
 }
 template <UnicastScatterWriteUpdateMask Mask = UnicastScatterWriteUpdateMask::None, typename Cmd = std::nullptr_t>
 inline void fabric_multicast_noc_scatter_write_set_state(
-    PacketHeader* hdr, uint8_t start_hops, uint8_t /*range*/, Cmd cmd = nullptr, uint16_t payload_size = 0) {
+    PacketHeader* hdr, uint8_t start_hops, uint8_t range, Cmd cmd = nullptr, uint16_t payload_size = 0) {
     fabric_unicast_noc_scatter_write_set_state<Mask>(hdr, start_hops, cmd, payload_size);
+#ifndef EMULE_FABRIC_2D
+    __emule_fabric_set_route(emule_route::key(hdr), emule_route::MCAST_1D, start_hops, range, 0, 0, 0, 0);
+#endif
 }
 template <UnicastScatterWriteUpdateMask Mask = UnicastScatterWriteUpdateMask::None, typename Conn, typename Cmd = std::nullptr_t>
 inline void fabric_multicast_noc_scatter_write_with_state(

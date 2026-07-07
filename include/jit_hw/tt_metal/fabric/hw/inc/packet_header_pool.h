@@ -31,15 +31,13 @@ class PacketHeaderPool {
     static constexpr uint32_t POOL_SLOTS = MEM_PACKET_HEADER_POOL_SIZE / HEADER_STRIDE;
     static constexpr uint32_t SLOTS_PER_RISC = 16;                      // headers per RISC partition
     static constexpr uint32_t MAX_RISCS = POOL_SLOTS / SLOTS_PER_RISC;  // 48/16=3: BRISC/NCRISC/TRISC
-    static constexpr uint8_t MAX_ROUTES = 16;
+    static constexpr uint8_t MAX_ROUTES = ThreadCommonCtx::PHDR_MAX_ROUTES;
 
-    // Per-(core,risc)-thread allocation state. thread_local because launch_cores runs each (core,risc)
-    // kernel on its own thread; separate threads → separate cursors → no cross-thread aliasing.
-    static inline thread_local uint32_t s_cursor = 0;     // next free header index within this risc partition
-    static inline thread_local uint8_t s_route_count = 0;
-    static inline thread_local uint32_t s_route_first[MAX_ROUTES] = {};  // route → first header index (in partition)
-    static inline thread_local uint8_t s_route_num[MAX_ROUTES] = {};     // route → header count
-
+    // Allocation state (cursor + route table) is homed in the running fiber's ThreadCommonCtx, NOT a
+    // thread_local: a persistent emule worker hosts many fibers across many program launches, and silicon
+    // gets a fresh pool per launch (kernel .bss re-zero). The ctx is a fresh, value-initialized object per
+    // launch (see launch_cores), so keying off it resets the pool per program — without this the cursor +
+    // route_id table leak across ops and overflow, corrupting fabric multicast routes (tt-emule #221).
     static uint32_t risc_partition_base() {
         return (static_cast<uint32_t>(__emule_self->processor_id) % MAX_RISCS) * SLOTS_PER_RISC;
     }
@@ -50,20 +48,20 @@ class PacketHeaderPool {
     }
 
 public:
-    // Reset this thread's allocation cursor + route table (mirrors silicon reset() for loop reuse).
+    // Reset this fiber's allocation cursor + route table (mirrors silicon reset() for loop reuse).
     static void reset() {
-        s_cursor = 0;
-        s_route_count = 0;
+        __emule_self->phdr_cursor = 0;
+        __emule_self->phdr_route_count = 0;
     }
 
     // Allocate `num` contiguous headers; register them as a new route; return the FIRST header pointer.
     static PACKET_HEADER_TYPE* allocate_header(uint32_t num = 1) {
-        const uint32_t first = s_cursor;
-        s_cursor += num;
-        if (s_route_count < MAX_ROUTES) {
-            s_route_first[s_route_count] = first;
-            s_route_num[s_route_count] = static_cast<uint8_t>(num);
-            s_route_count++;
+        const uint32_t first = __emule_self->phdr_cursor;
+        __emule_self->phdr_cursor += num;
+        if (__emule_self->phdr_route_count < MAX_ROUTES) {
+            __emule_self->phdr_route_first[__emule_self->phdr_route_count] = first;
+            __emule_self->phdr_route_num[__emule_self->phdr_route_count] = static_cast<uint8_t>(num);
+            __emule_self->phdr_route_count++;
         }
         return header_at(first);
     }
@@ -71,19 +69,19 @@ public:
     // Allocate `num` contiguous headers and return the route_id (mirrors silicon: route over `num` conns).
     static uint8_t allocate_header_n(uint32_t num) {
         allocate_header(num);
-        return static_cast<uint8_t>(s_route_count - 1);
+        return static_cast<uint8_t>(__emule_self->phdr_route_count - 1);
     }
 
     template <typename Func>
     static void for_each_header(uint8_t route_id, Func&& func) {
-        const uint32_t first = s_route_first[route_id];
-        const uint8_t num = s_route_num[route_id];
+        const uint32_t first = __emule_self->phdr_route_first[route_id];
+        const uint8_t num = __emule_self->phdr_route_num[route_id];
         for (uint8_t i = 0; i < num; i++) {
             func(header_at(first + i), i);
         }
     }
 
-    static uint8_t get_num_headers(uint8_t route_id) { return s_route_num[route_id]; }
+    static uint8_t get_num_headers(uint8_t route_id) { return __emule_self->phdr_route_num[route_id]; }
 };
 
 // Route-variant fabric send API (silicon: linear/api.h connection_manager+route_id overloads). They

@@ -163,12 +163,12 @@ Kernels are intercepted at the worker→fabric-client boundary, not the router. 
   L1. This is required: the kernel passes `(uint32_t)header` to the sender and the teleport re-extends that
   `uint32` to a host pointer, and only L1-backed pointers survive the truncation. Partitioned per RISC by
   `__emule_self->processor_id`.
-  - ⚠️ **Per-fiber caveat:** the header data and the RISC partition are per-fiber, but the allocation cursor
-    and route table (`s_cursor` / `s_route_*`) are per-worker-thread `thread_local`. Under the fiber engine a
-    worker hosts many fibers, so this is correct only while a fabric send sequence does not **yield** between
-    `reset()`/`allocate_header` and the last `for_each_header` use. Verified benign in practice (the n300 CCL
-    suite passes unchanged at the max fibers-per-worker setting); a robustness follow-up is to move the
-    cursor/route state into the per-fiber `ThreadCommonCtx`.
+  - **Per-fiber allocation state:** the allocation cursor and route table (`phdr_cursor` / `phdr_route_*`)
+    live in the running fiber's `ThreadCommonCtx`, which the runner allocates fresh per program launch. That
+    makes the pool reset per launch — mirroring silicon, where each program gets a fresh pool (zeroed kernel
+    `.bss`). A `thread_local` here would instead leak the cursor + route-id table across ops on a persistent
+    worker: the cursor overflows the per-RISC partition and the route-id table wraps, silently corrupting the
+    fabric multicast routes (the failure mode behind [#221](https://github.com/tenstorrent/tt-emule/issues/221)).
 
 ## How CCLs run as a result
 
@@ -204,10 +204,11 @@ scheduled **`blackhole-e2e-tests`** workflow (`bh_loudbox` sku, every 8 h) — l
 (latest: apc 116 passed / 0 failed; nightly success). Every emule failure below is an emule gap, not a
 silicon/CI failure; the emule harness (`scripts/run_ttnn_pytests_bh_loudbox.sh`) runs the same two legs.
 
-- **Green:** `all_gather` 2D (`*_2d_fabric`, `*_turning`, PCC 1.0) and 1D `all_gather` for **20/26** `apc`
-  configs — **Linear** and **Ring**, both impls, multi-worker / multi-link; and `reduce_scatter` **16/16**
-  (Linear + Ring, PCC ~1.0). On `box/nightly`, `all_gather` is **52/54** and the 2D + `minimal_*` suites are
-  green. n300/p300 2-chip CCL stays green (the subsumed degenerate path).
+- **Green:** `all_gather` 2D (`*_2d_fabric`, `*_turning`, PCC 1.0) and 1D `all_gather` for **26/26** `apc`
+  configs — **Linear** and **Ring**, both impls, multi-worker / multi-link, including the sub-tile-width /
+  row-major / `WIDTH_SHARDED` gemma shapes (`test_all_gather_failing_shapes`, `test_all_gather_broken`); and
+  `reduce_scatter` **16/16** (Linear + Ring, PCC ~1.0). On `box/nightly`, `all_gather` is **54/54** and the
+  2D + `minimal_*` suites are green. n300/p300 2-chip CCL stays green (the subsumed degenerate path).
 - **Direction resolution** — a 1D send's direction comes from the mux-core → direction lookup (`g_mux_dir`;
   the sender carries the mux's NOC coords, the teleport translates them back), with range-matching as a
   fallback. Routes and atomic-incs resolve to the correct chips (e.g. `src=1 →N→ 5`, `src=5 →S→ 1`;
@@ -218,9 +219,17 @@ silicon/CI failure; the emule harness (`scripts/run_ttnn_pytests_bh_loudbox.sh`)
   members in ring order. `reduce_scatter`'s stateful scatter-write honors the `UpdateMask` (patches only the
   named fields, preserving the `set_state` payload size), mirroring `api_common.h
   populate_unicast_scatter_write_fields`.
-- **Remaining `all_gather` fails (6/26)** — `test_all_gather_failing_shapes` (both impls): PCC data
-  corruption on row-major / sub-tile-width / sharded output shapes (an output page-addressing gap, not a
-  direction issue). Tracked in [#221](https://github.com/tenstorrent/tt-emule/issues/221).
+- **Broadcast-based `all_gather`** — the "semaphore-free" `all_gather` (`ttnn.all_gather`) and the
+  experimental path both lower, for these shapes, to the **broadcast** program factory whose writer
+  (`broadcast_tile_writer.cpp`) issues fabric **multicast** writes (`fabric_multicast_noc_{unicast,scatter}_write_*`)
+  over a routing-plane connection. Two properties make it faithful under emule: (1) the multicast
+  write / scatter `set_state` shims stamp the `MCAST_1D` route (`start`,`range`) exactly as the atomic-inc
+  form does, so the teleport replays each data page to every chip in the line (without the stamp the header
+  carried no route and fell back to the single physical neighbor — the wrong chip on a >2-chip mesh); and
+  (2) the `PacketHeaderPool` cursor + route table are homed in the per-fiber `ThreadCommonCtx` (a fresh
+  object per program launch), so the pool resets per launch like silicon's `.bss` rather than leaking the
+  cursor/route-id across ops on a persistent worker. Together these bring the sub-tile-width / row-major /
+  `WIDTH_SHARDED` gemma shapes to PCC 1.0.
 - **all_to_all_dispatch** — deadlocks **before any fabric send** (zero teleports; the writer parks on a CB
   and the reader on a never-incremented receive semaphore). A cross-device dispatch / CB↔sem ordering issue
   upstream of the fabric layer, not a direction problem. Tracked in
