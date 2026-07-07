@@ -21,7 +21,7 @@ set -euo pipefail
 
 : "${TT_METAL_DIR:?TT_METAL_DIR must be set}"
 : "${BUILD_DIR:?BUILD_DIR must be set}"
-: "${TT_EMULE_ARCH:?TT_EMULE_ARCH must be set (wormhole|blackhole)}"
+: "${TT_EMULE_ARCH:?TT_EMULE_ARCH must be set (wormhole|blackhole|n300|bh_loudbox)}"
 case "$TT_EMULE_ARCH" in
     wormhole|blackhole|n300|bh_loudbox) ;;
     *) echo "ERROR: TT_EMULE_ARCH must be wormhole|blackhole|n300|bh_loudbox, got '$TT_EMULE_ARCH'" >&2; exit 1 ;;
