@@ -109,10 +109,18 @@ Four pieces cooperate (all in `emulated_program_runner.cpp`, fed by the shim + a
 - **Per-send route metadata** — the kernel's route setters (`fabric_set_unicast_route` /
   `fabric_set_mcast_route`, shimmed) record each send's intent via `__emule_fabric_set_route`, keyed by the
   packet-header's L1 address (stable and identical between the shim's write and the teleport's read). Kinds:
-  `UNICAST_2D` (explicit `dst_dev`/`dst_mesh`), `UNICAST_1D` (hop distance), `MCAST_1D` (start + range). A
-  build-time `EMULE_FABRIC_2D` define (emitted from the fabric config) disambiguates 1D vs 2D, because emule
-  aliases the 1D and 2D packet-header C++ types into one layout and the kernel's `if constexpr` type dispatch
-  therefore cannot tell them apart.
+  `UNICAST_2D` (explicit `dst_dev`/`dst_mesh`), `UNICAST_1D` (hop distance), `MCAST_1D` (start + range).
+  emule gives the 1D (`LowLatencyPacketHeader`) and 2D (`HybridMesh`/`UDMHybridMesh`) packet-header C++ types
+  **distinct** definitions — the 2D variants are empty-derived from the base with the identical 48B layout —
+  and selects `PACKET_HEADER_TYPE` from the build-time `EMULE_FABRIC_2D` define. So the kernel's `if constexpr`
+  type dispatch (`worker_routing_utils`' `fabric_set_line_unicast_route`, moe_utils' portable send helpers)
+  picks the branch that matches the fabric config, exactly as silicon does: under a 1D fabric the hop-distance
+  branch — `fabric_set_unicast_route<false>(hdr, distance)` → `UNICAST_1D`; under 2D the explicit-destination
+  branch — `fabric_set_unicast_route(hdr, dst_chip, dst_mesh)` → `UNICAST_2D` (the teleport resolves the exact
+  physical chip). The 1D-distance shim is reached through the variadic overload — a dedicated 2-arg overload
+  loses partial ordering to the library's perfect-forwarding pack — so the variadic recognises the
+  `(packet_header, distance)` shape and stamps `UNICAST_1D`.
+  (`fabric_set_mcast_route` keys its 1D-vs-2D mapping off `EMULE_FABRIC_2D` directly.)
 - **Per-connection direction** — for 1D the dst chip is bound to the *connection* (which ethernet channel it
   opened on), information that lives in the firmware connection table emule skips. emule reconstructs it
   host-side: `append_fabric_connection_rt_args` (which runs unguarded in emule) records each connection's
@@ -126,17 +134,18 @@ Four pieces cooperate (all in `emulated_program_runner.cpp`, fed by the shim + a
      sender carries the mux's NOC coords (`build_connection_to_fabric_endpoint`); the teleport translates
      them back to the mux's logical core and looks up the direction the mux→EDM append recorded in
      `g_mux_dir`. This resolves rings (all_gather / reduce_scatter), where the fallback below cannot.
-  2. **Fallback** — the fwd/bwd index from `FabricConnectionManager::get_{forward,backward}_connection` on the
-     direct path, else **range-matching**: a line multicast's range equals the walk length of the worker's
-     direction, cached per `(src_chip, worker_core)` in `g_worker_dir`. Used only when the mux signal is
-     absent (so previously-green configs are byte-for-byte unchanged).
-
-  The **direct 4-directional path** (`open_direction_connections_async` — `all_to_all_dispatch` et al.) has
-  no mux signal and currently lands in the range-match fallback. A faithful emule-side resolution — capturing
-  the real `eth_channel` runtime arg in the `WorkerToFabricEdmSender::build_from_args` shim and mapping it to
-  a direction — is deferred until a consumer is unblocked (all of them are currently gated; its first consumer
-  `all_to_all_dispatch` is [#222](https://github.com/tenstorrent/tt-emule/issues/222)). It is **not** done by
-  tagging the kernel.
+  2. **Connection open-sequence index** — the *direct 4-directional path* (`open_direction_connections_async`
+     — `all_to_all_dispatch` et al.) has no mux core. It opens its connections once, in the same order the
+     host recorded them into `g_conn_route` (both walk the active directions in compass order). So emule's
+     `WorkerToFabricEdmSender::build_from_args` tags each sender with the fiber's next *open-sequence index*
+     (`ThreadCommonCtx::fabric_open_conn_seq`, a per-fiber counter incremented on each build, fresh per
+     launch); a send stamps that index as the route's `dir_index`, and the teleport reads
+     `g_conn_route[src][dir_index]` for the connection's direction + neighbor. Recovered entirely emule-side;
+     the kernel is not tagged.
+  3. **Fallback** — the fwd/bwd index from `FabricConnectionManager::get_{forward,backward}_connection`, else
+     **range-matching**: a line multicast's range equals the walk length of the worker's direction, cached per
+     `(src_chip, worker_core)` in `g_worker_dir`. Used only when the signals above are absent (so
+     previously-green configs are byte-for-byte unchanged).
 - **Resolve** — `UNICAST_2D` → `get_physical_chip_id_from_fabric_node_id(FabricNodeId{mesh, dev})`;
   `MCAST_2D` → the compass walk per non-zero `{E,W,N,S}` hop count; `UNICAST_1D` / `MCAST_1D` → the 1D ring
   walk in the worker's direction (compass fallback if the connection chain is incomplete), taking `distance`
@@ -230,10 +239,15 @@ silicon/CI failure; the emule harness (`scripts/run_ttnn_pytests_bh_loudbox.sh`)
   object per program launch), so the pool resets per launch like silicon's `.bss` rather than leaking the
   cursor/route-id across ops on a persistent worker. Together these bring the sub-tile-width / row-major /
   `WIDTH_SHARDED` gemma shapes to PCC 1.0.
-- **all_to_all_dispatch** — deadlocks **before any fabric send** (zero teleports; the writer parks on a CB
-  and the reader on a never-incremented receive semaphore). A cross-device dispatch / CB↔sem ordering issue
-  upstream of the fabric layer, not a direction problem. Tracked in
-  [#222](https://github.com/tenstorrent/tt-emule/issues/222).
+- **all_to_all_dispatch** — the first consumer of the **direct 4-directional** fabric path
+  (`open_direction_connections_async`). Three shims make it faithful under emule: (1) the *stateless*
+  `linear::experimental::fabric_unicast/multicast_noc_unicast_atomic_inc` free functions — the portable path
+  its cross-device init-semaphore barrier lowers through — configure the command and teleport like
+  `linear/api.h`; (2) the distinct 1D/2D header types (above) let its `fabric_set_line_unicast_route` take the
+  1D hop-distance branch under a 1D fabric, with the variadic route shim stamping `UNICAST_1D`; (3) the
+  per-connection direction comes from the connection open-sequence index (above). The init barrier, per-token
+  data relays, and metadata write+semaphore all land on the correct chips. `_trace` variants are
+  auto-deselected under emule (trace capture needs fast dispatch).
 - **Out of emule scope (need fast dispatch):** `all_reduce`, `all_broadcast`, `all_to_all`, the MoE
   dispatch/combine ops, fused matmul-CCL, and `all_gather`'s `subcore_grid` partition CCL/compute cores via a
   **sub-device manager**, which `TT_FATAL`s under slow dispatch (`sub_device_manager_tracker.cpp:98`) — the

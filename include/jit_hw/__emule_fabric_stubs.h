@@ -30,6 +30,7 @@
 #include <utility>
 
 #include "jit_hw/tt-metalium/experimental/fabric/fabric_edm_types.hpp"  // tt::tt_fabric::Topology (single def)
+#include "jit_hw/internal/emule_thread_ctx.h"  // ThreadCommonCtx + __emule_self (per-fiber conn open-seq counter)
 
 // Runtime teleport hooks (resolved at JIT link time to the runner symbols).
 extern "C" void __emule_fabric_teleport(const void* packet_header, const void* payload, uint32_t payload_size);
@@ -275,12 +276,15 @@ struct PacketHeader {
 };
 static_assert(sizeof(PacketHeader) == 48, "emule PacketHeader must match silicon LowLatencyPacketHeader size");
 
-// emule uses ONE 48B packet-header layout for all variants. Alias (not derive) them so functions that
-// return different header types from an `auto`-returning function deduce a single consistent type, and
-// casts between variants are no-ops. (1D scope; a 2D-specific larger layout can be revisited later.)
+// One 48B packet-header layout. The 2D (HybridMesh/UDMHybridMesh) variants are distinct empty-derived types,
+// not aliases, so a kernel's `if constexpr (is_same_v<PACKET_HEADER_TYPE, …>)` route dispatch resolves to the
+// branch matching the fabric config, as silicon does. Empty non-virtual inheritance keeps the layout and
+// makes base⇄derived pointer casts no-ops. See docs/fabric-ccl-emulation.md.
 using LowLatencyPacketHeader = PacketHeader;
-using HybridMeshPacketHeader = PacketHeader;
-using UDMHybridMeshPacketHeader = PacketHeader;
+struct HybridMeshPacketHeader : PacketHeader {};
+struct UDMHybridMeshPacketHeader : PacketHeader {};
+static_assert(sizeof(HybridMeshPacketHeader) == 48 && sizeof(UDMHybridMeshPacketHeader) == 48,
+              "emule 2D packet-header variants must keep the 48B silicon layout");
 
 // --- Worker -> fabric sender. Staged payload + teleport on header flush. ---
 struct WorkerToFabricEdmSender {
@@ -291,11 +295,17 @@ struct WorkerToFabricEdmSender {
     // (build_connection_to_fabric_endpoint) so the teleport can recover the mux's host-recorded direction.
     uint16_t emule_mux_x = 0xFFFF, emule_mux_y = 0xFFFF;
 
-    // Accept both build_from_args<ProgrammableCoreType::TENSIX>(idx) (non-type template arg, used by
-    // moe_utils) and build_from_args(args...) forms.
+    // Accepts both build_from_args<ProgrammableCoreType::TENSIX>(idx) and build_from_args(args...) forms.
+    // Tags the sender with the fiber's connection open-sequence index, which the teleport uses as the
+    // direct-path 1D dst direction (the mux path / FabricConnectionManager overwrite emule_conn_index with
+    // their own signal). See docs/fabric-ccl-emulation.md.
     template <auto CoreType = 0, typename... A>
     static WorkerToFabricEdmSender build_from_args(A&&...) {
-        return WorkerToFabricEdmSender{};
+        WorkerToFabricEdmSender s{};
+        if (__emule_self != nullptr) {
+            s.emule_conn_index = static_cast<uint8_t>(__emule_self->fabric_open_conn_seq++);
+        }
+        return s;
     }
 
     // Connection lifecycle — bookkeeping no-ops (no real EDM connection to open/close).
@@ -397,10 +407,12 @@ inline uint32_t key(volatile PacketHeader* hdr) {
 }
 }  // namespace emule_route
 
-// 2D unicast: explicit dst (worker_routing_utils 2D branch passes dst_chip_id, dst_mesh_id). emule aliases
-// the 1D/2D header types, so worker_routing_utils ALWAYS takes its 2D branch; we disambiguate on the
-// EMULE_FABRIC_2D build define (set by the runner from the fabric config) — under 1D the first arg is
-// actually distance_in_hops (the route_info union), so record it as a 1D distance instead.
+// Explicit-destination 2D unicast: worker_routing_utils' 2D branch and the 2D-header data/metadata helpers
+// in moe_utils.hpp pass (dst_chip_id, dst_mesh_id). Selected only when the caller genuinely dispatches on a
+// 2D header type — under a 1D fabric config the header types are distinct (below), so `fabric_set_line_unicast_route`
+// takes its 1D branch (the 1-arg hop-distance form) and this overload is not reached; the `EMULE_FABRIC_2D`
+// build define matches that so a 1D-config's stray 2-arg call still records a 1D distance rather than
+// mis-reading a hop count as a chip id.
 inline bool fabric_set_unicast_route(volatile PacketHeader* hdr, uint16_t a, uint16_t b) {
 #ifdef EMULE_FABRIC_2D
     __emule_fabric_set_route(emule_route::key(hdr), emule_route::UNICAST_2D, a, b, 0, 0, 0, 0);
@@ -409,15 +421,23 @@ inline bool fabric_set_unicast_route(volatile PacketHeader* hdr, uint16_t a, uin
 #endif
     return true;
 }
-// 1D unicast (direct path / explicit <false>): target_num = distance_in_hops.
-template <bool RangeHopsEnabled = false>
-inline bool fabric_set_unicast_route(volatile PacketHeader* hdr, uint16_t target_num) {
-    __emule_fabric_set_route(emule_route::key(hdr), emule_route::UNICAST_1D, target_num, 0, 0, 0, 0, 0);
-    return true;
+// Non-overload helper: stamp the 1D unicast route (distance_in_hops) for a (packet_header, distance) pair.
+// Named distinctly so it never competes with the fabric_set_unicast_route overload set.
+template <typename HdrT, typename DistT>
+inline void __emule_set_unicast_route_1d(HdrT&& hdr, DistT&& target_num) {
+    __emule_fabric_set_route(
+        emule_route::key(reinterpret_cast<volatile PacketHeader*>(hdr)),
+        emule_route::UNICAST_1D, static_cast<uint32_t>(target_num), 0, 0, 0, 0, 0);
 }
-// Other arities (e.g. the (connection_mgr, hdr, slot) route-variant form) — routing resolved elsewhere.
+// 1D unicast: `fabric_set_unicast_route<false>(hdr, distance)` stamps UNICAST_1D. A dedicated 2-arg overload
+// loses partial ordering to this perfect-forwarding variadic, so the variadic handles the 2-arg
+// (packet_header, distance) shape — the only 2-arg call to this name. The 3-arg (dst_chip, dst_mesh) form
+// matches the non-template overload above. See docs/fabric-ccl-emulation.md.
 template <bool RangeHopsEnabled = false, typename... A>
-inline bool fabric_set_unicast_route(A&&...) {
+inline bool fabric_set_unicast_route(A&&... args) {
+    if constexpr (sizeof...(A) == 2) {
+        __emule_set_unicast_route_1d(std::forward<A>(args)...);
+    }
     return true;
 }
 
@@ -656,7 +676,36 @@ inline void fabric_multicast_noc_scatter_write_with_state(
     fabric_unicast_noc_scatter_write_with_state<Mask>(client, hdr, src_addr, cmd, payload_size);
 }
 
-// Stateless forms — kept as no-ops for callers that don't use the set/with-state path here.
+// Stateless (single-shot) atomic-inc sends — CCL kernels call these directly (not the set/with-state pair):
+// configure the packet header + teleport, faithful to linear/api.h. The route is already recorded by the
+// caller's route setter (emule's to_chip_unicast is inert), so these don't re-stamp it.
+// See docs/fabric-ccl-emulation.md.
+template <typename Conn, typename Cmd>
+inline void fabric_unicast_noc_unicast_atomic_inc(
+    Conn* client, volatile PacketHeader* hdr, Cmd cmd, uint8_t /*num_hops*/) {
+    hdr->to_noc_unicast_atomic_inc(cmd);
+    hdr->payload_size_bytes = 0;
+    client->wait_for_empty_write_slot();
+    client->send_payload_flush_non_blocking_from_address(
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(const_cast<PacketHeader*>(hdr))), sizeof(PacketHeader));
+}
+// Multicast atomic-inc: stamp the MCAST_1D extent (start_distance, range) — as the *_set_state form does —
+// so the teleport replays the atomic-inc to every chip in [start, start+range), then teleport.
+template <typename Conn, typename Cmd>
+inline void fabric_multicast_noc_unicast_atomic_inc(
+    Conn* client, volatile PacketHeader* hdr, Cmd cmd, uint8_t start_distance, uint8_t range) {
+    hdr->to_noc_unicast_atomic_inc(cmd);
+    hdr->payload_size_bytes = 0;
+#ifndef EMULE_FABRIC_2D
+    __emule_fabric_set_route(emule_route::key(hdr), emule_route::MCAST_1D, start_distance, range, 0, 0, 0, 0);
+#endif
+    client->wait_for_empty_write_slot();
+    client->send_payload_flush_non_blocking_from_address(
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(const_cast<PacketHeader*>(hdr))), sizeof(PacketHeader));
+}
+// Route-manager (RoutingPlaneConnectionManager&, route_id, ...) overloads and the stateless write forms
+// are not reached by any emule-supported op today; the variadic no-ops below absorb them. The concrete
+// client-pointer atomic-inc overloads above are preferred by partial ordering when a caller matches.
 template <typename... A> inline void fabric_unicast_noc_unicast_atomic_inc(A&&...) {}
 template <typename... A> inline void fabric_multicast_noc_unicast_atomic_inc(A&&...) {}
 template <typename... A> inline void fabric_unicast_noc_unicast_write(A&&...) {}
@@ -668,8 +717,16 @@ namespace mesh::experimental {}
 }  // namespace tt::tt_fabric
 
 // --- PACKET_HEADER_TYPE + global FabricConnectionManager ---
-// Silicon exposes PACKET_HEADER_TYPE at global scope; keep that.
-using PACKET_HEADER_TYPE = tt::tt_fabric::PacketHeader;
+// Silicon exposes PACKET_HEADER_TYPE at global scope; keep that. It is the header type the fabric config
+// selects — the low-latency (1D) header under a 1D fabric, the hybrid-mesh (2D) header under a 2D fabric —
+// so a kernel's `is_same_v<PACKET_HEADER_TYPE, …>` route dispatch resolves to the matching branch (the 2D
+// variants are distinct types above). Gated on the same EMULE_FABRIC_2D define the runner emits from the
+// fabric config. See tt-emule #222.
+#ifdef EMULE_FABRIC_2D
+using PACKET_HEADER_TYPE = tt::tt_fabric::HybridMeshPacketHeader;
+#else
+using PACKET_HEADER_TYPE = tt::tt_fabric::LowLatencyPacketHeader;
+#endif
 
 // Silicon's noc_addr.h declares get_noc_address_components at GLOBAL scope (returning
 // tt::tt_fabric::WorkerXY); CCL kernels call it unqualified. Decompose an emule NOC address
