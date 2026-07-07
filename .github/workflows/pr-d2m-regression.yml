@@ -14,7 +14,14 @@ on:
       - 'LICENSE*'
       - 'NOTICE'
       - '.github/CODEOWNERS'
-  merge_group:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE*'
+      - 'NOTICE'
+      - '.github/CODEOWNERS'
 
 concurrency:
   group: pr-d2m-${{ github.workflow }}-${{ github.ref }}
