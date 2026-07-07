@@ -449,17 +449,12 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
-  # Multi-chip CCL — Blackhole loudbox (8x P150, 2x4 mesh). NON-BLOCKING for now:
-  # the loudbox suite still has known failures (all_gather failing_shapes +
-  # all_to_all_dispatch, tracked as emule #221/#222), so `continue-on-error`
-  # lets it run for visibility (logs + junit artifacts) without gating the push.
-  # It is intentionally NOT in `all-passed`'s needs. Promote to blocking (drop
-  # continue-on-error, add to all-passed) once #221/#222 are resolved.
+  # Multi-chip CCL — Blackhole loudbox (8x P150, 2x4 mesh). BLOCKING on-push gate
+  # (same `!= pull_request` policy as the other suites), wired into `all-passed`.
   ttnn-pytest-bh-loudbox:
     name: TTNN Pytests (bh loudbox, 8xP150 mesh)
     needs: [changes, build]
     if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'pull_request' }}
-    continue-on-error: true
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 150
     container:
@@ -598,9 +593,7 @@ jobs:
     name: All checks passed
     # Run even when a dependency failed/was skipped, so the gate always reports.
     if: ${{ always() }}
-    # ttnn-pytest-bh-loudbox is intentionally absent: it is non-blocking
-    # (continue-on-error) until emule #221/#222 are fixed, so it must not gate.
-    needs: [changes, build, test, ttnn-pytest-wormhole, ttnn-pytest-blackhole, ttnn-pytest-n300, ttnn-smoke-pr]
+    needs: [changes, build, test, ttnn-pytest-wormhole, ttnn-pytest-blackhole, ttnn-pytest-n300, ttnn-pytest-bh-loudbox, ttnn-smoke-pr]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any required job did not succeed
@@ -624,6 +617,7 @@ jobs:
           echo "  ttnn-pytest-wormhole: ${{ needs.ttnn-pytest-wormhole.result }}"
           echo "  ttnn-pytest-blackhole: ${{ needs.ttnn-pytest-blackhole.result }}"
           echo "  ttnn-pytest-n300: ${{ needs.ttnn-pytest-n300.result }}"
+          echo "  ttnn-pytest-bh-loudbox: ${{ needs.ttnn-pytest-bh-loudbox.result }}"
           echo "  ttnn-smoke-pr: ${{ needs.ttnn-smoke-pr.result }}"
           exit 1
       - name: All required jobs passed
