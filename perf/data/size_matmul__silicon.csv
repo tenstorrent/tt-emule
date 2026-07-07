@@ -1,0 +1,7 @@
+backend,graph,op,side,elements,dtype,in_mem,out_mem,layout,sharded,cores,fidelity,seq,flops,iters,ms_min,ms_med,ms_mean,ms_p90,error
+silicon,size_matmul,matmul,1,1024,bf16,dram,dram,tile,0,,HiFi4,,65536,8,0.0895,0.0944,0.0947,0.1021,
+silicon,size_matmul,matmul,2,4096,bf16,dram,dram,tile,0,,HiFi4,,524288,8,0.088,0.0942,0.0971,0.1211,
+silicon,size_matmul,matmul,4,16384,bf16,dram,dram,tile,0,,HiFi4,,4194304,8,0.0876,0.0885,0.0906,0.1003,
+silicon,size_matmul,matmul,8,65536,bf16,dram,dram,tile,0,,HiFi4,,33554432,8,0.0875,0.0998,0.1005,0.1254,
+silicon,size_matmul,matmul,16,262144,bf16,dram,dram,tile,0,,HiFi4,,268435456,8,0.0974,0.1199,0.1174,0.1349,
+silicon,size_matmul,matmul,32,1048576,bf16,dram,dram,tile,0,,HiFi4,,2147483648,8,0.1561,0.1909,0.1833,0.2048,

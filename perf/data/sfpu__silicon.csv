@@ -1,0 +1,6 @@
+backend,graph,op,side,elements,dtype,in_mem,out_mem,layout,sharded,cores,fidelity,seq,flops,iters,ms_min,ms_med,ms_mean,ms_p90,error
+silicon,sfpu,relu,8,65536,bf16,dram,dram,tile,0,,,,,8,0.1088,0.1168,0.1213,0.1386,
+silicon,sfpu,gelu,8,65536,bf16,dram,dram,tile,0,,,,,8,0.1112,0.1632,0.1531,0.1973,
+silicon,sfpu,exp,8,65536,bf16,dram,dram,tile,0,,,,,8,0.1103,0.1128,0.1127,0.1164,
+silicon,sfpu,erf,8,65536,bf16,dram,dram,tile,0,,,,,8,0.1108,0.1164,0.1157,0.1203,
+silicon,sfpu,sqrt,8,65536,bf16,dram,dram,tile,0,,,,,8,0.1126,0.1599,0.1607,0.2148,

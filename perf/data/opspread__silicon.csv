@@ -1,0 +1,9 @@
+backend,graph,op,side,elements,dtype,in_mem,out_mem,layout,sharded,cores,fidelity,seq,flops,iters,ms_min,ms_med,ms_mean,ms_p90,error
+silicon,opspread,exp,8,65536,bf16,dram,dram,tile,0,,,,,8,0.1097,0.1386,0.1316,0.1457,
+silicon,opspread,add,8,65536,bf16,dram,dram,tile,0,,,,,8,0.1311,0.1602,0.1591,0.2048,
+silicon,opspread,matmul,8,65536,bf16,dram,dram,tile,0,,,,33554432,8,0.0913,0.1013,0.1019,0.114,
+silicon,opspread,softmax,8,65536,bf16,dram,dram,tile,0,,,,,8,0.1216,0.1464,0.1415,0.1675,
+silicon,opspread,transpose,8,65536,bf16,dram,dram,tile,0,,,,,8,0.0913,0.1187,0.1343,0.1879,
+silicon,opspread,tilize,8,65536,bf16,dram,dram,tile,0,,,,,8,0.0795,0.0857,0.1075,0.1636,
+silicon,opspread,layernorm,8,65536,bf16,dram,dram,tile,0,,,,,8,0.0932,0.1242,0.124,0.1826,
+silicon,opspread,sdpa,,524288,bf16,dram,dram,tile,0,,,512,1073741824,8,0.1698,0.2093,0.198,0.2208,

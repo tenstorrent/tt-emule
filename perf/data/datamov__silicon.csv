@@ -1,0 +1,13 @@
+backend,graph,op,side,elements,dtype,in_mem,out_mem,layout,sharded,cores,fidelity,seq,flops,iters,ms_min,ms_med,ms_mean,ms_p90,error
+silicon,datamov,transpose,1,1024,bf16,dram,dram,tile,0,,,,,8,0.0904,0.1055,0.1058,0.123,
+silicon,datamov,transpose,2,4096,bf16,dram,dram,tile,0,,,,,8,0.0904,0.0939,0.0943,0.0998,
+silicon,datamov,transpose,4,16384,bf16,dram,dram,tile,0,,,,,8,0.0899,0.0913,0.0923,0.0966,
+silicon,datamov,transpose,8,65536,bf16,dram,dram,tile,0,,,,,8,0.0904,0.0923,0.0922,0.0937,
+silicon,datamov,transpose,16,262144,bf16,dram,dram,tile,0,,,,,8,0.0904,0.0921,0.0926,0.0969,
+silicon,datamov,transpose,32,1048576,bf16,dram,dram,tile,0,,,,,8,0.0904,0.0916,0.0919,0.0955,
+silicon,datamov,tilize,1,1024,bf16,dram,dram,tile,0,,,,,8,0.0791,0.0849,0.086,0.0946,
+silicon,datamov,tilize,2,4096,bf16,dram,dram,tile,0,,,,,8,0.0791,0.0885,0.0875,0.0974,
+silicon,datamov,tilize,4,16384,bf16,dram,dram,tile,0,,,,,8,0.0814,0.1523,0.1326,0.1699,
+silicon,datamov,tilize,8,65536,bf16,dram,dram,tile,0,,,,,8,0.0795,0.0826,0.0831,0.0889,
+silicon,datamov,tilize,16,262144,bf16,dram,dram,tile,0,,,,,8,0.0851,0.0963,0.1103,0.1674,
+silicon,datamov,tilize,32,1048576,bf16,dram,dram,tile,0,,,,,8,0.115,0.1438,0.1652,0.3193,

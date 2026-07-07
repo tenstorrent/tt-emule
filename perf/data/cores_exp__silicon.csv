@@ -1,0 +1,8 @@
+backend,graph,op,side,elements,dtype,in_mem,out_mem,layout,sharded,cores,fidelity,seq,flops,iters,ms_min,ms_med,ms_mean,ms_p90,error
+silicon,cores_exp,exp,1,1024,bf16,dram,dram,tile,1,1,,,,8,0.1102,0.1395,0.1743,0.4538,
+silicon,cores_exp,exp,2,4096,bf16,dram,dram,tile,1,2,,,,8,0.1154,0.137,0.1344,0.1562,
+silicon,cores_exp,exp,4,16384,bf16,dram,dram,tile,1,4,,,,8,0.1084,0.1164,0.1274,0.1567,
+silicon,cores_exp,exp,8,65536,bf16,dram,dram,tile,1,8,,,,8,0.1106,0.1157,0.1171,0.1268,
+silicon,cores_exp,exp,16,262144,bf16,dram,dram,tile,1,16,,,,8,0.114,0.131,0.1295,0.1419,
+silicon,cores_exp,exp,32,1048576,bf16,dram,dram,tile,1,32,,,,8,0.1211,0.1353,0.1335,0.1448,
+silicon,cores_exp,exp,64,4194304,bf16,dram,dram,tile,1,64,,,,8,0.1907,0.1975,0.1993,0.2139,
