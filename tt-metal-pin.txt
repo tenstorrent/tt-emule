@@ -8,8 +8,4 @@
 # (the same one tt-mlir-pin.txt cascades to via TT_METAL_VERSION). Drifting
 # apart pins the two CI pipelines on different umd revisions and exposes
 # version-specific umd bugs in one pipeline but not the other.
-#
-# NOTE: this points at the head of the tt-metal #241 Object-Intent fiber fix
-# (dd2849b5 + the runner/scheduler change); re-pin to its squash-merge SHA on
-# tt-metal main once that PR lands.
-be4f397041c2ff2df4f827cb607d35b209a569f0
+cba369723a28e1d0f984b996bf8d94ec73361f78
