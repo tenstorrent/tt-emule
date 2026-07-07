@@ -2724,7 +2724,6 @@ files:
     synchronous Layer-1 primitives (noc_async_read/write, noc_semaphore_inc, __emule_multicast_write)'
   symbols:
   - {kind: namespace, name: unified_kernels}
-  - {kind: function, name: __emule_uk_slotmask_local}
   - {kind: function, name: __emule_uk_set_local_bits}
   - {kind: function, name: unicast_write_increment_counters}
   - {kind: function, name: unicast_atomic_inc_increment_counters}
