@@ -170,6 +170,12 @@ struct ThreadCommonCtx {
     uint32_t phdr_route_first[PHDR_MAX_ROUTES] = {}; // route_id → first header index
     uint8_t  phdr_route_num[PHDR_MAX_ROUTES] = {};   // route_id → header count
 
+    // Direct 4-directional fabric path: each WorkerToFabricEdmSender::build_from_args hands out the next
+    // connection open-sequence index here, which the teleport uses as the connection's dir_index into the
+    // host-recorded per-src connection table (g_conn_route). Fresh per launch (fresh ctx), matching the
+    // kernel opening its connections once from index 0. See docs/fabric-ccl-emulation.md.
+    uint32_t fabric_open_conn_seq = 0;
+
     explicit ThreadCommonCtx(Kind k) : kind(k) {}
     virtual ~ThreadCommonCtx() = default;  // owned via base ptr (runner/fiber)
 };
