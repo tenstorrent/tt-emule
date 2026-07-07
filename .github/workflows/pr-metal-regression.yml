@@ -387,6 +387,134 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+  # Multi-chip CCL — Wormhole n300 (2-device mesh). Curated all-pass, so this is
+  # a BLOCKING on-push gate (same `!= pull_request` policy as the sharded suites).
+  # Single job, no matrix: the entry list is small and the run is short.
+  ttnn-pytest-n300:
+    name: TTNN Pytests (n300, 2-device mesh)
+    needs: [changes, build]
+    if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'pull_request' }}
+    runs-on: tt-ubuntu-2204-xlarge-stable
+    timeout-minutes: 90
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
+    steps:
+      - name: Checkout tt-emule (PR)
+        uses: actions/checkout@v4
+        with:
+          path: tt-emule
+
+      - name: Checkout tt-metal at pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ needs.build.outputs.pin }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tt-metal-build-${{ github.run_id }}
+          path: tt-metal/build_emule/
+
+      - name: Place cluster descriptors
+        shell: bash
+        run: |
+          mkdir -p tt-metal/tt_metal/third_party/umd/tests
+          cp -r tt-metal/build_emule/_cluster_descs/cluster_descriptor_examples \
+                tt-metal/tt_metal/third_party/umd/tests/
+
+      - name: Install SFPI toolchain
+        shell: bash
+        run: bash tt-metal/install_dependencies.sh --sfpi
+
+      - name: Run TTNN pytest (n300, 2-device mesh)
+        env:
+          TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
+          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
+          TT_EMULE_ARCH: n300
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-ttnn-pytests.sh
+
+      - name: Upload TTNN pytest artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ttnn-pytests-results-n300
+          path: |
+            ${{ runner.temp }}/ttnn-pytests.log
+            ${{ runner.temp }}/ttnn-junit-xml/*.xml
+          retention-days: 30
+          if-no-files-found: warn
+
+  # Multi-chip CCL — Blackhole loudbox (8x P150, 2x4 mesh). NON-BLOCKING for now:
+  # the loudbox suite still has known failures (all_gather failing_shapes +
+  # all_to_all_dispatch, tracked as emule #221/#222), so `continue-on-error`
+  # lets it run for visibility (logs + junit artifacts) without gating the push.
+  # It is intentionally NOT in `all-passed`'s needs. Promote to blocking (drop
+  # continue-on-error, add to all-passed) once #221/#222 are resolved.
+  ttnn-pytest-bh-loudbox:
+    name: TTNN Pytests (bh loudbox, 8xP150 mesh)
+    needs: [changes, build]
+    if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'pull_request' }}
+    continue-on-error: true
+    runs-on: tt-ubuntu-2204-xlarge-stable
+    timeout-minutes: 150
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
+    steps:
+      - name: Checkout tt-emule (PR)
+        uses: actions/checkout@v4
+        with:
+          path: tt-emule
+
+      - name: Checkout tt-metal at pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ needs.build.outputs.pin }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tt-metal-build-${{ github.run_id }}
+          path: tt-metal/build_emule/
+
+      - name: Place cluster descriptors
+        shell: bash
+        run: |
+          mkdir -p tt-metal/tt_metal/third_party/umd/tests
+          cp -r tt-metal/build_emule/_cluster_descs/cluster_descriptor_examples \
+                tt-metal/tt_metal/third_party/umd/tests/
+
+      - name: Install SFPI toolchain
+        shell: bash
+        run: bash tt-metal/install_dependencies.sh --sfpi
+
+      - name: Run TTNN pytest (bh loudbox, 8xP150 mesh)
+        env:
+          TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
+          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
+          TT_EMULE_ARCH: bh_loudbox
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-ttnn-pytests.sh
+
+      - name: Upload TTNN pytest artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ttnn-pytests-results-bh-loudbox
+          path: |
+            ${{ runner.temp }}/ttnn-pytests.log
+            ${{ runner.temp }}/ttnn-junit-xml/*.xml
+          retention-days: 30
+          if-no-files-found: warn
+
   # Lightweight TTNN gate for pull requests ONLY: the curated blackhole PR_TIER
   # smoke set across 2 parallel shards, replacing the full wormhole+blackhole
   # sharded matrix above. The full suites still run on push to main.
@@ -470,7 +598,9 @@ jobs:
     name: All checks passed
     # Run even when a dependency failed/was skipped, so the gate always reports.
     if: ${{ always() }}
-    needs: [changes, build, test, ttnn-pytest-wormhole, ttnn-pytest-blackhole, ttnn-smoke-pr]
+    # ttnn-pytest-bh-loudbox is intentionally absent: it is non-blocking
+    # (continue-on-error) until emule #221/#222 are fixed, so it must not gate.
+    needs: [changes, build, test, ttnn-pytest-wormhole, ttnn-pytest-blackhole, ttnn-pytest-n300, ttnn-smoke-pr]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any required job did not succeed
@@ -493,6 +623,7 @@ jobs:
           echo "  test:        ${{ needs.test.result }}"
           echo "  ttnn-pytest-wormhole: ${{ needs.ttnn-pytest-wormhole.result }}"
           echo "  ttnn-pytest-blackhole: ${{ needs.ttnn-pytest-blackhole.result }}"
+          echo "  ttnn-pytest-n300: ${{ needs.ttnn-pytest-n300.result }}"
           echo "  ttnn-smoke-pr: ${{ needs.ttnn-smoke-pr.result }}"
           exit 1
       - name: All required jobs passed

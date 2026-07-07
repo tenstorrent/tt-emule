@@ -8,7 +8,8 @@
 # Required env:
 #   TT_METAL_DIR   path to tt-metal source tree (checked out at the pinned SHA)
 #   BUILD_DIR      absolute path to the build tree (containing ttnn/_ttnn.so etc.)
-#   TT_EMULE_ARCH  wormhole | blackhole — selects the per-arch pytest script
+#   TT_EMULE_ARCH  wormhole | blackhole | n300 | bh_loudbox — selects the
+#                  per-suite pytest script (run_ttnn_pytests_${TT_EMULE_ARCH}.sh)
 #
 # Optional env:
 #   GTEST_XML_DIR  default $RUNNER_TEMP/ttnn-junit-xml (per-entry junit XML)
@@ -22,8 +23,8 @@ set -euo pipefail
 : "${BUILD_DIR:?BUILD_DIR must be set}"
 : "${TT_EMULE_ARCH:?TT_EMULE_ARCH must be set (wormhole|blackhole)}"
 case "$TT_EMULE_ARCH" in
-    wormhole|blackhole) ;;
-    *) echo "ERROR: TT_EMULE_ARCH must be wormhole|blackhole, got '$TT_EMULE_ARCH'" >&2; exit 1 ;;
+    wormhole|blackhole|n300|bh_loudbox) ;;
+    *) echo "ERROR: TT_EMULE_ARCH must be wormhole|blackhole|n300|bh_loudbox, got '$TT_EMULE_ARCH'" >&2; exit 1 ;;
 esac
 export SHARD_INDEX="${SHARD_INDEX:-1}"
 export SHARD_COUNT="${SHARD_COUNT:-1}"
