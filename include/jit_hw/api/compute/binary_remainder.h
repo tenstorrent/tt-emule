@@ -38,6 +38,22 @@ ALWI void remainder_int32_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
 }
 ALWI void remainder_int32_tile_init() {}
 
+ALWI void remainder_uint32_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
+    __emule_dst_check(idst0, "remainder_uint32_tile.a");
+    __emule_dst_check(idst1, "remainder_uint32_tile.b");
+    __emule_dst_check(odst, "remainder_uint32_tile.out");
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; ++i) {
+        uint32_t a, b;
+        std::memcpy(&a, &__emule_compute_ctx().dst[idst0][i], sizeof(uint32_t));
+        std::memcpy(&b, &__emule_compute_ctx().dst[idst1][i], sizeof(uint32_t));
+        // Unsigned modulo, no sign correction. b==0 is HW-undefined and untested;
+        // guard returns 0 (as remainder_int32_tile does) to avoid a host divide trap.
+        uint32_t r = (b == 0u) ? 0u : (a % b);
+        std::memcpy(&__emule_compute_ctx().dst[odst][i], &r, sizeof(uint32_t));
+    }
+}
+ALWI void remainder_uint32_tile_init() {}
+
 ALWI void remainder_binary_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     __emule_dst_check(idst0, "remainder_binary_tile.a");
     __emule_dst_check(idst1, "remainder_binary_tile.b");
