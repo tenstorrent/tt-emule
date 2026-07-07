@@ -41,9 +41,9 @@ ALWI void gelu_tanh_tile(uint32_t idst) {
     __emule_dst_check(idst, "gelu_tanh_tile");
     constexpr float kSqrt2OverPi = 0.7978845608028654f;
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
+        float x = __emule_compute_ctx().dst[idst][i];
         float cubic = x * x * x;
-        __emule_dst[idst][i] = 0.5f * x * (1.0f + std::tanh(kSqrt2OverPi * (x + 0.044715f * cubic)));
+        __emule_compute_ctx().dst[idst][i] = 0.5f * x * (1.0f + std::tanh(kSqrt2OverPi * (x + 0.044715f * cubic)));
     }
 }
 
