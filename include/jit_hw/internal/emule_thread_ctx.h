@@ -73,6 +73,10 @@ struct LocalCBInterface {
 // < the arch's NUM_CIRCULAR_BUFFERS ≤ this bound.
 static constexpr uint32_t __EMULE_CTX_MAX_CBS = 64;
 
+// Object-Intent (ASAN) resolved-range log capacity, per fiber. Ample — kernels resolve
+// pointers into <10 distinct buffers; overflow drops the excess (see ThreadCommonCtx).
+static constexpr uint32_t __EMULE_SAN_RESOLVED_CAP = 64;
+
 // Inline direct-write (noc_inline_dw_write) set/with-state cache entry, per NOC.
 struct __emule_dw_state {
     uint64_t addr = 0;
@@ -139,6 +143,18 @@ struct ThreadCommonCtx {
     uint32_t cb_self_consume_mask = 0;            // was __emule_cb_self_consume_mask
     uint32_t cb_self_produce_mask = 0;            // was __emule_cb_self_produce_mask
     LocalCBInterface local_cb[__EMULE_CTX_MAX_CBS]{};  // per-RISC CB ring ptrs (was __emule_local_cb)
+
+    // Object-Intent (ASAN) per-fiber resolved-range log. Fully fiber-local: the
+    // kernel-side OOB check appends each live-tensor extent it resolved a pointer into
+    // here, and the runner diffs any snapshotted extent that was modified without being
+    // recorded (post-launch). Living in the ctx (reached via __emule_self) means a fiber
+    // swap carries it — no thread-locals, nothing for the scheduler to restore. Inactive
+    // => no recording. Capacity is ample (kernels touch <10 buffers); overflow drops the
+    // excess, biasing the post-launch diff toward false positives, never negatives.
+    // See tt-emule #241, docs/ASAN.md, and emule_sanitizers.cpp (ObjectIntentTracker).
+    bool     san_resolved_active = false;
+    uint32_t san_resolved_count = 0;
+    uint64_t san_resolved_log[__EMULE_SAN_RESOLVED_CAP] = {};
 
     explicit ThreadCommonCtx(Kind k) : kind(k) {}
     virtual ~ThreadCommonCtx() = default;  // owned via base ptr (runner/fiber)

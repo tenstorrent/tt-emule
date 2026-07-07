@@ -218,12 +218,13 @@ run_test "noc_without_barrier"    "$API_BIN" --gtest_filter="MeshDeviceFixture.N
 run_test "padded_write"           "$API_BIN" --gtest_filter="MeshDeviceFixture.Tensor_Padding_*"
 run_test "semaphore_write"        "$API_BIN" --gtest_filter="MeshDeviceFixture.Semaphore_*"
 run_test "tensor_bad_access"      "$API_BIN" --gtest_filter="MeshDeviceFixture.Host_UAF_*"
-# Object_Intent *Violation* checks depend on the OOB-tensor sanitizer live-range
-# thread_locals, which the fiber scheduler sets on the dispatch thread but does NOT
-# restore on worker threads — so they silently no-op ("failed to die") under the
-# multichip runtime. Deselected pending https://github.com/tenstorrent/tt-emule/issues/241;
-# the *_NoViolation* controls (which use fiber-local CB/ctx state) still run.
-run_test "object_intent"          "$API_BIN" --gtest_filter="MeshDeviceFixture.Object_Intent_*NoViolation*"
+# Object_Intent: the fiber scheduler now restores the per-fiber resolved-range log on
+# swap-in and launch_cores re-runs the pre/post Object-Intent snapshot+verify around each
+# single-kernel core (tt-emule #241), so the *Violation* death-tests fire again. Grouped
+# apart from the non-death controls so each EXPECT_DEATH forks clean (same fork-after-parent-
+# threads split as CB_Reservation / CB_Boundary above).
+run_test "object_intent_violation" "$API_BIN" --gtest_filter="MeshDeviceFixture.Object_Intent_*Violation*:-MeshDeviceFixture.*NoViolation*"
+run_test "object_intent_controls"  "$API_BIN" --gtest_filter="MeshDeviceFixture.Object_Intent_*NoViolation*"
 # CB_Boundary checks use fiber-local CB reserved-pages state (not the range thread_locals),
 # so they fire correctly — they only need the death-tests grouped apart from the non-death
 # controls (same fork-after-parent-threads split as CB_Reservation above).

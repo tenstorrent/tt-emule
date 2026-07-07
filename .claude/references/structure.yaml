@@ -2355,6 +2355,7 @@ files:
   - {kind: fwd, name: TileCounterArray}
   - {kind: struct, name: LocalCBInterface}
   - {kind: global, name: __EMULE_CTX_MAX_CBS}
+  - {kind: global, name: __EMULE_SAN_RESOLVED_CAP}
   - {kind: struct, name: __emule_dw_state}
   - {kind: struct, name: __emule_uk_state}
   - {kind: struct, name: __emule_matmul_bridge}
@@ -2692,9 +2693,6 @@ files:
   - {kind: global, name: __emule_l1_padding_ranges_count}
   - {kind: global, name: __emule_l1_host_ranges}
   - {kind: global, name: __emule_l1_host_ranges_count}
-  - {kind: global, name: __emule_l1_resolved_ranges}
-  - {kind: global, name: __emule_l1_resolved_ranges_count}
-  - {kind: global, name: __emule_l1_resolved_ranges_capacity}
   - {kind: global, name: __emule_cb_reserved_pages}
   - {kind: global, name: __emule_cb_waited_pages}
   - {kind: global, name: __emule_cb_boundary_strict}

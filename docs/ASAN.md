@@ -112,7 +112,7 @@ The host populates these thread-locals before each kernel invocation
 | `__emule_cb_waited_pages[32]` | Per-CB read-window size (CB Boundary input); updated by `cb_wait_front`/`cb_pop_front` |
 | `__emule_cb_reserve_dangling[32]` | Dirty-CB leak flag: set by `cb_reserve_back`, cleared by any `cb_push_back` (decoupled from the window count above) |
 | `__emule_cb_wait_dangling[32]` | Dirty-CB leak flag: set by `cb_wait_front`, cleared by any `cb_pop_front` |
-| `__emule_l1_resolved_ranges` / `_count` / `_capacity` | Object-intent log (kernel writes; runner reads after join) |
+| `__emule_self->san_resolved_log` / `_count` (fiber ctx, not a thread-local) | Object-intent log (kernel writes; runner reads at fiber exit) |
 | `__emule_pending_noc_reads` | Outstanding noc_async_read count; consumed by NoC Barrier Missing check in cb_pop_front |
 
 All these declarations live in `tt-emule/include/jit_hw/jit_kernel_stubs.hpp`
@@ -246,7 +246,7 @@ Checks run in this order inside `__emule_local_l1_to_ptr`:
 3. **Out-of-Bounds Write (L1)** — for addresses at-or-above
    `l1_unreserved_base` only, scan `__emule_l1_tensor_ranges` for a
    matching extent. If none, abort. When a match is found, also append
-   the matched packed `(start, end)` to `__emule_l1_resolved_ranges`
+   the matched packed `(start, end)` to `__emule_self->san_resolved_log`
    (deduplicated by linear scan, capped at capacity) — this feeds the
    Object Intent check below.
 
@@ -256,7 +256,7 @@ Checks run in this order inside `__emule_local_l1_to_ptr`:
    poke scratch at `DEFAULT_UNRESERVED` and hand the bare address to a kernel,
    so it is valid but absent from `LiveL1Ranges`). A hit returns; a miss
    aborts as before. These ranges are deliberately a **separate** array: a
-   hit is **not** recorded into `__emule_l1_resolved_ranges` and the regions
+   hit is **not** recorded into `__emule_self->san_resolved_log` and the regions
    are never snapshotted by Object Intent (§12), so a host-NOC write into a
    poked region can't be mis-flagged. The acceptance is precise — only the
    exact poked `[start, end)` — so an overrun past it still aborts. Host side:
@@ -314,11 +314,24 @@ target.
 
 Detection has 6 stages, split between the runner (host) and the kernel:
 
+**Fiber-engine realization.** Kernels run as cooperatively-scheduled
+fibers on a shared worker pool, not one OS thread per (core, RISC). The
+stages below apply unchanged, with three fiber-specific points: (a) the
+per-core `ObjectIntentTracker` is owned by `launch_cores` so it outlives
+the fiber run; (b) the resolved-range log is a per-fiber field of the
+fiber context (`ThreadCommonCtx::san_resolved_*`, reached via
+`__emule_self`), so it swaps in with the fiber — no thread-local, nothing
+for the scheduler to restore, and a parked fiber's log is never confused
+with a peer's on the same worker; (c) "after join" means at the
+single-kernel core's fiber completion. Object Intent runs on the
+non-deferred (single-device) dispatch path; deferred multi-chip mesh runs
+skip it (ASAN is single-device-scoped).
+
 **Stage 1: pre-launch snapshot (runner, in `launch_cores`).**
 For each core: if `object_intent_strict && tensor_ranges != null`,
-allocate an `oi_snapshots` vector. For every live L1 tensor extent,
-`memcpy` the current bytes of L1 in that range into a local snapshot.
-Held on the stack of the core thread for the launch's duration.
+snapshot into the per-core `ObjectIntentTracker`. For every live L1
+tensor extent, `memcpy` the current bytes of L1 in that range into the
+snapshot, on the dispatch thread before the core's fiber runs.
 
 **Stage 2: refuse multi-kernel launches.**
 Exact attribution requires being able to tell, after join, which
@@ -328,13 +341,16 @@ mismatch couldn't be attributed back to a single kernel. We abort with
 a friendly diagnostic when `cs.ki_list->size() != 1`, telling the user
 to keep ASAN runs single-kernel-per-core.
 
-**Stage 3: kernel-thread stack-local log.**
-Each kernel thread gets a `uint64_t local_resolved[64]` on its own
-stack and points `__emule_l1_resolved_ranges` /
-`_resolved_ranges_count` / `_resolved_ranges_capacity` at it.
-Stack-local because:
-- One array per kernel thread, no contention.
-- Lifetime ties to the kernel thread exactly.
+**Stage 3: per-fiber resolved-range log.**
+The log is a fixed `uint64_t san_resolved_log[64]` (+ `san_resolved_count`
+and a `san_resolved_active` gate) inside the fiber context
+(`ThreadCommonCtx`), reached via `__emule_self`. The runner just arms it
+(`san_resolved_active = true`, count reset) before the kernel runs.
+Fiber-local because:
+- One log per fiber, no contention, reached through the same
+  `__emule_self` pointer the kernel already uses — so it swaps in with the
+  fiber (no thread-local, nothing to restore).
+- Lifetime ties to the fiber exactly.
 - Capacity 64 is plenty (even pathological kernels touch <10 distinct
   buffers); overflow drops the excess, which biases the post-launch
   comparison toward false positives, not false negatives.
@@ -342,10 +358,10 @@ Stack-local because:
 **Stage 4: kernel records intent.**
 Every successful resolution inside `__emule_local_l1_to_ptr` (i.e. the
 access hit a live tensor extent in OOB check #3 above) appends the
-matched `(start, end)` packed pair to `__emule_l1_resolved_ranges`.
+matched `(start, end)` packed pair to `__emule_self->san_resolved_log`.
 Linear-scan dedup keeps the array small. The append is the only
 write — `__emule_local_l1_to_ptr` is the only place that writes the
-array.
+log.
 
 The semantics are: "this kernel intends to touch buffer
 `[start, end)`." Crucially, the intent is recorded at *resolution*
@@ -354,11 +370,12 @@ never actually writes through it is still considered to have intent to
 touch B (the runner won't flag B even if B's bytes change — though
 that wouldn't normally happen).
 
-**Stage 5: merge after join.**
-When each kernel thread exits, it copies its `local_resolved` into the
-per-core `oi_resolved_single_kernel` vector (only one kernel thread on
-single-kernel-per-core launches, so no merge logic — direct copy). The
-runner waits for all kernel threads on the core to join.
+**Stage 5: accumulate at fiber exit.**
+When the kernel fiber finishes, the runner passes its
+`__emule_self->san_resolved_log` (and count) to
+`ObjectIntentTracker::accumulate_resolved`, which appends into the
+per-core resolved set (only one kernel fiber on single-kernel-per-core
+launches, so no merge logic — direct copy).
 
 **Stage 6: byte-diff snapshots whose extent was never resolved.**
 Build an `unordered_set<uint64_t>` of resolved packed pairs. For each
