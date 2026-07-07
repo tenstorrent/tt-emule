@@ -477,6 +477,7 @@ files:
   - {kind: function, name: v_and}
   - {kind: function, name: v_or}
   - {kind: function, name: v_not}
+  - {kind: function, name: __emule_vint_to_cond}
   - {kind: function, name: __emule_sfpi_push_if}
   - {kind: function, name: __emule_sfpi_elseif}
   - {kind: function, name: __emule_sfpi_else}
@@ -525,6 +526,7 @@ files:
   - {kind: enum, name: MantissaMode}
   - {kind: enum, name: ShiftMode}
   - {kind: function, name: exexp}
+  - {kind: function, name: exexp_nodebias}
   - {kind: function, name: exman}
   - {kind: function, name: shft}
   - {kind: function, name: setexp}
