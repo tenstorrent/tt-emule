@@ -829,11 +829,13 @@ files:
   - {kind: function, name: binary_min_uint32_tile}
 - path: include/jit_hw/api/compute/binary_remainder.h
   section: include/jit_hw/api/compute/
-  summary: '`ckernel::` `remainder_binary_tile`, `remainder_int32_tile` (+`_init`)'
+  summary: '`ckernel::` `remainder_binary_tile`, `remainder_int32_tile`, `remainder_uint32_tile` (+`_init`)'
   symbols:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: remainder_int32_tile}
   - {kind: function, name: remainder_int32_tile_init}
+  - {kind: function, name: remainder_uint32_tile}
+  - {kind: function, name: remainder_uint32_tile_init}
   - {kind: function, name: remainder_binary_tile}
   - {kind: function, name: remainder_binary_tile_init}
 - path: include/jit_hw/api/compute/binary_shift.h
