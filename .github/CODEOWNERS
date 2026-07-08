@@ -8,3 +8,10 @@
 # Add more specific patterns BELOW this line to delegate sub-trees later.
 
 *       @xanderchin @arminaleTT @sgholamiTT
+
+# ASAN OOB sanitizer (emule software emulation)
+include/jit_hw/asan/                        @smeydanshahiTT @xanderchin @arminaleTT @sgholamiTT
+include/jit_hw/api/dataflow/asan/           @smeydanshahiTT @xanderchin @arminaleTT @sgholamiTT
+include/jit_hw/internal/emule_cb_ptr.h      @smeydanshahiTT @xanderchin @arminaleTT @sgholamiTT
+include/jit_hw/internal/emule_l1_to_ptr.h   @smeydanshahiTT @xanderchin @arminaleTT @sgholamiTT
+docs/ASAN.md                                @smeydanshahiTT @xanderchin @arminaleTT @sgholamiTT
