@@ -56,6 +56,15 @@ inline void _llk_math_eltwise_unary_sfpu_params_(
     fn(params...);                       // covers col-0 rows 0..15 (cursor ends at 16)
     if (is_col) {
         fn(params...);                   // continues at cursor 16 → col-0 rows 16..31
+    } else if (static_cast<int>(vector_mode) == static_cast<int>(ckernel::VectorMode::RC)) {
+        // RC = full 32-row tile. The SDPA column helpers here use a per-face functor
+        // (ITERATIONS_HALF_FACE), so the call above covered only face 0 = row-major rows
+        // 0..15. The per-row column statistic (col 0) of rows 16..31 lives in FACE 2, not
+        // the contiguous next face. Silicon's apply_vector_mode_ runs the functor once per
+        // active face; mirror that by jumping the cursor to face 2 and re-running. (Half-tile
+        // R mode keeps the single call — rows 0..15 only.)
+        ::__emule_compute_ctx().sfpu.cursor = 32;
+        fn(params...);                   // face 2 → col-0 rows 16..31
     }
     ::__emule_compute_ctx().sfpu.dst_base = nullptr;
     ::__emule_compute_ctx().sfpu.cursor = 0;
