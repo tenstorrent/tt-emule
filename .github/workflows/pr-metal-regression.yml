@@ -26,7 +26,9 @@ on:
 
 concurrency:
   group: pr-regression-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs, but never push-to-main runs — every merged
+  # commit shares github.ref and must complete for per-commit attribution.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Decide whether the PR/push touches anything that can affect regression.

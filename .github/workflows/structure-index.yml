@@ -18,7 +18,9 @@ on:
 
 concurrency:
   group: structure-index-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs, but never push-to-main runs — every merged
+  # commit shares github.ref and must complete for per-commit attribution.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
