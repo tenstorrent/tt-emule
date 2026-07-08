@@ -18,6 +18,20 @@ faithful mock APIs.
 - Always run the per-arch regression scripts after code changes and
   log the **full** output. Run them **sequentially** (shared JIT
   cache).
+- **Prefer making an existing tt-metal test pass over adding a new
+  one.** The goal is faithful silicon behavior, which the canonical
+  tt-metal suites already assert — a new test is a last resort, only
+  when the coverage genuinely does not exist and cannot be reached by
+  fixing the mock so an existing test passes. When a new tt-metal test
+  is truly unavoidable, add it under **`tests/emule/`** (the dedicated
+  emule-only test tree in tt-metal — e.g. `tests/emule/ccl/`), **never**
+  under `tests/ttnn/...` or another canonical suite. Its fixtures
+  (`mesh_device`, `device_params`, `silicon_arch_name`, …) resolve from
+  the root tt-metal `conftest.py`, so no per-dir conftest is needed.
+  Wire it into the emule pytest runners (`scripts/run_ttnn_pytests_*.sh`)
+  and bump `tt-metal-pin.txt` to the companion commit. Format Python to
+  tt-metal's pre-commit config (**black line-length 120**, isort,
+  autoflake) before pushing.
 - When fixing a failure in a mock API, the goal is **faithful to the
   canonical silicon implementation**. Don't create parallel or
   different code paths to work around bugs — if it works in silicon,
