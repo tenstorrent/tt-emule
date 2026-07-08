@@ -407,56 +407,68 @@ inline uint32_t key(volatile PacketHeader* hdr) {
 }
 }  // namespace emule_route
 
-// Explicit-destination 2D unicast: worker_routing_utils' 2D branch and the 2D-header data/metadata helpers
-// in moe_utils.hpp pass (dst_chip_id, dst_mesh_id). Selected only when the caller genuinely dispatches on a
-// 2D header type — under a 1D fabric config the header types are distinct (below), so `fabric_set_line_unicast_route`
-// takes its 1D branch (the 1-arg hop-distance form) and this overload is not reached; the `EMULE_FABRIC_2D`
-// build define matches that so a 1D-config's stray 2-arg call still records a 1D distance rather than
-// mis-reading a hop count as a chip id.
-inline bool fabric_set_unicast_route(volatile PacketHeader* hdr, uint16_t a, uint16_t b) {
-#ifdef EMULE_FABRIC_2D
-    __emule_fabric_set_route(emule_route::key(hdr), emule_route::UNICAST_2D, a, b, 0, 0, 0, 0);
-#else
-    __emule_fabric_set_route(emule_route::key(hdr), emule_route::UNICAST_1D, a, 0, 0, 0, 0, 0);
-#endif
-    return true;
-}
-// Non-overload helper: stamp the 1D unicast route (distance_in_hops) for a (packet_header, distance) pair.
-// Named distinctly so it never competes with the fabric_set_unicast_route overload set.
+// Stamp the 1D unicast route (distance_in_hops) for a (packet_header, distance) pair.
 template <typename HdrT, typename DistT>
 inline void __emule_set_unicast_route_1d(HdrT&& hdr, DistT&& target_num) {
     __emule_fabric_set_route(
         emule_route::key(reinterpret_cast<volatile PacketHeader*>(hdr)),
         emule_route::UNICAST_1D, static_cast<uint32_t>(target_num), 0, 0, 0, 0, 0);
 }
-// 1D unicast: `fabric_set_unicast_route<false>(hdr, distance)` stamps UNICAST_1D. A dedicated 2-arg overload
-// loses partial ordering to this perfect-forwarding variadic, so the variadic handles the 2-arg
-// (packet_header, distance) shape — the only 2-arg call to this name. The 3-arg (dst_chip, dst_mesh) form
-// matches the non-template overload above. See docs/fabric-ccl-emulation.md.
+// Stamp the explicit-destination unicast route (packet_header, dst_chip, dst_mesh). Templated on the header
+// pointer type: under a 2D fabric config the kernel's PACKET_HEADER_TYPE is HybridMeshPacketHeader (a type
+// DERIVED from the 48B PacketHeader), so a fixed `volatile PacketHeader*` parameter would need a
+// derived-to-base conversion and LOSE overload resolution to the exact-match variadic below — silently
+// dropping the route (kind UNSET → the teleport falls back to the physical neighbor, the wrong chip on a
+// submesh line). Deducing the header type keeps it an exact match. See docs/fabric-ccl-emulation.md.
+template <typename HdrT, typename ChipT, typename MeshT>
+inline void __emule_set_unicast_route_2d(HdrT&& hdr, ChipT&& dst_chip, MeshT&& dst_mesh) {
+    const uint32_t k = emule_route::key(reinterpret_cast<volatile PacketHeader*>(hdr));
+#ifdef EMULE_FABRIC_2D
+    __emule_fabric_set_route(
+        k, emule_route::UNICAST_2D, static_cast<uint32_t>(dst_chip), static_cast<uint32_t>(dst_mesh), 0, 0, 0, 0);
+#else
+    // 1D config's stray (chip, mesh) call: record the first arg as a hop distance, not a chip id.
+    __emule_fabric_set_route(k, emule_route::UNICAST_1D, static_cast<uint32_t>(dst_chip), 0, 0, 0, 0, 0);
+#endif
+}
+// Single variadic entry for fabric_set_unicast_route — dispatching on arity avoids the overload-resolution
+// hazard that a fixed base-pointer overload has against a derived (2D) header type. worker_routing_utils'
+// 2D branch passes (hdr, dst_chip_id, dst_mesh_id) [3 args]; the 1D branch / variadic reaches
+// `fabric_set_unicast_route<false>(hdr, distance)` [2 args]. See docs/fabric-ccl-emulation.md.
 template <bool RangeHopsEnabled = false, typename... A>
 inline bool fabric_set_unicast_route(A&&... args) {
     if constexpr (sizeof...(A) == 2) {
         __emule_set_unicast_route_1d(std::forward<A>(args)...);
+    } else if constexpr (sizeof...(A) == 3) {
+        __emule_set_unicast_route_2d(std::forward<A>(args)...);
     }
     return true;
 }
 
-// Line multicast (worker_routing_utils 2D branch): start (dst_chip, dst_mesh) + per-direction hop counts.
-// 2D builds only (under 1D the union args differ — handled in 1D bring-up); the teleport walks the route
-// table for each non-zero direction and replays the terminal op to every chip in the line.
-inline void fabric_set_mcast_route(
-    volatile PacketHeader* hdr, uint16_t dst_chip, uint16_t dst_mesh, uint16_t e, uint16_t w, uint16_t n, uint16_t s) {
+// Line multicast (worker_routing_utils 2D branch): (hdr, dst_chip, dst_mesh, e, w, n, s). Single variadic
+// dispatching on arity for the same reason as fabric_set_unicast_route above — a fixed base-pointer overload
+// would lose to the variadic no-op for a derived 2D header type and drop the route. The teleport walks the
+// route table for each non-zero direction and replays the terminal op to every chip in the line.
+template <typename HdrT>
+inline void __emule_set_mcast_route_impl(
+    HdrT&& hdr, uint16_t dst_chip, uint16_t dst_mesh, uint16_t e, uint16_t w, uint16_t n, uint16_t s) {
+    const uint32_t k = emule_route::key(reinterpret_cast<volatile PacketHeader*>(hdr));
 #ifdef EMULE_FABRIC_2D
-    __emule_fabric_set_route(emule_route::key(hdr), emule_route::MCAST_2D, dst_chip, dst_mesh, e, w, n, s);
+    __emule_fabric_set_route(k, emule_route::MCAST_2D, dst_chip, dst_mesh, e, w, n, s);
 #else
     // 1D line multicast: the route_info union maps the 2D args to {dst_chip=range_hops, dst_mesh=
     // start_distance_in_hops}; the per-direction hop counts {e,w,n,s} carry which way the line multicast
     // goes (exactly one is non-zero on a line) — the teleport reads that to pick the direction, so a middle
     // chip's backward barrier resolves backward even on the (untagged) mux path.
-    __emule_fabric_set_route(emule_route::key(hdr), emule_route::MCAST_1D, dst_mesh /*start*/, dst_chip /*range*/, e, w, n, s);
+    __emule_fabric_set_route(k, emule_route::MCAST_1D, dst_mesh /*start*/, dst_chip /*range*/, e, w, n, s);
 #endif
 }
-template <typename... A> inline void fabric_set_mcast_route(A&&...) {}
+template <typename... A>
+inline void fabric_set_mcast_route(A&&... args) {
+    if constexpr (sizeof...(A) == 7) {
+        __emule_set_mcast_route_impl(std::forward<A>(args)...);
+    }
+}
 template <typename... A> inline bool fabric_set_sparse_multicast_route(A&&...) { return true; }
 template <typename... A> inline void open_connections(A&&...) {}
 template <typename... A> inline void close_connections(A&&...) {}
