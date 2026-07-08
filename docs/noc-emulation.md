@@ -134,6 +134,23 @@ index) so every view of a channel shares one backing. Implementation:
 (umd); the per-NOC bank tables that feed kernel-side DRAM resolution are
 described in §8.3.
 
+Because the two views of a WH channel are distinguished **only** by their
+`bank_to_dram_offset` (the odd view lives at +1 GB inside the 2 GB backing), any
+code that recomposes a NOC address must keep the full 36-bit local offset. The
+2 MB worker-slot mask (`__emule_addr_to_offset`, `addr & 0x1FFFFF`) is correct
+**only** for a WORKER L1 destination — it must never touch a DRAM offset, or the
++1 GB view offset is truncated and the two views collapse onto the first 2 MB of
+the shared channel backing. `__emule_resolve_noc_addr` already applies the slot
+mask for WORKER cores only and keeps DRAM offsets full-width, so it is the single
+place the mask belongs. Address *composition* helpers therefore leave the offset
+raw: `safe_get_noc_addr(x, y, addr, noc)` (`api/dataflow/dataflow_api.h`) — used
+by the fabric/CCL recompose path (`linear/addrgen_api.h`, `api_common.h`, whose
+Wormhole leg decodes a final DRAM address with `get_noc_address_components` then
+re-packs it) — and `UnicastEndpoint::get_noc_unicast_addr` both pack the raw
+offset, matching the read path (`InterleavedAddrGen` / `TensorAccessor` leave DRAM
+reads un-masked, #182) and the `unified_kernels` write path (#255). Masking at
+compose time is the DRAM bank-view collapse that broke DRAM-resident CCL (#229).
+
 ---
 
 ## 3. Async read / write surface
