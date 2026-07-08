@@ -124,8 +124,6 @@ jobs:
         # accuracy gate, shard 2 = batch-1 generative smoke.
         arch: [wormhole]
         shard: [1, 2]
-    env:
-      HF_HOME: ${{ runner.temp }}/hf-cache
     steps:
       - name: Checkout tt-emule (PR branch)
         uses: actions/checkout@v4
@@ -187,6 +185,7 @@ jobs:
           TT_EMULE_ARCH: ${{ matrix.arch }}
           SHARD_INDEX:   ${{ matrix.shard }}
           SHARD_COUNT:   2
+          HF_HOME:       ${{ runner.temp }}/hf-cache
         shell: bash
         run: bash tt-emule/.github/scripts/ci-e2e-models.sh
 
