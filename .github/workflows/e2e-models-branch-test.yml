@@ -51,7 +51,7 @@ jobs:
         id: resolve
         shell: bash
         run: |
-          SHA=$(git ls-remote https://github.com/tenstorrent/tt-metal main | awk '{print $1}')
+          SHA=$(git ls-remote https://github.com/tenstorrent/tt-metal refs/heads/main | awk '{print $1}')
           if [ -z "$SHA" ]; then
             echo "::error::failed to resolve tt-metal main tip"
             exit 1
