@@ -18,6 +18,7 @@ files:
   - {kind: global, name: l1_ptr_hint_self_x}
   - {kind: global, name: l1_ptr_hint_self_y}
   - {kind: global, name: l1_ptr_hint_tag}
+  - {kind: struct, name: L1PtrHintScope}
   - {kind: enum, name: CoreRole}
   - {kind: struct, name: CoreCoord}
   - {kind: class, name: Core}

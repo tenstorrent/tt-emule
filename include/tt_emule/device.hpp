@@ -29,15 +29,13 @@ namespace tt_emule {
 // full NOC address, the calling core's coord, a symbolic tag like a kernel
 // name or a page_id) sets these thread_locals before dispatching L1 accesses,
 // so a bounds-check abort points back to WHO made the request instead of only
-// WHERE it landed. A typical wrapper:
+// WHERE it landed. Set them through the `L1PtrHintScope` RAII guard below so
+// they are always restored to their sentinels on scope exit — including on an
+// early return or exception — and never leak stale context into an unrelated
+// later L1 access on the same fiber:
 //
-//     tt_emule::l1_ptr_hint_noc_addr = noc_addr;
-//     tt_emule::l1_ptr_hint_self_x   = my_x;
-//     tt_emule::l1_ptr_hint_self_y   = my_y;
+//     tt_emule::L1PtrHintScope hint(noc_addr, my_x, my_y, "my_tag");
 //     uint8_t* p = target_core->l1_ptr(offset);
-//     tt_emule::l1_ptr_hint_noc_addr = tt_emule::L1_PTR_HINT_NOC_ADDR_UNSET;
-//     tt_emule::l1_ptr_hint_self_x   = tt_emule::L1_PTR_HINT_COORD_UNSET;
-//     tt_emule::l1_ptr_hint_self_y   = tt_emule::L1_PTR_HINT_COORD_UNSET;
 //
 // Motivation: on a matmul mcast_in1 OOB, the original message told us the
 // target coord + offset but not the source coord or the raw NOC address. That
@@ -50,6 +48,29 @@ inline thread_local uint64_t l1_ptr_hint_noc_addr = L1_PTR_HINT_NOC_ADDR_UNSET;
 inline thread_local uint32_t l1_ptr_hint_self_x   = L1_PTR_HINT_COORD_UNSET;
 inline thread_local uint32_t l1_ptr_hint_self_y   = L1_PTR_HINT_COORD_UNSET;
 inline thread_local const char* l1_ptr_hint_tag   = nullptr;
+
+// RAII guard for the l1_ptr_hint_* thread_locals: sets them on construction and
+// restores each to its "unset" sentinel on destruction (NOT to 0 — 0 is a valid
+// noc_addr/coord and would masquerade as real context in a later OOB). This is
+// the single, safe way to populate the hints; callers should always scope them
+// rather than assign the thread_locals directly. Non-copyable/non-movable so a
+// scope maps 1:1 to a lifetime.
+struct L1PtrHintScope {
+    L1PtrHintScope(uint64_t noc_addr, uint32_t self_x, uint32_t self_y, const char* tag) {
+        l1_ptr_hint_noc_addr = noc_addr;
+        l1_ptr_hint_self_x   = self_x;
+        l1_ptr_hint_self_y   = self_y;
+        l1_ptr_hint_tag      = tag;
+    }
+    ~L1PtrHintScope() {
+        l1_ptr_hint_noc_addr = L1_PTR_HINT_NOC_ADDR_UNSET;
+        l1_ptr_hint_self_x   = L1_PTR_HINT_COORD_UNSET;
+        l1_ptr_hint_self_y   = L1_PTR_HINT_COORD_UNSET;
+        l1_ptr_hint_tag      = nullptr;
+    }
+    L1PtrHintScope(const L1PtrHintScope&) = delete;
+    L1PtrHintScope& operator=(const L1PtrHintScope&) = delete;
+};
 
 // Role of a Core — determines how its mmap'd region is used.
 enum class CoreRole { WORKER, DRAM };
