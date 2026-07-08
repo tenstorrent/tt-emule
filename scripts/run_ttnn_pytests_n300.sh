@@ -26,6 +26,8 @@ BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule}"
 PYTEST_BIN="${PYTEST_BIN:-/opt/ttmlir-toolchain/venv/bin/pytest}"
 CLUSTER_EXAMPLES="$TT_METAL_DIR/tt_metal/third_party/umd/tests/cluster_descriptor_examples"
 CCL_TEST_DIR="$TT_METAL_DIR/tests/ttnn/unit_tests/operations/ccl"
+# Dedicated emule-only test tree in tt-metal (tests/emule/); new emule-specific tests live here.
+EMULE_TEST_DIR="$TT_METAL_DIR/tests/emule"
 
 GTEST_XML_DIR="${GTEST_XML_DIR:-}"
 [ -n "$GTEST_XML_DIR" ] && mkdir -p "$GTEST_XML_DIR"
@@ -105,6 +107,13 @@ echo ""
 # Canonical high-level CCL: all_gather / reduce_scatter / all_broadcast +
 # composite variants × l1_default/l1_small (exercises the fabric mux path).
 run_pytest "ccl_l1_small_semaphores" "$CCL_TEST_DIR/test_ccl_l1_small_semaphores.py"
+
+# Curated 2-chip CCL microtests: all_gather + point_to_point, each parametrized over L1 and DRAM
+# memory configs. The DRAM leg covers the interleaved DRAM bank-view resolution across the fabric
+# teleport (host write / kernel addr-gen / cross-chip write must agree on backing + per-view offset).
+run_pytest "ccl_emule_microtests" \
+    "$EMULE_TEST_DIR/ccl/test_emule_ccl_microtests.py::test_emule_all_gather_2chip" \
+    "$EMULE_TEST_DIR/ccl/test_emule_ccl_microtests.py::test_emule_point_to_point_2chip"
 
 echo ""
 echo "========================================"
