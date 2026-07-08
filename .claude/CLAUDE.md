@@ -67,6 +67,7 @@ faithful mock APIs.
 | Add a compute-kernel LLK shim (`<op>_tile` in `include/jit_hw/api/compute/`) | `/compute-llk-bringup` skill |
 | Diagnose ATOL/PCC failures (wrong bytes, partial zeros, off-by-N) | `/memory-debug` skill |
 | A tt-metal pin bump turned the regression red (device-open crash, JIT-compile error, hang) | `/uplift` skill |
+| Review an open PR, address its comments, and rebase/prep it to hand off for landing | `/shepherd-emule-pr` skill |
 | Parallelize a sweep of ≥4 similar mocks | `/parallel-mock-implementation` skill |
 | Map HW concept → existing emule strategy | `references/emule-mapping.md` |
 | Where in the pipeline to inject a change | [`docs/api-injection-points.md`](../docs/api-injection-points.md) |
@@ -101,6 +102,15 @@ faithful mock APIs.
   regression vs jit_hw API-surface drift), the cross-repo push chain,
   and verification (oracle before/after + curated-suite membership
   via `--collect-only`). Prove by build+run, never by `git log`.
+- **shepherd-emule-pr** — methodology for taking an open PR to
+  mergeable against the repo ethos: gather all three review surfaces,
+  verify every comment by build (the JIT compile-probe) not by trusting
+  "addressed", own ethos pass for the bug classes reviewers miss
+  (dangling refactored symbol, divergent-duplicate/ODR, silent silicon
+  divergence, superseded-by-main), then fix / register via
+  `/workarounds` / trim → rebase locally → hand the developer a
+  change+verification summary and drafted per-point comment to review
+  and push (the human stays in the loop for the force-push).
 
 ## Agents (launched by skills, can be invoked directly via Agent tool)
 
