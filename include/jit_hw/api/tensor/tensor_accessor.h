@@ -219,7 +219,7 @@ struct TensorAccessor {
     FORCE_INLINE uint64_t get_noc_addr(
         const uint32_t page_id, const uint32_t offset = 0, uint8_t noc = noc_index) const {
         if constexpr (requires { DSpec::is_sharded_supported; }) {
-            if constexpr (DSpec::is_sharded_supported && !DSpec::is_dram) {
+            if constexpr (DSpec::is_sharded_supported) {
                 return sharded_noc_addr(page_id, offset, noc);
             }
         }
@@ -232,7 +232,7 @@ struct TensorAccessor {
     FORCE_INLINE uint64_t get_shard_noc_addr(
         const uint32_t shard_id, const uint32_t offset = 0, uint8_t noc = noc_index) const {
         if constexpr (requires { DSpec::is_sharded_supported; }) {
-            if constexpr (DSpec::is_sharded_supported && !DSpec::is_dram) {
+            if constexpr (DSpec::is_sharded_supported) {
                 // A shard's first page: page offset within shard is 0.
                 return sharded_bank_noc_addr(shard_id, /*page_offset_within_shard=*/0, offset, noc);
             }
@@ -284,11 +284,14 @@ struct TensorAccessor {
         }
     }
 
-    // L1-sharded page addressing. Ports the static-rank path of
+    // Sharded page addressing (L1 or DRAM). Ports the static-rank path of
     // tt_metal/hw/inc/api/tensor/tensor_accessor.h::get_bank_and_offset onto emule's
-    // NoC helper. Only reached for is_sharded_supported && !is_dram (guarded above); the
-    // shadow otherwise routes through InterleavedAddrGen, which ignores sharding and
-    // was the cause of the "column-0 only" corruption on sharded reshape/tilize.
+    // NoC helper. Reached for any is_sharded_supported tensor; the L1 and DRAM banks
+    // then diverge in bank_addr_from_shard (worker-coord get_noc_addr for L1 vs the
+    // physical dram_bank_to_noc_xy table for DRAM). Previously the whole sharded path
+    // was gated to !is_dram, so DRAM-sharded tensors wrongly fell through to
+    // InterleavedAddrGen — the cause of the width-sharded-DRAM tilize round-trip
+    // corruption (#45331).
     FORCE_INLINE uint64_t sharded_noc_addr(uint32_t page_id, uint32_t offset, uint8_t noc) const {
         constexpr uint32_t R = DSpec::ShardedRank;
         uint32_t ts[R]{}, ss[R]{};
@@ -357,7 +360,24 @@ struct TensorAccessor {
         const uint32_t bank_x = (xy >> 8) & 0xFF;  // packed as (x << 8) | y
         const uint32_t bank_y = xy & 0xFF;
         const uint32_t page_size = aligned_page_size == 0 ? 1u : aligned_page_size;
-        const uint32_t addr = static_cast<uint32_t>(bank_base_address) + bank_page_offset * page_size + offset;
+        uint32_t addr = static_cast<uint32_t>(bank_base_address) + bank_page_offset * page_size + offset;
+        if constexpr (DSpec::is_dram) {
+            // DRAM path — mirror InterleavedAddrGen<DRAM> exactly (both live over the
+            // same runner-populated bank tables in internal/dataflow/dataflow_api_addrgen.h):
+            //   1) fold in the per-bank DRAM base offset (bank_to_dram_offset);
+            //   2) take the *physical* DRAM bank NoC coords from dram_bank_to_noc_xy —
+            //      NOT the tensor's logical bank_coords metadata (bank_xy), which is a
+            //      worker-style (x<<8)|y encoding that does not match emule's physical
+            //      DRAM bank placement for banks > 0; and
+            //   3) build the NoC address directly, bypassing ::get_noc_addr whose
+            //      __emule_addr_to_offset step slot-masks to 2 MB (only valid for local
+            //      L1 pointers; a DRAM bank offset can exceed 2 MB).
+            // Using bank_xy + the 2 MB mask was the width-sharded-DRAM tilize corruption
+            // (#45331). bank_id indexes the tensor's bank list = the DRAM bank index.
+            addr += static_cast<uint32_t>(bank_to_dram_offset[bank_id]);
+            const uint32_t dram_noc_xy = dram_bank_to_noc_xy[noc][bank_id];
+            return (static_cast<uint64_t>(dram_noc_xy) << NOC_ADDR_COORD_SHIFT) | static_cast<uint64_t>(addr);
+        }
         return ::get_noc_addr(bank_x, bank_y, addr, noc);
     }
 
