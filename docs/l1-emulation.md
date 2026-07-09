@@ -13,7 +13,7 @@ Companion docs: [cb-emulation.md](cb-emulation.md) (CBs live in L1),
 [dram-emulation.md](dram-emulation.md) (the banked sibling),
 [mem-zeros-handling.md](mem-zeros-handling.md) (the MEM_ZEROS region),
 [noc-emulation.md](noc-emulation.md) (NOC address resolution),
-[multichip/l1-offset-translation.md](multichip/l1-offset-translation.md) (the
+[l1-offset-translation.md](l1-offset-translation.md) (the
 offset addressing model + the JIT patch pass, in depth).
 
 ---
@@ -46,7 +46,7 @@ editing the upstream kernel:
   fill-pad, etc.). These sites are rebased **at the cast** by a JIT-time
   source-transform pass (`apply_x86_rewrites`), which writes a temp
   `patched_kernel.cpp` — upstream kernel files stay pristine. See
-  [multichip/l1-offset-translation.md](multichip/l1-offset-translation.md).
+  [l1-offset-translation.md](l1-offset-translation.md).
 
 Because a kernel-visible address is an offset (not a host pointer), it is
 **address-space independent**: the same offset names the same L1 word on any chip
@@ -168,7 +168,7 @@ through the `extern "C"` hooks and inline chokepoint above (exported via
   `mmap` for worker cores) so a mesh whose total L1 exceeds 4 GB — e.g. a 32-chip
   Blackhole galaxy — fits in one process is a separate, behavior-neutral change
   on top of this model; see
-  [multichip/l1-offset-translation.md](multichip/l1-offset-translation.md).
+  [l1-offset-translation.md](l1-offset-translation.md).
 
 ---
 
