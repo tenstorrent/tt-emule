@@ -60,28 +60,6 @@ if(TT_EMULE_BUILD_TESTS)
     )
     add_test(NAME test_tilize_pack_offset COMMAND test_tilize_pack_offset)
 
-    add_executable(test_tensor_accessor_binding_token
-        tests/jit_hw/test_tensor_accessor_binding_token.cpp
-    )
-    target_link_libraries(test_tensor_accessor_binding_token PRIVATE tt-emule::headers)
-    target_include_directories(test_tensor_accessor_binding_token PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/jit_hw
-        ${TT_METAL_DIR}/tt_metal/api
-        ${TT_METAL_DIR}/tt_metal/hostdevcommon/api
-    )
-    add_test(NAME test_tensor_accessor_binding_token COMMAND test_tensor_accessor_binding_token)
-
-    add_executable(test_make_tensor_accessor_tuple
-        tests/jit_hw/test_make_tensor_accessor_tuple.cpp
-    )
-    target_link_libraries(test_make_tensor_accessor_tuple PRIVATE tt-emule::headers)
-    target_include_directories(test_make_tensor_accessor_tuple PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/jit_hw
-        ${TT_METAL_DIR}/tt_metal/api
-        ${TT_METAL_DIR}/tt_metal/hostdevcommon/api
-    )
-    add_test(NAME test_make_tensor_accessor_tuple COMMAND test_make_tensor_accessor_tuple)
-
     add_executable(test_ziveli_compat
         tests/jit_hw/test_ziveli_compat.cpp
     )
@@ -93,6 +71,7 @@ if(TT_EMULE_BUILD_TESTS)
     target_include_directories(test_ziveli_compat PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include/jit_hw
         ${TT_METAL_DIR}
+        ${TT_METAL_DIR}/tt_metal/hw/inc
         ${TT_METAL_DIR}/tt_metal/api
         ${TT_METAL_DIR}/tt_metal/hostdevcommon/api
     )
@@ -109,6 +88,7 @@ if(TT_EMULE_BUILD_TESTS)
     target_include_directories(test_ziveli_conv_chain PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include/jit_hw
         ${TT_METAL_DIR}
+        ${TT_METAL_DIR}/tt_metal/hw/inc
         ${TT_METAL_DIR}/tt_metal/api
         ${TT_METAL_DIR}/tt_metal/hostdevcommon/api
     )

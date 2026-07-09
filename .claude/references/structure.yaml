@@ -2266,31 +2266,6 @@ files:
   symbols:
   - {kind: macro, name: NOC_ADDR_LOCAL_BITS}
   - {kind: struct, name: noc_traits_t}
-- path: include/jit_hw/api/tensor/tensor_accessor.h
-  section: include/jit_hw/api/tensor/
-  summary: '`TensorAccessor`/`TensorAccessorArgs` and type-erased accessor wrappers for JIT kernels'
-  symbols:
-  - {kind: function, name: get_noc_addr}
-  - {kind: namespace, name: tensor_accessor}
-  - {kind: global, name: UNKNOWN}
-  - {kind: struct, name: TensorAccessorArgs}
-  - {kind: function, name: make_tensor_accessor_args_tuple}
-  - {kind: namespace, name: detail}
-  - {kind: struct, name: has_aligned_page_size}
-  - {kind: struct, name: TensorAccessorBindingToken}
-  - {kind: using, name: TensorBindingToken}
-  - {kind: struct, name: Page}
-  - {kind: struct, name: TensorAccessor}
-  - {kind: function, name: make_tensor_accessor_tuple}
-  - {kind: struct, name: ShardView}
-  - {kind: struct, name: AbstractTensorAccessorWrapper}
-  - {kind: function, name: make_abstract_tensor_accessor_wrappers}
-- path: include/jit_hw/api/tensor/tensor_accessor_args.h
-  section: include/jit_hw/api/tensor/
-  summary: forwarding shim for generated-kernel `TensorAccessorArgs` includes
-- path: include/jit_hw/api/tensor/tensor_binding_token.h
-  section: include/jit_hw/api/tensor/
-  summary: forwarding shim for generated-kernel `TensorBindingToken` includes
 - path: include/jit_hw/cpp/ttnn/operations/data_movement/common/kernels/common.hpp
   section: include/jit_hw/cpp/ttnn/operations/data_movement/common/kernels/
   summary: forwarding shim → `ttnn/operations/data_movement/common/kernels/common.hpp`
