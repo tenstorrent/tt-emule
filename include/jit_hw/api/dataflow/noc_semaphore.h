@@ -50,10 +50,7 @@ public:
     // get_semaphore is non-templated for two-phase template lookup reasons
     // (see comment in dataflow_api.h alongside the get_semaphore definition).
     explicit Semaphore(uint32_t semaphore_id)
-        : local_l1_addr_(get_semaphore(semaphore_id)) {
-        l1_offset_ = static_cast<uint32_t>(
-            local_l1_addr_ - reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
-    }
+        : l1_offset_(get_semaphore(semaphore_id)) {}
 
     // ---- Local operations ----
 
@@ -200,10 +197,11 @@ public:
     uint32_t get_l1_addr() const { return l1_offset_; }
 
 private:
-    uintptr_t local_l1_addr_;
-    uint32_t  l1_offset_;  // L1 offset of semaphore (for NOC address construction)
+    uint32_t  l1_offset_;  // 0-based L1 offset of the semaphore
 
     std::atomic<uint32_t>* atom() const {
-        return reinterpret_cast<std::atomic<uint32_t>*>(local_l1_addr_);
+        // Rebase the offset onto this fiber's L1. Direct (not via the sanitizer
+        // chokepoint): the semaphore region is legitimate for this API.
+        return reinterpret_cast<std::atomic<uint32_t>*>(__emule_self->bridge_l1 + l1_offset_);
     }
 };

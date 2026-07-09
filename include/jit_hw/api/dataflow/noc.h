@@ -293,8 +293,10 @@ public:
         uintptr_t s = noc_traits_t<Src>::template src_addr<AddressType::LOCAL_L1>(src, *this, src_args);
         auto mcast_noc_addr = noc_traits_t<Dst>::template dst_addr_mcast<AddressType::NOC>(dst, *this, dst_args);
         if (s) {
+            // src is a LOCAL_L1 offset (per the trait contract) — translate to a
+            // host pointer like the unicast async_write path before the memcpy.
             __emule_multicast_write(static_cast<uint64_t>(mcast_noc_addr),
-                                    reinterpret_cast<const uint8_t*>(s), size_bytes,
+                                    to_host_ptr<AddressType::LOCAL_L1>(s), size_bytes,
                                     has_flag(opts, NocOptions::MCAST_INCL_SRC));
         }
     }

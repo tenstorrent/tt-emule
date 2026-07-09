@@ -71,29 +71,37 @@ private:
 };
 
 // Specialise global ::noc_traits_t<CoreLocalMem<T,AddressType>>.
-// CoreLocalMem::get_address() already returns a host pointer
-// (translates L1 firmware offset → host via __emule_self->bridge_l1 for small addrs).
+// CoreLocalMem stores a host pointer (the ctor rebases a 0-based L1 offset onto
+// __emule_self->bridge_l1 so operator[]/get_unsafe_ptr can deref directly). But a
+// LOCAL_L1 endpoint address is, by convention, a 0-based offset that
+// Noc::to_host_ptr<LOCAL_L1> rebases — so recover the offset here (subtract
+// bridge_l1) to keep the rebase happening exactly once (no double translation).
 template <typename T, typename AddressType>
 struct noc_traits_t<CoreLocalMem<T, AddressType>> {
     struct src_args_type       { uintptr_t offset_bytes = 0; };
     struct dst_args_type       { uintptr_t offset_bytes = 0; };
     struct dst_args_mcast_type { uintptr_t offset_bytes = 0; };
 
+    // Host pointer (CoreLocalMem storage) → 0-based L1 offset.
+    static uintptr_t l1_offset(uintptr_t host_addr) {
+        return host_addr - reinterpret_cast<uintptr_t>(__emule_self->bridge_l1);
+    }
+
     template <Noc::AddressType AT>
     static uintptr_t src_addr(const CoreLocalMem<T, AddressType>& src, const Noc&,
                               const src_args_type& args) {
-        return static_cast<uintptr_t>(src.get_address()) + args.offset_bytes;
+        return l1_offset(static_cast<uintptr_t>(src.get_address())) + args.offset_bytes;
     }
     template <Noc::AddressType AT>
     static uintptr_t dst_addr(const CoreLocalMem<T, AddressType>& dst, const Noc&,
                               const dst_args_type& args) {
-        return static_cast<uintptr_t>(dst.get_address()) + args.offset_bytes;
+        return l1_offset(static_cast<uintptr_t>(dst.get_address())) + args.offset_bytes;
     }
     template <Noc::AddressType AT>
     static uintptr_t dst_addr_mcast(const CoreLocalMem<T, AddressType>& dst, const Noc&,
                                     const dst_args_mcast_type& args) {
-        // Multicast in emulation: return the local host address; the multicast
-        // write in __emule_multicast_write iterates all registered cores.
-        return static_cast<uintptr_t>(dst.get_address()) + args.offset_bytes;
+        // Multicast in emulation: __emule_multicast_write iterates all registered
+        // cores; the resolver rebases the offset per-core.
+        return l1_offset(static_cast<uintptr_t>(dst.get_address())) + args.offset_bytes;
     }
 };

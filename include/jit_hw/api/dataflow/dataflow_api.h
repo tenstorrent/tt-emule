@@ -89,16 +89,13 @@ inline bool __emule_debug_multicast() {
 }
 
 // ---- L1 address conversion helpers ----
-// Extract L1 offset from a host address using bitmask.
-// L1Pool allocates worker slots at 2 MB alignment, so addr & 0x1FFFFF
-// gives the offset within the slot — one AND instruction, no TLS lookup.
-//
-// IMPORTANT: This must only be called at NOC address construction time
-// (get_noc_addr, get_noc_multicast_addr) where the input is a host L1
-// pointer.  It must NOT be applied to firmware-style offsets like DRAM
-// bank addresses from get_noc_addr_from_bank_id (which can exceed 2MB).
+// L1 offset model: a local L1 address is already a 0-based firmware offset
+// (< 1.5 MB worker L1), so the 2 MB slot mask is idempotent here. It is kept as
+// a guard for NOC-address construction (get_noc_addr / get_noc_multicast_addr)
+// and must NOT be applied to firmware-style DRAM bank addresses from
+// get_noc_addr_from_bank_id (which can exceed 2 MB).
 inline uint32_t __emule_addr_to_offset(uint32_t addr) {
-    return addr & 0x1FFFFF;  // SLOT_MASK = 2 MB - 1
+    return addr & 0x1FFFFF;  // 2 MB slot mask; idempotent for in-L1 offsets
 }
 
 // L1 access chokepoint (__emule_local_l1_to_ptr) — single definition shared with
@@ -685,35 +682,23 @@ inline void noc_async_read_inc_num_issued(uint32_t /*num_issued_reads_inc*/,
 #ifndef __EMULE_GET_SEMAPHORE_DEFINED
 #define __EMULE_GET_SEMAPHORE_DEFINED
 inline uint32_t get_semaphore(uint32_t semaphore_id) {
-    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
-    return l1_base + EMULE_SEM_BASE + semaphore_id * EMULE_SEM_ALIGN;
+    // L1 offset model: return the 0-based firmware offset. The rebase to a host
+    // pointer happens at the deref (the L1 pointer cast is translated at JIT
+    // time; NOC ops go through the chokepoint / resolver).
+    return EMULE_SEM_BASE + semaphore_id * EMULE_SEM_ALIGN;
 }
 #endif
-
-// Remap a local-L1 host pointer to the current chip's copy (multi-chip global semaphores);
-// no-op for single-chip. Defined in emulated_program_runner.cpp.
-extern "C" uint8_t* __emule_chip_relative_l1(uint8_t* p);
 
 // Atomic helpers for semaphore operations.
 // volatile reads are unreliable at -O3; use std::atomic for cross-thread visibility.
 inline std::atomic<uint32_t>* __emule_sem_atomic(volatile tt_l1_ptr uint32_t* sem_addr) {
-    // Plain translation (offset-vs-absolute disambiguation only), NOT the
-    // sanitizer chokepoint: this is the legitimate semaphore API, which the
-    // checks must exempt. See docs/ASAN.md §6.
-    uint32_t addr32 = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(const_cast<uint32_t*>(sem_addr)));
-    // Multi-chip: a global semaphore is passed to kernels as one absolute host pointer valid for only
-    // ONE chip's MAP_32BIT mmap. Remap the RAW pointer to the current chip's copy FIRST (before the
-    // offset-vs-absolute translation, which would otherwise mangle a peer-chip absolute pointer whose
-    // numeric value happens to be < the local l1_base). Single-chip short-circuits in the hook (no-op).
-    // DESIGN DIVERGENCE: see tt-emule/.claude/skills/workarounds (DM-1). Faithful mechanism, not a hack.
-    uint8_t* raw = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(addr32));
-    uint8_t* remapped = __emule_chip_relative_l1(raw);
-    uint8_t* final_ptr = (remapped != raw) ? remapped : __emule_local_l1_to_ptr(addr32);
-    if (__emule_debug_multicast()) {
-        fprintf(stderr, "[EMULE_FABRIC]   sem_atomic raw=%p remapped=%p final=%p\n",
-                (void*)raw, (void*)remapped, (void*)final_ptr);
-    }
-    return reinterpret_cast<std::atomic<uint32_t>*>(final_ptr);
+    // L1 offset model: sem_addr is already a translated host pointer — the L1
+    // pointer cast that produced it was rewritten to __emule_local_l1_to_ptr at
+    // JIT time, using THIS fiber's bridge_l1. One shared offset space needs no
+    // per-chip remap (the old DM-1 __emule_chip_relative_l1 is unnecessary) and
+    // no offset-vs-absolute disambiguation. Use it directly — do NOT route
+    // through the sanitizer chokepoint (the semaphore region is legitimate here).
+    return reinterpret_cast<std::atomic<uint32_t>*>(const_cast<uint32_t*>(sem_addr));
 }
 
 // Set semaphore value (local L1 store).

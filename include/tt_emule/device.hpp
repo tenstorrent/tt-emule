@@ -89,14 +89,15 @@ public:
     // 32-bit absolute address of the L1 base (valid if mmap succeeded below 4 GB).
     uint32_t l1_base_addr() const { return l1_base_; }
 
-    // Bump allocate `bytes` from L1; returns absolute host address.
+    // Bump allocate `bytes` from L1; returns a 0-based L1 offset (L1 offset
+    // model — rebased to a host pointer at the deref via bridge_l1).
     // The bump region is the L1 below tt-metal's l1_unreserved_base, which is
     // firmware-reserved on silicon and unused in emule — so allocations here
     // don't collide with anything tt-metal's allocator hands out.
     uint32_t l1_alloc(size_t bytes) {
         if (l1_bump_ + bytes > l1_size_)
             throw std::runtime_error("L1 OOM");
-        uint32_t addr = l1_base_ + static_cast<uint32_t>(l1_bump_);
+        uint32_t addr = static_cast<uint32_t>(l1_bump_);
         l1_bump_ += bytes;
         return addr;
     }

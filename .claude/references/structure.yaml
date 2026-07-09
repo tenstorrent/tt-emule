@@ -2137,7 +2137,6 @@ files:
   - {kind: macro, name: EMULE_SEM_ALIGN}
   - {kind: macro, name: __EMULE_GET_SEMAPHORE_DEFINED}
   - {kind: function, name: get_semaphore}
-  - {kind: extern_c, name: __emule_chip_relative_l1}
   - {kind: function, name: __emule_sem_atomic}
   - {kind: function, name: noc_semaphore_set}
   - {kind: function, name: noc_semaphore_wait}
@@ -2246,9 +2245,6 @@ files:
   symbols:
   - {kind: macro, name: NOC_ADDR_LOCAL_BITS}
   - {kind: struct, name: noc_traits_t}
-- path: include/jit_hw/cpp/ttnn/operations/data_movement/common/kernels/common.hpp
-  section: include/jit_hw/cpp/ttnn/operations/data_movement/common/kernels/
-  summary: forwarding shim → `ttnn/operations/data_movement/common/kernels/common.hpp`
 - path: include/jit_hw/experimental/kernel_args.h
   section: include/jit_hw/experimental/
   summary: '`experimental::` `struct RtaArg`/`CrtaArg`/`CtaVal`; `get_arg_addr`, `get_common_arg_addr`'
@@ -2623,21 +2619,6 @@ files:
 - path: include/jit_hw/sfpu/ckernel_sfpu_rsqrt_compat.h
   section: include/jit_hw/sfpu/
   summary: forwarder → real per-arch `sfpu/ckernel_sfpu_rsqrt_compat.h` so the metal-layer `ckernel_sfpu_sqrt.h` include resolves on emule's JIT -I set
-- path: include/jit_hw/cpp/ttnn/kernel_lib/dest_helpers.hpp
-  section: include/jit_hw/cpp/ttnn/kernel_lib/
-  summary: Redirect shim — resolves the upstream `cpp/ttnn/kernel_lib/dest_helpers.hpp` include (only valid under -I ttnn/) to the real header reachable under emule's -I ttnn/cpp/.
-- path: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/dataflow/chunked_prefill_utils.hpp
-  section: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/dataflow/
-  summary: Redirect shim — resolves the upstream `cpp/ttnn/.../dataflow/chunked_prefill_utils.hpp` include to the real (portable C++) header under emule's -I ttnn/cpp/.
-- path: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/q_chunk_remapping.hpp
-  section: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/
-  summary: Redirect shim — resolves the upstream `cpp/ttnn/.../q_chunk_remapping.hpp` include to the real (portable zigzag index math) header under emule's -I ttnn/cpp/.
-- path: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/sdpa_streaming_qktv.hpp
-  section: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/
-  summary: Redirect shim — resolves the upstream `cpp/ttnn/.../sdpa_streaming_qktv.hpp` include to the real (portable C++) header under emule's -I ttnn/cpp/.
-- path: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/sliding_window_geometry.hpp
-  section: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/
-  summary: Redirect shim — resolves the upstream `cpp/ttnn/.../sliding_window_geometry.hpp` include (SDPA reader/compute K-loop bound geometry) to the real portable header under emule's -I ttnn/cpp/.
 - path: include/jit_hw/experimental/llk_sfpu/ckernel_sfpu_sdpa.h
   section: include/jit_hw/experimental/llk_sfpu/
   summary: emule shadow of the raw-TTI SDPA SFPU header — verbatim silicon first-column helpers (exp polynomial/recip/softplus/fused-max-sub-exp, calculate_binop_with_scalar) over emule's sfpi+ckernel_ops
