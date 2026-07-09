@@ -109,18 +109,25 @@ Four pieces cooperate (all in `emulated_program_runner.cpp`, fed by the shim + a
 - **Per-send route metadata** — the kernel's route setters (`fabric_set_unicast_route` /
   `fabric_set_mcast_route`, shimmed) record each send's intent via `__emule_fabric_set_route`, keyed by the
   packet-header's L1 address (stable and identical between the shim's write and the teleport's read). Kinds:
-  `UNICAST_2D` (explicit `dst_dev`/`dst_mesh`), `UNICAST_1D` (hop distance), `MCAST_1D` (start + range).
+  `UNICAST_2D` (explicit `dst_dev`/`dst_mesh`), `MCAST_2D` (per-direction `{e,w,n,s}` hop counts), `UNICAST_1D`
+  (hop distance), `MCAST_1D` (start + range).
   emule gives the 1D (`LowLatencyPacketHeader`) and 2D (`HybridMesh`/`UDMHybridMesh`) packet-header C++ types
   **distinct** definitions — the 2D variants are empty-derived from the base with the identical 48B layout —
   and selects `PACKET_HEADER_TYPE` from the build-time `EMULE_FABRIC_2D` define. So the kernel's `if constexpr`
-  type dispatch (`worker_routing_utils`' `fabric_set_line_unicast_route`, moe_utils' portable send helpers)
-  picks the branch that matches the fabric config, exactly as silicon does: under a 1D fabric the hop-distance
-  branch — `fabric_set_unicast_route<false>(hdr, distance)` → `UNICAST_1D`; under 2D the explicit-destination
-  branch — `fabric_set_unicast_route(hdr, dst_chip, dst_mesh)` → `UNICAST_2D` (the teleport resolves the exact
-  physical chip). The 1D-distance shim is reached through the variadic overload — a dedicated 2-arg overload
-  loses partial ordering to the library's perfect-forwarding pack — so the variadic recognises the
-  `(packet_header, distance)` shape and stamps `UNICAST_1D`.
-  (`fabric_set_mcast_route` keys its 1D-vs-2D mapping off `EMULE_FABRIC_2D` directly.)
+  type dispatch (`worker_routing_utils`' `fabric_set_line_unicast_route` / `fabric_set_line_multicast_route`,
+  moe_utils' portable send helpers) picks the branch that matches the fabric config, exactly as silicon does:
+  under a 1D fabric the hop-distance branch — `fabric_set_unicast_route<false>(hdr, distance)` → `UNICAST_1D`;
+  under 2D the explicit-destination branch — `fabric_set_unicast_route(hdr, dst_chip, dst_mesh)` → `UNICAST_2D`
+  and `fabric_set_mcast_route(hdr, dst_chip, dst_mesh, e, w, n, s)` → `MCAST_2D` (the teleport resolves the
+  exact physical chip / line members).
+  **The route-setter shims dispatch on *arity*, not on a fixed header-pointer parameter type.** This matters
+  because the 2D header is *derived* from the base 48B `PacketHeader`: a shim overload taking a fixed
+  `volatile PacketHeader*` would require a derived→base conversion for a 2D `HybridMeshPacketHeader*` argument
+  and therefore **lose** overload resolution to the exact-match variadic catch-all — silently dropping the
+  route (kind `UNSET`), so the teleport falls back to the single physical neighbor (the wrong chip on a
+  submesh line, → a quiescent barrier deadlock). Folding both the 1D `(hdr, distance)` [2-arg] and 2D
+  `(hdr, dst_chip, dst_mesh)` [3-arg] / `(hdr, dst_chip, dst_mesh, e, w, n, s)` [7-arg] shapes into one
+  arity-dispatched variadic per setter keeps every header type an exact match, so the route is always stamped.
 - **Per-connection direction** — for 1D the dst chip is bound to the *connection* (which ethernet channel it
   opened on), information that lives in the firmware connection table emule skips. emule reconstructs it
   host-side: `append_fabric_connection_rt_args` (which runs unguarded in emule) records each connection's
@@ -217,7 +224,11 @@ silicon/CI failure; the emule harness (`scripts/run_ttnn_pytests_bh_loudbox.sh`)
   configs — **Linear** and **Ring**, both impls, multi-worker / multi-link, including the sub-tile-width /
   row-major / `WIDTH_SHARDED` gemma shapes (`test_all_gather_failing_shapes`, `test_all_gather_broken`); and
   `reduce_scatter` **16/16** (Linear + Ring, PCC ~1.0). On `box/nightly`, `all_gather` is **54/54** and the
-  2D + `minimal_*` suites are green. n300/p300 2-chip CCL stays green (the subsumed degenerate path).
+  2D + `minimal_*` suites are green. The **DRAM-resident** `FABRIC_2D` / fabric-MUX configs
+  (`all_gather_2d_fabric[_turning]`, `reduce_scatter_2d_fabric`, `minimal_all_gather_async`,
+  `minimal_reduce_scatter_async`) are green too — they exercise the arity-dispatched 2D route setters that
+  stamp the barrier atomic-inc's route for the derived `HybridMeshPacketHeader`. n300/p300 2-chip CCL stays
+  green (the subsumed degenerate path).
 - **Direction resolution** — a 1D send's direction comes from the mux-core → direction lookup (`g_mux_dir`;
   the sender carries the mux's NOC coords, the teleport translates them back), with range-matching as a
   fallback. Routes and atomic-incs resolve to the correct chips (e.g. `src=1 →N→ 5`, `src=5 →S→ 1`;
@@ -257,9 +268,14 @@ silicon/CI failure; the emule harness (`scripts/run_ttnn_pytests_bh_loudbox.sh`)
 
 ## Other limits & notes
 
-- **DRAM-resident CCL** — the canonical DRAM `point_to_point` shapes hit a pre-existing DRAM bank-view
-  collapse in `__emule_resolve_noc_addr` (distinct DRAM noc-addrs alias one backing), independent of the
-  fabric path (which is bit-exact for L1).
+- **DRAM-resident CCL** — faithful on both fabric paths. The 2-chip *direct* path is bit-exact after the
+  DRAM bank-view fix in the fabric address recompose (`safe_get_noc_addr` no longer applies the 2 MB
+  worker-slot mask to DRAM addresses). The 8-chip loudbox `FABRIC_2D` / fabric-MUX DRAM configs
+  (`all_gather_2d_fabric[_turning]`, `reduce_scatter_2d_fabric`, `minimal_all_gather_async`,
+  `minimal_reduce_scatter_async`) run without deadlock once the 2D route setters stamp the route for the
+  derived `HybridMeshPacketHeader` (the arity-dispatch fix above) — before it, the unstamped barrier
+  atomic-inc fell back to the physical neighbor (the other mesh row, outside the collective's submesh line),
+  so the consumer's barrier semaphore was never incremented and every fiber parked.
 - **Inert value-divergent stubs** — `get_fabric_max_packet_size()`→4096, `get_next_hop_router_direction`→EAST,
   `eth_chan_to_noc_xy` zeroed. Not load-bearing: the teleport resolves the destination from the control plane
   and the per-connection record, never from the kernel's (firmware-skipped) routing-table reads.
