@@ -58,6 +58,7 @@ files:
   summary: 'comprehensive fabric stub (multichip out of scope): `using PACKET_HEADER_TYPE`; `struct PacketHeader`/`LowLatencyPacketHeader`/`HybridMeshPacketHeader`; `namespace tt::tt_fabric` `Noc*CommandHeader`
     structs, `class RoutingPlaneConnectionManager`, `open_connections`/`close_connections` no-ops'
   symbols:
+  - {kind: function, name: __emule_fabric_l1_off}
   - {kind: extern_c, name: __emule_fabric_teleport}
   - {kind: extern_c, name: __emule_fabric_set_route}
   - {kind: extern_c, name: __emule_fabric_set_route_dir}

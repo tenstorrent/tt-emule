@@ -439,14 +439,17 @@ narrowed survivors. They are recorded so the broad form is not reintroduced.
 These are not "tried and reverted"; they are cases deliberately left to fail loudly
 or handled elsewhere.
 
-- **No blanket C-style `(uint32_t)ptr` rule (offset-model gap "R2").** Fabric/CCL
-  truncation casts like `(uint32_t)sem_header_ptr` are downgraded to a warning by
-  `-fms-extensions` but are no longer value-preserving (the device address is now
-  `ptr - bridge_l1`, not the low host-pointer bits). A missed site feeds a wrong
-  offset to a NOC/atomic op; the `__emule_l1_translate` debug assert
-  (`offset >= l1_size`) catches it loudly. Add a **name-constrained** rewrite when a
-  real failing kernel surfaces — a blanket `(uint32_t)EXPR` rule would mistranslate
-  non-pointer int casts.
+- **Fabric header-narrow rule ("R2") — name-pattern-constrained, NOT blanket.** Fabric/CCL
+  kernels narrow a translated packet-header L1 *pointer* to a device address via C-style
+  `(uint32_t)<header>`; under the offset model that must yield the 0-based offset
+  (`ptr - bridge_l1`), not the truncated host pointer. The rule matches only a
+  packet-header-pointer identifier (`\w*(hdr|packet_header|header_ptr|header_addr)\w*`) —
+  a blanket `(uint32_t)EXPR` rule would mistranslate ordinary int casts, and even the
+  header-ish pattern deliberately excludes `current_cmd_header` (a `CclCommandHeader`
+  *value*). It pairs with the fabric shim's offset↔pointer translation
+  (`__emule_fabric_stubs.h`) and the chip-qualified route key so the fabric carries offsets
+  end-to-end and survives worker L1 above 4 GB. An over-match of a non-pointer is loud:
+  `reinterpret_cast<uintptr_t>(non_pointer)` is ill-formed and fails the JIT compile.
 - **Macro-hidden pointer casts — covered only for collected vars.** The pass runs
   before the C preprocessor, so a `#define`d pointer type hides both the `*` and the
   `tt_l1_ptr` token from every regex (e.g. the pad *stickwise* kernels'

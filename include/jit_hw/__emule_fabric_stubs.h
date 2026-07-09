@@ -31,6 +31,15 @@
 
 #include "jit_hw/tt-metalium/experimental/fabric/fabric_edm_types.hpp"  // tt::tt_fabric::Topology (single def)
 #include "jit_hw/internal/emule_thread_ctx.h"  // ThreadCommonCtx + __emule_self (per-fiber conn open-seq counter)
+#include "jit_hw/internal/emule_l1_to_ptr.h"  // __emule_local_l1_to_ptr + __emule_self (offset<->host ptr)
+
+// L1 offset model: fabric L1 addresses cross the shim as 0-based offsets. Narrow a header/payload
+// host pointer to its offset (widen with __emule_local_l1_to_ptr). Not a truncation — survives worker
+// L1 mapped above 4 GB, which the old `(uint32_t)ptr` truncation does not (the >4 GB galaxy needs this).
+inline uint32_t __emule_fabric_l1_off(const volatile void* p) {
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p) -
+                                 reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
+}
 
 // Runtime teleport hooks (resolved at JIT link time to the runner symbols).
 extern "C" void __emule_fabric_teleport(const void* packet_header, const void* payload, uint32_t payload_size);
@@ -326,7 +335,7 @@ struct WorkerToFabricEdmSender {
 
     // Stage the payload; the subsequent header flush performs the teleport.
     void send_payload_without_header_non_blocking_from_address(uint32_t src_addr, uint32_t size) {
-        pending_payload = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(src_addr));
+        pending_payload = __emule_local_l1_to_ptr(src_addr);  // src_addr is a 0-based L1 offset
         pending_size = size;
     }
     // Header sends → teleport using any staged payload.
@@ -359,7 +368,7 @@ private:
         // Record this connection's direction signals so the teleport can resolve a 1D dst by direction.
         __emule_fabric_set_route_dir(header_addr, emule_conn_index, emule_mux_x, emule_mux_y);
         __emule_fabric_teleport(
-            reinterpret_cast<const void*>(static_cast<uintptr_t>(header_addr)), pending_payload, pending_size);
+            __emule_local_l1_to_ptr(header_addr), pending_payload, pending_size);  // header_addr is a 0-based L1 offset
         pending_payload = nullptr;
         pending_size = 0;
     }
@@ -403,7 +412,7 @@ public:
 namespace emule_route {
 enum Kind : uint32_t { UNSET = 0, UNICAST_1D = 1, UNICAST_2D = 2, MCAST_1D = 3, MCAST_2D = 4 };
 inline uint32_t key(volatile PacketHeader* hdr) {
-    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hdr));
+    return __emule_fabric_l1_off(hdr);
 }
 }  // namespace emule_route
 
@@ -484,7 +493,7 @@ inline void fabric_async_write(Conn& connection_handle, Hdr* packet_header, uint
     connection_handle.wait_for_empty_write_slot();
     connection_handle.send_payload_without_header_non_blocking_from_address(src_addr, size);
     connection_handle.send_payload_flush_blocking_from_address(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(const_cast<void*>(static_cast<const volatile void*>(packet_header)))),
+        __emule_fabric_l1_off(packet_header),
         sizeof(PacketHeader));
 }
 
@@ -566,7 +575,7 @@ inline void fabric_unicast_noc_unicast_write_with_state(
     client->wait_for_empty_write_slot();
     client->send_payload_without_header_non_blocking_from_address(src_addr, hdr->payload_size_bytes);
     client->send_payload_flush_non_blocking_from_address(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hdr)), sizeof(PacketHeader));
+        __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
 }
 
 // ---- Scatter write (stateful: set_state lays the static fields once, with_state patches only the masked
@@ -595,7 +604,7 @@ inline void fabric_unicast_noc_scatter_write_with_state(
     client->wait_for_empty_write_slot();
     client->send_payload_without_header_non_blocking_from_address(src_addr, hdr->payload_size_bytes);
     client->send_payload_flush_non_blocking_from_address(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hdr)), sizeof(PacketHeader));
+        __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
 }
 
 // ---- Unicast atomic inc (no payload; the teleport increments val@8 at the dst noc address) ----
@@ -628,7 +637,7 @@ inline void fabric_unicast_noc_unicast_atomic_inc_with_state(Conn* client, Packe
     }
     client->wait_for_empty_write_slot();
     client->send_payload_flush_non_blocking_from_address(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hdr)), sizeof(PacketHeader));
+        __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
 }
 
 // ---- Multicast atomic inc: emule has no real multicast; the teleport reaches the single neighbor
@@ -699,7 +708,7 @@ inline void fabric_unicast_noc_unicast_atomic_inc(
     hdr->payload_size_bytes = 0;
     client->wait_for_empty_write_slot();
     client->send_payload_flush_non_blocking_from_address(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(const_cast<PacketHeader*>(hdr))), sizeof(PacketHeader));
+        __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
 }
 // Multicast atomic-inc: stamp the MCAST_1D extent (start_distance, range) — as the *_set_state form does —
 // so the teleport replays the atomic-inc to every chip in [start, start+range), then teleport.
@@ -713,7 +722,7 @@ inline void fabric_multicast_noc_unicast_atomic_inc(
 #endif
     client->wait_for_empty_write_slot();
     client->send_payload_flush_non_blocking_from_address(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(const_cast<PacketHeader*>(hdr))), sizeof(PacketHeader));
+        __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
 }
 // Route-manager (RoutingPlaneConnectionManager&, route_id, ...) overloads and the stateless write forms
 // are not reached by any emule-supported op today; the variadic no-ops below absorb them. The concrete

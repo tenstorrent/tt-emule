@@ -94,9 +94,12 @@ deliberate non-rules are documented in [jit-l1-patch-pass.md](jit-l1-patch-pass.
 A missed forward site dereferences a small offset as a pointer → an immediate SIGSEGV
 at the real kernel `file:line` (the `#line` is preserved). This is the loud-failure
 net: coverage gaps announce themselves rather than silently corrupting, so the rule
-set is grown against real kernels. Known gap: the C-style `(uint32_t)packet_header`
-narrowings in the fabric client API are not yet rewritten; the `__emule_l1_translate`
-debug assert catches the resulting out-of-range offset loudly (see the derisk doc, R2).
+set is grown against real kernels. The fabric client API's C-style
+`(uint32_t)<packet-header>` narrowings ("R2") are rewritten to the 0-based offset by a
+name-pattern-constrained rule, paired with the fabric shim's offset↔pointer translation
+(`__emule_fabric_stubs.h`) and a chip-qualified route key — so the fabric carries offsets,
+not truncated pointers, and survives worker L1 mapped above 4 GB (see
+[fabric-ccl-emulation.md](fabric-ccl-emulation.md) and [jit-l1-patch-pass.md](jit-l1-patch-pass.md)).
 
 ## Relationship to worker-L1 placement
 
