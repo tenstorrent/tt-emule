@@ -406,8 +406,20 @@ run_pytest "dm_test_sort_long_tensor_262144" "$DM_TEST_DIR/test_sort.py::test_so
 # (mask/sink/sliding); chunked is the streaming + paged-KV path; joint is the
 # image+text MMDiT path.
 run_pytest "sdpa_test_prefill"  "$SDPA_TEST_DIR/test_sdpa_prefill.py"
-run_pytest "sdpa_test_chunked"  "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_chunked.py"  # 18 passed, 16 skipped
-run_pytest "sdpa_test_joint"    "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_joint.py"    # 168 passed, 32 skipped
+# Split the two slow nightly SDPA files into -k slices that each fit the per-entry 900s timeout; the slices
+# are COMPLEMENT partitions (k256/q256; b1/bf16/nh1 vs negations) so no test is silently dropped — a stray
+# lands in a catch-all and trips the cap loudly. joint _small = `not 20481` (its only large seq_len). Largest slice ~283s on WH.
+run_pytest "sdpa_test_chunked_a" "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_chunked.py" -k 'k256 and q256'
+run_pytest "sdpa_test_chunked_b" "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_chunked.py" -k 'k256 and not q256'
+run_pytest "sdpa_test_chunked_c" "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_chunked.py" -k 'not k256 and q256'
+run_pytest "sdpa_test_chunked_d" "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_chunked.py" -k 'not k256 and not q256'
+run_pytest "sdpa_test_joint_small"       "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_joint.py" -k 'not 20481'
+run_pytest "sdpa_test_joint_b1_bf16"     "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_joint.py" -k '20481 and b1 and bf16'
+run_pytest "sdpa_test_joint_b1_bfp8"     "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_joint.py" -k '20481 and b1 and not bf16'
+run_pytest "sdpa_test_joint_b2_bf16_nh1" "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_joint.py" -k '20481 and not b1 and bf16 and nh1'
+run_pytest "sdpa_test_joint_b2_bf16_nh3" "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_joint.py" -k '20481 and not b1 and bf16 and not nh1'
+run_pytest "sdpa_test_joint_b2_bfp8_nh1" "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_joint.py" -k '20481 and not b1 and not bf16 and nh1'
+run_pytest "sdpa_test_joint_b2_bfp8_nh3" "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_joint.py" -k '20481 and not b1 and not bf16 and not nh1'
 run_pytest "sdpa_test_decode"   "$SDPA_TEST_DIR/test_sdpa_decode.py"           # 13 passed, 1 skipped (fiber yield + multi-core softmax fix)
 run_pytest "mla_test_decode"    "$SDPA_TEST_DIR/test_mla_decode.py"            # multi-core reduction fix
 
