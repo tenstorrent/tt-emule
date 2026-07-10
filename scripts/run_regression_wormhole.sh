@@ -195,15 +195,18 @@ echo "== Tier 3: JIT Kernel Execution =="
 run_test "TensixL1Tile"     "$API_BIN" --gtest_filter="MeshDeviceFixture.TensixTestSimpleL1ReadWrite*"
 
 # ===========================================================================
-# Tier 3a: API Sanity / Violation Checks
+# Tier 3a: ASan Checks
 # ===========================================================================
 echo ""
-echo "== Tier 3a: API Sanity / Violation Checks =="
+echo "== Tier 3a: ASan Checks =="
 
 # Filters use globs so positive controls + future additions are picked up
 # automatically — any change to an emule check should be validated by re-running
 # this block (see SANITIZER_CHECKS.md).
-run_test "alignment_writes"       "$API_BIN" --gtest_filter="MeshDeviceFixture.Noc*"
+# The DRAM-read alignment death/control tests are arch-specific (WH = 32 B, BH =
+# 64 B): exclude the _BH variants here — under wormhole_N150.yaml they'd fail the
+# 32 B rule / expect the 64 B message. blackhole runs the mirror set (excludes _WH).
+run_test "alignment_writes"       "$API_BIN" --gtest_filter="MeshDeviceFixture.Noc*:-MeshDeviceFixture.*_BH"
 run_test "cb_leak"                "$API_BIN" --gtest_filter="MeshDeviceFixture.Dirty_CB_*"
 # CB_Reservation: the *Overflow* death-tests are grouped ALONE (no in-parent
 # LaunchProgram before them), and the non-death ExactCapacity control runs in a

@@ -156,6 +156,26 @@ struct ThreadCommonCtx {
     uint32_t san_resolved_count = 0;
     uint64_t san_resolved_log[__EMULE_SAN_RESOLVED_CAP] = {};
 
+    // Fabric PacketHeaderPool allocation state (per-fiber). Silicon re-zeroes these
+    // statics on every program launch (fresh kernel .bss); emule reuses the JIT .so,
+    // so a `thread_local` would leak the cursor + route table across ops on a persistent
+    // worker — the cursor overflows the per-RISC partition and the route_id table wraps,
+    // corrupting the fabric multicast routes → wrong-chip / garbage relays (tt-emule #221).
+    // Homing them in the per-fiber ctx (a fresh object per launch, see launch_cores) makes
+    // the pool fresh per program, matching silicon. Read/written by the packet_header_pool.h
+    // shadow via __emule_self. PHDR_MAX_ROUTES mirrors the shadow's MAX_ROUTES.
+    static constexpr uint32_t PHDR_MAX_ROUTES = 16;
+    uint32_t phdr_cursor = 0;                        // next free header index in this RISC partition
+    uint8_t  phdr_route_count = 0;                   // routes registered this launch
+    uint32_t phdr_route_first[PHDR_MAX_ROUTES] = {}; // route_id → first header index
+    uint8_t  phdr_route_num[PHDR_MAX_ROUTES] = {};   // route_id → header count
+
+    // Direct 4-directional fabric path: each WorkerToFabricEdmSender::build_from_args hands out the next
+    // connection open-sequence index here, which the teleport uses as the connection's dir_index into the
+    // host-recorded per-src connection table (g_conn_route). Fresh per launch (fresh ctx), matching the
+    // kernel opening its connections once from index 0. See docs/fabric-ccl-emulation.md.
+    uint32_t fabric_open_conn_seq = 0;
+
     explicit ThreadCommonCtx(Kind k) : kind(k) {}
     virtual ~ThreadCommonCtx() = default;  // owned via base ptr (runner/fiber)
 };

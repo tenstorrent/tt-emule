@@ -153,10 +153,22 @@ inline uint64_t get_noc_addr(uint32_t addr, uint8_t noc = noc_index) {
 }
 
 // safe_get_noc_addr — silicon's bounds-aware variant; fabric/CCL kernels (addrgen_api.h,
-// minimal_ccl_common.hpp) use it to (re)compose a NOC address. emule's __emule_addr_to_offset is
-// idempotent for in-slot offsets, so this round-trips a get_noc_address_components() decode exactly.
-inline uint64_t safe_get_noc_addr(uint32_t noc_x, uint32_t noc_y, uint32_t addr, uint8_t noc = noc_index) {
-    return get_noc_addr(noc_x, noc_y, addr, noc);
+// api_common.h, minimal_ccl_common.hpp) use it to (re)compose a NOC address, typically from the
+// (x, y, offset) triple that get_noc_address_components() decoded off an already-final NOC address
+// (e.g. the Wormhole DRAM-write recompose in linear/addrgen_api.h). `addr` is therefore a final
+// NOC-local offset (up to the full 36-bit local field), NOT a worker L1 pointer that needs the
+// 2 MB slot mask. Recombine it raw — same rationale as UnicastEndpoint::get_noc_unicast_addr
+// (endpoints.h): routing through __emule_addr_to_offset masks to 0x1FFFFF, which silently truncates
+// DRAM view offsets (Wormhole odd views live at +1 GB) so distinct banks on one channel collapse
+// onto the first 2 MB. __emule_resolve_noc_addr applies the worker-slot mask itself for WORKER
+// cores and keeps the full offset for DRAM, so no masking is needed here.
+// `noc` is unused — like get_noc_addr(x,y,addr) above and UnicastEndpoint::get_noc_unicast_addr,
+// emule doesn't model NOC0/NOC1 coord mirroring (the (x,y) already name the target and the resolver
+// decodes them regardless of noc). Name elided to keep silicon's signature without -Wunused-parameter.
+inline uint64_t safe_get_noc_addr(uint32_t noc_x, uint32_t noc_y, uint32_t addr, uint8_t /*noc*/ = noc_index) {
+    return (uint64_t(noc_y & 0x3F) << (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) |
+           (uint64_t(noc_x & 0x3F) << NOC_ADDR_LOCAL_BITS) |
+           uint64_t(addr);
 }
 inline uint64_t safe_get_noc_addr(uint32_t addr, uint8_t noc = noc_index) { return get_noc_addr(addr, noc); }
 
