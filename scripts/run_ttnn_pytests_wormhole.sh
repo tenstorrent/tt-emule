@@ -413,9 +413,10 @@ run_pytest "dm_test_sort_long_tensor_262144" "$DM_TEST_DIR/test_sort.py::test_so
 # (mask/sink/sliding); chunked is the streaming + paged-KV path; joint is the
 # image+text MMDiT path.
 run_pytest "sdpa_test_prefill"  "$SDPA_TEST_DIR/test_sdpa_prefill.py"
-# Split the two slow nightly SDPA files into -k slices that each fit the per-entry 900s timeout; the slices
-# are COMPLEMENT partitions (k256/q256; b1/bf16/nh1 vs negations) so no test is silently dropped — a stray
-# lands in a catch-all and trips the cap loudly. joint _small = `not 20481` (its only large seq_len). Largest slice ~283s on WH.
+# Split the two slow nightly SDPA files into -k slices that each fit the per-entry 900s timeout. The slices
+# form an exhaustive complement partition (chunked: the k256/q256 truth table; joint: `not 20481`, then b1 by
+# dtype, then b2 by dtype and nh1) -- every test matches exactly one slice, none dropped or double-run
+# (verified via --collect-only: chunked 34, joint 200). A newly-added slow config trips its slice's 900s cap. Largest slice ~283s on WH.
 run_pytest "sdpa_test_chunked_a" "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_chunked.py" -k 'k256 and q256'
 run_pytest "sdpa_test_chunked_b" "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_chunked.py" -k 'k256 and not q256'
 run_pytest "sdpa_test_chunked_c" "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_chunked.py" -k 'not k256 and q256'

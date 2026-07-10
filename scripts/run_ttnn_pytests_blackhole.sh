@@ -487,9 +487,10 @@ run_pytest "sdpa_test_prefill"  "$SDPA_TEST_DIR/test_sdpa_prefill.py" \
     --deselect "tests/ttnn/unit_tests/operations/sdpa/test_sdpa_prefill.py::test_sdpa_noncausal[b=1-nh=8-nkv=1-s=2048-d=128-k128-q128-bf16]" \
     --deselect "tests/ttnn/unit_tests/operations/sdpa/test_sdpa_prefill.py::test_sdpa_sliding_window[b=1-nh=8-nkv=1-s=8192-d=128-sliding_window=512-k256-q256-bfp8]" \
     --deselect "tests/ttnn/unit_tests/operations/sdpa/test_sdpa_prefill.py::test_sdpa_with_attention_sink[b=1-nh=8-nkv=1-s=256-d=32-k128-q32-noncausal-bf16]"
-# Split the two slow nightly SDPA files into -k slices that each fit the per-entry 900s timeout; the slices
-# are COMPLEMENT partitions (k256/q256; b1/bf16/nh1 vs negations) so no test is silently dropped — a stray
-# lands in a catch-all and trips the cap loudly. joint _small = `not 20481` (its only large seq_len). Largest slice ~430-460s on BH; chunked ~80s/test.
+# Split the two slow nightly SDPA files into -k slices that each fit the per-entry 900s timeout. The slices
+# form an exhaustive complement partition (chunked: the k256/q256 truth table; joint: `not 20481`, then b1 by
+# dtype, then b2 by dtype and nh1) -- every test matches exactly one slice, none dropped or double-run
+# (verified via --collect-only: chunked 34, joint 200). A newly-added slow config trips its slice's 900s cap. Largest slice ~430-460s on BH; chunked ~80s/test.
 run_pytest "sdpa_test_chunked_a" "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_chunked.py" -k 'k256 and q256'
 run_pytest "sdpa_test_chunked_b" "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_chunked.py" -k 'k256 and not q256'
 run_pytest "sdpa_test_chunked_c" "$NIGHTLY_SDPA_TEST_DIR/test_sdpa_chunked.py" -k 'not k256 and q256'
