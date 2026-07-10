@@ -180,9 +180,14 @@ Kernels are intercepted at the worker→fabric-client boundary, not the router. 
 - **`PacketHeaderPool`** (`tt_metal/fabric/hw/inc/packet_header_pool.h`) — hands out header storage from the
   reserved L1 region via `__emule_local_l1_to_ptr`, so a header lives in the running fiber's **real** worker
   L1 (kernels dereference `header->field`). The kernel/shim narrows `(uint32_t)header` to that header's
-  **0-based L1 offset** (`ptr - bridge_l1`); the teleport re-widens it with `__emule_local_l1_to_ptr` and the
-  route table is keyed by the (chip-qualified) offset — so a header survives worker L1 mapped above 4 GB,
-  which the old `(uint32_t)ptr` truncation does not. Partitioned per RISC by `__emule_self->processor_id`.
+  **0-based L1 offset** (`ptr - bridge_l1`); the teleport re-widens it with `__emule_local_l1_to_ptr`. The
+  route table is keyed by the header's **full host pointer** (`bridge_l1 + offset`) — unique per
+  *(chip, core, offset)*. The offset alone is **both** chip- and core-agnostic (0-based within every core's
+  L1), so an offset key — even chip-qualified — collides across cores of one chip (one core's route
+  overwriting another's → wrong-chip delivery → PCC fail / a fiber waiting on an atomic-inc that lands
+  elsewhere → deadlock); the full host pointer restores the per-core uniqueness the old truncated-pointer key
+  had, untruncated so it survives worker L1 mapped above 4 GB (the key is host-side runner state, never a
+  kernel/L1 value). Partitioned per RISC by `__emule_self->processor_id`.
   - **Per-fiber allocation state:** the allocation cursor and route table (`phdr_cursor` / `phdr_route_*`)
     live in the running fiber's `ThreadCommonCtx`, which the runner allocates fresh per program launch. That
     makes the pool reset per launch — mirroring silicon, where each program gets a fresh pool (zeroed kernel
