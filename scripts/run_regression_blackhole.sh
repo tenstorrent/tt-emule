@@ -139,6 +139,53 @@ run_test "dst_capacity_bf16"  "$API_BIN" --gtest_filter="DstJitBF16.*"
 run_test "dst_capacity_fp32"  "$API_BIN" --gtest_filter="DstJitFP32.*"
 
 # ===========================================================================
+# Tier 3a: ASan Checks
+# ===========================================================================
+echo ""
+echo "== Tier 3a: ASan Checks =="
+
+export TT_METAL_MOCK_CLUSTER_DESC_PATH="$CLUSTER_EXAMPLES/blackhole_P100.yaml"
+export TT_METAL_EMULE_MODE=1
+export TT_METAL_SLOW_DISPATCH_MODE=1
+export TT_METAL_RUNTIME_ROOT="$TT_METAL_DIR"
+
+# Mirror of wormhole's Tier 3a (same 12 MeshDeviceFixture.* sanitizer suites,
+# same per-process/fork-safe splits). Filters use globs so positive controls +
+# future additions are picked up automatically — any change to an emule check
+# should be validated by re-running this block (see SANITIZER_CHECKS.md).
+# The DRAM-read alignment death/control tests are arch-specific (WH = 32 B, BH =
+# 64 B): exclude the _WH variants here — under blackhole_P100.yaml they'd fail
+# the 64 B rule / expect the 32 B message. wormhole runs the mirror set (excludes _BH).
+run_test "alignment_writes"       "$API_BIN" --gtest_filter="MeshDeviceFixture.Noc*:-MeshDeviceFixture.*_WH"
+run_test "cb_leak"                "$API_BIN" --gtest_filter="MeshDeviceFixture.Dirty_CB_*"
+# CB_Reservation: the *Overflow* death-tests are grouped ALONE (no in-parent
+# LaunchProgram before them), and the non-death ExactCapacity control runs in a
+# separate invocation. Under the fiber runtime a prior non-death LaunchProgram
+# leaves the parent multi-threaded, so a later EXPECT_DEATH fork inherits the
+# worker pool and the child deadlocks — split so each death-test forks clean.
+run_test "cb_pages"               "$API_BIN" --gtest_filter="MeshDeviceFixture.CB_Reservation_Overflow_*"
+run_test "cb_reserve_exact"       "$API_BIN" --gtest_filter="MeshDeviceFixture.CB_Reservation_ExactCapacity_NoViolation"
+run_test "host_alignment"         "$API_BIN" --gtest_filter="MeshDeviceFixture.Host_Alignment_*"
+run_test "metadata_size"          "$API_BIN" --gtest_filter="MeshDeviceFixture.Metadata_*"
+run_test "noc_without_barrier"    "$API_BIN" --gtest_filter="MeshDeviceFixture.NoC_Barrier_*"
+run_test "padded_write"           "$API_BIN" --gtest_filter="MeshDeviceFixture.Tensor_Padding_*"
+run_test "semaphore_write"        "$API_BIN" --gtest_filter="MeshDeviceFixture.Semaphore_*"
+run_test "tensor_bad_access"      "$API_BIN" --gtest_filter="MeshDeviceFixture.Host_UAF_*"
+# Object_Intent: the fiber scheduler now restores the per-fiber resolved-range log on
+# swap-in and launch_cores re-runs the pre/post Object-Intent snapshot+verify around each
+# single-kernel core (tt-emule #241), so the *Violation* death-tests fire again. Grouped
+# apart from the non-death controls so each EXPECT_DEATH forks clean (same fork-after-parent-
+# threads split as CB_Reservation / CB_Boundary above).
+run_test "object_intent_violation" "$API_BIN" --gtest_filter="MeshDeviceFixture.Object_Intent_*Violation*:-MeshDeviceFixture.*NoViolation*"
+run_test "object_intent_controls"  "$API_BIN" --gtest_filter="MeshDeviceFixture.Object_Intent_*NoViolation*"
+# CB_Boundary checks use fiber-local CB reserved-pages state (not the range thread_locals),
+# so they fire correctly — they only need the death-tests grouped apart from the non-death
+# controls (same fork-after-parent-threads split as CB_Reservation above).
+run_test "write_beyond_res_pages" "$API_BIN" --gtest_filter="MeshDeviceFixture.CB_Boundary_*Violation*:-MeshDeviceFixture.*NoViolation*"
+run_test "cb_boundary_controls"   "$API_BIN" --gtest_filter="MeshDeviceFixture.CB_Boundary_*NoViolation*"
+run_test "write_outside_tensor"   "$API_BIN" --gtest_filter="MeshDeviceFixture.OOB_Tensor_*"
+
+# ===========================================================================
 # Tier 4: TTNN INT32 (blackhole_P100.yaml)
 # ===========================================================================
 echo ""
