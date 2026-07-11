@@ -221,6 +221,9 @@ struct ComputeThreadCtx : ThreadCommonCtx {
     // thread_locals; per-fiber here so co-scheduled fibers at >1 fiber/worker don't race — #243).
     bool     dst_holds_int[16] = {};         // was __emule_dst_holds_int (common_globals.h)
     float    exp_init_scale = 1.0f;          // was __emule_exp_init_scale (exp.h)
+    uint32_t remainder_divisor_bits = 0;     // remainder_tile scalars staged by remainder_tile_init (remainder.h)
+    uint32_t remainder_recip_bits = 0;
+    uint32_t fmod_divisor_bits = 0;          // fmod_tile divisor staged by fmod_tile_init (fmod.h)
     uint32_t reduce_block_ct_dim = 1;        // was __emule_reduce_block_ct_dim (reduce_custom.h)
     std::mt19937 rand_engine{};              // was __emule_rand_engine (rand.h)
     bool     rand_deterministic = false;     // was __emule_rand_deterministic
