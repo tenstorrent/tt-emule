@@ -199,7 +199,11 @@ run_pytest "bf_test_graph_capture"         "$BF_TEST_DIR/test_graph_capture.py" 
     -k 'not test_program_cache_invalidation_across_dispatch_modes' \
     --deselect 'tests/ttnn/unit_tests/base_functionality/test_graph_capture.py::test_graph_capture[mode=RunMode.NORMAL-size=64-scalar=3]'
 
-run_pytest "bf_test_graph_report"          "$BF_TEST_DIR/test_graph_report.py" \
+# FORKED=1 (per-item process isolation): the non-forked whole-file run accumulates
+# ttnn graph-report/nanobind state across tests and non-deterministically segfaults in
+# cyclic GC (traceback.extract_stack in ttnn.graph._capture_python_stack_trace) — an
+# upstream nanobind refcount issue, not emule (the entry opens no device). Isolation clears it.
+FORKED=1 run_pytest "bf_test_graph_report"          "$BF_TEST_DIR/test_graph_report.py" \
     -k 'not TestDurationExtraction and not TestFastOperationGraphTracking and not test_resnet50_e2e_graph_capture'
 
 run_pytest "bf_test_reshape"               "$BF_TEST_DIR/test_reshape.py"  # promoted (issue #73): 320 passed
