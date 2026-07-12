@@ -149,7 +149,15 @@ run_pytest "dm_test_creation" "$DM_TEST_DIR/test_creation.py::test_ones" "$DM_TE
 
 # -k filter entries (capture passing subsets within partial-pass files)
 run_pytest "dm_test_repeat"                  "$DM_TEST_DIR/test_repeat.py"  # promoted (issue #73): 109 passed, 242 skipped
-run_pytest "dm_test_gather"                  "$DM_TEST_DIR/test_gather.py"  # promoted (issue #73): 45 passed
+# The gather reader is an O(Wt_index*Wt_input*1024) host element-scan, so the giant single-row
+# shapes are slow on the host emulator (local K=64: long_tensor[1,151936]~106s / [1,128256]~76s,
+# cache_run[1,1,32,65536]~40s). The whole file passes 45/45 locally — not a hang — but at the CI
+# runner's ~4x slowdown their cumulative cost crosses the 900s per-entry timeout. Split into three
+# entries so each fits its own 900s budget and all 45 tests still run (like the sdpa split). The
+# `-k` numbers form an exhaustive complement partition (--collect-only: 42 + 1 + 2 = 45, disjoint).
+run_pytest "dm_test_gather"                  "$DM_TEST_DIR/test_gather.py" -k 'not 151936 and not 128256 and not 65536'  # promoted (issue #73)
+run_pytest "dm_test_gather_151936"           "$DM_TEST_DIR/test_gather.py" -k '151936'  # long_tensor 152K-wide single row (~106s local)
+run_pytest "dm_test_gather_128256_65536"     "$DM_TEST_DIR/test_gather.py" -k '128256 or 65536'  # long_tensor 128K single row + cache_run 65K (~116s local)
 run_pytest "dm_test_concat_5d"               "$DM_TEST_DIR/test_concat.py" -k 'test_concat_5d'
 run_pytest "dm_test_concat_many_inputs"      "$DM_TEST_DIR/test_concat.py" -k 'test_concat_many_inputs'
 run_pytest "dm_test_concat_sharded"          "$DM_TEST_DIR/test_concat.py::test_sharded_concat" "$DM_TEST_DIR/test_concat.py::test_concat_sharded_pad" "$DM_TEST_DIR/test_concat.py::test_sharded_concat_with_groups"  # sharded S2S concat guard (#131): local CB→CB copy was all-zeros before noc_async_read/write_one_packet_with_state reconstructed coords from set_state
