@@ -692,7 +692,7 @@ inline std::atomic<uint32_t>* __emule_sem_atomic(volatile tt_l1_ptr uint32_t* se
     // L1 offset model: sem_addr is already a translated host pointer — the L1
     // pointer cast that produced it was rewritten to __emule_local_l1_to_ptr at
     // JIT time, using THIS fiber's bridge_l1. One shared offset space needs no
-    // per-chip remap (the old DM-1 __emule_chip_relative_l1 is unnecessary) and
+    // per-chip remap and
     // no offset-vs-absolute disambiguation. Use it directly — do NOT route
     // through the sanitizer chokepoint (the semaphore region is legitimate here).
     return reinterpret_cast<std::atomic<uint32_t>*>(const_cast<uint32_t*>(sem_addr));

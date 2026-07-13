@@ -58,12 +58,6 @@ chip's copy of this (core, offset)" problem. Two runtime hooks bridge it
   worker to the right physical core on the destination chip; DRAM/ETH coordinates are taken verbatim
   (identical across chips — translating them would collapse distinct banks). Worker offsets are masked to the
   per-core L1 slot.
-- **`__emule_chip_relative_l1(p)`** — called from the semaphore chokepoint `__emule_sem_atomic`. A *global
-  semaphore* (created once, shared across the mesh) reaches a kernel as a single absolute host pointer valid
-  for only one chip's mapping; a worker on another chip spinning on it must hit *its own* chip's copy. This
-  remaps `(core, offset)` to the current chip. It is **faithful** — identical effect to silicon, where every
-  chip backs the same offset with its own L1 — and **inherent** to the per-chip-mapping model, not a hack
-  (tracked as workaround DM-1 only because it is a non-obvious bridge).
 
 ## The teleport
 

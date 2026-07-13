@@ -99,18 +99,16 @@ kernel back to the host emulation runtime:
 
 Every dataflow API ultimately routes through one of these.
 
-### 2.3 L1Pool vs bridge_l1
+### 2.3 L1Pool and bridge_l1
 
-Two host-mmap layouts:
-- **L1Pool mode** (`TT_EMULE_USE_L1_POOL`): a single contiguous mmap below 4GB
-  serves as the L1 region for every emulated core. Local L1 offsets are direct
-  host pointers masked via `addr & 0x1FFFFF` (the 2 MiB L1Pool slot mask —
-  fixed, independent of `NOC_ADDR_LOCAL_BITS`).
-- **bridge_l1 mode** (default): `__emule_bridge_l1` holds the L1 mmap base for
-  this thread's core. Local L1 offsets are computed as `addr - __emule_bridge_l1`.
-
-The address encoding is the same in both modes; only the conversion in
-`__emule_addr_to_offset` / `__emule_local_l1_to_ptr` differs.
+A kernel-visible local-L1 address is a **0-based offset** (< 1.5 MB), rebased to a
+host pointer only at the deref: `__emule_local_l1_to_ptr` → `__emule_l1_translate`
+returns `__emule_self->bridge_l1 + offset` unconditionally (`bridge_l1` is this
+fiber's core L1 base). `__emule_addr_to_offset` (`addr & 0x1FFFFF`, the 2 MiB slot
+mask) is idempotent on an in-L1 offset. Worker L1 is a plain 64-bit mmap; with
+`TT_EMULE_USE_L1_POOL` one contiguous mmap backs every core as a 2 MiB-aligned slot
+(`bridge_l1` = the slot base). The offset model imposes no placement window (see
+[l1-emulation.md](l1-emulation.md)).
 
 ### 2.4 DRAM channel backing
 

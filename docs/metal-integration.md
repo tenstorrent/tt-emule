@@ -114,8 +114,8 @@ prog_config.sem_offset`, passed as `EMULE_SEM_BASE`; each sem at
 **Memory bridge.** The dlopen'd `.so` reaches the host only through `extern "C"`
 hooks (visible via `-rdynamic`): the resolvers `__emule_resolve_noc_addr`,
 `__emule_multicast_write`, `__emule_dram_ptr`, `__emule_local_l1_ptr`, the fabric
-hooks (`__emule_fabric_teleport`, `__emule_fabric_resolve_remote`,
-`__emule_chip_relative_l1`, …), and the fiber thunks (`__emule_fiber_park/wake/…`).
+hooks (`__emule_fabric_teleport`, `__emule_fabric_resolve_remote`, …), and the
+fiber thunks (`__emule_fiber_park/wake/…`).
 All read `__emule_self`; since every hook runs inside a kernel fiber, a null
 `__emule_self` is a contract violation and they fail loudly (`emule_require_self`)
 rather than returning nullptr. (The single-bank `__emule_dram_ptr` /

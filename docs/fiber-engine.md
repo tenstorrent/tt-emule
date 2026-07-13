@@ -319,10 +319,12 @@ engine is the substrate both rely on.
   across the K workers; cross-device wakes route to the home worker exactly as cross-core wakes.
 
 **Remaining for full multichip (not yet needed / out of scope):**
-- **Scaling beyond 2 chips** (T3000 8-chip → quietbox/galaxy). Inter-chip CCL **is** emulated for the
-  2-chip case (the concurrent dispatch here is the prerequisite; fabric transport is the teleport in
-  [`fabric-ccl-emulation.md`](fabric-ccl-emulation.md)), but ≥3 chips needs an on-demand L1Pool (the 2 GB
-  `MAP_32BIT` ceiling) + direction-aware multi-hop routing — see [#228](https://github.com/tenstorrent/tt-emule/issues/228).
+- **Scaling beyond 2 chips** (T3000 8-chip → quietbox/galaxy). Inter-chip CCL **is** emulated (the
+  concurrent dispatch here is the prerequisite; fabric transport is the teleport in
+  [`fabric-ccl-emulation.md`](fabric-ccl-emulation.md)); the 8-chip loudbox and a 32-chip galaxy
+  bring-up run in one process — worker L1 is a plain 64-bit mmap with no placement ceiling. Remaining
+  at galaxy scale: direction-aware multi-hop fabric routing (the wide-axis ring) — see
+  [#228](https://github.com/tenstorrent/tt-emule/issues/228).
 - **Heterogeneous meshes** (mixed arch / differing bank topology) would need the bank tables
   made per-device (keyed via the fiber context, like `core_map`). No current Tenstorrent board
   is heterogeneous, so this is deferred.

@@ -50,7 +50,7 @@ enumerate every idiom up front.
 | `ThreadCommonCtx::l1_size` | `jit_hw/internal/emule_thread_ctx.h` + runner launch | new POD field, set beside `bridge_l1` (keeps the assert out of the host `device.hpp` include) |
 | `get_semaphore` ×2 | `dataflow_api.h`, `jit_kernel_stubs.hpp` | drop `l1_base +` → pure offset (kept byte-identical under `__EMULE_GET_SEMAPHORE_DEFINED`) |
 | `Semaphore` | `jit_hw/api/dataflow/noc_semaphore.h` | store the offset; `atom()` rebases `bridge_l1 + offset` directly |
-| `__emule_sem_atomic` | `dataflow_api.h` | receives an already-translated pointer; trivial cast; DM-1 `__emule_chip_relative_l1` call removed |
+| `__emule_sem_atomic` | `dataflow_api.h` | receives an already-translated pointer; trivial cast; no per-chip remap |
 | `get_write_ptr`/`get_read_ptr` | `jit_hw/api/cb_api.h` | subtract `bridge_l1` (ring stays in host-pointer space) |
 | ASAN `cb_resolve` `cb_start` | `jit_hw/asan/asan_l1_checks.h` | rebase `cb.base` into offset space for the offset-vs-offset comparison |
 | `Core::l1_alloc` | `include/tt_emule/device.hpp` | return a 0-based offset |
@@ -84,5 +84,5 @@ enumerate every idiom up front.
 - **Worker-L1 placement** — worker L1 is still `MAP_32BIT` low-4 GB. Removing that
   (plain 64-bit `mmap`) to fit a >4 GB mesh in one process is a separate,
   behavior-neutral change enabled by this model (see l1-offset-translation.md).
-- **`__emule_chip_relative_l1` (DM-1)** — the runner implementation is now uncalled
-  (dead); remove it when the placement change lands.
+- **`__emule_chip_relative_l1` (DM-1)** — removed; one shared offset space makes the
+  per-chip global-semaphore pointer remap unnecessary.

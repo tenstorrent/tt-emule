@@ -68,8 +68,7 @@ chokepoint rebases unconditionally. See the per-site audit in the derisk doc.
   (runner `allocate_dfbs_on_core`) — the DFB bump/base is a 0-based offset, rebased to
   a host pointer where the DFB/CB sync state stores its `base`.
 - `__emule_sem_atomic` receives an already-translated host pointer (the semaphore
-  cast is rewritten at JIT time) and uses it directly — no per-chip remap. This
-  retires the `__emule_chip_relative_l1` (DM-1) global-semaphore workaround: one
+  cast is rewritten at JIT time) and uses it directly — no per-chip remap: one
   shared offset space means a peer chip's semaphore is reached by translating the
   offset with the reader's own `bridge_l1`, not by remapping a host pointer.
 
