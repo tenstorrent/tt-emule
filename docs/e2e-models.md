@@ -63,7 +63,7 @@ Llama-3.2-1B-Instruct (ungated unsloth mirror):
 
 | Entry | Selector | What it checks |
 |---|---|---|
-| `llama1b_token_matching` | `-k performance-ci-token-matching` | Teacher-forced top1/top5 vs `reference_outputs/Llama-3.2-1B-Instruct.refpt`. Primary correctness gate; validates deep-position SDPA-decode. |
+| `llama1b_token_matching` | `-k performance-ci-token-matching --max_generated_tokens 48` | Teacher-forced top1/top5 vs `reference_outputs/Llama-3.2-1B-Instruct.refpt`. Primary correctness gate; validates deep-position SDPA-decode. Capped at 48 tokens (the row defaults to 500; at ~20s/token that overruns the per-entry timeout). Prefill is the reference's first half (~512 tokens) so decode starts at pos 512 — the cap keeps the multi-chunk deep-position path, just over a shorter span. |
 | `llama1b_batch1` | `-k "performance and batch-1" --max_generated_tokens 32` | Full 16-layer prefill+decode generative smoke (host sampling); crash-free E2E. |
 
 Blackhole runs the same entries but is **warning-only** until validated.
@@ -75,8 +75,9 @@ export TT_METAL_DIR=/path/to/tt-metal
 TT_METAL_DIR=$TT_METAL_DIR bash scripts/run_e2e_models_wormhole.sh
 ```
 
-Expect `Results: 2 passed, 0 failed`. Token accuracy on the SDPA-decode-fixed
-tree is ~top1 0.93 / top5 1.0, clearing the `.refpt` thresholds.
+Expect `Results: 2 passed, 0 failed`. The token-matching entry clears the
+`.refpt` top1/top5 thresholds on the SDPA-decode-fixed tree over its 48-token
+window.
 
 ## Adding a model
 

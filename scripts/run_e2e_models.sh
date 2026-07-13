@@ -145,8 +145,13 @@ echo ""
 # Teacher-forced top1/top5 token accuracy vs the checked-in reference .refpt.
 # The primary correctness gate; validates deep-position SDPA-decode. Trace is
 # already off in the vendored file, and ci-token-matching sets token_accuracy=True.
+# The ci-token-matching row defaults to 500 generated tokens; at emule's
+# ~20s/token that overruns the per-entry timeout, so cap it to 48. Prefill is the
+# reference's first half (~512 tokens) and decode starts at pos 512, so even 48
+# tokens stay on the multi-chunk SDPA-decode path — the deep-position coverage is
+# kept, just over a shorter (bounded-runtime) span.
 run_model "llama1b_token_matching" "unsloth/Llama-3.2-1B-Instruct" \
-    -k "performance-ci-token-matching"
+    -k "performance-ci-token-matching" --max_generated_tokens 48
 
 # Full 16-layer prefill+decode generative smoke (host sampling). Bounded token
 # count keeps nightly runtime reasonable; asserts nothing beyond crash-free E2E.
