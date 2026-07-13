@@ -1,9 +1,11 @@
 # JIT source patch pass (`apply_x86_rewrites`)
 
 Reference for every regex the emule JIT applies to kernel source before
-compiling it for the x86 host. All regexes live in tt-metal
-`tt_metal/impl/emulation/emulated_program_runner.cpp`; this document enumerates
-them, the code each one targets, the rewrite it performs, and why.
+compiling it for the x86 host. The pass is a self-contained module in tt-emule —
+public API `tt::emule::patch_kernel_source` in `include/tt_emule/kernel_patcher.hpp`,
+rules in `include/tt_emule/detail/kernel_patcher.hpp` — which the tt-metal emulation
+runner (`tt_metal/impl/emulation/emulated_program_runner.cpp`) calls before compiling.
+This document enumerates the regexes, the code each one targets, the rewrite it performs, and why.
 
 ## Where this runs in the pipeline
 

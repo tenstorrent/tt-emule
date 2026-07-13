@@ -25,6 +25,9 @@ files:
   - {kind: struct, name: DFBTCSlot}
   - {kind: struct, name: EmuleDFBInterface}
   - {kind: struct, name: DFBSyncState}
+- path: include/tt_emule/kernel_patcher.hpp
+  section: include/tt_emule/
+  summary: Opaque public API for the JIT kernel patch pass (`tt::emule::patch_kernel_source`) — the source→source transform the tt-metal emulation runner calls before compiling a kernel for x86.
 - path: include/tt_emule/l1_pool.hpp
   section: include/tt_emule/
   summary: '`class L1Pool`; `SLOT_SIZE`, `slot_ptr`, `num_slots`'
@@ -2730,3 +2733,6 @@ files:
   - {kind: function, name: multicast_write_set_state}
   - {kind: function, name: multicast_write_issue_txn}
   - {kind: function, name: multicast_write_with_state}
+- path: include/tt_emule/detail/kernel_patcher.hpp
+  section: include/tt_emule/detail/
+  summary: Kernel patch-pass internals (not public) — the RISC-V/L1 rewrite rules (`apply_x86_rewrites`), line-preserving regex replace, and recursive include inlining/shadow-skip/normalization; see docs/jit-l1-patch-pass.md.
