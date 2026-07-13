@@ -79,9 +79,19 @@ FAIL=0
 run_model() {
     local name="$1"; shift
     local hf_model="$1"; shift
+    # Optional per-entry arch restriction: set ONLY_ARCH before the call to pin
+    # an entry to one arch. Consumed (reset) here so it never leaks to the next
+    # entry. Counted for sharding BEFORE the restriction check so the shard→entry
+    # mapping stays identical across archs.
+    local only_arch="$ONLY_ARCH"; ONLY_ARCH=""
     ENTRY_NUM=$((ENTRY_NUM + 1))
     # Skip entries not assigned to this shard.
     if [ $(( (ENTRY_NUM - 1) % SHARD_COUNT + 1 )) -ne "$SHARD_INDEX" ]; then
+        return
+    fi
+    if [ -n "$only_arch" ] && [ "$only_arch" != "$TT_EMULE_ARCH" ]; then
+        echo "--- $name ---"
+        echo "  SKIP ($TT_EMULE_ARCH: entry restricted to $only_arch)"
         return
     fi
     # Require an explicit -k selector. $E2E_TEST points at a single, heavily
@@ -150,6 +160,13 @@ echo ""
 # reference's first half (~512 tokens) and decode starts at pos 512, so even 48
 # tokens stay on the multi-chunk SDPA-decode path — the deep-position coverage is
 # kept, just over a shorter (bounded-runtime) span.
+#
+# Wormhole only: the emule blackhole compute is correct here (identical
+# 89.58%/97.92% top1/top5 to wormhole), but upstream's centralized accuracy
+# thresholds have no P150 (blackhole) entry, so the gate raises "Could not find
+# centralized accuracy targets ... on P150". Restrict the accuracy gate to the
+# arch upstream provides a target for; blackhole still runs the batch-1 smoke.
+ONLY_ARCH=wormhole \
 run_model "llama1b_token_matching" "unsloth/Llama-3.2-1B-Instruct" \
     -k "performance-ci-token-matching" --max_generated_tokens 48
 
