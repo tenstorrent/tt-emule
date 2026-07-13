@@ -7,7 +7,7 @@
 // CBInterface + get_local_cb_interface — mirror silicon's per-RISC CB register
 // file so kernels written against the real device API compile and run unchanged
 // under emule. `LocalCBInterface` (the struct) and the authoritative per-RISC
-// storage `__emule_local_cb` live in jit_hw/internal/emule_cb_ptr.h.
+// storage `__emule_self->local_cb` live in jit_hw/internal/emule_cb_ptr.h.
 //
 // AUTHORITATIVE, NOT a snapshot (#139). get_local_cb_interface returns a
 // reference into the per-RISC storage that get_write_ptr/get_read_ptr (cb_api.h)
@@ -19,7 +19,7 @@
 //     get_*_ptr advances/reads from the written value (pointer write-back).
 // Scope of write-back: ONLY fifo_{wr,rd}_ptr. The address/advance helpers in
 // emule_cb_ptr.h derive base/page_size/num_pages from the shared CBSyncState
-// (__emule_cbs[cb_id]), so writing the view's geometry fields
+// (__emule_self->cbs[cb_id]), so writing the view's geometry fields
 // (fifo_page_size/fifo_size/fifo_limit/fifo_num_pages) does NOT affect
 // wrap/advance — geometry cannot be reconfigured through this reference today.
 // Per call only the live `tiles_received` (the shared occupied semaphore) is
@@ -29,7 +29,8 @@
 #include <atomic>
 #include <cstdint>
 
-#include "jit_hw/internal/emule_cb_ptr.h"  // LocalCBInterface, __emule_local_cb, view helpers
+#include "jit_hw/internal/emule_thread_ctx.h"
+#include "jit_hw/internal/emule_cb_ptr.h"  // LocalCBInterface, __emule_self->local_cb, view helpers
 
 struct CBInterface {
     union {
@@ -59,8 +60,8 @@ inline LocalCBInterface& get_local_cb_interface(uint32_t cb_id) {
     // Return a reference into the per-RISC register file shared with all CB
     // pointer accessors — NOT a recomputed snapshot. Reads reflect this RISC's
     // own pointer; writes through the reference persist (write-back).
-    auto& view = __emule_local_cb[cb_id];
-    if (__emule_cbs == nullptr) {
+    auto& view = __emule_self->local_cb[cb_id];
+    if (__emule_self->cbs == nullptr) {
         return view;
     }
     // First touch seats fifo_{rd,wr}_ptr at the shard base + fills geometry
@@ -69,7 +70,7 @@ inline LocalCBInterface& get_local_cb_interface(uint32_t cb_id) {
     __emule_cb_view_init(cb_id);
     // Refresh only the live semaphore count; pointer + geometry are authoritative.
     view.tiles_received = static_cast<uint16_t>(
-        __emule_cbs[cb_id].occupied.load(std::memory_order_relaxed));
+        __emule_self->cbs[cb_id].occupied.load(std::memory_order_relaxed));
     view.tiles_acked = 0;
     return view;
 }

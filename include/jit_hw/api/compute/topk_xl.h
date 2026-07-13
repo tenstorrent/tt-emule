@@ -6,7 +6,7 @@
 //
 // Silicon delivers bitonic local-sort + merge + rebuild via the SFPU on the
 // MATH thread. On emule we run the same algorithm as scalar C++ against
-// __emule_dst[].
+// __emule_compute_ctx().dst[].
 //
 // Data layout (matches silicon kernel-author contract):
 //   Each "K-element sequence" occupies as many consecutive DST tiles as needed
@@ -34,7 +34,7 @@
 
 #include <limits>
 
-#include "api/compute/common.h"        // __emule_dst, __emule_dst_check, TILE_ELEMS
+#include "api/compute/common.h"        // __emule_compute_ctx().dst, __emule_dst_check, TILE_ELEMS
 #include "api/compute/tile_move_copy.h"
 
 namespace ckernel {
@@ -118,7 +118,7 @@ ALWI void topk_xl_copy_tile(
     uint32_t copied = 0;
     for (uint32_t t = 0; t < SEQ_TILES; ++t) {
         __emule_dst_check(dst_start_tile_index + t, "topk_xl_copy_tile");
-        float* dst = __emule_dst[dst_start_tile_index + t];
+        float* dst = __emule_compute_ctx().dst[dst_start_tile_index + t];
         const uint8_t* src = __emule_compute::cb_read_ptr_at(in_cb_id, in_tile_index_base + t);
 
         for (uint32_t i = 0; i < TILE_ELEMS; ++i) {
@@ -152,7 +152,7 @@ ALWI void topk_xl_add_lsb_indices(uint32_t idst) {
     uint32_t lane = 0;
     for (uint32_t t = 0; t < SEQ_TILES; ++t) {
         __emule_dst_check(idst + t, "topk_xl_add_lsb_indices");
-        float* dst = __emule_dst[idst + t];
+        float* dst = __emule_compute_ctx().dst[idst + t];
         for (uint32_t i = 0; i < TILE_ELEMS; ++i) {
             auto vi = decode_fused(dst[i]);
             // Index encoding: lane in low 11 bits, core_id in bits 11..15.
@@ -178,7 +178,7 @@ ALWI void topk_xl_local_sort(uint32_t idst, bool ascending) {
 
     std::vector<float> buf(N);
     for (uint32_t t = 0; t < SEQ_TILES; ++t) {
-        std::memcpy(buf.data() + t * TILE_ELEMS, __emule_dst[idst + t],
+        std::memcpy(buf.data() + t * TILE_ELEMS, __emule_compute_ctx().dst[idst + t],
                     TILE_ELEMS * sizeof(float));
     }
     if (ascending) {
@@ -189,7 +189,7 @@ ALWI void topk_xl_local_sort(uint32_t idst, bool ascending) {
                   [](float a, float b) { return decode_fused(a).v > decode_fused(b).v; });
     }
     for (uint32_t t = 0; t < SEQ_TILES; ++t) {
-        std::memcpy(__emule_dst[idst + t], buf.data() + t * TILE_ELEMS,
+        std::memcpy(__emule_compute_ctx().dst[idst + t], buf.data() + t * TILE_ELEMS,
                     TILE_ELEMS * sizeof(float));
     }
 }
@@ -209,14 +209,14 @@ ALWI void topk_xl_merge(uint32_t idst) {
 
     std::vector<float> all(2 * N);
     for (uint32_t t = 0; t < 2 * SEQ_TILES; ++t) {
-        std::memcpy(all.data() + t * TILE_ELEMS, __emule_dst[idst + t],
+        std::memcpy(all.data() + t * TILE_ELEMS, __emule_compute_ctx().dst[idst + t],
                     TILE_ELEMS * sizeof(float));
     }
     // Keep the top-N by value (descending sort, take first N).
     std::partial_sort(all.begin(), all.begin() + N, all.end(),
                       [](float a, float b) { return decode_fused(a).v > decode_fused(b).v; });
     for (uint32_t t = 0; t < SEQ_TILES; ++t) {
-        std::memcpy(__emule_dst[idst + t], all.data() + t * TILE_ELEMS,
+        std::memcpy(__emule_compute_ctx().dst[idst + t], all.data() + t * TILE_ELEMS,
                     TILE_ELEMS * sizeof(float));
     }
 }
@@ -250,7 +250,7 @@ ALWI void topk_xl_remove_msb_values(uint32_t idst) {
     constexpr uint32_t SEQ_TILES = tiles_per_seq_fused<K>();
     for (uint32_t t = 0; t < SEQ_TILES; ++t) {
         __emule_dst_check(idst + t, "topk_xl_remove_msb_values");
-        float* dst = __emule_dst[idst + t];
+        float* dst = __emule_compute_ctx().dst[idst + t];
         for (uint32_t i = 0; i < TILE_ELEMS; ++i) {
             auto vi = decode_fused(dst[i]);
             uint32_t bits = vi.idx & 0xFFFFu;  // only LSB index half

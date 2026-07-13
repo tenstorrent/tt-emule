@@ -25,9 +25,9 @@ ALWI void hardmish_tile_init() {}
 ALWI void hardmish_tile(uint32_t idst) {
     __emule_dst_check(idst, "hardmish_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
+        float x = __emule_compute_ctx().dst[idst][i];
         float clamped = std::fmin(std::fmax(x + 2.0f, 0.0f), 2.0f);
-        __emule_dst[idst][i] = x * clamped * 0.5f;
+        __emule_compute_ctx().dst[idst][i] = x * clamped * 0.5f;
     }
 }
 

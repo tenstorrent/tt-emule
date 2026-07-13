@@ -21,7 +21,7 @@ ALWI void mish_tile(uint32_t idst) {
     __emule_dst_check(idst, "mish_tile");
     constexpr float SAT_HI = 8.0f;
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
+        float x = __emule_compute_ctx().dst[idst][i];
         float result;
         if (x >= SAT_HI) {
             result = x;
@@ -31,7 +31,7 @@ ALWI void mish_tile(uint32_t idst) {
             float denom = u * u + 2.0f * u + 2.0f;
             result = x * numer / denom;
         }
-        __emule_dst[idst][i] = result;
+        __emule_compute_ctx().dst[idst][i] = result;
     }
 }
 

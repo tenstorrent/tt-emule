@@ -11,7 +11,7 @@
 // clamped_silu kernel passes `ckernel::sfpu::calculate_clamped_silu_gate<...>`
 // as the fn_ptr.
 //
-// emule version: point the sfpi cursor at __emule_dst[dst_idx], reset the cursor +
+// emule version: point the sfpi cursor at __emule_compute_ctx().dst[dst_idx], reset the cursor +
 // active-lane mask, then invoke the functor. The functor (e.g. calculate_recip/
 // exponential/softplus_first_column, calculate_fused_max_sub_exp_add_tile) reads and
 // writes sfpi::dst_reg, which now resolves into the selected DST tile.
@@ -19,7 +19,7 @@
 #include <cstdint>
 
 #include "jit_hw/sfpi.h"
-#include "jit_hw/api/compute/common.h"       // __emule_dst
+#include "jit_hw/api/compute/common.h"       // __emule_compute_ctx().dst
 #include "jit_hw/api/compute/vector_mode.h"  // ckernel::VectorMode
 
 // Variadic dispatcher: point sfpi::dst_reg at DST[dst_idx], run the functor with the
@@ -29,7 +29,7 @@
 // Every emule caller is an SDPA first-column COLUMN-VECTOR helper
 // (calculate_{recip,exponential,softplus}_first_column, calculate_fused_max_sub_exp_add_tile),
 // invoked with VectorMode::C. The per-row statistic they read/write lives in col 0 of all
-// 32 rows (emule row-major, no face transpose — see __emule_sfpi_first_col_mode in sfpi.h).
+// 32 rows (emule row-major, no face transpose — see __emule_compute_ctx().sfpu.first_col_mode in sfpi.h).
 // The functor walks dst_reg[0] then `dst_reg += 2`, ITERATIONS_HALF_FACE=4 times — one
 // functor call therefore covers only 4 four-row blocks = rows 0..15 (cursor 0,4,8,12).
 // Silicon's _llk_math_eltwise_sfpu_apply_vector_mode_ invokes the functor once PER ACTIVE
@@ -48,16 +48,25 @@ inline void _llk_math_eltwise_unary_sfpu_params_(
     // DST-slot contract before we take its address (matches the __emule_dst_check used
     // by pack_tile / functors; SFPU_UNARY_CALL's _sfpu_check_ defers the real bound here).
     __emule_dst_check(dst_idx, "_llk_math_eltwise_unary_sfpu_params_");
-    // __emule_sfpi_dst_base / _cursor / _first_col_mode are global scope; mask is in sfpi::.
-    ::__emule_sfpi_dst_base = &__emule_dst[dst_idx][0];
-    ::__emule_sfpi_cursor = 0;
-    ::__emule_sfpi_first_col_mode = is_col;
-    ::sfpi::__emule_sfpi_mask.fill(true);
+    // __emule_compute_ctx().sfpu.dst_base / _cursor / _first_col_mode are global scope; mask is in sfpi::.
+    ::__emule_compute_ctx().sfpu.dst_base = &__emule_compute_ctx().dst[dst_idx][0];
+    ::__emule_compute_ctx().sfpu.cursor = 0;
+    ::__emule_compute_ctx().sfpu.first_col_mode = is_col;
+    ::__emule_compute_ctx().sfpu.mask.fill(true);
     fn(params...);                       // covers col-0 rows 0..15 (cursor ends at 16)
     if (is_col) {
         fn(params...);                   // continues at cursor 16 → col-0 rows 16..31
+    } else if (static_cast<int>(vector_mode) == static_cast<int>(ckernel::VectorMode::RC)) {
+        // RC = full 32-row tile. The SDPA column helpers here use a per-face functor
+        // (ITERATIONS_HALF_FACE), so the call above covered only face 0 = row-major rows
+        // 0..15. The per-row column statistic (col 0) of rows 16..31 lives in FACE 2, not
+        // the contiguous next face. Silicon's apply_vector_mode_ runs the functor once per
+        // active face; mirror that by jumping the cursor to face 2 and re-running. (Half-tile
+        // R mode keeps the single call — rows 0..15 only.)
+        ::__emule_compute_ctx().sfpu.cursor = 32;
+        fn(params...);                   // face 2 → col-0 rows 16..31
     }
-    ::__emule_sfpi_dst_base = nullptr;
-    ::__emule_sfpi_cursor = 0;
-    ::__emule_sfpi_first_col_mode = false;
+    ::__emule_compute_ctx().sfpu.dst_base = nullptr;
+    ::__emule_compute_ctx().sfpu.cursor = 0;
+    ::__emule_compute_ctx().sfpu.first_col_mode = false;
 }

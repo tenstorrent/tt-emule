@@ -87,24 +87,39 @@ cache** at `/tmp/tt_emule_jit_cache_$UID` (override `TT_EMULE_JIT_CACHE_DIR`),
 hashed + mtime-validated, so compiled `.so`s **survive across process runs**.
 Misses compile in parallel.
 
-**Execution — direct Core memory, no copies.** Collect kernels per logical core
-from `ProgramImpl` → compile misses → resolve to function pointers → launch all
-cores concurrently. Per core: `get_core(xy)`, init CB sync, init semaphores at
-HAL-derived addresses, set the per-thread bridge TLS
-(`__emule_bridge_l1`, `__emule_bridge_dram`, `__emule_cbs`, `__emule_core_map`;
-Quasar adds `__emule_dfbs`, `__emule_tc_array`, `__emule_neo_id`,
-`__emule_trisc_id`), launch reader+compute+writer (WH/BH) or per-DM/per-engine
-threads (Quasar), join. No copy-back.
+**Execution — fiber engine, direct Core memory, no copies.** `prepare_program`
+resolves a program ONCE (collect kernels per logical core → compile misses →
+resolve to function pointers), memoized by `ProgramId` in `g_resolved_programs`
+(emule's analogue of `is_compiled()`; single-writer, written only on the
+sequential dispatch path). Each kernel runs as a **cooperatively-scheduled fiber**
+— one per (core, RISC) — multiplexed onto a runtime-sized worker pool
+(`TT_EMULE_FIBER_WORKERS`); a blocked fiber parks (yields its worker) instead of
+blocking an OS thread. Identity + bridge pointers live in the per-fiber ctx
+`__emule_self` (`bridge_l1`, `bridge_dram`, `cbs`, `core_map`, `chip_id`; Quasar
+adds `dfbs`, `tc_array`, `neo_id`, `trisc_id`). No copy-back. See
+[fiber-engine.md](fiber-engine.md).
+
+**Multi-chip (fabric / CCL).** A fabric send is intercepted at the worker→fabric
+client API in the `jit_hw` shim and **teleported**: resolve the final destination
+chip(s) from the control-plane topology, apply the terminal NOC command directly
+into that chip's L1, wake any parked fiber there. No ERISC router / multi-hop. The
+mesh runs all chips' fibers concurrently via a register/run split
+(`begin_mesh_dispatch` defers each device's spawn; `run_mesh_dispatch` drives one
+`run_until_idle`). See [fabric-ccl-emulation.md](fabric-ccl-emulation.md).
 
 **Semaphore init.** `emule_sem_base = hal.get_dev_addr(TENSIX, KERNEL_CONFIG) +
 prog_config.sem_offset`, passed as `EMULE_SEM_BASE`; each sem at
 `emule_sem_base + sem_id*16`. Same values `finalize_sems()` produces for firmware.
 
 **Memory bridge.** The dlopen'd `.so` reaches the host only through `extern "C"`
-hooks (visible via `-rdynamic`): `__emule_dram_ptr`, `__emule_local_l1_ptr`,
-`__emule_resolve_noc_addr`, `__emule_multicast_write` — plus the thread-local
-bridge pointers. (The resolver is the live path; the single-bank `__emule_dram_ptr`
-/ `__emule_local_l1_ptr` are legacy fast paths — see
+hooks (visible via `-rdynamic`): the resolvers `__emule_resolve_noc_addr`,
+`__emule_multicast_write`, `__emule_dram_ptr`, `__emule_local_l1_ptr`, the fabric
+hooks (`__emule_fabric_teleport`, `__emule_fabric_resolve_remote`,
+`__emule_chip_relative_l1`, …), and the fiber thunks (`__emule_fiber_park/wake/…`).
+All read `__emule_self`; since every hook runs inside a kernel fiber, a null
+`__emule_self` is a contract violation and they fail loudly (`emule_require_self`)
+rather than returning nullptr. (The single-bank `__emule_dram_ptr` /
+`__emule_local_l1_ptr` are legacy fast paths — see
 [noc-emulation.md](noc-emulation.md) §8.) This avoids any ABI hazard from kernels
 inlining `Device`/`Core` methods.
 
@@ -123,7 +138,9 @@ when `get_target_device_type() == TargetDevice::Emule`, call
 path. `CompileProgram` / `WriteRuntimeArgsToDevice` / `finalize_offsets()` still
 run (they populate `ProgramImpl` + `ProgramConfig.sem_offset`); only HW dispatch
 is bypassed. A second interception in `ConfigureDeviceWithProgram()` skips binary
-writing.
+writing. `DispatchCompiledProgramToDevice()` carries the same emule branch (the
+2nd..Nth device of a mesh coord range), running synchronously and skipping the
+`is_finalized`/`is_compiled` asserts that never hold under emule's lazy JIT.
 
 ---
 

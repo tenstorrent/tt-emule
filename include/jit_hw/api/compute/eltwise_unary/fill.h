@@ -14,7 +14,7 @@ ALWI void fill_tile_init() {}
 
 ALWI void fill_tile(uint32_t idst, float param0) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = param0;
+        __emule_compute_ctx().dst[idst][i] = param0;
 }
 
 template <DataFormat DATA_FORMAT = DataFormat::Int32>
@@ -27,7 +27,7 @@ ALWI void fill_tile_bitcast(uint32_t idst, uint32_t param0) {
     float val;
     std::memcpy(&val, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = val;
+        __emule_compute_ctx().dst[idst][i] = val;
 }
 
 } // namespace ckernel

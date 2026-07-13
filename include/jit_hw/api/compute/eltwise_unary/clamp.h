@@ -24,8 +24,8 @@ ALWI void clamp_tile(uint32_t idst, uint32_t min_param, uint32_t max_param) {
     std::memcpy(&min_val, &min_param, sizeof(float));
     std::memcpy(&max_val, &max_param, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float v = __emule_dst[idst][i];
-        __emule_dst[idst][i] = std::min(std::max(v, min_val), max_val);
+        float v = __emule_compute_ctx().dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = std::min(std::max(v, min_val), max_val);
     }
 }
 

@@ -5,7 +5,7 @@
 """tt-emule post-commit pass-rate sweep — manifest expander + sharded runner.
 
 Runs the same ttnn test set tt-metal runs in its per-arch post-commit CI lane
-(`tests/pipeline_reorg/ttnn-tests.yaml`) under the emule backend, writing
+(`tests/pipeline_reorg/ttnn_sanity_tests.yaml`) under the emule backend, writing
 per-entry JUnit XML + logs for `parse_sweep_results.py`. The unit of work (and
 of sharding, and of one XML file) is the manifest *entry* — the faithful "what
 metal runs" granularity. Successor to the one-off `arminale/bh-ci-sweep`
@@ -498,7 +498,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    common_manifest = dict(help="path to tt-metal tests/pipeline_reorg/ttnn-tests.yaml")
+    common_manifest = dict(help="path to tt-metal tests/pipeline_reorg/ttnn_sanity_tests.yaml")
 
     pe = sub.add_parser("expand", help="resolve + audit the arch's post-commit entry list")
     pe.add_argument("--arch", required=True, choices=sorted(ARCH_CONFIG))

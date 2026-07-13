@@ -222,7 +222,7 @@ jobs:
           XML_DIR=shard-artifacts
           OUT=report
           mkdir -p "$OUT"
-          MANIFEST=tt-metal/tests/pipeline_reorg/ttnn-tests.yaml
+          MANIFEST=tt-metal/tests/pipeline_reorg/ttnn_sanity_tests.yaml
 
           # sweep.py needs PyYAML — use the toolchain venv python (has it),
           # not the container's system python3.

@@ -22,12 +22,11 @@ API names.
 
 Consequences:
 - **Async / posted / non-posted distinctions collapse** — all are sync memcpy.
-- **Barriers are no-op** — there is nothing to wait for. `noc_async_write_barrier`,
-  `noc_async_writes_flushed`, `noc_async_full_barrier` all return immediately, and
-  the per-NOC barrier semantics collapse vacuously (no in-flight transactions on
-  either NOC). The one exception is `noc_async_read_barrier`, which models a
-  one-time-per-thread first-read latency (timing only, not a correctness wait — the
-  data was already memcpy'd by the preceding read); see Section 1.1.
+- **Barriers are no-op** — there is nothing to wait for. `noc_async_read_barrier`,
+  `noc_async_write_barrier`, `noc_async_writes_flushed`, `noc_async_full_barrier`
+  all return immediately, and the per-NOC barrier semantics collapse vacuously (no
+  in-flight transactions on either NOC — the data was already memcpy'd by the
+  preceding read/write).
 - **TRID (transaction id) is no-op** — `noc_async_*_set_trid`,
   `*_barrier_with_trid`, `ncrisc_noc_*_with_transaction_id_*` return without
   side-effects (or return `true` for completion probes).
@@ -44,22 +43,24 @@ guarantees aren't preserved — emule is a correctness model, not a perf model.
 
 ### 1.1 Cross-core start ordering
 
-Multi-core kernels that lean on silicon's launch/NOC timing rather than explicit
-handshakes need two minimal timing models, because emule runs each core as a host
-thread spawned sequentially with instant reads:
+Emule runs each core as a host thread and collapses to zero the NOC/DRAM read
+latency that staggers cores on silicon. One faithful model restores the ordering
+silicon guarantees at launch:
 
 - **Startup barrier** (`emulated_program_runner.cpp::launch_cores`) — all kernel
-  threads wait before running any kernel body, modeling simultaneous dispatch and
-  removing the spawn stagger that lets an early thread finish before a peer starts.
-- **First-read latency** (`dataflow_api.h::noc_async_read_barrier`) — a one-time
-  per-thread delay modeling the NOC round-trip a core's first input read incurs
-  before it can emit cross-core output. Sleeping threads also cede their cores, so
-  a starved peer can run its prologue.
+  threads wait before any kernel body runs, modeling simultaneous dispatch and
+  removing the spawn stagger that would let one thread finish before a peer starts.
+  The dispatcher's L1/semaphore initialization completes before this barrier, so a
+  semaphore's initial value is a true happens-before for every kernel that reads it.
 
-Motivating case: argmax's multi-core reducer resets `done_sem` in its ungated
-`k=0` prologue then waits for worker increments; without these models a worker
-increment can land before the reset, get clobbered, and hang the wait. See
-[`index-based-ops`](../.claude/skills/index-based-ops/SKILL.md).
+Emule does **not** model NOC read latency — `noc_async_read_barrier` is a no-op.
+A multi-core kernel that orders cross-core effects by leaning on read latency
+instead of an explicit handshake races under emule, exactly as it would on silicon
+under adversarial timing — emule is surfacing a real kernel fragility, not an emule
+defect. Such a kernel must take its ordering from a handshake or from state the
+dispatcher initializes before launch, never from how long a peer's first read
+takes. See [`index-based-ops`](../.claude/skills/index-based-ops/SKILL.md) for a
+worked multi-core reducer example.
 
 ---
 
@@ -132,6 +133,23 @@ index) so every view of a channel shares one backing. Implementation:
 `SWEmuleChip::get_dram_channel_backing(channel)` in `device/chip/sw_emule_chip.cpp`
 (umd); the per-NOC bank tables that feed kernel-side DRAM resolution are
 described in §8.3.
+
+Because the two views of a WH channel are distinguished **only** by their
+`bank_to_dram_offset` (the odd view lives at +1 GB inside the 2 GB backing), any
+code that recomposes a NOC address must keep the full 36-bit local offset. The
+2 MB worker-slot mask (`__emule_addr_to_offset`, `addr & 0x1FFFFF`) is correct
+**only** for a WORKER L1 destination — it must never touch a DRAM offset, or the
++1 GB view offset is truncated and the two views collapse onto the first 2 MB of
+the shared channel backing. `__emule_resolve_noc_addr` already applies the slot
+mask for WORKER cores only and keeps DRAM offsets full-width, so it is the single
+place the mask belongs. Address *composition* helpers therefore leave the offset
+raw: `safe_get_noc_addr(x, y, addr, noc)` (`api/dataflow/dataflow_api.h`) — used
+by the fabric/CCL recompose path (`linear/addrgen_api.h`, `api_common.h`, whose
+Wormhole leg decodes a final DRAM address with `get_noc_address_components` then
+re-packs it) — and `UnicastEndpoint::get_noc_unicast_addr` both pack the raw
+offset, matching the read path (`InterleavedAddrGen` / `TensorAccessor` leave DRAM
+reads un-masked, #182) and the `unified_kernels` write path (#255). Masking at
+compose time is the DRAM bank-view collapse that broke DRAM-resident CCL (#229).
 
 ---
 
@@ -286,14 +304,24 @@ hang. A count-up target is never 0, so the split is unambiguous.
 
 | Call | Behaviour |
 |---|---|
-| `Semaphore::up(noc, x, y, v, vc)` | Remote atomic fetch_add via `noc_semaphore_inc` |
-| `Semaphore::set_multicast<opts>(noc, x_start, ..., num_dests, linked)` | `__emule_multicast_write` 4-byte broadcast; `MCAST_INCL_SRC` opt controls loopback |
-| `Semaphore::inc_multicast(noc, x_start, ..., value, num_dests)` | Walks rect, per-core resolve + atomic fetch_add |
-| `Semaphore::relay_unicast(noc, dst_sem, x, y)` | 4-byte unicast write of local value to a different sem on remote core |
-| `Semaphore::relay_multicast<opts>(noc, dst_sem, ...)` | Mcast write of local value to a different sem on every core in rect |
-| `noc_semaphore_set_remote(src_l1, dst_noc, noc)` | 4-byte unicast write (free function, same path as `set` but for a remote target) |
-| `noc_semaphore_inc(addr, incr, noc, vc)` | Resolve + atomic fetch_add at addr |
-| `noc_semaphore_inc_multicast(addr, incr, num_dests, noc, vc)` | Walks rect, per-core resolve + atomic fetch_add |
+| `Semaphore::up(noc, x, y, v, vc)` | Remote atomic fetch_add via `noc_semaphore_inc` (wakes) |
+| `Semaphore::set_multicast<opts>(noc, x_start, ..., num_dests, linked)` | `__emule_multicast_write` 4-byte broadcast (wakes each target); `MCAST_INCL_SRC` opt controls loopback |
+| `Semaphore::inc_multicast(noc, x_start, ..., value, num_dests)` | `noc_semaphore_inc_multicast` — per-core resolve + atomic fetch_add (wakes each) |
+| `Semaphore::relay_unicast(noc, dst_sem, x, y)` | `noc_semaphore_set_remote` — 4-byte unicast write of local value to a different sem on remote core (wakes) |
+| `Semaphore::relay_multicast<opts>(noc, dst_sem, ...)` | Mcast write of local value to a different sem on every core in rect (wakes each) |
+| `noc_semaphore_set_remote(src_l1, dst_noc, noc)` | 4-byte unicast write (free function, same path as `set` but for a remote target) + fiber wake |
+| `noc_semaphore_inc(addr, incr, noc, vc)` | Resolve + atomic fetch_add at addr (wakes) |
+| `noc_semaphore_inc_multicast(addr, incr, num_dests, noc, vc)` | Walks rect, per-core resolve + atomic fetch_add (wakes each) |
+
+**Wake-on-sync-write invariant (load-bearing under the fiber engine).** Every remote semaphore write
+above calls `__emule_fiber_wake` on each resolved target host pointer — the same key a `noc_semaphore_wait`
+parks on. This is required because the fiber scheduler is cooperative: a peer fiber parked on a semaphore
+is only re-queued by an explicit wake (unlike the legacy OS-thread executor, where the spinning thread
+observed the L1 write directly). A cross-core handshake — e.g. the SDPA K/V-chain `relay_unicast` of the
+data-valid sem to the next core — would deadlock if any of these paths wrote the sem without waking
+(`set_remote` and `inc_multicast` were such gaps). Plain data writes (`noc_async_write`, the
+non-4-byte `__emule_multicast_write` branch) do **not** wake: no fiber parks on raw data L1; consumers of
+remote data wait on a companion semaphore (above) or a local `cb_push_back`, not the data address.
 
 The `ProgrammableCoreType` template arg selects which L1 base to use on
 silicon (TENSIX vs ACTIVE_ETH vs IDLE_ETH). Emule has only the TENSIX L1

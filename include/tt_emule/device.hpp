@@ -6,6 +6,8 @@
 #include "cb_sync_state.hpp"
 #include "dfb_sync_state.hpp"
 #include "tile_counter.hpp"
+#include "jit_hw/internal/emule_core_state.h"  // tt_emule::CoreState (per-core coords)
+#include "low4g_mmap.hpp"                      // __emule_mmap_low4g (worker L1 in low 4 GB)
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -58,6 +60,10 @@ public:
 
     CoreRole  role()  const { return role_; }
 
+    // Per-core NOC / logical coordinates. The per-thread ctx borrows a pointer
+    // via __emule_self->core; all RISC threads on this core share these.
+    CoreState& core_state() { return core_state_; }
+
     // Accepts uint64_t so DRAM banks (≤ 4 GB on BH, ≤ 2 GB on WH views) can be
     // addressed without uint32 truncation. Loud bounds check converts what was
     // previously silent UB into a clear failure during testing.
@@ -104,13 +110,15 @@ public:
 
     CBSyncState* cb_sync_array() { return cb_sync_states_; }
 
-    void init_cb_sync(uint32_t idx, uint8_t* base, uint32_t page_size, uint32_t num_pages) {
+    void init_cb_sync(uint32_t idx, uint8_t* base, uint32_t page_size, uint32_t num_pages,
+                      bool globally_allocated = false) {
         if (idx >= MAX_CBS) return;
         auto& s = cb_sync_states_[idx];
         s.base      = base;
         s.page_size = page_size;
         s.num_pages = num_pages;
         s.page_mask = (num_pages > 0 && (num_pages & (num_pages - 1)) == 0) ? num_pages - 1 : 0;
+        s.globally_allocated = globally_allocated;
         s.occupied  = 0;
         // Per-RISC read/write pointers reset per-thread at kernel launch
         // (thread_local zero-init in jit_hw/internal/emule_cb_ptr.h), not here.
@@ -122,6 +130,7 @@ public:
             s.page_size = 0;
             s.num_pages = 0;
             s.page_mask = 0;
+            s.globally_allocated = false;
             s.occupied  = 0;
         }
     }
@@ -159,12 +168,14 @@ public:
 private:
     void mmap_region(size_t size) {
         l1_size_ = size;
-        // Worker cores need MAP_32BIT so CB pointers fit in uint32_t.
-        // DRAM cores are accessed via bridge functions (full 64-bit pointers),
-        // so they use regular mmap to avoid exhausting the low 2 GB space.
-        int flags = MAP_PRIVATE | MAP_ANONYMOUS;
-        if (role_ == CoreRole::WORKER) flags |= MAP_32BIT;
-        void* p = mmap(nullptr, size, PROT_READ | PROT_WRITE, flags, -1, 0);
+        // Worker cores must be uint32-addressable (kernels deref CB pointers directly),
+        // so they live in the low 4 GB (low4g_mmap.hpp: MAP_32BIT, then a [2GB,4GB) gap).
+        // DRAM cores are accessed via bridge functions (full 64-bit pointers), so they
+        // use a regular mmap (anywhere) to avoid consuming the scarce low-4 GB space.
+        void* p = (role_ == CoreRole::WORKER)
+                      ? __emule_mmap_low4g(size)
+                      : mmap(nullptr, size, PROT_READ | PROT_WRITE,
+                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (p == MAP_FAILED)
             throw std::runtime_error("mmap for Core memory failed");
         l1_ = static_cast<uint8_t*>(p);
@@ -179,6 +190,7 @@ private:
     uint8_t*  l1_      = nullptr;
     uint32_t  l1_base_ = 0;
     size_t    l1_bump_ = 0;
+    CoreState core_state_;  // per-core NOC/logical coords (see emule_thread_ctx.h)
     CBSyncState cb_sync_states_[MAX_CBS] = {};
     // Quasar DFB state
     std::unique_ptr<TileCounterArray> tile_counters_;

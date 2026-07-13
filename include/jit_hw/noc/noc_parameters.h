@@ -14,6 +14,20 @@
 // dispatch, a BH JIT kernel built with the WH header would compute wrong
 // NOC commands.
 
+// Drop emule's #ifndef fallback shims (pulled in transitively before this
+// wrapper) so the authoritative, UNGUARDED per-arch header below wins without
+// tripping -Wmacro-redefined on the semantically-equal redefinition. #undef of
+// an undefined macro is a no-op.
+#undef NOC_UNICAST_ADDR_X
+#undef NOC_UNICAST_ADDR_Y
+#undef NOC_XY_ADDR
+#undef NOC_MULTICAST_ADDR
+#undef NOC_ADDR_LOCAL_BITS
+#undef NOC_ADDR_NODE_ID_BITS
+#undef NOC_MAX_BURST_SIZE
+#undef L1_ALIGNMENT
+#undef DRAM_ALIGNMENT
+
 #if defined(ARCH_BLACKHOLE)
 #include "tt_metal/hw/inc/internal/tt-1xx/blackhole/noc/noc_parameters.h"
 #elif defined(ARCH_QUASAR)

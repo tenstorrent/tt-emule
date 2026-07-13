@@ -13,8 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include "jit_hw/api/dataflow/noc.h"  // ::noc_traits_t primary template and ::Noc
-
-extern thread_local uint8_t* __emule_bridge_l1;
+#include "jit_hw/internal/emule_thread_ctx.h"
 
 // Raw L1 offsets are always < 16 MB (L1 is at most 4 MB).
 // MAP_32BIT host pointers are >= 0x40000000.
@@ -25,8 +24,8 @@ class CoreLocalMem {
     using difference_type = std::ptrdiff_t;
 
     static uintptr_t translate(uintptr_t addr) {
-        if (addr < CORE_LOCAL_MEM_RAW_OFFSET_THRESHOLD && __emule_bridge_l1) {
-            return reinterpret_cast<uintptr_t>(__emule_bridge_l1) + addr;
+        if (addr < CORE_LOCAL_MEM_RAW_OFFSET_THRESHOLD && __emule_self->bridge_l1) {
+            return reinterpret_cast<uintptr_t>(__emule_self->bridge_l1) + addr;
         }
         return addr;
     }
@@ -73,7 +72,7 @@ private:
 
 // Specialise global ::noc_traits_t<CoreLocalMem<T,AddressType>>.
 // CoreLocalMem::get_address() already returns a host pointer
-// (translates L1 firmware offset → host via __emule_bridge_l1 for small addrs).
+// (translates L1 firmware offset → host via __emule_self->bridge_l1 for small addrs).
 template <typename T, typename AddressType>
 struct noc_traits_t<CoreLocalMem<T, AddressType>> {
     struct src_args_type       { uintptr_t offset_bytes = 0; };

@@ -13,3 +13,5 @@ build_*/
 scripts/out/
 __pycache__/
 .local_ci/
+_build_emule.sh
+

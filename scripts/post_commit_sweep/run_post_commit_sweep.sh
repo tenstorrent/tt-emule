@@ -14,7 +14,7 @@
 #   BUILD_DIR       default $TT_METAL_DIR/build_emule
 #   TT_EMULE_ARCH   blackhole | wormhole          (default blackhole)
 #   OUT_DIR         report + per-entry XML/log dir (default $TT_METAL_DIR/../sweep-out/<arch>)
-#   MANIFEST        default $TT_METAL_DIR/tests/pipeline_reorg/ttnn-tests.yaml
+#   MANIFEST        default $TT_METAL_DIR/tests/pipeline_reorg/ttnn_sanity_tests.yaml
 #   PYTEST_BIN      default /opt/ttmlir-toolchain/venv/bin/pytest
 #   SHARD_COUNT     split entries across N sequential local passes (default 1 = all at once)
 #   SWEEP_ONLY      comma-separated entry slugs to run (debug / targeted reruns)
@@ -33,7 +33,7 @@ set -euo pipefail
 TT_METAL_DIR="$(cd "$TT_METAL_DIR" && pwd)"
 BUILD_DIR="${BUILD_DIR:-$TT_METAL_DIR/build_emule}"
 TT_EMULE_ARCH="${TT_EMULE_ARCH:-blackhole}"
-MANIFEST="${MANIFEST:-$TT_METAL_DIR/tests/pipeline_reorg/ttnn-tests.yaml}"
+MANIFEST="${MANIFEST:-$TT_METAL_DIR/tests/pipeline_reorg/ttnn_sanity_tests.yaml}"
 PYTEST_BIN="${PYTEST_BIN:-/opt/ttmlir-toolchain/venv/bin/pytest}"
 SHARD_COUNT="${SHARD_COUNT:-1}"
 KEEP_XML="${KEEP_XML:-0}"

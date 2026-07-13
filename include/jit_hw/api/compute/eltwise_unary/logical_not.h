@@ -27,7 +27,7 @@ ALWI void logical_not_tile(uint32_t idst) {
         }
     } else {
         for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-            __emule_dst[idst][i] = (__emule_dst[idst][i] == 0.0f) ? 1.0f : 0.0f;
+            __emule_compute_ctx().dst[idst][i] = (__emule_compute_ctx().dst[idst][i] == 0.0f) ? 1.0f : 0.0f;
         }
     }
 }

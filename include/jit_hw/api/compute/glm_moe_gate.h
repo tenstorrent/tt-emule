@@ -101,25 +101,25 @@ ALWI void glm_moe_gate(uint32_t icb0, uint32_t icb1,
     __emule_dst_mark_dirty(0);
     __emule_dst_mark_dirty(1);
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; ++i) {
-        __emule_dst[0][i] = 0.0f;
-        __emule_dst[1][i] = 0.0f;
+        __emule_compute_ctx().dst[0][i] = 0.0f;
+        __emule_compute_ctx().dst[1][i] = 0.0f;
     }
     // Silicon convention: index lives in low 16 bits of the DST word (matches
     // the topk fused-pair encoding and what pack-to-uint16 consumes). For
     // pack-to-bf16 the low 16 bits become a tiny denormal — unused by this op
     // (the indices CB is uint16-formatted).
     for (int i = 0; i < num_experts; ++i) {
-        __emule_dst[0][i * 32] = topk_scores[i];
+        __emule_compute_ctx().dst[0][i * 32] = topk_scores[i];
         uint32_t idx_bits = static_cast<uint32_t>(topk_indices[i]);
         float idx_as_float;
         std::memcpy(&idx_as_float, &idx_bits, sizeof(float));
-        __emule_dst[1][i * 32] = idx_as_float;
+        __emule_compute_ctx().dst[1][i * 32] = idx_as_float;
     }
     if constexpr (!normalize) {
         __emule_dst_check(2, "glm_moe_gate.bias_scores");
         __emule_dst_mark_dirty(2);
-        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; ++i) __emule_dst[2][i] = 0.0f;
-        for (int i = 0; i < num_experts; ++i) __emule_dst[2][i * 32] = topk_bias_scores[i];
+        for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; ++i) __emule_compute_ctx().dst[2][i] = 0.0f;
+        for (int i = 0; i < num_experts; ++i) __emule_compute_ctx().dst[2][i * 32] = topk_bias_scores[i];
     }
 }
 

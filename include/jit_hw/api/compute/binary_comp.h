@@ -61,6 +61,8 @@ template <DataFormat data_format> ALWI void lt_int_tile_init() {}
 template <DataFormat data_format> ALWI void gt_int_tile_init() {}
 template <DataFormat data_format> ALWI void le_int_tile_init() {}
 template <DataFormat data_format> ALWI void ge_int_tile_init() {}
+template <DataFormat data_format> ALWI void eq_int_tile_init() {}
+template <DataFormat data_format> ALWI void ne_int_tile_init() {}
 
 template <DataFormat data_format>
 ALWI void lt_int_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
@@ -106,24 +108,24 @@ ALWI void ge_int_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
         __emule_dst_store_i32(odst, i, r ? 1 : 0);
     }
 }
-
-// eq/ne: equality on the DST int bits is identical for signed/unsigned, so the
-// DataFormat parameter is accepted (to match the host's emitted call) but ignored.
-template <DataFormat data_format> ALWI void eq_int_tile_init() {}
-template <DataFormat data_format> ALWI void ne_int_tile_init() {}
-
 template <DataFormat data_format>
 ALWI void eq_int_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
         int32_t a = __emule_dst_load_i32(idst0, i), b = __emule_dst_load_i32(idst1, i);
-        __emule_dst_store_i32(odst, i, a == b ? 1 : 0);
+        bool r;
+        if constexpr (data_format == DataFormat::UInt16) r = (uint16_t)a == (uint16_t)b;
+        else r = a == b;  // bit-exact equality is signedness-agnostic at full width
+        __emule_dst_store_i32(odst, i, r ? 1 : 0);
     }
 }
 template <DataFormat data_format>
 ALWI void ne_int_tile(uint32_t idst0, uint32_t idst1, uint32_t odst) {
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
         int32_t a = __emule_dst_load_i32(idst0, i), b = __emule_dst_load_i32(idst1, i);
-        __emule_dst_store_i32(odst, i, a != b ? 1 : 0);
+        bool r;
+        if constexpr (data_format == DataFormat::UInt16) r = (uint16_t)a != (uint16_t)b;
+        else r = a != b;
+        __emule_dst_store_i32(odst, i, r ? 1 : 0);
     }
 }
 

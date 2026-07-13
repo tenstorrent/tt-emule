@@ -22,26 +22,28 @@
 namespace ckernel {
 
 ALWI void remainder_tile_init(uint32_t param0, uint32_t param1) {
-    // No SFPU state to initialize: emule reads param0/param1 directly in
-    // remainder_tile rather than staging them into vConstFloatPrgm0/1.
-    (void)param0;
-    (void)param1;
+    // Upstream stages the divisor (param0) + host reciprocal (param1) into the SFPU const
+    // registers here; mirror that by staging them per-fiber for remainder_tile to read.
+    __emule_compute_ctx().remainder_divisor_bits = param0;
+    __emule_compute_ctx().remainder_recip_bits = param1;
 }
 
-ALWI void remainder_tile(uint32_t idst, uint32_t param0, uint32_t param1) {
+ALWI void remainder_tile(uint32_t idst) {
     __emule_dst_check(idst, "remainder_tile");
+    const uint32_t param0 = __emule_compute_ctx().remainder_divisor_bits;
+    const uint32_t param1 = __emule_compute_ctx().remainder_recip_bits;
     float divisor, recip;
     std::memcpy(&divisor, &param0, sizeof(float));
     std::memcpy(&recip, &param1, sizeof(float));
     const float s = std::fabs(divisor);
     const float r = std::fabs(recip);
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        const float val = __emule_dst[idst][i];
+        const float val = __emule_compute_ctx().dst[idst][i];
         if (s == 0.0f) {
             // Divisor 0: silicon yields a NaN that packs to bf16 -inf; the test maps
             // that inf back to nan. Same bit pattern as binary_remainder.h.
             const uint32_t nan_bits = 0xFF800001u;
-            std::memcpy(&__emule_dst[idst][i], &nan_bits, sizeof(float));
+            std::memcpy(&__emule_compute_ctx().dst[idst][i], &nan_bits, sizeof(float));
             continue;
         }
         float v = std::fabs(val);
@@ -85,7 +87,7 @@ ALWI void remainder_tile(uint32_t idst, uint32_t param0, uint32_t param1) {
         if (std::fabs(v) - s == 0.0f) {
             v = 0.0f;
         }
-        __emule_dst[idst][i] = v;
+        __emule_compute_ctx().dst[idst][i] = v;
     }
 }
 

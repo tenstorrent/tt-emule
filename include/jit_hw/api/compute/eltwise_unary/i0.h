@@ -19,7 +19,7 @@ ALWI void i0_tile_init() {}
 ALWI void i0_tile(uint32_t idst) {
     __emule_dst_check(idst, "i0_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        __emule_dst[idst][i] = std::cyl_bessel_i(0, __emule_dst[idst][i]);
+        __emule_compute_ctx().dst[idst][i] = std::cyl_bessel_i(0, __emule_compute_ctx().dst[idst][i]);
     }
 }
 

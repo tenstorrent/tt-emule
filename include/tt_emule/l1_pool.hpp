@@ -5,14 +5,17 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <stdexcept>
 #include <sys/mman.h>
 
+#include "tt_emule/low4g_mmap.hpp"
+
 namespace tt_emule {
 
-/// L1Pool — allocates all worker L1 regions from a single contiguous MAP_32BIT
-/// mmap with power-of-2 aligned slots, enabling bitmask offset extraction.
+/// L1Pool — allocates all worker L1 regions from a single contiguous low-4 GB
+/// mmap (see low4g_mmap.hpp) with power-of-2 aligned slots, enabling bitmask
+/// offset extraction. Worker L1 must be uint32-addressable (kernels deref CB
+/// pointers directly), hence the low-4 GB placement.
 ///
 /// Each slot is 2 MB (next power of 2 above max L1: 1.5 MB on Blackhole), so
 /// callers extract an in-slot offset with a single `addr & (SLOT_SIZE-1)` mask.
@@ -23,11 +26,12 @@ public:
     explicit L1Pool(size_t num_slots) : num_slots_(num_slots) {
         if (num_slots == 0) return;
         size_t total = num_slots * SLOT_SIZE;
-        // MAP_32BIT ensures all addresses fit in 32-bit pointers.
-        // We request SLOT_SIZE-aligned memory by over-allocating and aligning.
+        // Worker L1 must be uint32-addressable (kernels deref CB pointers directly),
+        // so the pool lives in the low 4 GB (see low4g_mmap.hpp). We request
+        // SLOT_SIZE-aligned memory by over-allocating and aligning. No upfront memset:
+        // MAP_ANONYMOUS pages zero-fill on first fault, so only touched cores consume RAM.
         size_t alloc_size = total + SLOT_SIZE;  // extra for alignment
-        void* raw = mmap(nullptr, alloc_size, PROT_READ | PROT_WRITE,
-                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+        void* raw = __emule_mmap_low4g(alloc_size);
         if (raw == MAP_FAILED)
             throw std::runtime_error("L1Pool: mmap failed for " +
                                      std::to_string(num_slots) + " slots");
@@ -38,9 +42,6 @@ public:
         uintptr_t raw_addr = reinterpret_cast<uintptr_t>(raw_);
         uintptr_t aligned = (raw_addr + SLOT_SIZE - 1) & ~(SLOT_SIZE - 1);
         base_ = reinterpret_cast<uint8_t*>(aligned);
-
-        // Zero out the usable region
-        std::memset(base_, 0, total);
     }
 
     ~L1Pool() {

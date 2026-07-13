@@ -26,7 +26,7 @@ ALWI void llk_math_eltwise_unary_sfpu_binop_with_scalar(
     std::memcpy(&val, &scalar, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
         if (!__emule_vector_mode_active(i, vector_mode)) continue;
-        float& e = __emule_dst[dst_index][i];
+        float& e = __emule_compute_ctx().dst[dst_index][i];
         if constexpr (binop_mode == ADD_UNARY)       e += val;
         else if constexpr (binop_mode == SUB_UNARY)  e -= val;
         else if constexpr (binop_mode == MUL_UNARY)  e *= val;
@@ -40,35 +40,35 @@ ALWI void add_unary_tile(uint32_t idst, uint32_t param1) {
     float val;
     std::memcpy(&val, &param1, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] += val;
+        __emule_compute_ctx().dst[idst][i] += val;
 }
 
 ALWI void sub_unary_tile(uint32_t idst, uint32_t param1) {
     float val;
     std::memcpy(&val, &param1, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] -= val;
+        __emule_compute_ctx().dst[idst][i] -= val;
 }
 
 ALWI void mul_unary_tile(uint32_t idst, uint32_t param1) {
     float val;
     std::memcpy(&val, &param1, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] *= val;
+        __emule_compute_ctx().dst[idst][i] *= val;
 }
 
 ALWI void div_unary_tile(uint32_t idst, uint32_t param1) {
     float val;
     std::memcpy(&val, &param1, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] /= val;
+        __emule_compute_ctx().dst[idst][i] /= val;
 }
 
 ALWI void rsub_unary_tile(uint32_t idst, uint32_t param1) {
     float val;
     std::memcpy(&val, &param1, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[idst][i] = val - __emule_dst[idst][i];
+        __emule_compute_ctx().dst[idst][i] = val - __emule_compute_ctx().dst[idst][i];
 }
 
 // INT32 variants: param1 is int32_t reinterpreted as uint32_t

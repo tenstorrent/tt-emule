@@ -24,7 +24,7 @@ ALWI void digamma_tile_init() {}
 ALWI void digamma_tile(uint32_t idst) {
     __emule_dst_check(idst, "digamma_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
+        float x = __emule_compute_ctx().dst[idst][i];
         float result = 0.0f;
         // Recurrence: shift x up until x > 6 so the asymptotic series is accurate.
         while (x <= 6.0f) {
@@ -39,7 +39,7 @@ ALWI void digamma_tile(uint32_t idst) {
                   - (1.0f / 12.0f) * inv2
                   + (1.0f / 120.0f) * inv4
                   - (1.0f / 252.0f) * inv6;
-        __emule_dst[idst][i] = result;
+        __emule_compute_ctx().dst[idst][i] = result;
     }
 }
 

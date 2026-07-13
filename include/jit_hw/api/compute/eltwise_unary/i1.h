@@ -54,7 +54,7 @@ ALWI void i1_tile(uint32_t idst) {
     constexpr float REGION_SPLIT = 10.0f;
 
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst][i];
+        float x = __emule_compute_ctx().dst[idst][i];
         if (x >  X_CLAMP) x =  X_CLAMP;
         if (x < -X_CLAMP) x = -X_CLAMP;
         float ax = std::fabs(x);
@@ -90,7 +90,7 @@ ALWI void i1_tile(uint32_t idst) {
             out = std::copysign(mag, x);
         }
 
-        __emule_dst[idst][i] = out;
+        __emule_compute_ctx().dst[idst][i] = out;
     }
 }
 

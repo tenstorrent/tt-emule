@@ -71,12 +71,11 @@ struct NocOptVals {
 // (experimental::set_read_state / read_with_state in experimental_device_api.h)
 // take `Noc` BY VALUE, so storing this state as a per-`Noc`-instance member
 // would lose it between the set_*_state call and the paired *_with_state call.
-// Model it as global state keyed by (core-thread, noc_id): one OS thread per
-// core ⇒ thread_local; one slot per NOC ⇒ array indexed by noc_id.  Mirrors the
-// per-NOC NIU-register model already used for the counters in
-// noc_nonblocking_api.h (`noc_reads_num_issued[NUM_NOCS]` et al.).
-inline thread_local uint32_t  __emule_noc_cached_size[NUM_NOCS]      = {};
-inline thread_local uintptr_t __emule_noc_cached_write_dst[NUM_NOCS] = {};
+// Model it as per-thread state keyed by (core-thread, noc_id): one OS thread per
+// core, one slot per NOC ⇒ DatamovementThreadCtx::noc_cached_size /
+// noc_cached_write_dst, indexed by noc_id.  Mirrors the per-NOC NIU-register
+// model already used for the counters in noc_nonblocking_api.h
+// (`noc_reads_num_issued[NUM_NOCS]` et al.).
 
 // ---- class Noc ----
 
@@ -170,7 +169,7 @@ public:
         uint32_t size_bytes,
         const src_args_t<Src>& /*src_args*/,
         const NocOptVals& /*noc_opts*/ = {}) const {
-        __emule_noc_cached_size[noc_id_] = size_bytes;
+        __emule_datamovement_ctx().noc_cached_size[noc_id_] = size_bytes;
     }
 
     template <
@@ -186,7 +185,7 @@ public:
         const NocOptVals& /*noc_opts*/ = {}) const {
         // When max_page_size fits in one packet, size comes from cached state.
         constexpr bool fits_in_one_packet = max_page_size <= NOC_MAX_BURST_SIZE;
-        const uint32_t bytes = fits_in_one_packet ? __emule_noc_cached_size[noc_id_] : size_bytes;
+        const uint32_t bytes = fits_in_one_packet ? __emule_datamovement_ctx().noc_cached_size[noc_id_] : size_bytes;
         uint8_t* src_ptr = to_host_ptr<AddressType::NOC>(
             noc_traits_t<Src>::template src_addr<AddressType::NOC>(src, *this, src_args));
         uint8_t* dst_ptr = to_host_ptr<AddressType::LOCAL_L1>(
@@ -237,8 +236,8 @@ public:
         uint32_t size_bytes,
         const dst_args_t<Dst>& dst_args,
         const NocOptVals& /*noc_opts*/ = {}) const {
-        __emule_noc_cached_size[noc_id_]      = size_bytes;
-        __emule_noc_cached_write_dst[noc_id_] = reinterpret_cast<uintptr_t>(to_host_ptr<AddressType::NOC>(
+        __emule_datamovement_ctx().noc_cached_size[noc_id_]      = size_bytes;
+        __emule_datamovement_ctx().noc_cached_write_dst[noc_id_] = reinterpret_cast<uintptr_t>(to_host_ptr<AddressType::NOC>(
             noc_traits_t<Dst>::template dst_addr<AddressType::NOC>(dst, *this, dst_args)));
     }
 
@@ -254,13 +253,13 @@ public:
         const dst_args_t<Dst>& dst_args,
         const NocOptVals& /*noc_opts*/ = {}) const {
         constexpr bool fits_in_one_packet = max_page_size <= NOC_MAX_BURST_SIZE;
-        const uint32_t bytes = fits_in_one_packet ? __emule_noc_cached_size[noc_id_] : size_bytes;
+        const uint32_t bytes = fits_in_one_packet ? __emule_datamovement_ctx().noc_cached_size[noc_id_] : size_bytes;
         uint8_t* src_ptr = to_host_ptr<AddressType::LOCAL_L1>(
             noc_traits_t<Src>::template src_addr<AddressType::LOCAL_L1>(src, *this, src_args));
         // Prefer the pre-resolved destination from set_async_write_state when available;
         // fall back to re-resolving from the dst argument for safety.
         // The cached write-dst is already a host pointer (resolved in set_async_write_state).
-        const uintptr_t cached_wdst = __emule_noc_cached_write_dst[noc_id_];
+        const uintptr_t cached_wdst = __emule_datamovement_ctx().noc_cached_write_dst[noc_id_];
         uint8_t* dst_ptr = cached_wdst
             ? reinterpret_cast<uint8_t*>(cached_wdst)
             : to_host_ptr<AddressType::NOC>(
@@ -396,5 +395,6 @@ private:
     uint8_t  noc_id_;
     // set_async_{read,write}_state size + resolved write-dst are NOT stored here:
     // the upstream wrappers pass `Noc` by value, so the cmd_buf-register state is
-    // modelled globally — see __emule_noc_cached_size / __emule_noc_cached_write_dst.
+    // modelled per-thread — see DatamovementThreadCtx::noc_cached_size /
+    // noc_cached_write_dst.
 };

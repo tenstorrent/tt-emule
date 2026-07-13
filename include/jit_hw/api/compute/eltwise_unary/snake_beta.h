@@ -23,9 +23,9 @@ ALWI void snake_beta_tile(uint32_t idst_x, uint32_t idst_alpha, uint32_t idst_be
     __emule_dst_check(idst_beta, "snake_beta_tile");
     __emule_dst_check(idst_out, "snake_beta_tile");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_dst[idst_x][i];
-        float s = std::sin(__emule_dst[idst_alpha][i] * x);
-        __emule_dst[idst_out][i] = x + (s * s) / __emule_dst[idst_beta][i];
+        float x = __emule_compute_ctx().dst[idst_x][i];
+        float s = std::sin(__emule_compute_ctx().dst[idst_alpha][i] * x);
+        __emule_compute_ctx().dst[idst_out][i] = x + (s * s) / __emule_compute_ctx().dst[idst_beta][i];
     }
 }
 

@@ -25,7 +25,7 @@ ALWI void copy_dest_values(uint32_t dst_src, uint32_t dst_dst) {
     __emule_dst_check(dst_src, "copy_dest_values src");
     __emule_dst_check(dst_dst, "copy_dest_values dst");
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++)
-        __emule_dst[dst_dst][i] = __emule_dst[dst_src][i];
+        __emule_compute_ctx().dst[dst_dst][i] = __emule_compute_ctx().dst[dst_src][i];
 }
 
 } // namespace ckernel

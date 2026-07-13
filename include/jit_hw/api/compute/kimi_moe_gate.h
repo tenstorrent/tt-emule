@@ -122,16 +122,16 @@ ALWI void kimi_moe_gate(uint32_t icb0, uint32_t icb1,
     __emule_dst_mark_dirty(0);
     __emule_dst_mark_dirty(1);
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; ++i) {
-        __emule_dst[0][i] = 0.0f;
-        __emule_dst[1][i] = 0.0f;
+        __emule_compute_ctx().dst[0][i] = 0.0f;
+        __emule_compute_ctx().dst[1][i] = 0.0f;
     }
     // Silicon convention: index lives in low 16 bits of the DST word.
     for (int i = 0; i < K; ++i) {
-        __emule_dst[0][i * 32] = topk_scores[i];
+        __emule_compute_ctx().dst[0][i * 32] = topk_scores[i];
         uint32_t idx_bits = static_cast<uint32_t>(topk_indices[i]);
         float idx_as_float;
         std::memcpy(&idx_as_float, &idx_bits, sizeof(float));
-        __emule_dst[1][i * 32] = idx_as_float;
+        __emule_compute_ctx().dst[1][i * 32] = idx_as_float;
     }
 }
 

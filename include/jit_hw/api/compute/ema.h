@@ -34,18 +34,15 @@ namespace ckernel {
 // alpha (weight on previous output) and beta (weight on current input), plus the
 // per-column carried previous output. Persist across ema_tile calls; reset by
 // ema_clear_previous_output at each batch boundary.
-static thread_local float __emule_ema_alpha = 0.0f;
-static thread_local float __emule_ema_beta = 0.0f;
-static thread_local float __emule_ema_prev[32] = {};
 
 ALWI void ema_init(uint32_t alpha, uint32_t beta) {
-    std::memcpy(&__emule_ema_alpha, &alpha, sizeof(float));
-    std::memcpy(&__emule_ema_beta, &beta, sizeof(float));
+    std::memcpy(&__emule_compute_ctx().ema_alpha, &alpha, sizeof(float));
+    std::memcpy(&__emule_compute_ctx().ema_beta, &beta, sizeof(float));
 }
 
 ALWI void ema_clear_previous_output() {
     for (uint32_t j = 0; j < 32; ++j) {
-        __emule_ema_prev[j] = 0.0f;
+        __emule_compute_ctx().ema_prev[j] = 0.0f;
     }
 }
 
@@ -53,17 +50,17 @@ ALWI void ema_clear_previous_output() {
 ALWI void ema_tile(uint32_t input_dst_index) {
     __emule_dst_check(input_dst_index, "ema_tile.in");
     __emule_dst_check(input_dst_index + 1, "ema_tile.out");
-    const float alpha = __emule_ema_alpha;
-    const float beta = __emule_ema_beta;
+    const float alpha = __emule_compute_ctx().ema_alpha;
+    const float beta = __emule_compute_ctx().ema_beta;
 
-    const float* in = __emule_dst[input_dst_index];
+    const float* in = __emule_compute_ctx().dst[input_dst_index];
     __emule_dst_mark_dirty(input_dst_index + 1);
-    float* out = __emule_dst[input_dst_index + 1];
+    float* out = __emule_compute_ctx().dst[input_dst_index + 1];
     for (uint32_t r = 0; r < 32; ++r) {       // rows = successive time samples T
         for (uint32_t c = 0; c < 32; ++c) {   // cols = channels (independent EMAs)
-            const float v = beta * in[r * 32 + c] + alpha * __emule_ema_prev[c];
+            const float v = beta * in[r * 32 + c] + alpha * __emule_compute_ctx().ema_prev[c];
             out[r * 32 + c] = v;
-            __emule_ema_prev[c] = v;
+            __emule_compute_ctx().ema_prev[c] = v;
         }
     }
 }

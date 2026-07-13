@@ -42,8 +42,8 @@ ALWI void sigmoid_tile(uint32_t idst) {
         ckernel::sfpu::_calculate_sigmoid_<approx, __emule_deep::kTileIterations>(it);
     });
 #else
-    // Real impl: 1 / (1 + exp(-x)) per element in __emule_dst[idst].
-    float* d = __emule_dst[idst];
+    // Real impl: 1 / (1 + exp(-x)) per element in __emule_compute_ctx().dst[idst].
+    float* d = __emule_compute_ctx().dst[idst];
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; ++i) {
         d[i] = 1.0f / (1.0f + std::exp(-d[i]));
     }

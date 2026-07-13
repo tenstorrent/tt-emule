@@ -4,10 +4,7 @@
 
 #pragma once
 #include <cstdint>
+#include "jit_hw/internal/emule_thread_ctx.h"
 
-// TLS variables set by the kernel runner before kernel launch.
-extern thread_local uint32_t __emule_num_threads;
-extern thread_local uint32_t __emule_my_thread_id;
-
-inline uint32_t get_num_threads() { return __emule_num_threads; }
-inline uint32_t get_my_thread_id() { return __emule_my_thread_id; }
+inline uint32_t get_num_threads() { return __emule_self->num_threads; }
+inline uint32_t get_my_thread_id() { return __emule_self->my_thread_id; }

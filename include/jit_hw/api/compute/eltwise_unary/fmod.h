@@ -21,17 +21,19 @@
 namespace ckernel {
 
 ALWI void fmod_tile_init(uint32_t param0, uint32_t param1) {
-    (void)param0;
+    // Upstream stages the divisor (param0) + reciprocal (param1) into SFPU const registers here;
+    // mirror by staging the divisor per-fiber for fmod_tile (recip unused — emule uses std::fmod).
     (void)param1;
+    __emule_compute_ctx().fmod_divisor_bits = param0;
 }
 
-ALWI void fmod_tile(uint32_t idst, uint32_t param0, uint32_t param1) {
-    (void)param1;
+ALWI void fmod_tile(uint32_t idst) {
     __emule_dst_check(idst, "fmod_tile");
     float divisor;
+    const uint32_t param0 = __emule_compute_ctx().fmod_divisor_bits;
     std::memcpy(&divisor, &param0, sizeof(float));
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        __emule_dst[idst][i] = std::fmod(__emule_dst[idst][i], divisor);
+        __emule_compute_ctx().dst[idst][i] = std::fmod(__emule_compute_ctx().dst[idst][i], divisor);
     }
 }
 

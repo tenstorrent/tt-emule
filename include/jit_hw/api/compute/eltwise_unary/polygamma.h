@@ -47,7 +47,7 @@ ALWI void polygamma_tile(uint32_t idst, uint32_t n_packed, uint32_t scale_packed
     constexpr int NUM_TERMS = 11;  // exact terms k = 0..10
 
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        const float x = __emule_dst[idst][i];
+        const float x = __emule_compute_ctx().dst[idst][i];
 
         // Part 1: exact summation of first NUM_TERMS reciprocal powers.
         float sum = 0.0f;
@@ -79,7 +79,7 @@ ALWI void polygamma_tile(uint32_t idst, uint32_t n_packed, uint32_t scale_packed
 
         sum += tail;
 
-        __emule_dst[idst][i] = sum * scale;
+        __emule_compute_ctx().dst[idst][i] = sum * scale;
     }
 }
 

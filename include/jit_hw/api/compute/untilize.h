@@ -22,19 +22,19 @@
 #include "jit_hw/internal/llk_state.h"
 
 inline void untilize_init(uint32_t, uint32_t = 0) {
-    __llk_unpack_is_tilize = false;
-    __llk_pack_is_untilize = true;
+    __emule_compute_ctx().llk_unpack_is_tilize = false;
+    __emule_compute_ctx().llk_pack_is_untilize = true;
 }
 inline void untilize_init_short(uint32_t) {
-    __llk_unpack_is_tilize = false;
-    __llk_pack_is_untilize = true;
+    __emule_compute_ctx().llk_unpack_is_tilize = false;
+    __emule_compute_ctx().llk_pack_is_untilize = true;
 }
 // untilize_uninit reverts the packer to its default (tilize-pack) mode.
 // In emule the only state to flip is `__llk_pack_is_untilize`.  Real
 // callers: ssm_prefix_scan, rotary_embedding, and matmul ops that mix
 // tilize/untilize within a single compute kernel.
 inline void untilize_uninit(uint32_t = 0) {
-    __llk_pack_is_untilize = false;
+    __emule_compute_ctx().llk_pack_is_untilize = false;
 }
 
 // untilize_block: write `ntiles` tiles from `icb` to `ocb` in row-major
@@ -46,12 +46,12 @@ inline void untilize_uninit(uint32_t = 0) {
 // Real LLK reference:
 //   tt_metal/tt-llk/tt_llk_wormhole_b0/llk_lib/llk_pack_untilize.h
 inline void untilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb) {
-    __llk_pack_block_c = ntiles;
-    __llk_pack_offset = 0;
+    __emule_compute_ctx().llk_pack_block_c = ntiles;
+    __emule_compute_ctx().llk_pack_offset = 0;
     for (uint32_t t = 0; t < ntiles; ++t) {
         copy_tile(icb, t, 0);
         __llk_pack_untilize(0, ocb);
-        __llk_pack_offset++;
+        __emule_compute_ctx().llk_pack_offset++;
     }
 }
 template <uint32_t block_tile_count>
