@@ -15,8 +15,9 @@
 #include "jit_hw/api/dataflow/noc.h"  // ::noc_traits_t primary template and ::Noc
 #include "jit_hw/internal/emule_thread_ctx.h"
 
-// Raw L1 offsets are always < 16 MB (L1 is at most 4 MB).
-// MAP_32BIT host pointers are >= 0x40000000.
+// A raw L1 offset is always < 16 MB (L1 is at most 4 MB); a resolved host pointer is far larger.
+// The threshold distinguishes a 0-based L1 offset (rebase onto bridge_l1) from an already-resolved
+// host pointer (pass through).
 static constexpr uintptr_t CORE_LOCAL_MEM_RAW_OFFSET_THRESHOLD = 0x1000000;
 
 template <typename T, typename AddressType = uintptr_t>

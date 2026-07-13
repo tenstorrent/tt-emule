@@ -98,9 +98,8 @@ private:
     // already resolved the NOC address (e.g. via __emule_dram_ptr or
     // __emule_resolve_noc_addr) before returning — we simply cast here.
     //
-    // LOCAL_L1 addresses are raw CB/DFB firmware pointers (uint32_t) or truncated
-    // host pointers that must be run through __emule_local_l1_to_ptr, which handles
-    // both "firmware offset from L1 base" and "truncated 32-bit host pointer" cases.
+    // LOCAL_L1 addresses are 0-based L1 offsets (uint32_t) that must be run through
+    // __emule_local_l1_to_ptr, which rebases them onto the per-fiber bridge_l1.
     template <AddressType addr_type>
     static uint8_t* to_host_ptr(uintptr_t addr) {
         if constexpr (addr_type == AddressType::NOC) {

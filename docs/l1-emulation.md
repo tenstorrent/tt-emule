@@ -89,10 +89,10 @@ on blackhole / quasar — see [BUILD_GUIDE.md](../BUILD_GUIDE.md) for arch defau
 `Core::l1_alloc(bytes)` is a bump allocator returning a **0-based offset** (Quasar
 DFB fallback path — see §4).
 
-Worker L1 is currently backed by the low-4 GB pool (`MAP_32BIT`; `l1_pool.hpp`,
-`low4g_mmap.hpp`), and DRAM cores use a plain mmap. Under the offset model this
-placement is a **backing detail, not an addressing constraint** — the
-kernel-visible address is an offset regardless of where L1 is mapped (§6).
+Worker L1 is backed by a plain 64-bit `mmap` (`l1_pool.hpp`, `worker_l1_mmap.hpp`),
+as are DRAM cores. Under the offset model the placement is a **backing detail, not
+an addressing constraint** — the kernel-visible address is an offset regardless of
+where L1 is mapped (§6).
 
 L1 alignment is `L1_ALIGNMENT` (16 bytes), injected as a JIT define from
 `hal::get_l1_alignment()`.
@@ -158,16 +158,13 @@ through the `extern "C"` hooks and inline chokepoint above (exported via
 - No per-program re-zeroing (one-time `MAP_ANONYMOUS` zero-init; the Quasar DFB
   fallback bump allocator is the one exception — see
   [mem-zeros-handling.md](mem-zeros-handling.md)).
-- **Worker-L1 placement.** Worker L1 is currently mapped in the low 4 GB
-  (`low4g_mmap.hpp`: `MAP_32BIT`'s `[0, 2 GB)` first, then a `/proc/self/maps`-found
-  `[2 GB, 4 GB)` gap via `MAP_FIXED`; `L1Pool` reserves one 2-MB-aligned slot per
-  Tensix core, `MAP_NORESERVE` so slots cost only virtual address space until
-  touched). Under the offset addressing model (§1) this placement is a backing
-  detail, not an addressing constraint — the kernel-visible address is an offset
-  independent of where L1 is mapped. Lifting the low-4 GB placement (a plain 64-bit
-  `mmap` for worker cores) so a mesh whose total L1 exceeds 4 GB — e.g. a 32-chip
-  Blackhole galaxy — fits in one process is a separate, behavior-neutral change
-  on top of this model; see
+- **Worker-L1 placement.** Worker L1 is a plain 64-bit `mmap` (`worker_l1_mmap.hpp`;
+  `MAP_NORESERVE`, so a slot costs only virtual address space until touched). `L1Pool`
+  reserves one 2-MB-aligned slot per Tensix core. Under the offset addressing model
+  (§1) the placement is unconstrained — the kernel-visible address is an offset
+  independent of where L1 is mapped — so a mesh whose total worker L1 exceeds 4 GB
+  (e.g. a 32-chip Blackhole galaxy, ≈ 9 GB) runs in one process, the backing landing
+  wherever the kernel places a 64-bit anonymous map (well above 4 GB). See
   [l1-offset-translation.md](l1-offset-translation.md).
 
 ---

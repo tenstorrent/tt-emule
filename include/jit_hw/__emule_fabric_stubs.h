@@ -963,9 +963,9 @@ public:
 // ---- PacketHeaderPool ----
 // NOTE: PacketHeaderPool is defined in the `tt_metal/fabric/hw/inc/packet_header_pool.h` shadow (NOT
 // here). It must hand out pointers into the worker's real L1 reserved region (via
-// __emule_local_l1_to_ptr) so the (uint32_t)header truncation the teleport relies on round-trips —
-// .so static storage lives above 4 GB and would truncate to garbage. The shadow includes dev_mem_map.h
-// for the reserved MEM_PACKET_HEADER_POOL_BASE region, which this stub cannot reach.
+// __emule_local_l1_to_ptr) so the fabric shim's bridge_l1-relative header narrowing round-trips
+// through the teleport. The shadow includes dev_mem_map.h for the reserved MEM_PACKET_HEADER_POOL_BASE
+// region, which this stub cannot reach.
 struct HeaderTableEntry_t {
     PACKET_HEADER_TYPE* first = nullptr;
     PACKET_HEADER_TYPE* second = nullptr;

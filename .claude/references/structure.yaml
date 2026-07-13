@@ -31,13 +31,6 @@ files:
   symbols:
   - {kind: namespace, name: tt_emule}
   - {kind: class, name: L1Pool}
-- path: include/tt_emule/low4g_mmap.hpp
-  section: include/tt_emule/
-  summary: '`__emule_mmap_low4g(size)` — maps worker L1 in the low 4 GB (uint32-addressable aliasing window): MAP_32BIT first, then a /proc/self/maps-found [2 GB,4 GB) gap via MAP_FIXED. Lets ~16 BH chips
-    fit one process.'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: function, name: __emule_mmap_low4g}
 - path: include/tt_emule/tile_counter.hpp
   section: include/tt_emule/
   summary: '`struct TileCounter`, `class TileCounterArray`; `TILE_COUNTERS_PER_NEO`; inc_posted/inc_acked/reset_all'
@@ -46,6 +39,13 @@ files:
   - {kind: global, name: TILE_COUNTERS_PER_NEO}
   - {kind: struct, name: TileCounter}
   - {kind: class, name: TileCounterArray}
+- path: include/tt_emule/worker_l1_mmap.hpp
+  section: include/tt_emule/
+  summary: Worker-L1 backing allocator (__emule_mmap_worker_l1) — a plain 64-bit MAP_NORESERVE mmap; the offset model frees worker L1 from any placement window, so a galaxy-scale pool lives anywhere in
+    64-bit space.
+  symbols:
+  - {kind: namespace, name: tt_emule}
+  - {kind: function, name: __emule_mmap_worker_l1}
 - path: include/hw/inc/api/debug/dprint.h
   section: include/hw/inc/api/debug/
   summary: macros `DPRINT`, `DPRINT_DATA0`, `DPRINT_DATA1`

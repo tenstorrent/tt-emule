@@ -184,8 +184,6 @@ Authoritative pass/fail state lives outside this report so it cannot drift:
   timing/precision/resource reasons.
 - *DEST is fp32 internally* — bf16 rounding occurs only at pack/unpack
   boundaries, not per MATH step.
-- *`MAP_32BIT` pressure* — worker L1 must fit the shared sub-4 GB region; L1Pool
-  consolidates it, but heavy core counts compete for the space.
 - *JIT compile cost* — each unique kernel costs a compiler invocation (~1–3 s);
   the persistent cache amortizes repeats, but a fresh cache pays full cost.
 

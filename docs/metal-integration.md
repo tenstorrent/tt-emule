@@ -35,9 +35,9 @@ std::unordered_map<tt_xy_pair, uint32_t> dram_core_to_channel_;
 uint32_t l1_size_; uint64_t dram_bank_size_;
 ```
 
-- Builds a single `MAP_32BIT` `L1Pool` (slots = 2× the SoC Tensix count). Worker
-  cores draw L1 from pool slots; DRAM cores use individual mmaps; pool exhaustion
-  falls back to individual `MAP_32BIT` mmaps. See [l1-emulation.md](l1-emulation.md).
+- Builds a single `L1Pool` (one slot per SoC Tensix core) from a plain 64-bit
+  `mmap`. Worker cores draw L1 from pool slots; DRAM cores use individual mmaps;
+  pool exhaustion falls back to an individual mmap. See [l1-emulation.md](l1-emulation.md).
 - `get_core(tt_xy_pair)` lazy-creates a `Core` with the right role.
 - `read_from_device` / `write_to_device` delegate uniformly to
   `get_core(xy)->l1_ptr(offset)` + `memcpy`.

@@ -8,14 +8,13 @@
 #include <stdexcept>
 #include <sys/mman.h>
 
-#include "tt_emule/low4g_mmap.hpp"
+#include "tt_emule/worker_l1_mmap.hpp"
 
 namespace tt_emule {
 
-/// L1Pool — allocates all worker L1 regions from a single contiguous low-4 GB
-/// mmap (see low4g_mmap.hpp) with power-of-2 aligned slots, enabling bitmask
-/// offset extraction. Worker L1 must be uint32-addressable (kernels deref CB
-/// pointers directly), hence the low-4 GB placement.
+/// L1Pool — allocates all worker L1 regions from a single contiguous mmap
+/// (see worker_l1_mmap.hpp) with power-of-2 aligned slots, enabling bitmask
+/// offset extraction.
 ///
 /// Each slot is 2 MB (next power of 2 above max L1: 1.5 MB on Blackhole), so
 /// callers extract an in-slot offset with a single `addr & (SLOT_SIZE-1)` mask.
@@ -26,12 +25,10 @@ public:
     explicit L1Pool(size_t num_slots) : num_slots_(num_slots) {
         if (num_slots == 0) return;
         size_t total = num_slots * SLOT_SIZE;
-        // Worker L1 must be uint32-addressable (kernels deref CB pointers directly),
-        // so the pool lives in the low 4 GB (see low4g_mmap.hpp). We request
-        // SLOT_SIZE-aligned memory by over-allocating and aligning. No upfront memset:
+        // Request SLOT_SIZE-aligned memory by over-allocating and aligning. No upfront memset:
         // MAP_ANONYMOUS pages zero-fill on first fault, so only touched cores consume RAM.
         size_t alloc_size = total + SLOT_SIZE;  // extra for alignment
-        void* raw = __emule_mmap_low4g(alloc_size);
+        void* raw = __emule_mmap_worker_l1(alloc_size);
         if (raw == MAP_FAILED)
             throw std::runtime_error("L1Pool: mmap failed for " +
                                      std::to_string(num_slots) + " slots");

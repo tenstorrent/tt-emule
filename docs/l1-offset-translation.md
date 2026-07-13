@@ -104,8 +104,6 @@ not truncated pointers, and survives worker L1 mapped above 4 GB (see
 ## Relationship to worker-L1 placement
 
 Offset addressing **decouples** the kernel-visible address from where worker L1 is
-mapped. Worker L1 is still backed by the low-4 GB `MAP_32BIT` pool
-([l1-emulation.md](l1-emulation.md) §2) — that placement is now a backing
-detail, not an addressing constraint. Lifting it (a plain 64-bit `mmap` for worker
-cores, so a >4 GB mesh such as a 32-chip Blackhole galaxy fits one process) is a
-separate, behavior-neutral change on top of this model.
+mapped. Worker L1 is a plain 64-bit `mmap` ([l1-emulation.md](l1-emulation.md) §2) —
+placement is a backing detail, not an addressing constraint, so a mesh whose total
+worker L1 exceeds 4 GB (e.g. a 32-chip Blackhole galaxy, ≈ 9 GB) runs in one process.

@@ -4,7 +4,7 @@
 
 #pragma once
 // JIT dataflow API — self-contained implementation for JIT-compiled kernels.
-// Uses uint32_t L1 addresses (truncated host pointers from mmap'd-below-4GB L1)
+// Uses 0-based uint32 L1 offsets (rebased onto the per-fiber bridge_l1 at deref)
 // and __emule_self->cbs for circular buffer state.
 //
 // Address translation model:
@@ -624,11 +624,9 @@ FORCE_INLINE void noc_async_read_one_packet_with_state_with_trid(
     uint32_t dst_l1_addr,
     uint32_t /*trid*/,
     uint8_t noc = noc_index) {
-    // shard_base_l1 + shard_offset is the L1 address on the source core.
-    // In emule it may be a firmware-style L1 offset or a truncated host
-    // pointer (from l1_alloc / CB APIs); __emule_addr_to_offset canonicalizes
-    // both to the proper L1 offset so the OR with the cached upper coords
-    // doesn't corrupt the high bits of the reconstructed noc addr.
+    // shard_base_l1 + shard_offset is the 0-based L1 offset on the source core;
+    // __emule_addr_to_offset is an idempotent in-slot mask (the offset is already < 2 MB)
+    // before the OR with the cached upper coords of the reconstructed noc addr.
     uint64_t base = __emule_datamovement_ctx().shard_noc_addr_base[noc & 1];
     uint32_t size = __emule_datamovement_ctx().shard_size[noc & 1];
     uint32_t l1_off = __emule_addr_to_offset(shard_base_l1 + shard_offset);
@@ -651,9 +649,8 @@ template <bool inc_num_issued = true>
 inline void noc_async_read_with_state(
     uint32_t src_local_l1_addr, uint32_t dst_local_l1_addr, uint32_t size,
     uint8_t noc = noc_index) {
-    // Canonicalize src — it can be either a firmware-style L1 offset or a
-    // truncated host pointer in emule; __emule_addr_to_offset normalizes both
-    // to a proper L1 offset so the OR with cached upper coords is well-formed.
+    // __emule_addr_to_offset is an idempotent in-slot mask on src (already a 0-based
+    // L1 offset) before the OR with the cached upper coords.
     uint64_t upper = __emule_datamovement_ctx().shard_noc_addr_base[noc & 1]
                    & 0xFFFFFFFF00000000ULL;
     uint64_t full_src = upper | uint64_t(__emule_addr_to_offset(src_local_l1_addr));
@@ -702,7 +699,7 @@ inline std::atomic<uint32_t>* __emule_sem_atomic(volatile tt_l1_ptr uint32_t* se
 }
 
 // Set semaphore value (local L1 store).
-// addr is a uint32_t L1 address (truncated host pointer).
+// addr is a 0-based uint32 L1 offset.
 inline void noc_semaphore_set(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t val) {
     auto* a = __emule_sem_atomic(sem_addr);
     a->store(val, std::memory_order_release);
