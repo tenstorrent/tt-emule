@@ -22,6 +22,11 @@ on:
   schedule:
     - cron: '0 7 * * *'   # 07:00 UTC daily
   workflow_dispatch: {}
+  # TEMP (PR #234 pre-merge validation — REVERT BEFORE MERGE): run the pinned
+  # e2e lane on this PR. The heavy main-tip jobs (build/test/ttnn-pytest) are
+  # gated off for pull_request below, so only build-pinned → e2e-models run.
+  pull_request:
+    branches: [main]
 
 concurrency:
   group: nightly-upstream
@@ -30,6 +35,7 @@ concurrency:
 jobs:
   build:
     name: Build tt-metal (main tip) against tt-emule main
+    if: ${{ github.event_name != 'pull_request' }}   # TEMP (PR #234) — REVERT BEFORE MERGE
     runs-on: tt-ubuntu-2204-large-stable
     timeout-minutes: 240
     continue-on-error: true
@@ -109,6 +115,7 @@ jobs:
 
   test:
     name: Run regression (all archs)
+    if: ${{ github.event_name != 'pull_request' }}   # TEMP (PR #234) — REVERT BEFORE MERGE
     needs: build
     runs-on: tt-ubuntu-2204-xlarge-stable
     # One runner visits wormhole/blackhole/quasar sequentially (shared JIT cache).
@@ -185,6 +192,7 @@ jobs:
 
   ttnn-pytest:
     name: TTNN Pytests (${{ matrix.arch }}, shard ${{ matrix.shard }}/5)
+    if: ${{ github.event_name != 'pull_request' }}   # TEMP (PR #234) — REVERT BEFORE MERGE
     needs: build
     runs-on: tt-ubuntu-2204-xlarge-stable
     timeout-minutes: 90
@@ -352,7 +360,11 @@ jobs:
       - name: Checkout tt-emule (main)
         uses: actions/checkout@v4
         with:
-          ref: main
+          # TEMP (PR #234) — REVERT TO `ref: main` BEFORE MERGE. On the PR run,
+          # check out the branch so its e2e harness scripts are present (they
+          # are not on main yet); github.head_ref is empty on schedule/dispatch,
+          # falling back to main.
+          ref: ${{ github.head_ref || 'main' }}
           path: tt-emule
 
       - name: Checkout tt-metal at pinned SHA
