@@ -394,15 +394,20 @@ jobs:
         run: bash tt-metal/install_dependencies.sh --sfpi
 
       - name: Install model deps (transformers, torchvision — no torch bump)
-        # The tt_transformers model loader needs transformers; torchvision is
-        # pulled in by the model preprocessing chain. Pin to the versions the
-        # toolchain venv is validated against and install torchvision --no-deps
-        # so it never bumps the pre-baked torch.
+        # The tt_transformers model loader needs transformers; transformers in
+        # turn imports torchvision if it is installed (AutoProcessor → image
+        # utils), so torchvision must import cleanly. Install it --no-deps (so it
+        # never bumps the pre-baked torch) AND from the CPU index at the version
+        # matching the pre-baked torch (2.9.1 → torchvision 0.24.1+cpu): a
+        # default-index/mismatched build fails with "operator torchvision::nms
+        # does not exist" on import, which transformers surfaces as a spurious
+        # AutoProcessor import error.
         shell: bash
         run: |
           VENV=/opt/ttmlir-toolchain/venv
           "$VENV/bin/pip" install --no-cache-dir transformers==4.53.0
-          "$VENV/bin/pip" install --no-cache-dir --no-deps torchvision==0.24.0
+          "$VENV/bin/pip" install --no-cache-dir --no-deps \
+            --index-url https://download.pytorch.org/whl/cpu torchvision==0.24.1
 
       - name: Restore HuggingFace weight cache (ungated unsloth mirror)
         uses: actions/cache@v4
