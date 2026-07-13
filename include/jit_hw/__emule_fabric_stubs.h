@@ -73,6 +73,10 @@ enum NocSendType : uint8_t {
     NOC_MULTICAST_WRITE = 5,
     NOC_MULTICAST_ATOMIC_INC = 6,
     NOC_UNICAST_READ = 7,
+    // Emule-internal: silicon folds fused scatter-write+atomic-inc into NOC_UNICAST_SCATTER_WRITE with an
+    // extra chunk (chunk_count = N+1). Emule's teleport tag is internal (multicast already isn't 5/6), so a
+    // dedicated code lets the runner deliver the 2 writes + sem inc without overloading the scatter case.
+    NOC_FUSED_SCATTER_WRITE_ATOMIC_INC = 8,
     NOC_SEND_TYPE_LAST = NOC_UNICAST_SCATTER_WRITE,
 };
 constexpr uint32_t CHIP_SEND_TYPE_LAST = 0;
@@ -155,6 +159,31 @@ struct NocUnicastAtomicIncFusedCommandHeader {
     bool flush;
     NocUnicastAtomicIncFusedCommandHeader(uint64_t a, uint64_t s, uint32_t v, bool f = true) :
         noc_address(a), semaphore_noc_address(s), val(v), flush(f) {}
+};
+static constexpr uint8_t NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS = 2;
+struct NocUnicastScatterAtomicIncFusedCommandHeader {
+    uint64_t noc_address[NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS];
+    uint64_t semaphore_noc_address;
+    uint16_t chunk_size[NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS - 1];  // last chunk size is implicit
+    uint16_t val;                                                             // semaphore increment value
+    bool flush;
+    NocUnicastScatterAtomicIncFusedCommandHeader(
+        std::initializer_list<uint64_t> noc_addresses, uint64_t semaphore_noc_address,
+        std::initializer_list<uint16_t> chunk_sizes, uint16_t val, bool flush = true) :
+        semaphore_noc_address(semaphore_noc_address), val(val), flush(flush) {
+        uint32_t i = 0;
+        for (uint64_t a : noc_addresses) {
+            if (i < NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS) {
+                noc_address[i++] = a;
+            }
+        }
+        uint32_t j = 0;
+        for (uint16_t s : chunk_sizes) {
+            if (j < NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS - 1) {
+                chunk_size[j++] = s;
+            }
+        }
+    }
 };
 static constexpr uint8_t NOC_SCATTER_WRITE_MAX_CHUNKS = 4;
 struct NocUnicastScatterCommandHeader {
@@ -270,6 +299,57 @@ struct PacketHeader {
             for (int i = 0; i < NOC_SCATTER_WRITE_MAX_CHUNKS - 1; ++i) {
                 *reinterpret_cast<volatile uint16_t*>(&cmd_rest[24 + i * 2]) = h.chunk_size[i];  // @32
             }
+        }
+    }
+    // Mask-aware fused unicast-write+atomic-inc patch (mirrors api_common.h populate_unicast_fused_atomic_inc
+    // _fields<UpdateMask>): layout is noc_address@0, semaphore_noc_address@8, val@16 — the same slots the
+    // NOC_FUSED_UNICAST_ATOMIC_INC teleport (runner case 3) reads back. Bits = UnicastFusedAtomicIncUpdateMask.
+    template <uint32_t MaskBits>
+    void apply_fused_fields(uint16_t payload_size, const NocUnicastAtomicIncFusedCommandHeader& h) volatile {
+        constexpr bool upd_waddr = (MaskBits & 0x1u) != 0;   // WriteDstAddr
+        constexpr bool upd_saddr = (MaskBits & 0x2u) != 0;   // SemaphoreAddr
+        constexpr bool upd_val = (MaskBits & 0x4u) != 0;     // Val
+        constexpr bool upd_psize = (MaskBits & 0x10u) != 0;  // PayloadSize (Flush=0x8 is inert — teleport is synchronous)
+        if constexpr (upd_waddr) {
+            cmd_noc_address = h.noc_address;  // @0
+        }
+        if constexpr (upd_saddr) {
+            *reinterpret_cast<volatile uint64_t*>(&cmd_rest[0]) = h.semaphore_noc_address;  // @8
+        }
+        if constexpr (upd_val) {
+            *reinterpret_cast<volatile uint32_t*>(&cmd_rest[8]) = h.val;  // @16
+        }
+        if constexpr (upd_psize) {
+            payload_size_bytes = payload_size;
+        }
+    }
+    // Mask-aware fused scatter-write+atomic-inc patch (mirrors populate_unicast_fused_scatter_write_atomic_inc
+    // _fields<UpdateMask>). Emule layout in the 40B command union: noc_address[0]@0, noc_address[1]@8,
+    // semaphore_noc_address@16, chunk_size[0]@24, val@26 — what the NOC_FUSED_SCATTER_WRITE_ATOMIC_INC teleport
+    // (runner case 8) reads back. Bits = UnicastFusedScatterWriteAtomicIncUpdateMask.
+    template <uint32_t MaskBits>
+    void apply_fused_scatter_fields(uint16_t payload_size, const NocUnicastScatterAtomicIncFusedCommandHeader& h) volatile {
+        constexpr bool upd_waddr = (MaskBits & 0x1u) != 0;   // WriteDstAddrs
+        constexpr bool upd_saddr = (MaskBits & 0x2u) != 0;   // SemaphoreDstAddr
+        constexpr bool upd_chunks = (MaskBits & 0x4u) != 0;  // WriteChunkSizes
+        constexpr bool upd_val = (MaskBits & 0x8u) != 0;     // Val
+        constexpr bool upd_psize = (MaskBits & 0x20u) != 0;  // PayloadSize (Flush=0x10 is inert)
+        if constexpr (upd_waddr) {
+            volatile uint64_t* na = reinterpret_cast<volatile uint64_t*>(this);  // na[0]@0, na[1]@8
+            na[0] = h.noc_address[0];
+            na[1] = h.noc_address[1];
+        }
+        if constexpr (upd_saddr) {
+            *reinterpret_cast<volatile uint64_t*>(&cmd_rest[8]) = h.semaphore_noc_address;  // @16
+        }
+        if constexpr (upd_chunks) {
+            *reinterpret_cast<volatile uint16_t*>(&cmd_rest[16]) = h.chunk_size[0];  // @24
+        }
+        if constexpr (upd_val) {
+            *reinterpret_cast<volatile uint16_t*>(&cmd_rest[18]) = h.val;  // @26
+        }
+        if constexpr (upd_psize) {
+            payload_size_bytes = payload_size;
         }
     }
     // Routing setters — emule resolves the destination chip via the cluster neighbor table, not the
@@ -512,6 +592,10 @@ enum class UnicastFusedAtomicIncUpdateMask : uint32_t {
     None = 0, WriteDstAddr = 1u << 0, SemaphoreAddr = 1u << 1, Val = 1u << 2, Flush = 1u << 3,
     PayloadSize = 1u << 4, All = 31
 };
+enum class UnicastFusedScatterWriteAtomicIncUpdateMask : uint32_t {
+    None = 0, WriteDstAddrs = 1u << 0, SemaphoreDstAddr = 1u << 1, WriteChunkSizes = 1u << 2,
+    Val = 1u << 3, Flush = 1u << 4, PayloadSize = 1u << 5, All = 63
+};
 #define __EMULE_FABRIC_MASK_OR(T)                                                            \
     constexpr T operator|(T a, T b) {                                                        \
         return static_cast<T>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));          \
@@ -521,6 +605,7 @@ __EMULE_FABRIC_MASK_OR(UnicastInlineWriteUpdateMask)
 __EMULE_FABRIC_MASK_OR(UnicastAtomicIncUpdateMask)
 __EMULE_FABRIC_MASK_OR(UnicastScatterWriteUpdateMask)
 __EMULE_FABRIC_MASK_OR(UnicastFusedAtomicIncUpdateMask)
+__EMULE_FABRIC_MASK_OR(UnicastFusedScatterWriteAtomicIncUpdateMask)
 #undef __EMULE_FABRIC_MASK_OR
 
 // Experimental sub-namespaces. linear::experimental holds the fabric send free-functions CCL kernels
@@ -636,6 +721,68 @@ inline void fabric_unicast_noc_unicast_atomic_inc_with_state(Conn* client, Packe
         }
     }
     client->wait_for_empty_write_slot();
+    client->send_payload_flush_non_blocking_from_address(
+        __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
+}
+
+// ---- Fused unicast-write + atomic-inc (stateful): set_state lays the static fields (payload size, val,
+// flush) once; with_state patches the per-packet write + semaphore dst addrs and reuses the rest. The
+// teleport (runner case 3, NOC_FUSED_UNICAST_ATOMIC_INC) writes the payload then increments the semaphore. ----
+template <UnicastFusedAtomicIncUpdateMask Mask = UnicastFusedAtomicIncUpdateMask::None, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_fused_unicast_with_atomic_inc_set_state(
+    PacketHeader* hdr, uint8_t /*num_hops*/, Cmd cmd = nullptr, uint16_t packet_size_bytes = 0) {
+    hdr->noc_send_type = NOC_FUSED_UNICAST_ATOMIC_INC;
+    if constexpr (!std::is_same_v<Cmd, std::nullptr_t>) {
+        hdr->template apply_fused_fields<static_cast<uint32_t>(Mask)>(packet_size_bytes, cmd);
+    } else if constexpr (__mask_has(Mask, UnicastFusedAtomicIncUpdateMask::PayloadSize)) {
+        hdr->payload_size_bytes = packet_size_bytes;
+    }
+}
+template <
+    UnicastFusedAtomicIncUpdateMask Mask = UnicastFusedAtomicIncUpdateMask::None,
+    typename Conn,
+    typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_fused_unicast_with_atomic_inc_with_state(
+    Conn* client, PacketHeader* hdr, uint32_t src_addr, Cmd cmd = nullptr, uint16_t packet_size_bytes = 0) {
+    if constexpr (!std::is_same_v<Cmd, std::nullptr_t>) {
+        hdr->template apply_fused_fields<static_cast<uint32_t>(Mask)>(packet_size_bytes, cmd);
+    } else if constexpr (__mask_has(Mask, UnicastFusedAtomicIncUpdateMask::PayloadSize)) {
+        hdr->payload_size_bytes = packet_size_bytes;
+    }
+    client->wait_for_empty_write_slot();
+    client->send_payload_without_header_non_blocking_from_address(src_addr, hdr->payload_size_bytes);
+    client->send_payload_flush_non_blocking_from_address(
+        __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
+}
+
+// ---- Fused scatter-write (2 chunks) + atomic-inc (stateful). Silicon folds the semaphore into a 3rd scatter
+// chunk; emule tags it NOC_FUSED_SCATTER_WRITE_ATOMIC_INC and the teleport (runner case 8) does the 2 writes +
+// the semaphore inc. set_state lays payload size / chunk size / val; with_state patches the write + sem dsts. ----
+template <
+    UnicastFusedScatterWriteAtomicIncUpdateMask Mask = UnicastFusedScatterWriteAtomicIncUpdateMask::None,
+    typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_fused_scatter_write_atomic_inc_set_state(
+    PacketHeader* hdr, uint8_t /*num_hops*/, Cmd cmd = nullptr, uint16_t packet_size_bytes = 0) {
+    hdr->noc_send_type = NOC_FUSED_SCATTER_WRITE_ATOMIC_INC;
+    if constexpr (!std::is_same_v<Cmd, std::nullptr_t>) {
+        hdr->template apply_fused_scatter_fields<static_cast<uint32_t>(Mask)>(packet_size_bytes, cmd);
+    } else if constexpr (__mask_has(Mask, UnicastFusedScatterWriteAtomicIncUpdateMask::PayloadSize)) {
+        hdr->payload_size_bytes = packet_size_bytes;
+    }
+}
+template <
+    UnicastFusedScatterWriteAtomicIncUpdateMask Mask = UnicastFusedScatterWriteAtomicIncUpdateMask::None,
+    typename Conn,
+    typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_fused_scatter_write_atomic_inc_with_state(
+    Conn* client, PacketHeader* hdr, uint32_t src_addr, Cmd cmd = nullptr, uint16_t packet_size_bytes = 0) {
+    if constexpr (!std::is_same_v<Cmd, std::nullptr_t>) {
+        hdr->template apply_fused_scatter_fields<static_cast<uint32_t>(Mask)>(packet_size_bytes, cmd);
+    } else if constexpr (__mask_has(Mask, UnicastFusedScatterWriteAtomicIncUpdateMask::PayloadSize)) {
+        hdr->payload_size_bytes = packet_size_bytes;
+    }
+    client->wait_for_empty_write_slot();
+    client->send_payload_without_header_non_blocking_from_address(src_addr, hdr->payload_size_bytes);
     client->send_payload_flush_non_blocking_from_address(
         __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
 }

@@ -80,6 +80,10 @@ chip's copy of this (core, offset)" problem. Two runtime hooks bridge it
    - `2 NOC_UNICAST_ATOMIC_INC` — `fetch_add` (the CCL handshake counter).
    - `3 NOC_FUSED_UNICAST_ATOMIC_INC` — a payload write **and** a separate semaphore `fetch_add` (wakes both).
    - `4 NOC_UNICAST_SCATTER_WRITE` — per-chunk writes to several dst addresses.
+   - `8 NOC_FUSED_SCATTER_WRITE_ATOMIC_INC` — a 2-chunk scatter write **and** a semaphore `fetch_add` (the
+     fused reduce_scatter packet). Silicon folds the semaphore into a 3rd scatter chunk on send-type `4`;
+     emule tags it with a dedicated internal send-type (multicast already isn't wire-faithful at `5/6`) so
+     the delivery is a clean compose of the case-4 writes and the case-3 increment.
    - **multicast** (`5/6`, a line/range routing) — emule expresses it as the resolved target *list* and
      replays the same terminal command (write or atomic-inc) into each chip in the range. This is the CCL
      barrier broadcast.
