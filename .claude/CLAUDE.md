@@ -62,7 +62,7 @@ faithful mock APIs.
   index; per-subsystem references live under `docs/`
   (l1/dram/dest/cb/noc-emulation, metal-integration,
   tilize-untilize-pack, cb-dataformat, mem-zeros-handling,
-  DFB/QUASAR). Read the relevant doc before changing a subsystem
+  DFB/QUASAR, e2e-models). Read the relevant doc before changing a subsystem
   and update it in the same change. Verify every claim against
   actual code before writing it down — the docs must never assert
   something the source doesn't do.

@@ -46,12 +46,16 @@ Layered exactly like the ttnn pytest regression:
 - `.github/scripts/ci-e2e-models.sh` — CI wrapper (mirrors `ci-ttnn-pytests.sh`):
   env contract, `_ttnn.so` symlink, `HF_HOME` cache, tee log, exit-code
   propagation.
-- `e2e-models` job in `.github/workflows/nightly-metal-upstream.yml` — matrix
-  over `arch × shard`, `needs: build`, `continue-on-error: true`. Runs in
-  parallel with the `test` (regression) and `ttnn-pytest` jobs. Installs
-  `transformers`/`torchvision` into the toolchain venv (no torch bump), caches
-  the ungated `unsloth/Llama-3.2-1B-Instruct` weights (no HF token), and uploads
-  the log + junit XML.
+- `e2e-models` job in `.github/workflows/nightly-metal-upstream.yml` — a matrix
+  over `arch × shard`, `continue-on-error: true`, fanning out in parallel with
+  the `test` (regression) and `ttnn-pytest` jobs. It is fed by a **second**
+  `build-pinned` job in that workflow that builds tt-metal at the **pinned** SHA
+  (`tt-metal-pin.txt`, same as PR Metal Regression), so — unlike the main-tip
+  regression/ttnn-pytest lanes — the model signal is reproducible and moves only
+  when a PR bumps the pin. Installs `transformers`/`torchvision` into the
+  toolchain venv (no torch bump), caches the ungated
+  `unsloth/Llama-3.2-1B-Instruct` weights (no HF token), and uploads the log +
+  junit XML.
 
 ## Current coverage
 
@@ -89,5 +93,6 @@ tree is ~top1 0.93 / top5 1.0, clearing the `.refpt` thresholds.
 The vendored demo tracks upstream only as of the pin SHA in its header. On a pin
 bump, re-run `git show <new-pin>:models/tt_transformers/demo/simple_text_demo.py`
 into the vendored file and re-apply the two `# emule:` markers. This is a
-`/uplift` checklist item — the demo is not in the C++ regression, so upstream
-drift is otherwise uncaught (same lesson as the SDPA-pytest compile break).
+`/uplift` Step 5 item (see `.claude/skills/uplift/SKILL.md`) — the demo is not in
+the C++ regression, so upstream drift is otherwise uncaught until the nightly e2e
+lane runs against the new pin (same lesson as the SDPA-pytest compile break).
