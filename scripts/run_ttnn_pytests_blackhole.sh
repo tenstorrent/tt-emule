@@ -215,7 +215,14 @@ run_pytest "dm_test_creation" "$DM_TEST_DIR/test_creation.py::test_ones" "$DM_TE
 
 # -k filter entries (capture passing subsets within partial-pass files)
 run_pytest "dm_test_repeat"                  "$DM_TEST_DIR/test_repeat.py"  # promoted (issue #73): 109 passed, 242 skipped
-run_pytest "dm_test_gather"                  "$DM_TEST_DIR/test_gather.py" -k 'not test_gather_general'  # issue #73: PASS on WH (45/45), but BH has 3 BH-specific PCC failures in test_gather_general — keep filter on BH
+# Giant single-row gathers (long_tensor [1,151936]/[1,128256], cache_run [1,1,32,65536]) are
+# O(Wt_index*Wt_input*1024) host-compute-bound; their cumulative cost crosses the 900s per-entry
+# timeout at the CI runner's slowdown (a perf limit, not a deadlock — the file passes locally).
+# Split into three entries so each fits its own 900s budget (like the sdpa split); see WH note.
+# test_gather_general keeps its BH-only filter (3 BH-specific PCC failures).
+run_pytest "dm_test_gather"                  "$DM_TEST_DIR/test_gather.py" -k 'not test_gather_general and not 151936 and not 128256 and not 65536'  # issue #73
+run_pytest "dm_test_gather_151936"           "$DM_TEST_DIR/test_gather.py" -k '151936'  # long_tensor 152K-wide single row
+run_pytest "dm_test_gather_128256_65536"     "$DM_TEST_DIR/test_gather.py" -k '128256 or 65536'  # long_tensor 128K single row + cache_run 65K
 run_pytest "dm_test_concat_5d"               "$DM_TEST_DIR/test_concat.py" -k 'test_concat_5d'
 run_pytest "dm_test_concat_many_inputs"      "$DM_TEST_DIR/test_concat.py" -k 'test_concat_many_inputs'
 run_pytest "dm_test_concat_sharded"          "$DM_TEST_DIR/test_concat.py::test_sharded_concat" "$DM_TEST_DIR/test_concat.py::test_concat_sharded_pad" "$DM_TEST_DIR/test_concat.py::test_sharded_concat_with_groups"  # sharded S2S concat guard (#131): local CB→CB copy was all-zeros before noc_async_read/write_one_packet_with_state reconstructed coords from set_state
