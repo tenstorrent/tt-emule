@@ -77,7 +77,8 @@ enum NocSendType : uint8_t {
     // extra chunk (chunk_count = N+1). Emule's teleport tag is internal (multicast already isn't 5/6), so a
     // dedicated code lets the runner deliver the 2 writes + sem inc without overloading the scatter case.
     NOC_FUSED_SCATTER_WRITE_ATOMIC_INC = 8,
-    NOC_SEND_TYPE_LAST = NOC_UNICAST_SCATTER_WRITE,
+    // Last real (silicon) send-type; the emule-internal tag 8 is deliberately beyond it.
+    NOC_SEND_TYPE_LAST = NOC_UNICAST_READ,
 };
 constexpr uint32_t CHIP_SEND_TYPE_LAST = 0;
 
@@ -162,9 +163,9 @@ struct NocUnicastAtomicIncFusedCommandHeader {
 };
 static constexpr uint8_t NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS = 2;
 struct NocUnicastScatterAtomicIncFusedCommandHeader {
-    uint64_t noc_address[NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS];
+    uint64_t noc_address[NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS] = {};
     uint64_t semaphore_noc_address;
-    uint16_t chunk_size[NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS - 1];  // last chunk size is implicit
+    uint16_t chunk_size[NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS - 1] = {};  // last chunk size is implicit
     uint16_t val;                                                             // semaphore increment value
     bool flush;
     NocUnicastScatterAtomicIncFusedCommandHeader(

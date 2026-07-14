@@ -151,17 +151,20 @@ inline void apply_x86_rewrites(std::string& src) {
     // #define'd pointer type. Two passes:
     //   (A) collect the L1-address variable set — vars assigned DIRECTLY from a
     //       producer (get_write_ptr / get_read_ptr / get_semaphore / get_tile_address,
-    //       free or cb.-method form), then the transitive closure over
-    //       `w = <collected-var> [+/- expr]` (e.g. vars_addr = means_addr + n).
+    //       free or cb.-method form; plus get_arg_val, for the `uint32_t addr =
+    //       get_arg_val<uint32_t>(i)` store-then-cast L1-offset idiom), then the
+    //       transitive closure over `w = <collected-var> [+/- expr]` (e.g. vars_addr = means_addr + n).
     //   (B) per collected var v, translate a cast whose operand is v (optionally
     //       `v + arith`), in either the reinterpret_cast form (a non-tt_l1_ptr pointer
     //       target, or a `_l1_ptr`-suffixed macro type P1 can't see pre-macro) or the
     //       C-style `(T*)(...)` form.
     // Gating on the collected set is what keeps this from over-matching arbitrary casts:
-    // a var not assigned from get_*_ptr is never collected, tt_l1_ptr reinterpret_casts
+    // a var not assigned from a producer is never collected, tt_l1_ptr reinterpret_casts
     // stay with P1 (negative lookahead), and get_arg_addr host pointers are never
-    // collected. A collected var later reassigned to a non-L1 value is the only residual
-    // risk — it fails loudly (SIGSEGV / the __emule_l1_translate OOB assert).
+    // collected. get_arg_val is the broadest producer — runtime args aren't always L1
+    // offsets (a count, a DRAM base) — but only a collected var actually cast to an L1
+    // pointer is rewritten, and a wrong rebase fails loudly (SIGSEGV / the
+    // __emule_l1_translate OOB assert).
     {
         static const std::regex l1_addr_var_re(
             R"RE(\b(?:uint32_t|auto)\s+([A-Za-z_]\w*)\s*=\s*(?:[A-Za-z_]\w*\s*\.\s*)?(?:get_write_ptr|get_read_ptr|get_semaphore|get_tile_address|get_arg_val)\s*(?:<[^>]*>)?\s*\()RE");
@@ -247,7 +250,9 @@ inline void apply_x86_rewrites(std::string& src) {
     // reinterpret_cast<T*> forms handled above.
     static const std::regex ptr_to_l1_addr_re(
         R"(reinterpret_cast<\s*(?:std::)?uint32_t\s*>\s*\(\s*((?:[^()]|\([^()]*\))*?)\s*\))");
-    src = std::regex_replace(
+    // Line-preserving: the operand can match newlines, so a multi-line narrowing must
+    // not collapse to one line and drift the #line map for the rest of the file.
+    src = emule_line_preserving_replace(
         src, ptr_to_l1_addr_re,
         "static_cast<uint32_t>(reinterpret_cast<uintptr_t>($1) - reinterpret_cast<uintptr_t>(__emule_self->bridge_l1))");
 
@@ -264,7 +269,7 @@ inline void apply_x86_rewrites(std::string& src) {
     // dummy; behavior is identical on both arches (the element is never touched).
     static const std::regex zero_len_noc_coords_re(
         R"((using\s+RemoteNocCoords\s*=\s*RemoteNocCoord\s*\[)\s*N\s*(\]))");
-    src = std::regex_replace(src, zero_len_noc_coords_re, "$1(N) == 0 ? 1 : (N)$2");
+    src = emule_line_preserving_replace(src, zero_len_noc_coords_re, "$1(N) == 0 ? 1 : (N)$2");
 
     // R2 (fabric header narrowing): a fabric/CCL kernel narrows a packet-header L1
     // *pointer* (pool-allocated, translated) to a device address via C-style
@@ -301,7 +306,7 @@ inline void preprocess_tu_recursive(
     std::map<std::string, std::string>& done) {
     std::ifstream in(src_path);
     if (!in) {
-        throw std::runtime_error("preprocess_kernel_source_for_x86: cannot read " + src_path);
+        throw std::runtime_error("kernel_patcher: cannot read " + src_path);
     }
     std::stringstream ss;
     ss << in.rdbuf();
@@ -422,7 +427,7 @@ inline void preprocess_tu_recursive(
 
     std::ofstream out(out_path);
     if (!out) {
-        throw std::runtime_error("preprocess_kernel_source_for_x86: cannot write " + out_path);
+        throw std::runtime_error("kernel_patcher: cannot write " + out_path);
     }
     // Attribute the emitted body to the real kernel file so DWARF (and thus ASAN
     // backtraces) report `<real kernel>.cpp:<line>` rather than the generated temp

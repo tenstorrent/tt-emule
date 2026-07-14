@@ -73,8 +73,8 @@ Consequences:
 static constexpr size_t MAX_CBS = 32;
 enum class CoreRole { WORKER, DRAM };
 
-uint8_t*  l1_      = nullptr;             // mmap base (host pointer)
-uint32_t  l1_base_ = 0;                   // l1_ truncated to 32 bits (legacy accessor)
+uint8_t*   l1_      = nullptr;            // mmap base (host pointer)
+uintptr_t  l1_base_ = 0;                  // = (uintptr_t)l1_ — full host pointer (offset model; no longer truncated)
 size_t    l1_size_ = 0;                   // worker L1 / DRAM bank size, from SoC descriptor
 CoreRole  role_    = CoreRole::WORKER;
 CBSyncState     cb_sync_states_[MAX_CBS] = {};

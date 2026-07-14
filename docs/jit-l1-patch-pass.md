@@ -58,7 +58,7 @@ silently corrupting memory. Diagnose with `EMULE_JIT_DEBUG=1` + gdb (ASAN off).
 | 5 | `l1_named_arg_ptr_re` | translate the Metal 2.0 `get_arg(args::NAME)` form |
 | 6 | `l1_getptr_cast_re` (P2) | translate an attr-less cast of an inline `get_*_ptr()` |
 | 7 | `l1_mem_move_copy_re` (P3) | translate both L1 operands of `memmove`/`memcpy` |
-| 8 | `l1_addr_var_re` + per-var casts (P4) | set-gated closure: casts (attr-less / C-style / `v+arith` / `_l1_ptr` macro) of vars derived from `get_*_ptr` |
+| 8 | `l1_addr_var_re` + per-var casts (P4) | set-gated closure: casts (attr-less / C-style / `v+arith` / `_l1_ptr` macro) of vars derived from `get_*_ptr` or `get_arg_val` |
 | 9 | `l1_pad_tile_re` (P5.1) | translate `fill_pad_tile`'s `l1_tile_ptr` param cast |
 | 10 | `l1_curr_addr_re` (P5.2) | translate `fill_with_val_async`'s `curr_addr` cast |
 | 11 | `ptr_to_l1_addr_re` (reverse) | pointer → 0-based device offset (subtract `bridge_l1`) |
@@ -216,8 +216,14 @@ C-style, arithmetic operand, or `#define`d pointer type). Two passes.
 **(A) Collect the L1-address variable set.** Direct producers:
 
 ```
-\b(?:uint32_t|auto)\s+([A-Za-z_]\w*)\s*=\s*(?:[A-Za-z_]\w*\s*\.\s*)?(?:get_write_ptr|get_read_ptr|get_semaphore|get_tile_address)\s*(?:<[^>]*>)?\s*\(
+\b(?:uint32_t|auto)\s+([A-Za-z_]\w*)\s*=\s*(?:[A-Za-z_]\w*\s*\.\s*)?(?:get_write_ptr|get_read_ptr|get_semaphore|get_tile_address|get_arg_val)\s*(?:<[^>]*>)?\s*\(
 ```
+
+`get_arg_val` is a producer for the `uint32_t addr = get_arg_val<uint32_t>(i)` store-then-cast
+L1-offset idiom (rule 4 covers the inline-cast form; this adds the store-then-cast case). It is the
+broadest producer — runtime args aren't always L1 offsets (a count, a DRAM base) — but only a
+collected var actually cast to an L1 pointer is rewritten, and a wrong rebase fails loudly (the
+SIGSEGV net / the `[EMULE_L1] … out of range` assert).
 
 then the **transitive closure** (fixpoint) over derivations — `w = <collected> [+/- …]`:
 

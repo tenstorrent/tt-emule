@@ -44,7 +44,7 @@ inline uint8_t* __emule_l1_translate(uint32_t l1_addr) {
 #ifndef NDEBUG
     // Surface an un-migrated site (a value still carrying an absolute/aliased
     // address rather than a 0-based offset) as a named panic instead of a wild
-    // store. Skipped until the ctx carries this core's l1_size.
+    // store. Skipped only while l1_size is unset (0).
     if (__emule_self->l1_size != 0 && l1_addr >= __emule_self->l1_size) {
         __emule_asan_panic("[EMULE_L1] L1 offset 0x%x out of range (l1_size 0x%x)\n",
                            l1_addr, __emule_self->l1_size);

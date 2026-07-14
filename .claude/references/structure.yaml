@@ -2577,7 +2577,8 @@ files:
 - path: include/jit_hw/tt_metal/fabric/hw/inc/packet_header_pool.h
   section: include/jit_hw/tt_metal/fabric/hw/inc/
   summary: '`PacketHeaderPool` (route-based: contiguous header blocks per route_id + for_each_header) from the reserved MEM_PACKET_HEADER_POOL_BASE region of real worker L1 (via __emule_local_l1_to_ptr),
-    per-(core,risc)-thread partition; plus the route-variant multicast send overloads. So the (uint32_t)header truncation the teleport relies on round-trips and broadcast''s route API resolves'
+    per-(core,risc)-thread partition; plus the route-variant multicast send overloads, so (uint32_t)header narrows to a bridge_l1-relative offset (__emule_fabric_l1_off) that the teleport re-widens, and
+    broadcast''s route API resolves'
   symbols:
   - {kind: function, name: __emule_local_l1_to_ptr}
   - {kind: class, name: PacketHeaderPool}
