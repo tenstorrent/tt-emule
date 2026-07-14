@@ -9,6 +9,11 @@
 #   2. Warm the GitHub Actions ccache against the current tt-metal main, so
 #      that PRs which later bump tt-metal-pin.txt to that SHA hit warm cache.
 #
+# The `e2e-models` lane is the exception: full model demos are only meaningful
+# against a reproducible tree, so they run against the PINNED tt-metal SHA
+# (tt-metal-pin.txt) from a second `build-pinned` job, fanning out in parallel
+# with the main-tip regression + ttnn-pytest shards. See docs/e2e-models.md.
+#
 # Slack notification on failure is documented in .github/notify-stub.md.
 
 name: Nightly Metal Upstream Regression
@@ -242,5 +247,182 @@ jobs:
           path: |
             ${{ runner.temp }}/ttnn-pytests.log
             ${{ runner.temp }}/ttnn-junit-xml/*.xml
+          retention-days: 30
+          if-no-files-found: warn
+
+  # Second build, at the PINNED tt-metal SHA (tt-metal-pin.txt) rather than main
+  # tip — the e2e model demos need a reproducible tree, and the vendored demo
+  # (tests/emule/models/test_tt_transformers_text_demo.py) lives at the pinned
+  # SHA. Runs in parallel with the main-tip `build` above; feeds only e2e-models.
+  build-pinned:
+    name: Build tt-metal (pinned) against tt-emule main
+    runs-on: tt-ubuntu-2204-large-stable
+    timeout-minutes: 240
+    continue-on-error: true
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
+    outputs:
+      pin: ${{ steps.pin.outputs.sha }}
+    steps:
+      - name: Checkout tt-emule (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: tt-emule
+
+      - name: Resolve pinned tt-metal SHA
+        id: pin
+        shell: bash
+        run: |
+          SHA=$(grep -vE '^\s*(#|$)' tt-emule/tt-metal-pin.txt | head -1 | awk '{print $1}')
+          if [ -z "$SHA" ]; then
+            echo "::error::tt-metal-pin.txt has no SHA"
+            exit 1
+          fi
+          echo "Pinned tt-metal SHA: $SHA"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tt-metal at pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ steps.pin.outputs.sha }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Init required tt-metal submodules
+        shell: bash
+        run: |
+          cd tt-metal
+          git submodule update --init --depth=1 tt_metal/third_party/umd
+          git submodule update --init --depth=1 tt_metal/third_party/tracy
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: tt-metal-${{ steps.pin.outputs.sha }}-clang20-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            tt-metal-${{ steps.pin.outputs.sha }}-clang20-${{ runner.os }}-
+            tt-metal-${{ steps.pin.outputs.sha }}-clang20-
+            tt-metal-
+
+      - name: Build
+        env:
+          TT_EMULE_DIR: ${{ github.workspace }}/tt-emule
+          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
+          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-build.sh
+
+      - name: Stage cluster descriptors with build artifact
+        shell: bash
+        run: |
+          mkdir -p tt-metal/build_emule/_cluster_descs
+          cp -r tt-metal/tt_metal/third_party/umd/tests/cluster_descriptor_examples \
+                tt-metal/build_emule/_cluster_descs/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-tt-metal-build-pinned-${{ github.run_id }}
+          path: tt-metal/build_emule/
+          retention-days: 1
+          if-no-files-found: error
+
+  e2e-models:
+    name: E2E Models (${{ matrix.arch }}, shard ${{ matrix.shard }}/2)
+    needs: build-pinned
+    runs-on: tt-ubuntu-2204-xlarge-stable
+    # Full model demos under emule slow-dispatch are slow; warning-only so a
+    # failure/timeout never blocks. Runs in parallel with the regression and
+    # ttnn-pytest jobs (built against the pinned SHA, not main tip).
+    timeout-minutes: 300
+    continue-on-error: true
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Blackhole full-model support is unvalidated — kept warning-only.
+        arch: [wormhole, blackhole]
+        shard: [1, 2]   # one shard per curated model entry (round-robin)
+    steps:
+      - name: Checkout tt-emule (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: tt-emule
+
+      - name: Checkout tt-metal at pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ needs.build-pinned.outputs.pin }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nightly-tt-metal-build-pinned-${{ github.run_id }}
+          path: tt-metal/build_emule/
+
+      - name: Place cluster descriptors
+        shell: bash
+        run: |
+          mkdir -p tt-metal/tt_metal/third_party/umd/tests
+          cp -r tt-metal/build_emule/_cluster_descs/cluster_descriptor_examples \
+                tt-metal/tt_metal/third_party/umd/tests/
+
+      - name: Install SFPI toolchain
+        shell: bash
+        run: bash tt-metal/install_dependencies.sh --sfpi
+
+      - name: Install model deps (transformers, torchvision — no torch bump)
+        # The tt_transformers model loader needs transformers; transformers in
+        # turn imports torchvision if it is installed (AutoProcessor → image
+        # utils), so torchvision must import cleanly. Install it --no-deps (so it
+        # never bumps the pre-baked torch) AND from the CPU index at the version
+        # matching the pre-baked torch (2.9.1 → torchvision 0.24.1+cpu): a
+        # default-index/mismatched build fails with "operator torchvision::nms
+        # does not exist" on import, which transformers surfaces as a spurious
+        # AutoProcessor import error.
+        shell: bash
+        run: |
+          VENV=/opt/ttmlir-toolchain/venv
+          "$VENV/bin/pip" install --no-cache-dir transformers==4.53.0
+          "$VENV/bin/pip" install --no-cache-dir --no-deps \
+            --index-url https://download.pytorch.org/whl/cpu torchvision==0.24.1
+
+      - name: Restore HuggingFace weight cache (ungated unsloth mirror)
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/hf-cache
+          key: hf-unsloth-llama-3.2-1b-instruct-v1
+          restore-keys: |
+            hf-unsloth-llama-3.2-1b-
+
+      - name: Run E2E models (${{ matrix.arch }}, shard ${{ matrix.shard }}/2)
+        env:
+          TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
+          BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
+          TT_EMULE_ARCH: ${{ matrix.arch }}
+          SHARD_INDEX:   ${{ matrix.shard }}
+          SHARD_COUNT:   2
+          HF_HOME:       ${{ runner.temp }}/hf-cache
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-e2e-models.sh
+
+      - name: Upload E2E model artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-e2e-models-results-${{ github.run_id }}-${{ matrix.arch }}-shard-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/e2e-models.log
+            ${{ runner.temp }}/e2e-junit-xml/*.xml
           retention-days: 30
           if-no-files-found: warn

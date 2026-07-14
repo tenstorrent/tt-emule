@@ -227,6 +227,21 @@ Expect: the test collects and runs, the host-side reshape variants pass, and **n
 
 ---
 
+## Phase 4c: Verify End-to-End Models (optional)
+
+Run a full model demo (Llama-3.2-1B-Instruct) end-to-end under emulation. Needs
+`transformers`/`torchvision` in the venv and downloads the ungated
+`unsloth/Llama-3.2-1B-Instruct` weights (no HF token). See
+[docs/e2e-models.md](docs/e2e-models.md) for details and how to add a model.
+
+```bash
+TT_METAL_DIR=$ROOT/tt-metal bash scripts/run_e2e_models_wormhole.sh
+```
+
+Expect `Results: 2 passed, 0 failed` (token-accuracy gate + batch-1 generative smoke).
+
+---
+
 ## Phase 5: Build tt-mlir (for D2M Regression)
 
 The D2M regression tests are Python tests from tt-mlir that exercise the emulated device through the MLIR compiler pipeline. tt-mlir links against the **same `build_emule` libs** built in Phase 3 — no second tt-metal build.
