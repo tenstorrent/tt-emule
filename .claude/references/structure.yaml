@@ -65,6 +65,7 @@ files:
   - {kind: extern_c, name: __emule_fabric_teleport}
   - {kind: extern_c, name: __emule_fabric_set_route}
   - {kind: extern_c, name: __emule_fabric_set_route_dir}
+  - {kind: extern_c, name: __emule_fabric_route_follow}
   - {kind: macro, name: PROGRAMMABLE_CORE_TYPE_DEFINED}
   - {kind: enum, name: ProgrammableCoreType}
   - {kind: using, name: PACKET_HEADER_TYPE}
@@ -2085,6 +2086,7 @@ files:
   - {kind: macro, name: NOC_UNICAST_ADDR_X}
   - {kind: macro, name: NOC_UNICAST_ADDR_Y}
   - {kind: extern_c, name: __emule_resolve_noc_addr}
+  - {kind: extern_c, name: __emule_fabric_route_follow}
   - {kind: extern_c, name: __emule_multicast_write}
   - {kind: extern_c, name: __emule_noc_addr_is_dram}
   - {kind: function, name: __emule_debug_multicast}

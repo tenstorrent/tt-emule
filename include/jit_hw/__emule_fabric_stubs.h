@@ -51,6 +51,11 @@ extern "C" void __emule_fabric_set_route(
 // the dst chip by direction. Set at send time by the sender (which knows its own direction).
 extern "C" void __emule_fabric_set_route_dir(
     uint32_t hdr, uint32_t conn_index, uint32_t mux_x, uint32_t mux_y);
+// Carry a stamped route from a source header address to a destination address when the header bytes are
+// copied (a worker staging a packet header into a forwarder relay slot). On silicon the routing fields ride
+// inside the header, so a byte copy carries them for free; emule keeps them in the address-keyed side-table,
+// so the copy must replicate the entry. No-op when src carries no route. See docs/fabric-ccl-emulation.md.
+extern "C" void __emule_fabric_route_follow(uint32_t src_key, uint32_t dst_key);
 
 // ProgrammableCoreType — a single GLOBAL definition guarded by the same macro noc_semaphore.h uses, so
 // there is exactly one definition regardless of include order. CCL kernels (moe_utils.hpp) reference it
@@ -73,12 +78,7 @@ enum NocSendType : uint8_t {
     NOC_MULTICAST_WRITE = 5,
     NOC_MULTICAST_ATOMIC_INC = 6,
     NOC_UNICAST_READ = 7,
-    // Emule-internal: silicon folds fused scatter-write+atomic-inc into NOC_UNICAST_SCATTER_WRITE with an
-    // extra chunk (chunk_count = N+1). Emule's teleport tag is internal (multicast already isn't 5/6), so a
-    // dedicated code lets the runner deliver the 2 writes + sem inc without overloading the scatter case.
-    NOC_FUSED_SCATTER_WRITE_ATOMIC_INC = 8,
-    // Last real (silicon) send-type; the emule-internal tag 8 is deliberately beyond it.
-    NOC_SEND_TYPE_LAST = NOC_UNICAST_READ,
+    NOC_SEND_TYPE_LAST = NOC_UNICAST_SCATTER_WRITE,
 };
 constexpr uint32_t CHIP_SEND_TYPE_LAST = 0;
 
@@ -185,6 +185,15 @@ struct NocUnicastScatterAtomicIncFusedCommandHeader {
             }
         }
     }
+};
+// Per-chunk encoding for a scatter-write packet (silicon: fabric_edm_packet_header.hpp
+// NocScatterWriteChunkEncoding — 2 bits per chunk). The teleport reads it to tell a payload write from a
+// semaphore increment on a fused scatter-write + atomic-inc.
+enum NocScatterWriteChunkEncoding : uint8_t {
+    CHUNK_ENCODING_NOP = 0,
+    CHUNK_ENCODING_UNICAST_WRITE = 1,
+    CHUNK_ENCODING_SEMINC_NO_FLUSH = 2,
+    CHUNK_ENCODING_SEMINC_FLUSH = 3,
 };
 static constexpr uint8_t NOC_SCATTER_WRITE_MAX_CHUNKS = 4;
 struct NocUnicastScatterCommandHeader {
@@ -324,30 +333,54 @@ struct PacketHeader {
             payload_size_bytes = payload_size;
         }
     }
-    // Mask-aware fused scatter-write+atomic-inc patch (mirrors populate_unicast_fused_scatter_write_atomic_inc
-    // _fields<UpdateMask>). Emule layout in the 40B command union: noc_address[0]@0, noc_address[1]@8,
-    // semaphore_noc_address@16, chunk_size[0]@24, val@26 — what the NOC_FUSED_SCATTER_WRITE_ATOMIC_INC teleport
-    // (runner case 8) reads back. Bits = UnicastFusedScatterWriteAtomicIncUpdateMask.
+    // Mask-aware fused scatter-write + atomic-inc patch (mirrors api_common.h
+    // populate_unicast_fused_scatter_write_atomic_inc_fields<UpdateMask>). Silicon encodes this op as a
+    // NOC_UNICAST_SCATTER_WRITE packet — N unicast-write chunks + 1 semaphore-increment chunk, distinguished
+    // by the per-chunk chunk_encoding, NOT a dedicated send-type. So the layout is the scatter-write command's:
+    // noc_address[4]@0 (write dsts, then the seminc dst), chunk_size[3]@32 (write sizes, then the seminc val),
+    // chunk_count@38, chunk_encoding@39 — exactly what the NOC_UNICAST_SCATTER_WRITE teleport (runner case 4)
+    // reads back. Bits = UnicastFusedScatterWriteAtomicIncUpdateMask.
     template <uint32_t MaskBits>
     void apply_fused_scatter_fields(uint16_t payload_size, const NocUnicastScatterAtomicIncFusedCommandHeader& h) volatile {
         constexpr bool upd_waddr = (MaskBits & 0x1u) != 0;   // WriteDstAddrs
         constexpr bool upd_saddr = (MaskBits & 0x2u) != 0;   // SemaphoreDstAddr
         constexpr bool upd_chunks = (MaskBits & 0x4u) != 0;  // WriteChunkSizes
         constexpr bool upd_val = (MaskBits & 0x8u) != 0;     // Val
-        constexpr bool upd_psize = (MaskBits & 0x20u) != 0;  // PayloadSize (Flush=0x10 is inert)
+        constexpr bool upd_flush = (MaskBits & 0x10u) != 0;  // Flush — sets the chunk encodings (init)
+        constexpr bool upd_psize = (MaskBits & 0x20u) != 0;  // PayloadSize
+        constexpr uint8_t write_chunks = NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS;  // 2
+        volatile uint64_t* na = reinterpret_cast<volatile uint64_t*>(this);               // noc_address[]@0
+        cmd_rest[30] = static_cast<uint8_t>(write_chunks + 1);  // @38 chunk_count = writes + the seminc (constant)
         if constexpr (upd_waddr) {
-            volatile uint64_t* na = reinterpret_cast<volatile uint64_t*>(this);  // na[0]@0, na[1]@8
-            na[0] = h.noc_address[0];
-            na[1] = h.noc_address[1];
+            for (int i = 0; i < write_chunks; ++i) {
+                na[i] = h.noc_address[i];  // write chunk dsts @0, @8
+            }
         }
         if constexpr (upd_saddr) {
-            *reinterpret_cast<volatile uint64_t*>(&cmd_rest[8]) = h.semaphore_noc_address;  // @16
+            na[write_chunks] = h.semaphore_noc_address;  // the seminc chunk's dst = the semaphore @16
         }
         if constexpr (upd_chunks) {
-            *reinterpret_cast<volatile uint16_t*>(&cmd_rest[16]) = h.chunk_size[0];  // @24
+            uint16_t accumulated = 0;
+            for (int i = 0; i < write_chunks - 1; ++i) {
+                *reinterpret_cast<volatile uint16_t*>(&cmd_rest[24 + i * 2]) = h.chunk_size[i];  // @32
+                accumulated = static_cast<uint16_t>(accumulated + h.chunk_size[i]);
+            }
+            // last write chunk size is implicit on silicon (remaining payload); make it explicit @34
+            *reinterpret_cast<volatile uint16_t*>(&cmd_rest[24 + (write_chunks - 1) * 2]) =
+                static_cast<uint16_t>(payload_size - accumulated);
         }
         if constexpr (upd_val) {
-            *reinterpret_cast<volatile uint16_t*>(&cmd_rest[18]) = h.val;  // @26
+            // seminc value packed into the seminc chunk's size slot, after the write chunks @36
+            *reinterpret_cast<volatile uint16_t*>(&cmd_rest[24 + write_chunks * 2]) = h.val;
+        }
+        if constexpr (upd_flush) {
+            uint8_t enc = 0;  // @39: 2 bits/chunk — writes = UNICAST_WRITE, last = SEMINC_(NO_)FLUSH
+            for (int i = 0; i < write_chunks; ++i) {
+                enc |= static_cast<uint8_t>(CHUNK_ENCODING_UNICAST_WRITE << (i * 2));
+            }
+            enc |= static_cast<uint8_t>((h.flush ? CHUNK_ENCODING_SEMINC_FLUSH : CHUNK_ENCODING_SEMINC_NO_FLUSH)
+                                        << (write_chunks * 2));
+            cmd_rest[31] = enc;
         }
         if constexpr (upd_psize) {
             payload_size_bytes = payload_size;
@@ -756,15 +789,16 @@ inline void fabric_unicast_noc_fused_unicast_with_atomic_inc_with_state(
         __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
 }
 
-// ---- Fused scatter-write (2 chunks) + atomic-inc (stateful). Silicon folds the semaphore into a 3rd scatter
-// chunk; emule tags it NOC_FUSED_SCATTER_WRITE_ATOMIC_INC and the teleport (runner case 8) does the 2 writes +
-// the semaphore inc. set_state lays payload size / chunk size / val; with_state patches the write + sem dsts. ----
+// ---- Fused scatter-write (2 chunks) + atomic-inc (stateful). Silicon encodes it as a NOC_UNICAST_SCATTER_WRITE
+// packet — 2 write chunks + a 3rd semaphore-increment chunk, tagged via per-chunk chunk_encoding — so the
+// teleport (runner case 4) does the 2 writes + the semaphore inc. set_state lays payload size / chunk sizes /
+// val / encodings; with_state patches the write + sem dsts. ----
 template <
     UnicastFusedScatterWriteAtomicIncUpdateMask Mask = UnicastFusedScatterWriteAtomicIncUpdateMask::None,
     typename Cmd = std::nullptr_t>
 inline void fabric_unicast_noc_fused_scatter_write_atomic_inc_set_state(
     PacketHeader* hdr, uint8_t /*num_hops*/, Cmd cmd = nullptr, uint16_t packet_size_bytes = 0) {
-    hdr->noc_send_type = NOC_FUSED_SCATTER_WRITE_ATOMIC_INC;
+    hdr->noc_send_type = NOC_UNICAST_SCATTER_WRITE;
     if constexpr (!std::is_same_v<Cmd, std::nullptr_t>) {
         hdr->template apply_fused_scatter_fields<static_cast<uint32_t>(Mask)>(packet_size_bytes, cmd);
     } else if constexpr (__mask_has(Mask, UnicastFusedScatterWriteAtomicIncUpdateMask::PayloadSize)) {

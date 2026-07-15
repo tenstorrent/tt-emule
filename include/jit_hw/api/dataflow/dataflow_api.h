@@ -73,6 +73,10 @@
 
 // ---- Bridge function declarations for cross-core access ----
 extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
+// Carry a stamped fabric route across a header-byte copy (worker → forwarder relay slot). No-op when the
+// source address carries no route. Declared here too (also in __emule_fabric_stubs.h) so the write
+// primitives below can call it without depending on fabric-header include order.
+extern "C" void __emule_fabric_route_follow(uint32_t src_key, uint32_t dst_key);
 // `include_self` mirrors silicon's NOC_CMD_BRCST_SRC_INCLUDE bit (see the
 // matching comment in tt_metal/impl/emulation/emulated_program_runner.cpp).
 // `true` for `_loopback_src` / `MCAST_INCL_SRC` callers, `false` otherwise.
@@ -432,6 +436,21 @@ inline void noc_async_write_one_packet_with_state(uint32_t src_local_l1_addr,
     const uint64_t full_dst = upper | uint64_t(__emule_addr_to_offset(dst_local_l1_addr));
     noc_async_write(src_local_l1_addr, full_dst,
                     __emule_datamovement_ctx().write_one_packet_state_size[noc & 1], noc);
+    // Fabric route-follow: this register-level primitive is what a forwarder relay uses to COPY a composed
+    // packet header (route already stamped, keyed by its L1 address) into a relay slot; the forwarder later
+    // teleports FROM the slot — a different L1 address — so carry the stamped route to the slot address, else
+    // the teleport's lookup misses and falls back to the wrong neighbor chip (multi-hop relay deadlock).
+    // No-op for ordinary payload writes (src carries no route). On silicon the routing fields ride inside the
+    // header, so the copy carries them for free; this mirrors that in emule's address-keyed side-table.
+    uint8_t* rf_src = __emule_local_l1_to_ptr(src_local_l1_addr);
+    uint8_t* rf_dst = __emule_resolve_noc_addr(full_dst);
+    if (rf_src != nullptr && rf_dst != nullptr) {
+        // Offset model: pass bridge_l1-relative offsets; the runner's emule_route_key widens them back to the
+        // full host-pointer key (matching set_route / the teleport read side).
+        __emule_fabric_route_follow(
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rf_src) - reinterpret_cast<uintptr_t>(__emule_self->bridge_l1)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rf_dst) - reinterpret_cast<uintptr_t>(__emule_self->bridge_l1)));
+    }
 }
 // Silicon adds `enable_noc_tracing` (and `posted` for write) template args
 // that control event-record / posted-vs-acked semantics. Both are no-ops in
