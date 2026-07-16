@@ -8,4 +8,7 @@
 # (the same one tt-mlir-pin.txt cascades to via TT_METAL_VERSION). Drifting
 # apart pins the two CI pipelines on different umd revisions and exposes
 # version-specific umd bugs in one pipeline but not the other.
-2a1df92deac6c16674c02fae8b75ab3b112837eb
+# TEMPORARY: points at PR #50120's branch head (the companion host-side change) so
+# this PR's regression can exercise the per-fiber sanitizer state end-to-end. MUST be
+# updated to the merged #50120 commit on tt-metal main before this PR lands.
+4fbe4f4932c78ba9e331827f85e2c80e7351450b
