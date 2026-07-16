@@ -123,18 +123,18 @@ inline void __emule_asan_check_oob_tensor(uint32_t l1_off) {
     // Record the resolved extent for the runner's Object Intent check. The log lives in
     // this fiber's ctx (__emule_self), so it needs no thread-local handshake and survives
     // a fiber swap. Inactive unless Object Intent is armed for this kernel.
-    if (__emule_self->san.resolved_active) {
-        uint32_t cur = __emule_self->san.resolved_count;
+    if (__emule_self->san_resolved_active) {
+        uint32_t cur = __emule_self->san_resolved_count;
         bool already = false;
         for (uint32_t i = 0; i < cur; ++i) {
-            if (__emule_self->san.resolved_log[i] == matched_packed) {
+            if (__emule_self->san_resolved_log[i] == matched_packed) {
                 already = true;
                 break;
             }
         }
         if (!already && cur < __EMULE_SAN_RESOLVED_CAP) {
-            __emule_self->san.resolved_log[cur] = matched_packed;
-            __emule_self->san.resolved_count = cur + 1;
+            __emule_self->san_resolved_log[cur] = matched_packed;
+            __emule_self->san_resolved_count = cur + 1;
         }
     }
 }

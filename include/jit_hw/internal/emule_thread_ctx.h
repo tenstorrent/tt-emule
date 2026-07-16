@@ -144,14 +144,6 @@ struct EmuleSanitizerState {
     const uint64_t* dram_tensor_ranges = nullptr;
     uint32_t dram_tensor_ranges_count = 0;
 
-    // Object-Intent resolved-range log: the kernel-side OOB check appends each
-    // live-tensor extent it resolved a pointer into; the runner diffs any snapshotted
-    // extent modified without being recorded (post-launch). Inactive => no recording.
-    // Overflow drops the excess, biasing the diff toward false positives (FP-safe).
-    bool     resolved_active = false;
-    uint32_t resolved_count = 0;
-    uint64_t resolved_log[__EMULE_SAN_RESOLVED_CAP] = {};
-
     // CB-Boundary window counters + Dirty-CB dangling flags / call sites (per CB).
     bool cb_boundary_strict = false;
     uint32_t cb_reserved_pages[__EMULE_CTX_MAX_CBS] = {};
@@ -202,13 +194,23 @@ struct ThreadCommonCtx {
     uint32_t cb_self_produce_mask = 0;            // was __emule_cb_self_produce_mask
     LocalCBInterface local_cb[__EMULE_CTX_MAX_CBS]{};  // per-RISC CB ring ptrs (was __emule_local_cb)
 
-    // Per-fiber ASAN sanitizer state (see EmuleSanitizerState above): the Object-Intent
-    // resolved-range log (san.resolved_*), the semaphore/OOB/padding/host + DRAM range
-    // views, the CB-Boundary window counters + Dirty-CB dangling flags, the NoC-read
-    // counter, and the diagnostic identity. On the base because both data-movement and
-    // compute kernels flow through the L1/CB checks. Fiber-local (reached via
-    // __emule_self) so a swap carries it — no thread-locals to restore. See tt-emule #241.
+    // Per-fiber ASAN sanitizer state (see EmuleSanitizerState above): the
+    // semaphore/OOB/padding/host + DRAM range views, the CB-Boundary window counters +
+    // Dirty-CB dangling flags, the NoC-read counter, and the diagnostic identity. On the
+    // base because both data-movement and compute kernels flow through the L1/CB checks.
+    // Fiber-local (reached via __emule_self) so a swap carries it — no thread-locals to
+    // restore. See tt-emule #241.
     EmuleSanitizerState san;
+
+    // Object-Intent resolved-range log: the kernel-side OOB check appends each live-tensor
+    // extent it resolved a pointer into; the runner diffs any snapshotted extent modified
+    // without being recorded (post-launch). Inactive => no recording. Overflow drops the
+    // excess, biasing the diff toward false positives (FP-safe). Kept as flat ctx fields
+    // (not inside `san`): it was already made per-fiber in #241, and folding it would break
+    // the build against tt-metal pins whose runner still names san_resolved_* directly.
+    bool     san_resolved_active = false;
+    uint32_t san_resolved_count = 0;
+    uint64_t san_resolved_log[__EMULE_SAN_RESOLVED_CAP] = {};
 
     // Fabric PacketHeaderPool allocation state (per-fiber). Silicon re-zeroes these
     // statics on every program launch (fresh kernel .bss); emule reuses the JIT .so,
