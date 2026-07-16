@@ -26,9 +26,9 @@ inline bool __emule_asan_enabled() {
     return cached != 0;
 }
 
-// Human-readable source path of the kernel currently running on this thread, or
-// nullptr when no kernel is on the stack (host-API checks). Set per launch.
-extern thread_local const char* __emule_kernel_name;
+// The kernel source path + logical/processor identity the trace prints now live
+// in the per-fiber context (`__emule_self->san`); nullptr/absent when no kernel is
+// on the stack (host-API checks) or __emule_self is null.
 
 // Report one [ASAN ERROR] and abort. `fmt`/args are the printf-style error line
 // (printed verbatim); the context+backtrace follows. Pass nullptr for
@@ -53,12 +53,11 @@ extern "C" [[noreturn]] void __emule_asan_panic(const char* fmt, ...);
 #include <sys/wait.h>   // waitpid (reap the gcore child)
 #endif
 
-// Identity thread-locals read by the trace (defined in the same runtime TUs).
+// Physical-coord identity read by the trace. my_x/my_y stay worker-thread-locals
+// (restored per-fiber on swap by the scheduler); logical coords / processor id /
+// kernel name are read from the per-fiber __emule_self->san below.
 extern thread_local uint8_t my_x[2];
 extern thread_local uint8_t my_y[2];
-extern thread_local uint32_t __emule_logical_x;
-extern thread_local uint32_t __emule_logical_y;
-extern thread_local uint8_t __processor_id;
 
 // Resolve one (module, file-relative offset) to a "func at file:line" string,
 // flattening inlined frames onto one line with " <- ". Returns false if no real
@@ -171,21 +170,22 @@ static void __emule_asan_collapse_angles(char* s) {
 static void __emule_asan_print_trace() {
     std::fflush(stdout);
     fprintf(stderr, "  --- emule ASAN context ---\n");
-    if (__emule_kernel_name != nullptr && __emule_kernel_name[0] != '\0') {
-        fprintf(stderr, "  kernel:    %s\n", __emule_kernel_name);
+    const char* kn = (__emule_self != nullptr) ? __emule_self->san.kernel_name : nullptr;
+    if (kn != nullptr && kn[0] != '\0') {
+        fprintf(stderr, "  kernel:    %s\n", kn);
         fprintf(
             stderr,
             "  core:      logical (%u, %u)  physical (%u, %u)\n",
-            __emule_logical_x,
-            __emule_logical_y,
+            __emule_self->san.logical_x,
+            __emule_self->san.logical_y,
             static_cast<unsigned>(my_x[0]),
             static_cast<unsigned>(my_y[0]));
         fprintf(
             stderr,
             "  processor: %u  (neo %u, trisc %u)\n",
-            static_cast<unsigned>(__processor_id),
-            static_cast<unsigned>(__emule_self ? __emule_self->neo_id : 0),
-            static_cast<unsigned>(__emule_self ? __emule_self->trisc_id : 0));
+            static_cast<unsigned>(__emule_self->san.processor_id),
+            static_cast<unsigned>(__emule_self->neo_id),
+            static_cast<unsigned>(__emule_self->trisc_id));
     }
 
     void* frames[128];
