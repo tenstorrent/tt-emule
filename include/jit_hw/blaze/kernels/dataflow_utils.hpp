@@ -360,7 +360,7 @@ FORCE_INLINE void multicast_write_issue_txn(uint8_t /*noc*/ = noc_index) {
     auto& mc = __emule_datamovement_ctx().uk_mc[noc_index];
     __emule_multicast_write(
         mc.noc_addr, __emule_local_l1_to_ptr(mc.local_addr), mc.len,
-        mc.include_self);
+        mc.include_self, noc_index);
 }
 
 template <uint32_t mcast_num_cores, bool loopback, bool is_part_of_receiver_grid,
@@ -384,7 +384,7 @@ FORCE_INLINE void multicast_write_with_state(uint32_t src_local_addr, uint32_t d
     }
     __emule_multicast_write(
         mc.noc_addr, __emule_local_l1_to_ptr(mc.local_addr), mc.len,
-        mc.include_self);
+        mc.include_self, noc_index);
 }
 
 #endif  // defined(COMPILE_FOR_BRISC) || defined(COMPILE_FOR_NCRISC)

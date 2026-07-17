@@ -34,8 +34,11 @@ Consequences:
   (NOC 0 and NOC 1) each with independent sticky cmd-buf state. Emule models
   the **state surface** per NOC (see Section 8.3) so a kernel that interleaves
   `set_state(noc=0)` and `set_state(noc=1)` gets two independent caches. The
-  **transfer path** is single — emule executes one sync memcpy per API call
-  regardless of which NOC was named, and there is no NOC0/NOC1 concurrency.
+  **transfer path** is single — emule executes one sync memcpy per API call and
+  there is no NOC0/NOC1 concurrency. The one place the NOC index reaches the
+  transfer is multicast rectangle **orientation**: `__emule_multicast_write`
+  takes the sender's `noc` to undo the NOC1 coordinate swap and walk a torus
+  path (see Section 4.1). The per-core copy itself is still one sync memcpy.
 
 This is correct **by design**, not drift: a kernel that produces the right
 value on silicon produces the right value on emule. Timing and ordering
@@ -226,13 +229,27 @@ and `noc_async_write_*_trid` collapse to their non-trid siblings.
 extern "C" void __emule_multicast_write(uint64_t mcast_addr,
                                         const uint8_t* src,
                                         uint32_t size,
-                                        bool include_self);
+                                        bool include_self,
+                                        uint8_t noc);
 ```
 
 The runtime decodes the rectangle (`x_start..x_end` × `y_start..y_end`), looks
 up each destination core via the core map, and `memcpy(size)` to each L1.
 `include_self` controls whether the sender's coordinates within the rectangle
 receive the packet too (silicon's `NOC_CMD_BRCST_SRC_INCLUDE` flag).
+
+The delivery is **NOC-aware**. `noc` is the NOC index the rectangle was encoded
+on (the caller forwards `noc_index` / `Noc::get_noc_id()`). Silicon frames a
+NOC1 multicast in NOC1's reflected coordinate frame, so its rectangle arrives
+with `start`/`end` swapped; emule models NOC coordinates as identity, so the
+swap alone would leave the rectangle reversed. For `noc != 0` the runtime undoes
+the swap to recover physical (NOC0-frame) coordinates. It then walks each axis
+`start → end` stepping `+1 mod` the node space — a true **torus path**, so a
+rectangle whose cores straddle the worker-grid seam (`start > end`, e.g. NOC0
+SDPA S-block multicasts) wraps around rather than covering the min..max bounding
+box. For a non-wrapping rectangle this is identical to `min..max` (the
+post-un-swap NOC1 matmul/argmax in0/in1-mcast case). A stale 4-arg caller leaves
+`noc` as register garbage, so the caller signature must match this exactly.
 
 ### 4.2 Public APIs
 
