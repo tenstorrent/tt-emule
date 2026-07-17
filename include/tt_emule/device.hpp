@@ -7,7 +7,7 @@
 #include "dfb_sync_state.hpp"
 #include "tile_counter.hpp"
 #include "jit_hw/internal/emule_core_state.h"  // tt_emule::CoreState (per-core coords)
-#include "low4g_mmap.hpp"                      // __emule_mmap_low4g (worker L1 in low 4 GB)
+#include "worker_l1_mmap.hpp"                  // __emule_mmap_worker_l1 (worker L1 backing)
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -32,7 +32,7 @@ public:
     static constexpr size_t L1_SIZE = 1024 * 1024; // 1 MB
     static constexpr size_t MAX_CBS = 32;
 
-    // Default constructor: WORKER role, 1 MB L1 mmap'd below 4 GB.
+    // Default constructor: WORKER role, 1 MB L1.
     explicit Core(CoreCoord coord) : coord_(coord) {
         mmap_region(L1_SIZE);
     }
@@ -48,7 +48,7 @@ public:
     Core(CoreCoord coord, uint8_t* external_l1, size_t l1_size)
         : coord_(coord), owns_l1_(false), l1_size_(l1_size) {
         l1_ = external_l1;
-        l1_base_ = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(l1_));
+        l1_base_ = reinterpret_cast<uintptr_t>(l1_);
     }
 
     ~Core() {
@@ -86,17 +86,18 @@ public:
     // Size of the memory region (regardless of role).
     size_t l1_size() const { return l1_size_; }
 
-    // 32-bit absolute address of the L1 base (valid if mmap succeeded below 4 GB).
-    uint32_t l1_base_addr() const { return l1_base_; }
+    // Host address of the L1 base.
+    uintptr_t l1_base_addr() const { return l1_base_; }
 
-    // Bump allocate `bytes` from L1; returns absolute host address.
+    // Bump allocate `bytes` from L1; returns a 0-based L1 offset (L1 offset
+    // model — rebased to a host pointer at the deref via bridge_l1).
     // The bump region is the L1 below tt-metal's l1_unreserved_base, which is
     // firmware-reserved on silicon and unused in emule — so allocations here
     // don't collide with anything tt-metal's allocator hands out.
     uint32_t l1_alloc(size_t bytes) {
         if (l1_bump_ + bytes > l1_size_)
             throw std::runtime_error("L1 OOM");
-        uint32_t addr = l1_base_ + static_cast<uint32_t>(l1_bump_);
+        uint32_t addr = static_cast<uint32_t>(l1_bump_);
         l1_bump_ += bytes;
         return addr;
     }
@@ -168,18 +169,17 @@ public:
 private:
     void mmap_region(size_t size) {
         l1_size_ = size;
-        // Worker cores must be uint32-addressable (kernels deref CB pointers directly),
-        // so they live in the low 4 GB (low4g_mmap.hpp: MAP_32BIT, then a [2GB,4GB) gap).
-        // DRAM cores are accessed via bridge functions (full 64-bit pointers), so they
-        // use a regular mmap (anywhere) to avoid consuming the scarce low-4 GB space.
+        // Both roles are plain 64-bit mmaps: worker L1 is offset-addressed (kernels deref via
+        // bridge_l1) and DRAM via bridge functions, so neither backing is placement-constrained.
+        // Worker L1 goes through the helper (MAP_NORESERVE, lazy-faulted for large multi-chip pools).
         void* p = (role_ == CoreRole::WORKER)
-                      ? __emule_mmap_low4g(size)
+                      ? __emule_mmap_worker_l1(size)
                       : mmap(nullptr, size, PROT_READ | PROT_WRITE,
                              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (p == MAP_FAILED)
             throw std::runtime_error("mmap for Core memory failed");
         l1_ = static_cast<uint8_t*>(p);
-        l1_base_ = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(l1_));
+        l1_base_ = reinterpret_cast<uintptr_t>(l1_);
         // MAP_ANONYMOUS guarantees zero-filled pages; no memset needed.
     }
 
@@ -188,7 +188,7 @@ private:
     bool      owns_l1_ = true;  // false when using external memory
     size_t    l1_size_ = L1_SIZE;
     uint8_t*  l1_      = nullptr;
-    uint32_t  l1_base_ = 0;
+    uintptr_t l1_base_ = 0;
     size_t    l1_bump_ = 0;
     CoreState core_state_;  // per-core NOC/logical coords (see emule_thread_ctx.h)
     CBSyncState cb_sync_states_[MAX_CBS] = {};

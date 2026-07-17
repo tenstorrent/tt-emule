@@ -293,16 +293,20 @@ inline void cb_pop_front(uint32_t cb_id, int32_t n)    { cb_pop_front(cb_id, sta
 // ---- Pointer accessors ----
 
 
-// Return uint32_t (truncated host pointer). CB memory is mmap'd below 4 GB.
-// Reads the calling thread's own per-RISC write/read pointer (emule_cb_ptr.h),
-// so concurrent reader and writer threads each see their own view — matching
-// silicon's per-RISC write/read pointer registers (the #139 fix).
+// Return a 0-based L1 offset (L1 offset model). The CB ring is maintained in
+// host-pointer space (emule_cb_ptr.h); convert to an offset only here, at the
+// value the kernel sees — __emule_l1_translate rebases it at the deref.
+// Reads the calling thread's own per-RISC write/read pointer, so concurrent
+// reader and writer threads each see their own view — matching silicon's
+// per-RISC write/read pointer registers (the #139 fix).
 inline uint32_t get_write_ptr(uint32_t cb_id) {
-    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_cb_wr_addr(cb_id)));
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_cb_wr_addr(cb_id)) -
+                                 reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
 }
 
 inline uint32_t get_read_ptr(uint32_t cb_id) {
-    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_cb_rd_addr(cb_id)));
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_cb_rd_addr(cb_id)) -
+                                 reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
 }
 
 // get_tile_size — return page size (bytes) for a CB.

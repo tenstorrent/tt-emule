@@ -374,22 +374,25 @@ output to its sibling build dir.
 
 Once you know the JIT kernel and the failing instruction, look at
 the original kernel `.cpp` and follow the call chain backwards.
-Pay particular attention to **silicon-side functions that take
-`uint32_t` for what's really a host pointer**: real L1 addresses
-fit in 32 bits, so silicon code routinely truncates pointers
-without losing information. emule's host pointers don't — those
-truncations produce SIGSEGV when dereferenced.
+Pay particular attention to **silicon-side functions that take or
+produce `uint32_t` for an L1 address**. Under emule's L1 offset model
+those `uint32_t` values are **0-based firmware offsets**; the deref
+site must rebase onto this fiber's `bridge_l1` via
+`__emule_local_l1_to_ptr`, which the JIT patch pass inserts (see
+`docs/jit-l1-patch-pass.md`).
 
-The fix is usually emule-side: ensure the value the silicon-side
-code receives stays valid after a `uint64→uint32` narrowing.
-Options:
+The failure mode is a **missed deref site**: a 0-based offset (e.g.
+~`0x1240`) dereferenced directly as a pointer hits an unmapped low page
+→ immediate SIGSEGV at the real `kernel.cpp:<line>` (the intentional
+SIGSEGV net). An un-migrated absolute/aliased value that reaches the
+translate chokepoint instead trips the debug assert
+`[EMULE_L1] L1 offset 0x… out of range`.
 
-- Back the relevant storage with a `MAP_32BIT` mmap so the host
-  pointer fits in 32 bits.
-- Keep the storage on the host heap but expose a separate
-  below-4 GB scratch buffer that the kernel-facing API returns.
-- Place the data inside a Core's L1 mmap (already `MAP_32BIT`) and
-  reference it via an L1 offset.
+The fix is emule-side and lives in the **patch pass**, not the mmap:
+add a targeted rewrite rule for the missed idiom so the offset is
+rebased at deref (`docs/jit-l1-patch-pass.md` enumerates the rules).
+Do **not** reach for `MAP_32BIT` — worker L1 is a plain 64-bit mmap
+now, and the old truncated-host-pointer model is retired.
 
 ## Dataflow-only debug (no compute kernel involved)
 
