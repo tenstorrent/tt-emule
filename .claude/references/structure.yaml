@@ -1027,8 +1027,8 @@ files:
   - {kind: function, name: silu_tile}
   - {kind: function, name: silu_tile_init_pack}
   - {kind: function, name: silu_tile_pack}
-  - {kind: function, name: sfpu_reduce}
   - {kind: function, name: sfpu_reduce_init}
+  - {kind: function, name: sfpu_reduce}
   - {kind: namespace, name: __emule_topk}
   - {kind: function, name: merge_split_col}
   - {kind: function, name: sort_col}
