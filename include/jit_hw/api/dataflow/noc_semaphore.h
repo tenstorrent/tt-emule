@@ -126,7 +126,7 @@ public:
         __emule_multicast_write(mcast_addr,
                                 reinterpret_cast<const uint8_t*>(&val),
                                 sizeof(uint32_t),
-                                has_flag(opts, NocOptions::MCAST_INCL_SRC));
+                                has_flag(opts, NocOptions::MCAST_INCL_SRC), noc.get_noc_id());
     }
 
     // Argument order matches real api/dataflow/noc_semaphore.h: (value, num_dests).

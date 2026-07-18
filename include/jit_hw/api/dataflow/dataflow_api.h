@@ -80,10 +80,13 @@ extern "C" void __emule_fabric_route_follow(uint32_t src_key, uint32_t dst_key);
 // `include_self` mirrors silicon's NOC_CMD_BRCST_SRC_INCLUDE bit (see the
 // matching comment in tt_metal/impl/emulation/emulated_program_runner.cpp).
 // `true` for `_loopback_src` / `MCAST_INCL_SRC` callers, `false` otherwise.
+// `noc` is the NOC index the mcast rectangle was encoded on (noc_index): the
+// runtime uses it to undo the NOC1 start<->end coordinate swap before walking
+// the rectangle as a torus path (see emulated_program_runner.cpp).
 // Header signature MUST match the runner-side definition — extern "C" link
-// matches by name only; a mismatch leaves the 4th arg as register garbage.
+// matches by name only; a mismatch leaves the trailing args as register garbage.
 extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src,
-                                        uint32_t size, bool include_self);
+                                        uint32_t size, bool include_self, uint8_t noc);
 extern "C" bool __emule_noc_addr_is_dram(uint64_t noc_addr);
 
 // ---- Debug logging (enabled by TT_EMULE_DEBUG_MULTICAST=1 env var) ----
@@ -489,12 +492,12 @@ inline void noc_async_write_multicast(
                 __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
-    __emule_multicast_write(dst_mcast_noc_addr, src, size, /*include_self=*/false);
+    __emule_multicast_write(dst_mcast_noc_addr, src, size, /*include_self=*/false, noc);
 }
 
 inline void noc_async_write_multicast_loopback_src(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
-    uint32_t size, uint32_t num_dests, bool /*linked*/ = false, uint8_t /*noc*/ = 0) {
+    uint32_t size, uint32_t num_dests, bool /*linked*/ = false, uint8_t noc = noc_index) {
     // Silicon: NOC_CMD_BRCST_SRC_INCLUDE set → sender receives the packet.
     // Cannot delegate to the non-loopback variant (which passes false).
     if (__emule_debug_multicast()) {
@@ -509,7 +512,7 @@ inline void noc_async_write_multicast_loopback_src(
                 __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
-    __emule_multicast_write(dst_mcast_noc_addr, src, size, /*include_self=*/true);
+    __emule_multicast_write(dst_mcast_noc_addr, src, size, /*include_self=*/true, noc);
 }
 
 // Single-packet (size <= NOC_MAX_BURST_SIZE) multicast write. Silicon takes
@@ -831,12 +834,12 @@ inline void noc_semaphore_set_multicast(
                 __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
-    __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t), /*include_self=*/false);
+    __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t), /*include_self=*/false, noc);
 }
 
 inline void noc_semaphore_set_multicast_loopback_src(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
-    uint32_t num_dests, bool /*linked*/ = false, uint8_t /*noc*/ = 0) {
+    uint32_t num_dests, bool /*linked*/ = false, uint8_t noc = noc_index) {
     // Silicon NOC_CMD_BRCST_SRC_INCLUDE: sender sees its own semaphore update.
     if (__emule_debug_multicast()) {
         uint32_t x_end   = (dst_mcast_noc_addr >> NOC_ADDR_LOCAL_BITS) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
@@ -852,7 +855,7 @@ inline void noc_semaphore_set_multicast_loopback_src(
                 __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
-    __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t), /*include_self=*/true);
+    __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t), /*include_self=*/true, noc);
 }
 
 // Atomic increment fanned across a rectangular grid of cores. Silicon uses

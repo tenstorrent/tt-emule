@@ -296,7 +296,7 @@ public:
             // host pointer like the unicast async_write path before the memcpy.
             __emule_multicast_write(static_cast<uint64_t>(mcast_noc_addr),
                                     to_host_ptr<AddressType::LOCAL_L1>(s), size_bytes,
-                                    has_flag(opts, NocOptions::MCAST_INCL_SRC));
+                                    has_flag(opts, NocOptions::MCAST_INCL_SRC), get_noc_id());
         }
     }
 
