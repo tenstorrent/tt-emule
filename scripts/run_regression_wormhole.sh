@@ -55,6 +55,7 @@ _gtest_xml_args() {
 # (the full arch): DRAM bank topology, tilize/format, basic L1/JIT/NOC/reduce.
 CI_TIER="${CI_TIER:-full}"
 PR_TIER=(
+    fiber_asan_isolation
     tilize_untilize
     SimpleL1Buffer
     SimpleDramBuffer
