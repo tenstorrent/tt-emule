@@ -134,4 +134,78 @@ inline void fabric_multicast_noc_unicast_atomic_inc_with_state(ConnMgr& conn, ui
     });
 }
 
+// Unicast route variants (silicon: linear/api.h connection_manager+route_id overloads). Same shape as the
+// multicast forms above — iterate the route's headers and apply the per-header set/with-state form from the
+// stub — but for a one-target (real unicast) route: the codegen writers take this path when a route has a
+// single destination (broadcast's is_point_to_point, relay/ring's directional sends). set_state ignores the
+// connection (emule's chip-routing metadata is inert; the teleport reaches the neighbor regardless of it);
+// with_state sends each header through the matching connection slot's teleporting sender. The first argument
+// is the concrete RoutingPlaneConnectionManager (matching silicon, and what every generated writer declares)
+// so it never collides with the packet-header-first low-level overloads these delegate to.
+template <UnicastWriteUpdateMask Mask = UnicastWriteUpdateMask::None, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_unicast_write_set_state(
+    tt::tt_fabric::RoutingPlaneConnectionManager& /*conn*/, uint8_t route_id, uint8_t* num_hops,
+    Cmd cmd = nullptr, uint16_t size = 0) {
+    PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        fabric_unicast_noc_unicast_write_set_state<Mask>(hdr, num_hops[i], cmd, size);
+    });
+}
+template <UnicastWriteUpdateMask Mask = UnicastWriteUpdateMask::None, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_unicast_write_with_state(
+    tt::tt_fabric::RoutingPlaneConnectionManager& conn, uint8_t route_id, uint32_t src_addr,
+    Cmd cmd = nullptr, uint16_t size = 0) {
+    PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        fabric_unicast_noc_unicast_write_with_state<Mask>(&conn.get(i).sender, hdr, src_addr, cmd, size);
+    });
+}
+
+template <UnicastScatterWriteUpdateMask Mask = UnicastScatterWriteUpdateMask::None, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_scatter_write_set_state(
+    tt::tt_fabric::RoutingPlaneConnectionManager& /*conn*/, uint8_t route_id, uint8_t* num_hops,
+    Cmd cmd = nullptr, uint16_t size = 0) {
+    PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        fabric_unicast_noc_scatter_write_set_state<Mask>(hdr, num_hops[i], cmd, size);
+    });
+}
+template <UnicastScatterWriteUpdateMask Mask = UnicastScatterWriteUpdateMask::None, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_scatter_write_with_state(
+    tt::tt_fabric::RoutingPlaneConnectionManager& conn, uint8_t route_id, uint32_t src_addr,
+    Cmd cmd = nullptr, uint16_t size = 0) {
+    PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        fabric_unicast_noc_scatter_write_with_state<Mask>(&conn.get(i).sender, hdr, src_addr, cmd, size);
+    });
+}
+
+template <UnicastAtomicIncUpdateMask Mask = UnicastAtomicIncUpdateMask::None, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_unicast_atomic_inc_set_state(
+    tt::tt_fabric::RoutingPlaneConnectionManager& /*conn*/, uint8_t route_id, uint8_t* num_hops, Cmd cmd = nullptr) {
+    PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        fabric_unicast_noc_unicast_atomic_inc_set_state<Mask>(hdr, num_hops[i], cmd);
+    });
+}
+template <UnicastAtomicIncUpdateMask Mask = UnicastAtomicIncUpdateMask::None, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_unicast_atomic_inc_with_state(
+    tt::tt_fabric::RoutingPlaneConnectionManager& conn, uint8_t route_id, Cmd cmd = nullptr) {
+    PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        fabric_unicast_noc_unicast_atomic_inc_with_state<Mask>(&conn.get(i).sender, hdr, cmd);
+    });
+}
+
+template <UnicastFusedAtomicIncUpdateMask Mask = UnicastFusedAtomicIncUpdateMask::None, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_fused_unicast_with_atomic_inc_set_state(
+    tt::tt_fabric::RoutingPlaneConnectionManager& /*conn*/, uint8_t route_id, uint8_t* num_hops,
+    Cmd cmd = nullptr, uint16_t size = 0) {
+    PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        fabric_unicast_noc_fused_unicast_with_atomic_inc_set_state<Mask>(hdr, num_hops[i], cmd, size);
+    });
+}
+template <UnicastFusedAtomicIncUpdateMask Mask = UnicastFusedAtomicIncUpdateMask::None, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_fused_unicast_with_atomic_inc_with_state(
+    tt::tt_fabric::RoutingPlaneConnectionManager& conn, uint8_t route_id, uint32_t src_addr,
+    Cmd cmd = nullptr, uint16_t size = 0) {
+    PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        fabric_unicast_noc_fused_unicast_with_atomic_inc_with_state<Mask>(&conn.get(i).sender, hdr, src_addr, cmd, size);
+    });
+}
+
 }  // namespace tt::tt_fabric::linear::experimental
