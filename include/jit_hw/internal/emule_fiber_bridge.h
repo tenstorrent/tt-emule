@@ -21,6 +21,9 @@
 //   semaphore atom). Unique per process (the eventual multi-process multichip case
 //   extends the key — see docs/fiber-engine.md).
 
+#include <cstdint>
+#include "jit_hw/internal/emule_thread_ctx.h"  // __emule_self (per-fiber Dirty-CB snapshot)
+
 extern "C" {
 
 // Scheduler lock — guards the ready/parked structures. Acquire it around the
@@ -49,6 +52,94 @@ void __emule_fiber_note_publish(unsigned pages);
 
 }  // extern "C"
 
+// ---- Per-fiber Dirty-CB snapshot swap (fixes the co-scheduled false positive) ----
+//
+// The Dirty-CB sanitizer bookkeeping (dangling reserve/wait flags, reserved/waited
+// window counters, and reserve/wait call sites) lives in per-*worker* thread_locals
+// because the tt-metal exit-time sweep (sweep_per_kernel_dirty_cbs) reads it there.
+// But those flags track per-*kernel* (per-fiber) progress. A worker cooperatively
+// hosts many fibers; whenever a fiber parks (or yields) it hands its worker to a
+// peer that shares those thread_locals. If the peer runs its exit-time sweep while
+// this fiber's `cb_wait_front` is still legitimately outstanding (parked, not yet
+// popped), the peer reads THIS fiber's flag and aborts with a false "Dirty CB".
+//
+// Fix: swap the thread_local set with a per-fiber snapshot (ThreadCommonCtx) across
+// every cooperative hand-off — save+clear before yielding the worker, restore on
+// resume — so the thread_local always reflects the fiber currently running on the
+// worker. A genuine leak (an exiting kernel with its OWN un-popped wait) is
+// unaffected: the exiting fiber never parked between its wait and its exit, so its
+// flags sit in the thread_local at sweep time exactly as before. Widths are 32 ==
+// EMULE_NUM_CBS (emule_sanitizers.hpp), matching ThreadCommonCtx::SAN_CB_SLOTS.
+extern thread_local bool __emule_cb_reserve_dangling[32];
+extern thread_local bool __emule_cb_wait_dangling[32];
+extern thread_local uint32_t __emule_cb_reserved_pages[32];
+extern thread_local uint32_t __emule_cb_waited_pages[32];
+extern thread_local const char* __emule_cb_reserve_file[32];
+extern thread_local uint32_t __emule_cb_reserve_line[32];
+extern thread_local const char* __emule_cb_wait_file[32];
+extern thread_local uint32_t __emule_cb_wait_line[32];
+
+// Save this fiber's Dirty-CB thread_local set into its ctx, then CLEAR the
+// thread_local so a peer that STARTS fresh on this worker (no snapshot to restore)
+// begins from a clean slate. Called immediately before the worker is handed off.
+inline void __emule_fiber_cb_asan_save() {
+    ThreadCommonCtx* self = __emule_self;
+    if (!self) {
+        return;  // off-fiber (dispatch thread); nothing to snapshot
+    }
+    for (uint32_t i = 0; i < ThreadCommonCtx::SAN_CB_SLOTS; ++i) {
+        self->san_cb_reserve_dangling[i] = __emule_cb_reserve_dangling[i];
+        self->san_cb_wait_dangling[i]    = __emule_cb_wait_dangling[i];
+        self->san_cb_reserved_pages[i]   = __emule_cb_reserved_pages[i];
+        self->san_cb_waited_pages[i]     = __emule_cb_waited_pages[i];
+        self->san_cb_reserve_file[i]     = __emule_cb_reserve_file[i];
+        self->san_cb_reserve_line[i]     = __emule_cb_reserve_line[i];
+        self->san_cb_wait_file[i]        = __emule_cb_wait_file[i];
+        self->san_cb_wait_line[i]        = __emule_cb_wait_line[i];
+        __emule_cb_reserve_dangling[i] = false;
+        __emule_cb_wait_dangling[i]    = false;
+        __emule_cb_reserved_pages[i]   = 0;
+        __emule_cb_waited_pages[i]     = 0;
+    }
+}
+
+// Restore this fiber's Dirty-CB thread_local set from its ctx when it resumes on the
+// worker, overwriting whatever a peer left behind.
+inline void __emule_fiber_cb_asan_restore() {
+    ThreadCommonCtx* self = __emule_self;
+    if (!self) {
+        return;
+    }
+    for (uint32_t i = 0; i < ThreadCommonCtx::SAN_CB_SLOTS; ++i) {
+        __emule_cb_reserve_dangling[i] = self->san_cb_reserve_dangling[i];
+        __emule_cb_wait_dangling[i]    = self->san_cb_wait_dangling[i];
+        __emule_cb_reserved_pages[i]   = self->san_cb_reserved_pages[i];
+        __emule_cb_waited_pages[i]     = self->san_cb_waited_pages[i];
+        __emule_cb_reserve_file[i]     = self->san_cb_reserve_file[i];
+        __emule_cb_reserve_line[i]     = self->san_cb_reserve_line[i];
+        __emule_cb_wait_file[i]        = self->san_cb_wait_file[i];
+        __emule_cb_wait_line[i]        = self->san_cb_wait_line[i];
+    }
+}
+
+// Park the current fiber on `key` with the Dirty-CB snapshot swapped across the
+// worker hand-off (pre: scheduler lock held, as __emule_fiber_park_locked requires;
+// post: lock NOT held). Use this instead of the raw thunk everywhere a blocking
+// primitive parks.
+inline void __emule_fiber_park_locked_shielded(const void* key) {
+    __emule_fiber_cb_asan_save();
+    __emule_fiber_park_locked(key);   // yields the worker; returns unlocked when woken
+    __emule_fiber_cb_asan_restore();
+}
+
+// Voluntary reschedule (no park) with the same snapshot shielding: yield hands the
+// worker to a peer and returns to THIS fiber, so the same save/restore applies.
+inline void __emule_fiber_yield_shielded(void) {
+    __emule_fiber_cb_asan_save();
+    __emule_fiber_yield();
+    __emule_fiber_cb_asan_restore();
+}
+
 // Block the current fiber until `pred()` is true. Keeps the caller's lock-free
 // fast path effective (pred() is checked before any lock), then runs the
 // register-then-recheck-under-lock loop. Inline in the .so; pred is the caller's
@@ -64,6 +155,6 @@ inline void __emule_fiber_wait(const void* key, Pred pred) {
             __emule_fiber_unlock();
             return;
         }
-        __emule_fiber_park_locked(key);  // yields the worker; returns unlocked when woken
+        __emule_fiber_park_locked_shielded(key);  // park + per-fiber Dirty-CB snapshot swap
     }
 }

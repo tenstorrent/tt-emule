@@ -2339,6 +2339,18 @@ files:
   - {kind: extern_c, name: __emule_fiber_wake}
   - {kind: extern_c, name: __emule_fiber_yield}
   - {kind: extern_c, name: __emule_fiber_note_publish}
+  - {kind: global, name: __emule_cb_reserve_dangling}
+  - {kind: global, name: __emule_cb_wait_dangling}
+  - {kind: global, name: __emule_cb_reserved_pages}
+  - {kind: global, name: __emule_cb_waited_pages}
+  - {kind: global, name: __emule_cb_reserve_file}
+  - {kind: global, name: __emule_cb_reserve_line}
+  - {kind: global, name: __emule_cb_wait_file}
+  - {kind: global, name: __emule_cb_wait_line}
+  - {kind: function, name: __emule_fiber_cb_asan_save}
+  - {kind: function, name: __emule_fiber_cb_asan_restore}
+  - {kind: function, name: __emule_fiber_park_locked_shielded}
+  - {kind: function, name: __emule_fiber_yield_shielded}
   - {kind: function, name: __emule_fiber_wait}
 - path: include/jit_hw/internal/emule_l1_to_ptr.h
   section: include/jit_hw/internal/

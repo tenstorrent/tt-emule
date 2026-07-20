@@ -157,6 +157,31 @@ struct ThreadCommonCtx {
     uint32_t san_resolved_count = 0;
     uint64_t san_resolved_log[__EMULE_SAN_RESOLVED_CAP] = {};
 
+    // Per-fiber snapshot of the Dirty-CB sanitizer bookkeeping (the dangling
+    // reserve/wait flags + reserved/waited window counters + reserve/wait call
+    // sites). The live copies are per-*worker* `thread_local`s (asan_cb.h /
+    // emule_sanitizers.hpp) because the tt-metal exit-time sweep
+    // (sweep_per_kernel_dirty_cbs) reads them there. But those flags track
+    // per-*kernel* (per-fiber) progress, and a worker cooperatively hosts many
+    // fibers: when a producer fiber runs its exit-time sweep while a co-scheduled
+    // consumer fiber is parked mid-`cb_wait_front` (its wait legitimately
+    // outstanding, not yet popped), the producer would read the consumer's flag off
+    // the shared worker thread_local and abort with a false "Dirty CB". Homing a
+    // snapshot per-fiber and swapping it across every cooperative park/yield
+    // (emule_fiber_bridge.h) makes the thread_local effectively fiber-local, so the
+    // sweep at a fiber's exit sees only that fiber's own outstanding CB ops — a
+    // genuine leak (a real un-popped wait in the exiting kernel) is still caught.
+    // 32 == EMULE_NUM_CBS (emule_sanitizers.hpp); matches the thread_local widths.
+    static constexpr uint32_t SAN_CB_SLOTS = 32;
+    bool        san_cb_reserve_dangling[SAN_CB_SLOTS] = {};
+    bool        san_cb_wait_dangling[SAN_CB_SLOTS] = {};
+    uint32_t    san_cb_reserved_pages[SAN_CB_SLOTS] = {};
+    uint32_t    san_cb_waited_pages[SAN_CB_SLOTS] = {};
+    const char* san_cb_reserve_file[SAN_CB_SLOTS] = {};
+    uint32_t    san_cb_reserve_line[SAN_CB_SLOTS] = {};
+    const char* san_cb_wait_file[SAN_CB_SLOTS] = {};
+    uint32_t    san_cb_wait_line[SAN_CB_SLOTS] = {};
+
     // Fabric PacketHeaderPool allocation state (per-fiber). Silicon re-zeroes these
     // statics on every program launch (fresh kernel .bss); emule reuses the JIT .so,
     // so a `thread_local` would leak the cursor + route table across ops on a persistent

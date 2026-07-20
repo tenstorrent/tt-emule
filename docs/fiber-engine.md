@@ -187,6 +187,36 @@ A wake means "look again," never "proceed." A woken fiber re-evaluates its predi
 (the `for(;;)` loop) and re-parks if still false — so a spurious or shared wake is
 harmless.
 
+### 4.5 Per-fiber sanitizer state across a park (the Dirty-CB snapshot)
+
+Any per-*kernel* bookkeeping that lives in a `thread_local` is, under the fiber engine,
+per-*worker* — shared by every fiber the worker cooperatively hosts. That is correct for
+program-uniform state (the OOB/L1 range tables, re-armed identically per fiber) but
+**wrong** for state that tracks one kernel's in-flight progress. The Dirty-CB sanitizer
+(`sweep_per_kernel_dirty_cbs`, run at each kernel's exit) is the sharp case: its dangling
+reserve/wait flags + reserved/waited window counters are `thread_local`
+(`asan_cb.h` / `emule_sanitizers.hpp`) because the exit sweep reads them there. But a
+`cb_wait_front` that has parked is a *legitimately outstanding* wait, not a leak. When a
+producer fiber runs its exit sweep while a co-scheduled consumer is parked mid-wait on the
+same worker, the producer reads the consumer's flag and aborts with a **false "Dirty CB"**
+(deterministic at K=1, where every fiber shares worker 0; possible at any K when a program
+has more fibers than active workers). The consumer is *not* lost — with the check skipped
+the op completes bit/PCC-correct; the wake handshake (§4.2–4.4) is intact.
+
+The fix keeps the sanitizer state fiber-local without moving its storage (the tt-metal
+sweep must keep reading the `thread_local`): the bridge **swaps** the Dirty-CB
+`thread_local` set with a per-fiber snapshot (`ThreadCommonCtx::san_cb_*`) across every
+cooperative hand-off — `__emule_fiber_cb_asan_save()` (save + clear the `thread_local`)
+before the worker is yielded, `__emule_fiber_cb_asan_restore()` on resume. So the
+`thread_local` always reflects the fiber *currently* running on the worker. A genuine leak
+is untouched: a kernel that exits with its **own** un-popped wait never parked between that
+wait and its exit (or restored the flag on resume), so the flag is present in the
+`thread_local` at its own exit sweep exactly as before. This is the sanitizer analogue of
+homing the Object-Intent resolved-range log in the ctx (§2.3) — the clean solution is
+per-fiber storage; where a `thread_local` interface is mandated externally, save/restore it
+across the swap. Both park (`__emule_fiber_wait`) and the shielded voluntary yield
+(`invalidate_l1_cache` → `__emule_fiber_yield_shielded`) apply the swap.
+
 ---
 
 ## 5. Yield points

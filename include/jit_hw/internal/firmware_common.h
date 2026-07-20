@@ -13,7 +13,11 @@
 // re-read barrier a kernel busy-poll spins on. The cooperative fiber engine has no
 // preemption, so a spin that never calls a fiber primitive would hog its worker and
 // starve the peer fiber updating the polled value. Yielding here cedes the worker.
-inline void invalidate_l1_cache() { __emule_fiber_yield(); }
+// Shielded yield: a busy-poll can spin while a cb_wait_front / cb_reserve_back it
+// issued earlier is still outstanding, so cede the worker with the per-fiber Dirty-CB
+// snapshot swapped (else a peer's exit-time sweep would see this fiber's flag — the
+// same co-scheduled false positive the park path guards against). See emule_fiber_bridge.h.
+inline void invalidate_l1_cache() { __emule_fiber_yield_shielded(); }
 inline void flush_l1_cache() {}
 
 // Debug waypoints - no-op in emulation
