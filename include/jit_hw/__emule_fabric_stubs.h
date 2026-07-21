@@ -492,6 +492,10 @@ private:
 // --- RoutingPlaneConnectionManager (blaze N-slot; also reached via .get(i).sender) ---
 class RoutingPlaneConnectionManager {
 public:
+    // Mirrors silicon: the connection slot's fabric sender type. reduce_scatter_line_writer keeps a
+    // `RoutingPlaneConnectionManager::Sender* fabric_sender = &conn.get(0).sender` and drives the low-level
+    // fabric_unicast_*_with_state forms through it.
+    using Sender = WorkerToFabricEdmSender;
     struct ConnectionSlot {
         WorkerToFabricEdmSender sender;
         uint8_t tag = 0;
@@ -567,6 +571,38 @@ inline bool fabric_set_unicast_route(A&&... args) {
         __emule_set_unicast_route_2d(std::forward<A>(args)...);
     }
     return true;
+}
+// Connection-manager overload, mirroring silicon linear/api.h fabric_set_unicast_route(connection_manager,
+// packet_header, i): the all_to_all writer's non-mux path calls this 3-arg (conn, hdr, i) form. It must be a
+// dedicated overload (not the variadic above, which would misread (conn, hdr, i) as (hdr, dst_chip, dst_mesh)
+// and reinterpret_cast the RoutingPlaneConnectionManager to a PacketHeader* — a hard compile error). The
+// header pointer is templated (Hdr) so a derived 2D HybridMeshPacketHeader stays an exact match and this
+// overload wins over the variadic. 2D: read the slot's explicit FabricNodeId (mirrors silicon); 1D: nop on
+// silicon (to_chip_unicast(num_hops) carries the route) — emule's to_chip_unicast is inert, so the UNICAST_1D
+// route is stamped from num_hops inside the stateless fabric_unicast_noc_unicast_write instead.
+// The index is templated (I), not a fixed uint8_t: callers pass either a uint8_t conn_idx (all_to_all) or a
+// literal `0` (int, reduce_scatter). A fixed uint8_t would need an int->uint8_t conversion on the literal and
+// LOSE overload resolution to the perfect-forwarding variadic above (which binds int&& exactly), sending the
+// call back into __emule_set_unicast_route_2d(conn, hdr, i) — a hard compile error. Deducing I keeps every
+// argument an exact match, so partial ordering (concrete RoutingPlaneConnectionManager& first param) wins.
+template <typename Hdr, typename I>
+inline void fabric_set_unicast_route(RoutingPlaneConnectionManager& connection_manager, Hdr* packet_header, I i) {
+#ifdef EMULE_FABRIC_2D
+    // Silicon reads slot.dst_dev_id/dst_mesh_id here (the connection's explicit FabricNodeId). A
+    // RoutingPlaneConnectionManager slot always owns the physical sender to an IMMEDIATE neighbor (1 hop) —
+    // reduce_scatter_line_writer (the only 2D user of this conn-first form; all_to_all's 2D path uses the
+    // header-first fabric_set_unicast_route(hdr, chip, mesh) with the final multi-hop dst) asserts
+    // neighbor_num_hops==1. emule's slots carry no populated FabricNodeId, so stamp the emule-equivalent
+    // immediate-neighbor route: UNICAST_1D distance 1, which the teleport resolves by walking one hop in the
+    // connection's inferred direction (the same mechanism the stateless write uses). See docs/fabric-ccl-emulation.md.
+    (void)connection_manager;
+    (void)i;
+    __emule_set_unicast_route_1d(packet_header, static_cast<uint32_t>(1));
+#else
+    (void)connection_manager;
+    (void)packet_header;
+    (void)i;  // 1D: route stamped from num_hops in the stateless write (emule's to_chip_unicast is inert)
+#endif
 }
 
 // Line multicast (worker_routing_utils 2D branch): (hdr, dst_chip, dst_mesh, e, w, n, s). Single variadic
@@ -823,6 +859,56 @@ inline void fabric_unicast_noc_fused_scatter_write_atomic_inc_with_state(
         __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
 }
 
+// ---- volatile-header forwarders for the low-level set_state / with_state forms ----
+// Under FABRIC_2D the kernel's PACKET_HEADER_TYPE is HybridMeshPacketHeader (DERIVED from PacketHeader) and
+// reduce_scatter_line_writer holds its headers as `volatile PACKET_HEADER_TYPE*`, so it calls these low-level
+// forms with a volatile derived pointer. The primary forms above take a non-volatile `PacketHeader*` (matching
+// the packet_header_pool.h connection-manager forms that call them), which cannot bind a volatile derived
+// pointer. These thin forwarders accept `volatile PacketHeader*` (an exact-enough match: the derived→base +
+// volatile conversion binds) and const_cast to the working non-volatile body — every PacketHeader mutator the
+// bodies touch is safe on the real header storage. Non-volatile callers keep matching the exact primary form.
+template <UnicastWriteUpdateMask Mask = UnicastWriteUpdateMask::None, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_unicast_write_set_state(
+    volatile PacketHeader* hdr, uint8_t num_hops, Cmd cmd = nullptr, uint16_t payload_size = 0) {
+    fabric_unicast_noc_unicast_write_set_state<Mask>(const_cast<PacketHeader*>(hdr), num_hops, cmd, payload_size);
+}
+template <UnicastScatterWriteUpdateMask Mask = UnicastScatterWriteUpdateMask::None, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_scatter_write_set_state(
+    volatile PacketHeader* hdr, uint8_t num_hops, Cmd cmd = nullptr, uint16_t payload_size = 0) {
+    fabric_unicast_noc_scatter_write_set_state<Mask>(const_cast<PacketHeader*>(hdr), num_hops, cmd, payload_size);
+}
+template <UnicastAtomicIncUpdateMask Mask = UnicastAtomicIncUpdateMask::None, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_unicast_atomic_inc_set_state(
+    volatile PacketHeader* hdr, uint8_t num_hops, Cmd cmd = nullptr) {
+    fabric_unicast_noc_unicast_atomic_inc_set_state<Mask>(const_cast<PacketHeader*>(hdr), num_hops, cmd);
+}
+template <UnicastFusedAtomicIncUpdateMask Mask = UnicastFusedAtomicIncUpdateMask::None, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_fused_unicast_with_atomic_inc_set_state(
+    volatile PacketHeader* hdr, uint8_t num_hops, Cmd cmd = nullptr, uint16_t packet_size_bytes = 0) {
+    fabric_unicast_noc_fused_unicast_with_atomic_inc_set_state<Mask>(
+        const_cast<PacketHeader*>(hdr), num_hops, cmd, packet_size_bytes);
+}
+template <UnicastWriteUpdateMask Mask = UnicastWriteUpdateMask::None, typename Conn, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_unicast_write_with_state(
+    Conn* client, volatile PacketHeader* hdr, uint32_t src_addr, Cmd cmd = nullptr, uint16_t payload_size = 0) {
+    fabric_unicast_noc_unicast_write_with_state<Mask>(client, const_cast<PacketHeader*>(hdr), src_addr, cmd, payload_size);
+}
+template <UnicastScatterWriteUpdateMask Mask = UnicastScatterWriteUpdateMask::None, typename Conn, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_scatter_write_with_state(
+    Conn* client, volatile PacketHeader* hdr, uint32_t src_addr, Cmd cmd = nullptr, uint16_t payload_size = 0) {
+    fabric_unicast_noc_scatter_write_with_state<Mask>(client, const_cast<PacketHeader*>(hdr), src_addr, cmd, payload_size);
+}
+template <UnicastAtomicIncUpdateMask Mask = UnicastAtomicIncUpdateMask::None, typename Conn, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_unicast_atomic_inc_with_state(Conn* client, volatile PacketHeader* hdr, Cmd cmd = nullptr) {
+    fabric_unicast_noc_unicast_atomic_inc_with_state<Mask>(client, const_cast<PacketHeader*>(hdr), cmd);
+}
+template <UnicastFusedAtomicIncUpdateMask Mask = UnicastFusedAtomicIncUpdateMask::None, typename Conn, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_fused_unicast_with_atomic_inc_with_state(
+    Conn* client, volatile PacketHeader* hdr, uint32_t src_addr, Cmd cmd = nullptr, uint16_t packet_size_bytes = 0) {
+    fabric_unicast_noc_fused_unicast_with_atomic_inc_with_state<Mask>(
+        client, const_cast<PacketHeader*>(hdr), src_addr, cmd, packet_size_bytes);
+}
+
 // ---- Multicast atomic inc: emule has no real multicast; the teleport reaches the single neighbor
 // chip (2-chip scope). The kernel issues one with_state per destination core, so each resolves to the
 // neighbor's correct core. Bodies delegate to the unicast forms plus the extra range arg. ----
@@ -833,10 +919,12 @@ inline void fabric_multicast_noc_unicast_atomic_inc_set_state(
     // Stamp the multicast extent the real set_state configures (emule had dropped `range`): the teleport
     // replays the atomic-inc to every chip in [start, start+range) in the worker's direction. Without this,
     // a line/ring barrier multicast (e.g. reduce_scatter's batch_ready_sem) reaches only one neighbor and
-    // its wait-for-2*(ring_size-1) never completes. 1D form (the 2D extent is e/w/n/s, set elsewhere).
-#ifndef EMULE_FABRIC_2D
+    // its wait-for-2*(ring_size-1) never completes. Stamped under BOTH fabric configs: on a Linear topology
+    // (what the 2D CCL tests exercise) the MCAST_1D resolver infers the worker's direction from its single
+    // connection and walks the line — the barrier atomic-inc has no explicit fabric_set_mcast_route caller,
+    // so without this stamp the 2D route stays UNSET and the teleport misroutes to the wrong physical chip
+    // on a >2-chip cluster submesh (quiescent deadlock).
     __emule_fabric_set_route(emule_route::key(hdr), emule_route::MCAST_1D, start_hops, range, 0, 0, 0, 0);
-#endif
 }
 template <
     UnicastAtomicIncUpdateMask Mask = UnicastAtomicIncUpdateMask::None,
@@ -857,9 +945,8 @@ template <UnicastWriteUpdateMask Mask = UnicastWriteUpdateMask::None, typename C
 inline void fabric_multicast_noc_unicast_write_set_state(
     PacketHeader* hdr, uint8_t start_hops, uint8_t range, Cmd cmd = nullptr, uint16_t payload_size = 0) {
     fabric_unicast_noc_unicast_write_set_state<Mask>(hdr, start_hops, cmd, payload_size);
-#ifndef EMULE_FABRIC_2D
+    // Stamp under BOTH fabric configs — Linear-topology 2D relies on the MCAST_1D direction-inference walk.
     __emule_fabric_set_route(emule_route::key(hdr), emule_route::MCAST_1D, start_hops, range, 0, 0, 0, 0);
-#endif
 }
 template <UnicastWriteUpdateMask Mask = UnicastWriteUpdateMask::None, typename Conn, typename Cmd = std::nullptr_t>
 inline void fabric_multicast_noc_unicast_write_with_state(
@@ -870,9 +957,8 @@ template <UnicastScatterWriteUpdateMask Mask = UnicastScatterWriteUpdateMask::No
 inline void fabric_multicast_noc_scatter_write_set_state(
     PacketHeader* hdr, uint8_t start_hops, uint8_t range, Cmd cmd = nullptr, uint16_t payload_size = 0) {
     fabric_unicast_noc_scatter_write_set_state<Mask>(hdr, start_hops, cmd, payload_size);
-#ifndef EMULE_FABRIC_2D
+    // Stamp under BOTH fabric configs — Linear-topology 2D relies on the MCAST_1D direction-inference walk.
     __emule_fabric_set_route(emule_route::key(hdr), emule_route::MCAST_1D, start_hops, range, 0, 0, 0, 0);
-#endif
 }
 template <UnicastScatterWriteUpdateMask Mask = UnicastScatterWriteUpdateMask::None, typename Conn, typename Cmd = std::nullptr_t>
 inline void fabric_multicast_noc_scatter_write_with_state(
@@ -893,6 +979,34 @@ inline void fabric_unicast_noc_unicast_atomic_inc(
     client->send_payload_flush_non_blocking_from_address(
         __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
 }
+// Stateless unicast write — all_to_all / scatter writers call this directly (not the set/with-state pair):
+// configure the packet header (dst noc address + payload size + send type) then stage payload + teleport,
+// faithful to linear/api.h. The route is already recorded by the caller's fabric_set_unicast_route (emule's
+// to_chip_unicast is inert), so this does not re-stamp it. EVERY parameter is deduced (Hdr*, Addr, Size,
+// Hops), not a fixed type: under FABRIC_2D the kernel's PACKET_HEADER_TYPE is HybridMeshPacketHeader (DERIVED
+// from PacketHeader) and src_addr is size_t, so any fixed base-pointer / uint32_t param would need a
+// conversion on that argument and LOSE overload resolution to the perfect-forwarding variadic no-op below
+// (which is an exact match on every arg) — silently dropping every data write (pcc=0). Deducing every
+// parameter makes this an exact match too, so partial ordering (fixed arity beats the pack) selects it.
+template <typename Conn, typename Hdr, typename Addr, typename Size, typename Cmd, typename Hops>
+inline void fabric_unicast_noc_unicast_write(
+    Conn* client, Hdr* hdr, Addr src_addr, Size size, Cmd cmd, Hops num_hops) {
+    hdr->to_noc_unicast_write(cmd, size);
+#ifndef EMULE_FABRIC_2D
+    // 1D: the conn-first fabric_set_unicast_route is a nop and emule's to_chip_unicast is inert, so stamp the
+    // UNICAST_1D hop-distance route here (mirrors silicon's to_chip_unicast(num_hops) inside the write). Under
+    // 2D the route is already stamped UNICAST_2D by fabric_set_unicast_route(hdr, chip, mesh) — do not clobber.
+    __emule_fabric_set_route(
+        emule_route::key(reinterpret_cast<volatile PacketHeader*>(hdr)), emule_route::UNICAST_1D,
+        static_cast<uint32_t>(num_hops), 0, 0, 0, 0, 0);
+#else
+    (void)num_hops;
+#endif
+    client->wait_for_empty_write_slot();
+    client->send_payload_without_header_non_blocking_from_address(src_addr, hdr->payload_size_bytes);
+    client->send_payload_flush_non_blocking_from_address(
+        __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
+}
 // Multicast atomic-inc: stamp the MCAST_1D extent (start_distance, range) — as the *_set_state form does —
 // so the teleport replays the atomic-inc to every chip in [start, start+range), then teleport.
 template <typename Conn, typename Cmd>
@@ -900,9 +1014,8 @@ inline void fabric_multicast_noc_unicast_atomic_inc(
     Conn* client, volatile PacketHeader* hdr, Cmd cmd, uint8_t start_distance, uint8_t range) {
     hdr->to_noc_unicast_atomic_inc(cmd);
     hdr->payload_size_bytes = 0;
-#ifndef EMULE_FABRIC_2D
+    // Stamp under BOTH fabric configs — Linear-topology 2D relies on the MCAST_1D direction-inference walk.
     __emule_fabric_set_route(emule_route::key(hdr), emule_route::MCAST_1D, start_distance, range, 0, 0, 0, 0);
-#endif
     client->wait_for_empty_write_slot();
     client->send_payload_flush_non_blocking_from_address(
         __emule_fabric_l1_off(hdr), sizeof(PacketHeader));

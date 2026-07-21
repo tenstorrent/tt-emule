@@ -148,12 +148,14 @@ inline void fabric_multicast_noc_unicast_atomic_inc_with_state(ConnMgr& conn, ui
 // (matching silicon, and what every generated writer declares) so it never collides with the
 // packet-header-first low-level overloads these delegate to.
 inline void __emule_stamp_unicast_route(tt::tt_fabric::PacketHeader* hdr, uint8_t num_hops) {
-#ifndef EMULE_FABRIC_2D
+    // Stamp UNICAST_1D (hop distance) under BOTH fabric configs. On a Linear topology (what the 2D CCL tests
+    // exercise) the UNICAST_1D resolver infers the worker's direction from its single connection (or a prior
+    // multicast's cached direction) and walks the line to the peer chip. The set_state writers that call this
+    // have no explicit fabric_set_unicast_route(hdr,chip,mesh) caller, so without a stamp the 2D route stays
+    // UNSET and the teleport misroutes to the wrong physical chip on a >2-chip cluster submesh (deadlock /
+    // garbage). Kernels that DO carry an explicit 2D route setter (all_to_all writers) overwrite this with
+    // UNICAST_2D via fabric_set_unicast_route below.
     tt::tt_fabric::__emule_set_unicast_route_1d(hdr, num_hops);
-#else
-    (void)hdr;
-    (void)num_hops;  // 2D routes are stamped by the kernel's explicit fabric_set_unicast_route(hdr,chip,mesh) calls
-#endif
 }
 template <UnicastWriteUpdateMask Mask = UnicastWriteUpdateMask::None, typename Cmd = std::nullptr_t>
 inline void fabric_unicast_noc_unicast_write_set_state(
