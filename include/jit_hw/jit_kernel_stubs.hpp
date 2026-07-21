@@ -249,7 +249,16 @@ inline uint32_t get_semaphore(uint32_t semaphore_id) {
 #endif
 #endif
 
-// ---- ThreadId enum + mailbox stubs (used by both compute and dataflow kernels) ----
+// ---- ThreadId enum + inter-RISC mailbox (used by both compute and dataflow kernels) ----
+// Faithful model of silicon's blocking RISC-to-RISC mailbox. The old stub returned a
+// constant 1 (always "valid") and dropped writes, which deadlocks sparse matmul: the
+// in0 reader (BRISC) skips zero-sparsity experts and signals that per batch via the
+// mailbox, but the compute — always told "valid" — waited on CB 0 for tiles the reader
+// never pushed. Now the value is delivered through a per-core FIFO (tt_emule::CoreMailbox
+// in CoreState) and the reader blocks (parks its fiber) when the mailbox is empty, exactly
+// as the HW mailbox stalls an empty read. See emule_core_state.h for the (writer,reader)
+// grouping rationale.
+#include "jit_hw/internal/emule_fiber_bridge.h"  // __emule_fiber_{lock,unlock,park_locked,wake}
 namespace ckernel {
 enum ThreadId {
     BriscThreadId  = 0,
@@ -257,6 +266,44 @@ enum ThreadId {
     MathThreadId   = 2,
     PackThreadId   = 3
 };
-inline uint32_t mailbox_read(uint8_t /*thread*/) { return 1; }
-inline void mailbox_write(uint8_t /*thread*/, uint32_t /*data*/) {}
+
+// ThreadId → coarse group: Brisc is the data-movement side; Unpack/Math/Pack are the
+// (emule-fused) compute side. Matches CoreMailbox's {DM=0, Compute=1} indexing.
+inline uint32_t __emule_mbox_arg_group(uint8_t thread) {
+    return thread == BriscThreadId ? 0u : 1u;
+}
+// Caller's own group, from the per-fiber context kind.
+inline uint32_t __emule_mbox_self_group() {
+    return __emule_self->kind == ThreadCommonCtx::Kind::Datamovement ? 0u : 1u;
+}
+
+// Read the scalar the peer wrote for us; block (park) until one is available. `thread`
+// names the WRITER (source); the caller is the reader.
+inline uint32_t mailbox_read(uint8_t thread) {
+    if (__emule_self == nullptr || __emule_self->core == nullptr) {
+        return 1;  // degenerate/host context: preserve the old permissive behavior
+    }
+    tt_emule::CoreMailbox& box = __emule_self->core->mbox[__emule_mbox_arg_group(thread)][__emule_mbox_self_group()];
+    __emule_fiber_lock();
+    while (box.empty()) {
+        __emule_fiber_park_locked(&box);  // yields the worker; returns UNLOCKED when woken
+        __emule_fiber_lock();             // re-acquire to re-check under the lock
+    }
+    uint32_t v = box.pop();
+    __emule_fiber_unlock();
+    return v;
+}
+
+// Hand a scalar to the peer thread named by `thread` (the destination/reader); the caller
+// is the writer. Non-blocking append, then wake any reader parked on this slot.
+inline void mailbox_write(uint8_t thread, uint32_t data) {
+    if (__emule_self == nullptr || __emule_self->core == nullptr) {
+        return;  // degenerate/host context: drop (matches old stub)
+    }
+    tt_emule::CoreMailbox& box = __emule_self->core->mbox[__emule_mbox_self_group()][__emule_mbox_arg_group(thread)];
+    __emule_fiber_lock();
+    box.push(data);
+    __emule_fiber_unlock();
+    __emule_fiber_wake(&box);
+}
 } // namespace ckernel

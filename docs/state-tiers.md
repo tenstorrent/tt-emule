@@ -53,9 +53,34 @@ Owned by `tt_emule::Core` (lifetime = device open→close), one per logical core
   condvars, [cb-emulation.md](cb-emulation.md)); the DFB sync state + tile
   counters ([DFB_EMULATION.md](DFB_EMULATION.md)); L1-resident semaphores.
 - **`tt_emule::CoreState`** (`include/jit_hw/internal/emule_core_state.h`) — the
-  logical coordinates (`logical_x` / `logical_y`). Split into its own minimal,
-  dependency-free header so `Core` (in `include/tt_emule/device.hpp`) and the umd
-  TU can embed it without parsing the kernel-only per-thread context below.
+  logical coordinates (`logical_x` / `logical_y`) and the **inter-RISC mailbox**
+  (`CoreMailbox mbox[2][2]`, below). Split into its own minimal, dependency-free
+  header so `Core` (in `include/tt_emule/device.hpp`) and the umd TU can embed it
+  without parsing the kernel-only per-thread context below.
+
+#### Inter-RISC mailbox (`ckernel::mailbox_write` / `mailbox_read`)
+
+On silicon these are a small **blocking** RISC-to-RISC FIFO: `mailbox_write(dst, v)`
+hands a scalar from the calling RISC to thread `dst`, and `mailbox_read(src)` blocks
+until the peer `src` has written one. `ttnn.sparse_matmul` uses it to keep its in0
+reader (BRISC) and compute triad in lockstep — the reader signals, per batch, whether
+each expert is a non-zero-sparsity (valid) batch (`is_batch_valid`), and the compute
+skips the invalid ones instead of waiting on CB 0 for tiles the reader never pushes.
+A no-op stub here (read always returns "valid") makes the compute wait on CB 0 for
+skipped batches ⇒ a quiescent fiber deadlock, single-chip and multichip alike; this is
+exactly what blocked gpt-oss decode until the model is fully removed as a variable.
+
+emule models it faithfully with a per-core `CoreMailbox` (a bounded ordered ring) and
+a **blocking read that parks the fiber** ([fiber-engine.md](fiber-engine.md)) while the
+ring is empty — the cooperative analogue of the HW stall. It lives in `CoreState`
+because both endpoints (the DM reader fiber and the compute fiber) run on the same core
+and share it. Because emule **fuses UNPACK/MATH/PACK into one compute fiber** and has no
+per-sub-thread identity, the exact `(src-thread, dst-thread)` pair is not recoverable;
+but every mailbox exchange in the tree is either **DM→compute** (sparse matmul) or
+**compute→compute** (deepseek / swiglu), so the ring is keyed by the coarse
+`(writer_group, reader_group) ∈ {DM, Compute}²`, derived from the caller's
+`ThreadCommonCtx::kind` and the `ThreadId` argument (`Brisc`→DM, `Unpack`/`Math`/`Pack`
+→Compute). Balanced kernels (equal writes and reads) drain the ring to empty each op.
 
 ### Tier 3 — per-thread (per-RISC)
 
