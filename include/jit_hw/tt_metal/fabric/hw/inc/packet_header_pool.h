@@ -137,16 +137,30 @@ inline void fabric_multicast_noc_unicast_atomic_inc_with_state(ConnMgr& conn, ui
 // Unicast route variants (silicon: linear/api.h connection_manager+route_id overloads). Same shape as the
 // multicast forms above — iterate the route's headers and apply the per-header set/with-state form from the
 // stub — but for a one-target (real unicast) route: the codegen writers take this path when a route has a
-// single destination (broadcast's is_point_to_point, relay/ring's directional sends). set_state ignores the
-// connection (emule's chip-routing metadata is inert; the teleport reaches the neighbor regardless of it);
-// with_state sends each header through the matching connection slot's teleporting sender. The first argument
-// is the concrete RoutingPlaneConnectionManager (matching silicon, and what every generated writer declares)
-// so it never collides with the packet-header-first low-level overloads these delegate to.
+// single destination (broadcast's is_point_to_point, relay/ring's directional sends).
+// set_state stamps each header's 1D unicast route via __emule_stamp_unicast_route: silicon records the hop
+// count through packet_header->to_chip_unicast, which is INERT in emule, so the route table must be stamped
+// explicitly (the read-side mirror of silicon's fabric_set_unicast_route call in these overloads, and the
+// direct analogue of the MCAST_1D self-stamp in the multicast forms). Without it, __emule_fabric_resolve_targets
+// (EMULE_FABRIC8) cannot resolve the destination chip and the barrier atomic-inc misroutes, hanging the fiber
+// engine (quiescent deadlock). with_state re-uses that stamped route and sends each header through the matching
+// connection slot's teleporting sender. The first argument is the concrete RoutingPlaneConnectionManager
+// (matching silicon, and what every generated writer declares) so it never collides with the
+// packet-header-first low-level overloads these delegate to.
+inline void __emule_stamp_unicast_route(tt::tt_fabric::PacketHeader* hdr, uint8_t num_hops) {
+#ifndef EMULE_FABRIC_2D
+    tt::tt_fabric::__emule_set_unicast_route_1d(hdr, num_hops);
+#else
+    (void)hdr;
+    (void)num_hops;  // 2D routes are stamped by the kernel's explicit fabric_set_unicast_route(hdr,chip,mesh) calls
+#endif
+}
 template <UnicastWriteUpdateMask Mask = UnicastWriteUpdateMask::None, typename Cmd = std::nullptr_t>
 inline void fabric_unicast_noc_unicast_write_set_state(
     tt::tt_fabric::RoutingPlaneConnectionManager& /*conn*/, uint8_t route_id, uint8_t* num_hops,
     Cmd cmd = nullptr, uint16_t size = 0) {
     PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        __emule_stamp_unicast_route(hdr, num_hops[i]);
         fabric_unicast_noc_unicast_write_set_state<Mask>(hdr, num_hops[i], cmd, size);
     });
 }
@@ -164,6 +178,7 @@ inline void fabric_unicast_noc_scatter_write_set_state(
     tt::tt_fabric::RoutingPlaneConnectionManager& /*conn*/, uint8_t route_id, uint8_t* num_hops,
     Cmd cmd = nullptr, uint16_t size = 0) {
     PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        __emule_stamp_unicast_route(hdr, num_hops[i]);
         fabric_unicast_noc_scatter_write_set_state<Mask>(hdr, num_hops[i], cmd, size);
     });
 }
@@ -180,6 +195,7 @@ template <UnicastAtomicIncUpdateMask Mask = UnicastAtomicIncUpdateMask::None, ty
 inline void fabric_unicast_noc_unicast_atomic_inc_set_state(
     tt::tt_fabric::RoutingPlaneConnectionManager& /*conn*/, uint8_t route_id, uint8_t* num_hops, Cmd cmd = nullptr) {
     PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        __emule_stamp_unicast_route(hdr, num_hops[i]);
         fabric_unicast_noc_unicast_atomic_inc_set_state<Mask>(hdr, num_hops[i], cmd);
     });
 }
@@ -196,6 +212,7 @@ inline void fabric_unicast_noc_fused_unicast_with_atomic_inc_set_state(
     tt::tt_fabric::RoutingPlaneConnectionManager& /*conn*/, uint8_t route_id, uint8_t* num_hops,
     Cmd cmd = nullptr, uint16_t size = 0) {
     PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
+        __emule_stamp_unicast_route(hdr, num_hops[i]);
         fabric_unicast_noc_fused_unicast_with_atomic_inc_set_state<Mask>(hdr, num_hops[i], cmd, size);
     });
 }
