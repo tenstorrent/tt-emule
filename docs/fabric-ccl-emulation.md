@@ -126,10 +126,18 @@ Four pieces cooperate (all in `emulated_program_runner.cpp`, fed by the shim + a
   host-side: `append_fabric_connection_rt_args` (which runs unguarded in emule) records each connection's
   `(forwarding_direction, neighbor)` via `__emule_fabric_record_conn` (compiled only under
   `TT_METAL_USE_EMULE`) — both src-keyed (`g_conn_route`) and per connection-owner core (`g_mux_dir`, keyed
-  by the mux core's *logical* coords). The tables are **reset per op** (`execute_program_emulated` marks them
-  dirty; the next op's first record clears them) — without this, a later op that gives a chip a *different*
-  line orientation would corrupt the ordering. The signals are recovered **entirely emule-side** (no device
-  kernel is modified — emule must run the same kernel silicon runs), in precedence order:
+  by the mux core's *logical* coords). The tables are **scoped per op**: `execute_program_emulated` marks them
+  dirty and the next op's first record clears them — without this, a later op that gives a chip a *different*
+  line orientation would corrupt the ordering. Recording runs during **host program construction**, which
+  ttnn's **program cache skips on a cache hit**, so a repeated op (e.g. the 2nd `reduce_scatter` in a
+  `reduce_scatter → all_gather → reduce_scatter` stack) would otherwise never re-record and would inherit the
+  intervening op's routes — sending the ring's fabric semaphore increments the wrong way, so half the chips'
+  readers wait forever (quiescent deadlock). Because routing is a property of the program, the resolved
+  (memoized) program **snapshots** `g_conn_route`/`g_worker_dir`/`g_mux_dir` at first resolve and **restores**
+  them into the globals at every dispatch, so a cache hit reinstates its own directions. (`g_ring_adj`, the
+  static physical ring, stays globally accumulated and is not snapshotted.) The signals are recovered
+  **entirely emule-side** (no device kernel is modified — emule must run the same kernel silicon runs), in
+  precedence order:
   1. **Mux core → direction** — the *mux* path: the worker connects to a direction-specific mux core, so the
      sender carries the mux's NOC coords (`build_connection_to_fabric_endpoint`); the teleport translates
      them back to the mux's logical core and looks up the direction the mux→EDM append recorded in
