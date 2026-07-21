@@ -218,6 +218,21 @@ inline void apply_x86_rewrites(std::string& src) {
         }
     }
 
+    // P4b (declared-type widening, NOT rebasing): get_arg_addr/get_common_arg_addr
+    // return a genuine host pointer (see P1's exclusion above), not an L1 offset —
+    // dropping MAP_32BIT (worker_l1_mmap.hpp) means that pointer can now exceed 32
+    // bits. Real, unmodified kernel source that stores it into a `uint32_t` local
+    // (valid on real silicon, where L1 addresses always fit in 32 bits) silently
+    // truncates it; a later cast of that truncated local to a pointer dereferences
+    // garbage and SIGSEGVs (padded_slice_reader_rm_interleaved_start_id.cpp:21,23).
+    // The fix is to stop the truncation, not to rebase it — the value already IS
+    // the correct pointer, and rebasing it (as the rules above do for genuine L1
+    // offsets) would produce a different, equally-wrong address. Widen the declared
+    // type so the full pointer survives to its later cast undisturbed.
+    static const std::regex l1_arg_addr_widen_re(
+        R"(\buint32_t(\s+[A-Za-z_]\w*\s*=\s*get_(?:common_)?arg_addr\s*\())");
+    src = std::regex_replace(src, l1_arg_addr_widen_re, "uintptr_t$1");
+
     // P5 (per-site, interprocedural param-cast): two kernel helpers take a uint32_t
     // L1 address THROUGH a function parameter and reinterpret_cast<T*> it, so the
     // address is neither a tt_l1_ptr cast (P1) nor a locally get_*_ptr-assigned var
@@ -241,6 +256,16 @@ inline void apply_x86_rewrites(std::string& src) {
     src = emule_line_preserving_replace(
         src, l1_curr_addr_re,
         "reinterpret_cast<uint16_t*>((uintptr_t)__emule_local_l1_to_ptr((uint32_t)(curr_addr)))");
+    //   3) ttnn ccl kernel_common/sharding_addrgen.hpp get_shard_map(uint32_t L1_address)
+    //      — receives get_arg_addr(...)'s host pointer across a function-parameter
+    //      boundary (reader_unary_stick_start_id.cpp/writer_unary_stick_start_id.cpp's
+    //      sharded-copy fallback, and other sharded/reshard/CCL kernels via the same
+    //      shared header). Widen-not-rebase, same reasoning as P4b, anchored on the
+    //      one shared-header signature; safe for every caller (widening uint32_t to
+    //      uintptr_t is an exact zero-extension regardless of what value flows in).
+    static const std::regex l1_shard_map_param_re(
+        R"(get_shard_map\s*\(\s*uint32_t\s+L1_address\s*\))");
+    src = std::regex_replace(src, l1_shard_map_param_re, "get_shard_map(uintptr_t L1_address)");
 
     // reinterpret_cast<uint32_t>(ptr): the REVERSE direction — an L1 host pointer
     // narrowed to its device address. L1 offset model: the device address is the

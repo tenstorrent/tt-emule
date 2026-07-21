@@ -59,8 +59,10 @@ silently corrupting memory. Diagnose with `EMULE_JIT_DEBUG=1` + gdb (ASAN off).
 | 6 | `l1_getptr_cast_re` (P2) | translate an attr-less cast of an inline `get_*_ptr()` |
 | 7 | `l1_mem_move_copy_re` (P3) | translate both L1 operands of `memmove`/`memcpy` |
 | 8 | `l1_addr_var_re` + per-var casts (P4) | set-gated closure: casts (attr-less / C-style / `v+arith` / `_l1_ptr` macro) of vars derived from `get_*_ptr` or `get_arg_val` |
+| 8b | `l1_arg_addr_widen_re` (P4b) | widen (not rebase) a `uint32_t` local fed by `get_arg_addr`/`get_common_arg_addr` |
 | 9 | `l1_pad_tile_re` (P5.1) | translate `fill_pad_tile`'s `l1_tile_ptr` param cast |
 | 10 | `l1_curr_addr_re` (P5.2) | translate `fill_with_val_async`'s `curr_addr` cast |
+| 10b | `l1_shard_map_param_re` (P5.3) | widen (not rebase) `get_shard_map`'s `L1_address` param |
 | 11 | `ptr_to_l1_addr_re` (reverse) | pointer → 0-based device offset (subtract `bridge_l1`) |
 | 12 | `zero_len_noc_coords_re` | make a dead zero-length array compile on x86 clang |
 | P1 | `include_re` | (pipeline) find quote-includes to recurse into |
@@ -277,6 +279,33 @@ Residual risk: a collected var later reassigned to a non-L1 value — it fails l
 where the L1 address arrives through a function parameter, not a local — are **not**
 collected here; those are P5's per-site rules.)
 
+## 8b. `l1_arg_addr_widen_re` (P4b) — widen a `get_arg_addr`-fed local, don't rebase it
+
+```
+\buint32_t(\s+[A-Za-z_]\w*\s*=\s*get_(?:common_)?arg_addr\s*\()
+```
+
+**Triggers on** (`ttnn/cpp/ttnn/operations/experimental/padded_slice/device/kernels/dataflow/padded_slice_reader_rm_interleaved_start_id.cpp:21,23`):
+
+```cpp
+const uint32_t num_unpadded_sticks_addr = get_arg_addr(9);
+tt_l1_ptr uint32_t* num_unpadded_sticks = (tt_l1_ptr uint32_t*)(num_unpadded_sticks_addr);
+```
+
+**Rewrites to** `const uintptr_t num_unpadded_sticks_addr = get_arg_addr(9);` (the cast on the
+next line is left untouched — it now casts a full-width pointer, needing no rebase).
+
+`get_arg_addr`/`get_common_arg_addr` return a genuine **host pointer**, not an L1
+offset (see rule 3's exclusion) — safe to narrow into a `uint32_t` only while the L1
+pool is guaranteed to live below 4 GB. Dropping that guarantee (`worker_l1_mmap.hpp`,
+the >4 GB galaxy work) means a `uint32_t` local storing this value can silently lose
+its high bits; the later cast back to a pointer then dereferences garbage and
+SIGSEGVs. This is the **opposite** of every other rule here: those rebase a genuine
+0-based offset into a pointer; this one *prevents a truncation* of a value that was
+already a correct pointer — rebasing it (adding/subtracting `bridge_l1`) would produce
+a different, equally-wrong address. Scoped to the exact `uint32_t <name> = get_arg_addr(...)`
+shape; `auto`-declared locals already deduce `uintptr_t` and need no rewrite.
+
 ## 9. `l1_pad_tile_re` (P5.1) — `fill_pad_tile` param cast
 
 ```
@@ -321,6 +350,36 @@ Translation happens **at the cast**, leaving `curr_addr` a 0-based offset for it
 other uses (the sibling `CoreLocalMem<uint32_t> dst(curr_addr)` NoC-read path,
 whose ctor rebases separately). `curr_addr` is a copy of the `begin_addr`
 parameter, so the value is again interprocedural and P4 cannot reach it.
+
+## 10b. `l1_shard_map_param_re` (P5.3) — `get_shard_map` param widening
+
+```
+get_shard_map\s*\(\s*uint32_t\s+L1_address\s*\)
+```
+
+**Triggers on** (`ttnn/cpp/ttnn/operations/ccl/kernel_common/sharding_addrgen.hpp:136`):
+
+```cpp
+template <typename ShardingInfoType>
+std::pair<const mapping_table_t* const, uint32_t> get_shard_map(uint32_t L1_address) {
+    const mapping_table_t* const map = reinterpret_cast<const mapping_table_t* const>(L1_address);
+    ...
+}
+```
+
+**Rewrites to** `get_shard_map(uintptr_t L1_address)` (the return type's own `uint32_t`
+is untouched — the pattern anchors on the parameter only).
+
+Same widen-not-rebase reasoning as P4b (rule 8b): `get_shard_map` is called as
+`get_shard_map<T>(get_arg_addr(rt_index))` from `reader_unary_stick_start_id.cpp`,
+`writer_unary_stick_start_id.cpp`, and other sharded/reshard/CCL kernels that share
+this header — the `uint32_t` parameter silently truncates `get_arg_addr`'s host
+pointer at the call boundary once the L1 pool can live above 4 GB, and the
+`reinterpret_cast` inside then dereferences the truncated value. Interprocedural
+(the parameter, not a local variable), so neither P4 nor P4b's collector can reach
+it — anchored per-site like P5.1/P5.2. Widening `uint32_t`→`uintptr_t` is an exact
+zero-extension for every other value that already flows through this parameter, so
+this is safe for all callers, not just the ones observed crashing.
 
 ## 11. `ptr_to_l1_addr_re` (reverse) — pointer → device offset
 
