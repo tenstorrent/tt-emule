@@ -28,6 +28,63 @@ ALWI void remainder_tile_init(uint32_t param0, uint32_t param1) {
     __emule_compute_ctx().remainder_recip_bits = param1;
 }
 
+// Per-element scalar remainder mirroring the SFPU sequence (see file docblock).
+// divisor = fp32 divisor; recip = host reciprocal fl(1/divisor).
+inline float __emule_remainder_scalar(float val, float divisor, float recip) {
+    const float s = std::fabs(divisor);
+    const float r = std::fabs(recip);
+    if (s == 0.0f) {
+        // Divisor 0: silicon yields a NaN that packs to bf16 -inf; the test maps
+        // that inf back to nan. Same bit pattern as binary_remainder.h.
+        const uint32_t nan_bits = 0xFF800001u;
+        float out;
+        std::memcpy(&out, &nan_bits, sizeof(float));
+        return out;
+    }
+    float v = std::fabs(val);
+    const float prod = v * r;  // fp32, matches silicon's mul (no FMA)
+    float quotient;
+    if (prod == 0.0f) {
+        quotient = 0.0f;
+    } else {
+        int e;
+        std::frexp(prod, &e);
+        e -= 1;  // unbiased exponent of prod (exexp)
+        if (e < 0) {
+            quotient = 0.0f;
+        } else if (e < 23) {
+            // Clear the low (23-e) mantissa bits → floor toward zero.
+            uint32_t u;
+            std::memcpy(&u, &prod, sizeof(u));
+            u &= ~((1u << (23 - e)) - 1u);
+            std::memcpy(&quotient, &u, sizeof(quotient));
+        } else {
+            quotient = prod;
+        }
+        if (quotient > prod) {
+            quotient -= 1.0f;  // mask-edge guard
+        }
+    }
+    const float qs = quotient * s;
+    v = v - qs;
+    if (val < 0.0f && v != 0.0f) {
+        v = s - v;
+    }
+    if (divisor < 0.0f && v != 0.0f) {
+        v = v + divisor;
+    }
+    v = std::copysign(v, divisor);
+    for (int l = 0; l < 10; l++) {
+        if (v >= s) {
+            v = s - v;
+        }
+    }
+    if (std::fabs(v) - s == 0.0f) {
+        v = 0.0f;
+    }
+    return v;
+}
+
 ALWI void remainder_tile(uint32_t idst) {
     __emule_dst_check(idst, "remainder_tile");
     const uint32_t param0 = __emule_compute_ctx().remainder_divisor_bits;
@@ -35,59 +92,22 @@ ALWI void remainder_tile(uint32_t idst) {
     float divisor, recip;
     std::memcpy(&divisor, &param0, sizeof(float));
     std::memcpy(&recip, &param1, sizeof(float));
-    const float s = std::fabs(divisor);
-    const float r = std::fabs(recip);
     for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        const float val = __emule_compute_ctx().dst[idst][i];
-        if (s == 0.0f) {
-            // Divisor 0: silicon yields a NaN that packs to bf16 -inf; the test maps
-            // that inf back to nan. Same bit pattern as binary_remainder.h.
-            const uint32_t nan_bits = 0xFF800001u;
-            std::memcpy(&__emule_compute_ctx().dst[idst][i], &nan_bits, sizeof(float));
-            continue;
-        }
-        float v = std::fabs(val);
-        const float prod = v * r;  // fp32, matches silicon's mul (no FMA)
-        float quotient;
-        if (prod == 0.0f) {
-            quotient = 0.0f;
-        } else {
-            int e;
-            std::frexp(prod, &e);
-            e -= 1;  // unbiased exponent of prod (exexp)
-            if (e < 0) {
-                quotient = 0.0f;
-            } else if (e < 23) {
-                // Clear the low (23-e) mantissa bits → floor toward zero.
-                uint32_t u;
-                std::memcpy(&u, &prod, sizeof(u));
-                u &= ~((1u << (23 - e)) - 1u);
-                std::memcpy(&quotient, &u, sizeof(quotient));
-            } else {
-                quotient = prod;
-            }
-            if (quotient > prod) {
-                quotient -= 1.0f;  // mask-edge guard
-            }
-        }
-        const float qs = quotient * s;
-        v = v - qs;
-        if (val < 0.0f && v != 0.0f) {
-            v = s - v;
-        }
-        if (divisor < 0.0f && v != 0.0f) {
-            v = v + divisor;
-        }
-        v = std::copysign(v, divisor);
-        for (int l = 0; l < 10; l++) {
-            if (v >= s) {
-                v = s - v;
-            }
-        }
-        if (std::fabs(v) - s == 0.0f) {
-            v = 0.0f;
-        }
-        __emule_compute_ctx().dst[idst][i] = v;
+        __emule_compute_ctx().dst[idst][i] =
+            __emule_remainder_scalar(__emule_compute_ctx().dst[idst][i], divisor, recip);
+    }
+}
+
+// 3-arg form used by the kernel_lib (sfpu_helpers.inl Remainder::call passes the
+// divisor/reciprocal bits per call). param0 = fp32 divisor; param1 = host reciprocal.
+ALWI void remainder_tile(uint32_t idst, uint32_t param0, uint32_t param1) {
+    __emule_dst_check(idst, "remainder_tile");
+    float divisor, recip;
+    std::memcpy(&divisor, &param0, sizeof(float));
+    std::memcpy(&recip, &param1, sizeof(float));
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        __emule_compute_ctx().dst[idst][i] =
+            __emule_remainder_scalar(__emule_compute_ctx().dst[idst][i], divisor, recip);
     }
 }
 

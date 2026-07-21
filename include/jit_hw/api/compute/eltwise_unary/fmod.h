@@ -37,4 +37,16 @@ ALWI void fmod_tile(uint32_t idst) {
     }
 }
 
+// 3-arg form used by the kernel_lib (sfpu_helpers.inl Fmod::call passes the divisor
+// bits per call). param0 = fp32 divisor bit-pattern; param1 = host reciprocal
+// (unused — emule uses std::fmod). Mirrors the staged form above, divisor per call.
+ALWI void fmod_tile(uint32_t idst, uint32_t param0, uint32_t /*param1*/) {
+    __emule_dst_check(idst, "fmod_tile");
+    float divisor;
+    std::memcpy(&divisor, &param0, sizeof(float));
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        __emule_compute_ctx().dst[idst][i] = std::fmod(__emule_compute_ctx().dst[idst][i], divisor);
+    }
+}
+
 }  // namespace ckernel

@@ -89,11 +89,15 @@ inline constexpr ckernel::EltwiseBinaryType ELWADD = ckernel::EltwiseBinaryType:
 inline constexpr ckernel::EltwiseBinaryType ELWSUB = ckernel::EltwiseBinaryType::ELWSUB;
 inline constexpr ckernel::EltwiseBinaryType ELWMUL = ckernel::EltwiseBinaryType::ELWMUL;
 
-// Note: MathFidelity may also be defined in llk_defs.h — guard against redefinition.
-// Values must match tt-metal's enum: LoFi=0, HiFi2=2, HiFi3=3, HiFi4=4.
+// MathFidelity: the canonical enum lives in jit_hw/llk_types.h as ckernel::MathFidelity
+// (included above) and is re-exported globally by `using namespace ckernel;` at the bottom
+// of this header. Defining a *separate* global enum here too makes the unqualified name
+// `MathFidelity` ambiguous (two distinct types in one lookup) for the kernel_lib helpers
+// (ttnn/cpp/ttnn/kernel_lib/binary_op_helpers.inl). Alias instead so a global-qualified
+// `::MathFidelity` still resolves and names the one true type.
 #ifndef __EMULE_MATH_FIDELITY_DEFINED
 #define __EMULE_MATH_FIDELITY_DEFINED
-enum class MathFidelity : uint8_t { LoFi = 0, HiFi2 = 2, HiFi3 = 3, HiFi4 = 4 };
+using MathFidelity = ckernel::MathFidelity;
 #endif
 
 enum class ReluType : uint8_t { NO_RELU, ZERO_RELU, MIN_THRESHOLD_RELU, MAX_THRESHOLD_RELU };

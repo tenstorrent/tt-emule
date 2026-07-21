@@ -324,13 +324,15 @@ files:
   section: include/jit_hw/
   summary: '`llk_math_eltwise_binary_init`, `llk_math_eltwise_binary_init_with_operands` (no-op LLK shims)'
   symbols:
-  - {kind: function, name: llk_math_eltwise_binary_init}
   - {kind: function, name: llk_math_eltwise_binary_init_with_operands}
 - path: include/jit_hw/llk_math_eltwise_binary.h
   section: include/jit_hw/
   summary: empty shim (pragma-once only)
   symbols:
   - {kind: function, name: llk_math_eltwise_binary_init}
+  - {kind: function, name: __emule_llk_binary_math}
+  - {kind: global, name: binary_reuse_dest}
+  - {kind: function, name: llk_math_eltwise_binary}
 - path: include/jit_hw/llk_math_eltwise_unary_datacopy.h
   section: include/jit_hw/
   summary: '`enum class DataCopyType`; `copy_tile` datacopy helper'
@@ -427,14 +429,13 @@ files:
   - {kind: function, name: llk_unpack_A}
   - {kind: function, name: llk_unpack_A_init}
   - {kind: function, name: llk_unpack_AB_init}
+  - {kind: struct, name: __emule_unpack_AB_stash}
+  - {kind: function, name: __emule_unpack_AB_state}
   - {kind: function, name: llk_unpack_AB}
   - {kind: function, name: llk_unpack_tilize_init}
 - path: include/jit_hw/llk_unpack_AB_api.h
   section: include/jit_hw/
   summary: '`llk_unpack_AB_init`, `llk_unpack_AB` (no-op LLK shims)'
-  symbols:
-  - {kind: function, name: llk_unpack_AB_init}
-  - {kind: function, name: llk_unpack_AB}
 - path: include/jit_hw/llk_unpack_common_api.h
   section: include/jit_hw/
   summary: stub of silicon LLK unpack common API (function surface lives in `llk_unpack_a.h`)
@@ -900,7 +901,7 @@ files:
   - {kind: global, name: ELWSUB}
   - {kind: global, name: ELWMUL}
   - {kind: macro, name: __EMULE_MATH_FIDELITY_DEFINED}
-  - {kind: enum, name: MathFidelity}
+  - {kind: using, name: MathFidelity}
   - {kind: enum, name: ReluType}
   - {kind: struct, name: ReluConfig}
   - {kind: enum, name: p_dim_stride_target}
@@ -1864,6 +1865,7 @@ files:
   symbols:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: remainder_tile_init}
+  - {kind: function, name: __emule_remainder_scalar}
   - {kind: function, name: remainder_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/rounding.h
   section: include/jit_hw/api/compute/eltwise_unary/
@@ -1877,6 +1879,7 @@ files:
   - {kind: function, name: ceil_tile}
   - {kind: function, name: floor_tile}
   - {kind: function, name: frac_tile}
+  - {kind: function, name: stochastic_round_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/rpow.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `rpow_tile` (+`_init`)'
@@ -2645,6 +2648,9 @@ files:
 - path: include/jit_hw/tt_metal/fabric/hw/inc/mesh/api.h
   section: include/jit_hw/tt_metal/fabric/hw/inc/mesh/
   summary: fabric include-path shim → `jit_hw/__emule_fabric_stubs.h` (multichip fabric out of scope)
+- path: include/jit_hw/sfpu/ckernel_sfpu_converter.h
+  section: include/jit_hw/sfpu/
+  summary: empty include-resolver so metal-layer SFPU headers' `#include "sfpu/ckernel_sfpu_converter.h"` resolves on emule's JIT -I set; the `ckernel::sfpu::Converter` symbol is supplied by sfpi.h
 - path: include/jit_hw/sfpu/ckernel_sfpu_rsqrt_compat.h
   section: include/jit_hw/sfpu/
   summary: forwarder → real per-arch `sfpu/ckernel_sfpu_rsqrt_compat.h` so the metal-layer `ckernel_sfpu_sqrt.h` include resolves on emule's JIT -I set

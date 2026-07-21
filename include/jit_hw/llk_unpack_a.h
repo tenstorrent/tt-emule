@@ -56,9 +56,30 @@ inline void llk_unpack_AB_init(
     uint32_t /*icb1*/ = 0,
     ckernel::Transpose /*transpose*/ = ckernel::Transpose::NoneT) {}
 
+// Emule has no SRCA/SRCB register file: the binary math (llk_math_eltwise_binary)
+// reads the two CB tiles directly. Upstream's split hands the per-op operands + tile
+// indices to llk_unpack_AB but NOT to llk_math_eltwise_binary (which on silicon
+// consumes the already-unpacked SRC banks), so stash them here for the math step to
+// pick up. Safe because UNPACK()/MATH() run inline on the same fiber back-to-back —
+// no CB-wait/yield sits between the paired calls (see #define PACK/MATH/UNPACK in
+// api/compute/common.h), so the thread_local can't be clobbered by another fiber.
+struct __emule_unpack_AB_stash {
+    uint32_t operand_a = 0, operand_b = 0, tile_a = 0, tile_b = 0;
+};
+inline __emule_unpack_AB_stash& __emule_unpack_AB_state() {
+    static thread_local __emule_unpack_AB_stash s{};
+    return s;
+}
+
 template <ckernel::BroadcastType BType = ckernel::BroadcastType::NONE>
-inline void llk_unpack_AB(uint32_t /*icb0*/, uint32_t /*icb1*/,
-                          uint32_t /*tile_idx0*/, uint32_t /*tile_idx1*/) {}
+inline void llk_unpack_AB(uint32_t icb0, uint32_t icb1,
+                          uint32_t tile_idx0, uint32_t tile_idx1) {
+    auto& s = __emule_unpack_AB_state();
+    s.operand_a = icb0;
+    s.operand_b = icb1;
+    s.tile_a = tile_idx0;
+    s.tile_b = tile_idx1;
+}
 
 inline void llk_unpack_tilize_init(
     uint32_t /*operand*/ = 0,

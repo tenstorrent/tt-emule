@@ -9,24 +9,13 @@
 // shims those; surface them under this name as well for kernels that
 // `#include "llk_unpack_AB_api.h"` directly.
 //
-// The init/runtime entry points (`llk_unpack_AB_init`, `llk_unpack_AB`) are
-// no-ops under emule: the unpacker state is implicit (kernels read CB
-// data directly via the bridge), so init has no state to configure and
-// the per-tile unpack is a no-op (the math/sfpu path handles its own
-// CB reads).
+// The canonical `llk_unpack_AB_init` / `llk_unpack_AB` (with the correct non-type
+// `ckernel::BroadcastType` template param) live in `llk_unpack_a.h` (included below).
+// Don't redeclare them here — a second overload set with a different template-param
+// kind makes the call ambiguous once the kernel_lib instantiates it. `llk_unpack_AB`
+// stashes its tile indices there (see `__emule_unpack_AB_state()`) for the binary
+// math step (llk_math_eltwise_binary) to consume, since emule has no SRCA/SRCB banks.
 
 #include <cstdint>
 #include "llk_unpack_a.h"
 #include "llk_unpack_common_api.h"
-
-// Generic init/runtime templates. Drop the function bodies — emule's math
-// path doesn't depend on unpacker state.
-template <typename BroadcastType = void>
-inline void llk_unpack_AB_init(
-    const std::uint32_t /*operandA*/, const std::uint32_t /*operandB*/,
-    const std::uint32_t /*transpose*/ = 0) {}
-
-template <typename BroadcastType = void, bool acc_to_dest = false>
-inline void llk_unpack_AB(
-    const std::uint32_t /*operandA*/, const std::uint32_t /*operandB*/,
-    const std::uint32_t /*tile_index_a*/, const std::uint32_t /*tile_index_b*/) {}

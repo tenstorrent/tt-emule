@@ -13,20 +13,21 @@
 #include <cstdint>
 #include "llk_math_eltwise_binary.h"
 
-// `llk_math_eltwise_binary_init<>` — silicon configures the unpacker/math
-// state for the binary op.  Under emule the math is performed inline by the
-// `llk_math_eltwise_binary<>` body (in `llk_math_eltwise_binary.h`); this
-// init can be a no-op.
-template <
-    typename EltwiseBinaryType,
-    typename BroadcastType,
-    int math_fidelity,
-    typename EltwiseBinaryReuseDestType>
-inline void llk_math_eltwise_binary_init(const std::uint32_t /*acc_to_dest*/ = 0) {}
+// `llk_math_eltwise_binary_init<>` (the operand/acc form) lives in
+// `llk_math_eltwise_binary.h` (included above) with the correct non-type enum
+// template params. Don't redeclare it here — the template params are
+// `ckernel::EltwiseBinaryType` / `BroadcastType` / `MathFidelity` VALUES at the
+// call site, not `typename`s.
 
-// Variants taking concrete cb_ids and full shape, used by some kernel
-// templates.  All no-ops under emule.
-template <typename EltwiseBinaryType, typename BroadcastType, int math_fidelity>
+// `llk_math_eltwise_binary_init_with_operands<op, bcast, fidelity>(icb_a, icb_b)`
+// — silicon configures the unpacker/math pipeline for the binary op; a no-op under
+// emule (the math is done inline by llk_math_eltwise_binary<>). The kernel_lib
+// (binary_op_helpers.inl) instantiates this with enum VALUES, so the template
+// parameters are non-type, mirroring llk_math_eltwise_binary_init.
+template <
+    ckernel::EltwiseBinaryType /*eltwise_binary_type*/,
+    ckernel::BroadcastType /*src_b_bcast_type*/,
+    ckernel::MathFidelity /*math_fidelity*/>
 inline void llk_math_eltwise_binary_init_with_operands(
     std::uint32_t /*src_a_operand*/, std::uint32_t /*src_b_operand*/,
     const std::uint32_t /*acc_to_dest*/ = 0) {}
