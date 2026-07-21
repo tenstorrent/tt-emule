@@ -17,8 +17,7 @@
 #include "jit_hw/internal/emule_fiber_bridge.h"  // __emule_fiber_wait / _wake (park/wake)
 
 // get_semaphore() is defined in jit_kernel_stubs.hpp (included by all JIT
-// kernels).  It returns a uint32_t L1 address (truncated host pointer) for
-// the given semaphore ID.
+// kernels).  It returns a 0-based uint32 L1 offset for the given semaphore ID.
 
 namespace ckernel {
 

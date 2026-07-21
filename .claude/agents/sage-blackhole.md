@@ -109,7 +109,7 @@ Common patterns (see `emule-mapping.md` for full table):
 
 | HW concept | Emule strategy |
 |---|---|
-| L1 memory | per-core `mmap`(MAP_32BIT) + `Core::l1_data()` |
+| L1 memory | per-core `mmap` (plain 64-bit; kernel L1 addrs are 0-based offsets) + `Core::l1_data()` |
 | DRAM banking (BH = 7 banks) | `InterleavedAddrGen<DRAM>` + `bank_to_dram_offset[]` |
 | NOC (BH-style encoding) | memcpy via `__emule_resolve_noc_addr` + `L1_SLOT_MASK=0x1FFFFF` |
 | CB sync | `CBSyncState` mutex + condvar |

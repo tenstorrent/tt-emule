@@ -178,6 +178,7 @@ struct ThreadCommonCtx {
                                             // source chip when a worker co-runs fibers from
                                             // multiple chips (mesh register/run dispatch).
     uint8_t* bridge_l1 = nullptr;           // was __emule_bridge_l1
+    uint32_t l1_size = 0;                   // this core's L1 size — offset-model OOB assert bound
     uint8_t* bridge_dram = nullptr;         // was __emule_bridge_dram
     tt_emule::CBSyncState* cbs = nullptr;          // was __emule_cbs
     tt_emule::EmuleDFBInterface* dfbs = nullptr;   // was __emule_dfbs

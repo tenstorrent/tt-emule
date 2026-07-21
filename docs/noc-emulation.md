@@ -34,8 +34,11 @@ Consequences:
   (NOC 0 and NOC 1) each with independent sticky cmd-buf state. Emule models
   the **state surface** per NOC (see Section 8.3) so a kernel that interleaves
   `set_state(noc=0)` and `set_state(noc=1)` gets two independent caches. The
-  **transfer path** is single — emule executes one sync memcpy per API call
-  regardless of which NOC was named, and there is no NOC0/NOC1 concurrency.
+  **transfer path** is single — emule executes one sync memcpy per API call and
+  there is no NOC0/NOC1 concurrency. The one place the NOC index reaches the
+  transfer is multicast rectangle **orientation**: `__emule_multicast_write`
+  takes the sender's `noc` to undo the NOC1 coordinate swap and walk a torus
+  path (see Section 4.1). The per-core copy itself is still one sync memcpy.
 
 This is correct **by design**, not drift: a kernel that produces the right
 value on silicon produces the right value on emule. Timing and ordering
@@ -99,18 +102,16 @@ kernel back to the host emulation runtime:
 
 Every dataflow API ultimately routes through one of these.
 
-### 2.3 L1Pool vs bridge_l1
+### 2.3 L1Pool and bridge_l1
 
-Two host-mmap layouts:
-- **L1Pool mode** (`TT_EMULE_USE_L1_POOL`): a single contiguous mmap below 4GB
-  serves as the L1 region for every emulated core. Local L1 offsets are direct
-  host pointers masked via `addr & 0x1FFFFF` (the 2 MiB L1Pool slot mask —
-  fixed, independent of `NOC_ADDR_LOCAL_BITS`).
-- **bridge_l1 mode** (default): `__emule_bridge_l1` holds the L1 mmap base for
-  this thread's core. Local L1 offsets are computed as `addr - __emule_bridge_l1`.
-
-The address encoding is the same in both modes; only the conversion in
-`__emule_addr_to_offset` / `__emule_local_l1_to_ptr` differs.
+A kernel-visible local-L1 address is a **0-based offset** (< 1.5 MB), rebased to a
+host pointer only at the deref: `__emule_local_l1_to_ptr` → `__emule_l1_translate`
+returns `__emule_self->bridge_l1 + offset` unconditionally (`bridge_l1` is this
+fiber's core L1 base). `__emule_addr_to_offset` (`addr & 0x1FFFFF`, the 2 MiB slot
+mask) is idempotent on an in-L1 offset. Worker L1 is a plain 64-bit mmap; with
+`TT_EMULE_USE_L1_POOL` one contiguous mmap backs every core as a 2 MiB-aligned slot
+(`bridge_l1` = the slot base). The offset model imposes no placement window (see
+[l1-emulation.md](l1-emulation.md)).
 
 ### 2.4 DRAM channel backing
 
@@ -228,13 +229,27 @@ and `noc_async_write_*_trid` collapse to their non-trid siblings.
 extern "C" void __emule_multicast_write(uint64_t mcast_addr,
                                         const uint8_t* src,
                                         uint32_t size,
-                                        bool include_self);
+                                        bool include_self,
+                                        uint8_t noc);
 ```
 
 The runtime decodes the rectangle (`x_start..x_end` × `y_start..y_end`), looks
 up each destination core via the core map, and `memcpy(size)` to each L1.
 `include_self` controls whether the sender's coordinates within the rectangle
 receive the packet too (silicon's `NOC_CMD_BRCST_SRC_INCLUDE` flag).
+
+The delivery is **NOC-aware**. `noc` is the NOC index the rectangle was encoded
+on (the caller forwards `noc_index` / `Noc::get_noc_id()`). Silicon frames a
+NOC1 multicast in NOC1's reflected coordinate frame, so its rectangle arrives
+with `start`/`end` swapped; emule models NOC coordinates as identity, so the
+swap alone would leave the rectangle reversed. For `noc != 0` the runtime undoes
+the swap to recover physical (NOC0-frame) coordinates. It then walks each axis
+`start → end` stepping `+1 mod` the node space — a true **torus path**, so a
+rectangle whose cores straddle the worker-grid seam (`start > end`, e.g. NOC0
+SDPA S-block multicasts) wraps around rather than covering the min..max bounding
+box. For a non-wrapping rectangle this is identical to `min..max` (the
+post-un-swap NOC1 matmul/argmax in0/in1-mcast case). A stale 4-arg caller leaves
+`noc` as register garbage, so the caller signature must match this exactly.
 
 ### 4.2 Public APIs
 

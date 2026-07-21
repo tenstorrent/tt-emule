@@ -35,14 +35,17 @@ namespace ckernel {
 // UNPACK→MATH/PACK mailbox sync) so callers can `reinterpret_cast<To*>` it and
 // read tile data directly. Used by the normalization kernel_util
 // (`ttnn/.../normalization/kernel_util/compute/memory.h::get_pointer_to_cb_data`,
-// e.g. the layernorm-welford reciprocal LUT). emule runs UNPACK/MATH/PACK on one
-// thread, so no mailbox is needed: return the CB tile's host pointer truncated to
-// a uint32_t L1 address. emule L1 is mmap'd below 4 GB, so the value round-trips
-// through `reinterpret_cast<To*>` (same idiom as get_semaphore /
-// __emule_local_l1_to_ptr in jit_kernel_stubs.hpp).
+// e.g. the layernorm-welford reciprocal LUT) and by reshuffle (embedding_backward).
+// emule runs UNPACK/MATH/PACK on one thread, so no mailbox is needed. L1 offset
+// model: return a 0-based L1 offset (like get_write_ptr/get_read_ptr) — the CB ring
+// is maintained in host-pointer space, so subtract this fiber's bridge_l1. Callers
+// that `reinterpret_cast<To*>` the result are rebased by the JIT patch pass
+// (get_tile_address is registered there as an L1-address producer), and
+// reshuffle_rows_tile rebases via __emule_local_l1_to_ptr.
 ALWI uint32_t get_tile_address(uint32_t cb_id, uint32_t tile_index) {
     uint8_t* ptr = __emule_compute::cb_read_ptr_at(cb_id, tile_index);
-    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr));
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr) -
+                                 reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
 }
 
 // read_tile_value — silicon reads a uint32_t at element_offset from the CB

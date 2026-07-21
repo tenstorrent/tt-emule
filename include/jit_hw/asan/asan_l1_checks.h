@@ -25,14 +25,20 @@
 // clobbered by a co-scheduled one. The host arms it per launch
 // (set_sanitizer_thread_locals). See docs/ASAN.md + tt-emule #241.
 
-// Plain address->host-pointer translation (the tail every chokepoint path ends
-// in). A firmware-style offset is rebased onto __emule_self->bridge_l1; an already-
-// absolute host pointer (l1_alloc / CB / DFB) passes through.
+// Address->host-pointer translation (the tail every chokepoint path ends in).
+// L1 offset model: l1_addr is a 0-based firmware L1 offset (< l1_size); rebase
+// onto this fiber's core L1. Cross-core / cross-chip access never reaches here —
+// it goes through __emule_resolve_noc_addr. See docs/l1-emulation.md.
 inline uint8_t* __emule_l1_translate(uint32_t l1_addr) {
-    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
-    if (l1_addr >= l1_base) {
-        return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(l1_addr));
+#ifndef NDEBUG
+    // Surface an un-migrated site (a value still carrying an absolute/aliased
+    // address rather than a 0-based offset) as a named panic instead of a wild
+    // store. Skipped only while l1_size is unset (0).
+    if (__emule_self->l1_size != 0 && l1_addr >= __emule_self->l1_size) {
+        __emule_asan_panic("[EMULE_L1] L1 offset 0x%x out of range (l1_size 0x%x)\n",
+                           l1_addr, __emule_self->l1_size);
     }
+#endif
     return __emule_self->bridge_l1 + l1_addr;
 }
 
@@ -55,7 +61,10 @@ inline bool __emule_asan_cb_resolve(uint32_t l1_addr, uint8_t*& out) {
     for (uint32_t cb_id = 0; cb_id < 32; ++cb_id) {
         auto& cb = __emule_self->cbs[cb_id];
         if (cb.num_pages == 0) continue;
-        uint32_t cb_start = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(cb.base));
+        // Offset model: l1_addr is a 0-based offset; cb.base is a host pointer,
+        // so rebase it into offset space for the membership/boundary comparison.
+        uint32_t cb_start = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(cb.base) -
+                                                  reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
         uint32_t cb_size = cb.num_pages * cb.page_size;
         if (l1_addr < cb_start || l1_addr >= cb_start + cb_size) continue;
         // globally_allocated CBs reserve only nominally → exempt. See ASAN.md (CB Boundary Violation).

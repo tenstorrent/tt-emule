@@ -50,9 +50,10 @@
 #include "jit_hw/emule_cb_state.h"                   // __emule_cb_state alias (tt_emule::CBSyncState)
 #include "jit_hw/internal/emule_thread_ctx.h"        // __emule_self->cbs
 
-// Silicon convention: CB fifo addresses are encoded in 16-byte units. The kernel
-// reconstitutes a byte pointer with `<< cb_addr_shift`. (Mirror of the upstream
-// LocalCBInterface fifo_{rd,wr}_ptr encoding.)
+// Silicon convention: CB fifo addresses are encoded in 16-byte units — here a 0-based L1 offset
+// `>> cb_addr_shift`. The *_addr helpers reconstitute a host byte pointer with
+// `bridge_l1 + (p << cb_addr_shift)`. (Mirror of the upstream LocalCBInterface fifo_{rd,wr}_ptr
+// encoding, which likewise holds a 16B-encoded L1 offset.)
 inline constexpr uint32_t cb_addr_shift = 4;
 
 // LocalCBInterface (the per-RISC CB register-file shape) and the per-RISC array
@@ -61,10 +62,14 @@ inline constexpr uint32_t cb_addr_shift = 4;
 
 // ---- internal helpers -----------------------------------------------------
 
-// 16-byte-encoded base address of CB `cb_id`.
+// 16-byte-encoded 0-based L1 OFFSET of CB `cb_id` (base − bridge_l1, in 16B units). Encoding the
+// offset — not the raw host pointer — keeps the uint32 valid when worker L1 is mapped above 4 GB
+// (the CB analog of the fabric __emule_fabric_l1_off narrowing). The *_addr helpers below rebase it
+// onto bridge_l1 at deref. This also matches silicon, whose fifo_*_ptr hold 16B-encoded L1 offsets.
 inline uint32_t __emule_cb_base16(uint32_t cb_id) {
     return static_cast<uint32_t>(
-        reinterpret_cast<uintptr_t>(__emule_self->cbs[cb_id].base) >> cb_addr_shift);
+        (reinterpret_cast<uintptr_t>(__emule_self->cbs[cb_id].base) -
+         reinterpret_cast<uintptr_t>(__emule_self->bridge_l1)) >> cb_addr_shift);
 }
 
 // Total ring span of CB `cb_id` in 16-byte units (page_size * num_pages).
@@ -128,7 +133,7 @@ inline uint8_t* __emule_cb_wr_addr(uint32_t cb_id, uint32_t off = 0) {
     const uint32_t p = __emule_cb_wrap(
         __emule_self->local_cb[cb_id].fifo_wr_ptr + off * (__emule_self->cbs[cb_id].page_size >> cb_addr_shift),
         __emule_cb_base16(cb_id), __emule_cb_span16(cb_id));
-    return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(p) << cb_addr_shift);
+    return __emule_self->bridge_l1 + (static_cast<uintptr_t>(p) << cb_addr_shift);
 }
 
 // Byte pointer for the read side at `off` pages past this thread's read ptr.
@@ -137,7 +142,7 @@ inline uint8_t* __emule_cb_rd_addr(uint32_t cb_id, uint32_t off = 0) {
     const uint32_t p = __emule_cb_wrap(
         __emule_self->local_cb[cb_id].fifo_rd_ptr + off * (__emule_self->cbs[cb_id].page_size >> cb_addr_shift),
         __emule_cb_base16(cb_id), __emule_cb_span16(cb_id));
-    return reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(p) << cb_addr_shift);
+    return __emule_self->bridge_l1 + (static_cast<uintptr_t>(p) << cb_addr_shift);
 }
 
 // Advance this thread's write/read pointer by `n` pages, wrapping at the ring end.
