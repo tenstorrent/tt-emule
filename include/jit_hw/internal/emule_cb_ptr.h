@@ -50,11 +50,27 @@
 #include "jit_hw/emule_cb_state.h"                   // __emule_cb_state alias (tt_emule::CBSyncState)
 #include "jit_hw/internal/emule_thread_ctx.h"        // __emule_self->cbs
 
-// Silicon convention: CB fifo addresses are encoded in 16-byte units — here a 0-based L1 offset
-// `>> cb_addr_shift`. The *_addr helpers reconstitute a host byte pointer with
-// `bridge_l1 + (p << cb_addr_shift)`. (Mirror of the upstream LocalCBInterface fifo_{rd,wr}_ptr
-// encoding, which likewise holds a 16B-encoded L1 offset.)
-inline constexpr uint32_t cb_addr_shift = 4;
+// Silicon convention (tt_metal/hw/inc/internal/circular_buffer_interface.h):
+// `cb_addr_shift = CIRCULAR_BUFFER_COMPUTE_ADDR_SHIFT (=4)` on compute/TRISC and
+// `0` on the dataflow RISCs (BRISC/NCRISC). It is the per-RISC unit in which
+// LocalCBInterface encodes fifo_{rd,wr}_ptr / fifo_page_size / fifo_size — 16-byte
+// words on compute, raw BYTES on dataflow. Kernels read those fields with their
+// own raw arithmetic and rely on that per-RISC unit: e.g. compute SDPA does
+// `fifo_wr_ptr -= n*fifo_page_size` in 16B words, while dataflow readers/writers do
+// `page_bytes = fifo_page_size << cb_addr_shift` expecting the shift to be a no-op
+// (bytes << 0). emule compiles each kernel for its own RISC (TRISC_* is defined by
+// the runner only on compute — see emulated_program_runner.cpp), so the constant
+// must be gated the same way silicon's header is; a fixed 4 makes a dataflow kernel's
+// `fifo_page_size << cb_addr_shift` 16× too large and walks the CB write pointer off
+// the ring. The *_addr helpers reconstitute a host byte pointer with
+// `bridge_l1 + (p << cb_addr_shift)`; all encode/decode below uses this one constant,
+// so each TU stays self-consistent (16B on compute, bytes on dataflow) and
+// get_write_ptr/get_read_ptr return correct byte offsets either way.
+#if defined(TRISC_MATH) || defined(TRISC_PACK) || defined(TRISC_UNPACK)
+inline constexpr uint32_t cb_addr_shift = 4;   // compute/TRISC: 16-byte words
+#else
+inline constexpr uint32_t cb_addr_shift = 0;   // dataflow BRISC/NCRISC: raw bytes
+#endif
 
 // LocalCBInterface (the per-RISC CB register-file shape) and the per-RISC array
 // now live in ThreadCommonCtx (jit_hw/internal/emule_thread_ctx.h, included above)
