@@ -25,18 +25,26 @@ struct WallClock {
         std::thread([this] {
             using namespace std::chrono;
             for (;;) {
-                auto ns = static_cast<uint64_t>(steady_clock::now().time_since_epoch().count());
-                lo.store(static_cast<uint32_t>(ns), std::memory_order_relaxed);
-                hi.store(static_cast<uint32_t>(ns >> 32), std::memory_order_relaxed);
+                // Coarser unit than nanoseconds so the 32-bit lo half wraps far less often
+                // (~71 min at microsecond resolution vs ~4.3s at nanosecond resolution) —
+                // narrows (doesn't eliminate) the tearing window between the two separate,
+                // unsynchronized 32-bit stores/loads, matching a real split hi/lo register pair.
+                auto us = static_cast<uint64_t>(duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count());
+                lo.store(static_cast<uint32_t>(us), std::memory_order_relaxed);
+                hi.store(static_cast<uint32_t>(us >> 32), std::memory_order_relaxed);
                 std::this_thread::sleep_for(microseconds(1));
             }
         }).detach();
     }
 };
 
+// Intentionally leaked: the ticker thread must outlive this object, but a function-local static
+// would run WallClock's (trivial but non-zero-cost-to-reason-about) destructor at static-teardown
+// time while the detached thread may still be writing to it. Heap-allocating and never freeing
+// means the memory stays valid until the process's address space itself goes away.
 inline WallClock& wall_clock() {
-    static WallClock instance;
-    return instance;
+    static WallClock* instance = new WallClock();
+    return *instance;
 }
 
 }  // namespace tt_emule
