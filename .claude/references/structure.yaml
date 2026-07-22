@@ -969,6 +969,8 @@ files:
   - {kind: function, name: reconfig_data_format_srca}
   - {kind: function, name: reconfig_data_format_srcb}
   - {kind: function, name: pack_reconfig_data_format}
+  - {kind: using, name: ReluType}
+  - {kind: using, name: ReluConfig}
   - {kind: function, name: llk_pack_relu_config}
   - {kind: function, name: pack_set_relu_threshold}
   - {kind: function, name: llk_pack_reconfig_l1_acc}
@@ -2414,6 +2416,7 @@ files:
   - {kind: function, name: get_output_narrow_tile}
   - {kind: function, name: get_output_face_r_dim}
   - {kind: function, name: get_output_num_faces}
+  - {kind: function, name: get_operand_dst_format}
 - path: include/jit_hw/internal/mod_div_lib.h
   section: include/jit_hw/internal/
   summary: '`mulsi3`; `fast_udiv_<N>` for N = 7, 12, 20, 48, 56, 63, 70, 72, 80, 94, 108, 110, 117, 120, 124, 126, 130, 140'

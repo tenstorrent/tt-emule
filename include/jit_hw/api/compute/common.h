@@ -1035,6 +1035,17 @@ ALWI void pack_reconfig_data_format(uint32_t, uint32_t) {}
 // state applied at every pack site.  Mode is set by `llk_pack_relu_config`,
 // threshold by `pack_set_relu_threshold`; `pack_relu_config(uint32_t)`
 // decodes the silicon-style packed config.
+//
+// ReluType/ReluConfig are defined at GLOBAL scope above (to match the
+// forward decl `enum class ReluType` that internal/emule_thread_ctx.h stores
+// as ComputeThreadCtx::pack_relu_mode). On silicon these types live in
+// namespace ckernel (tt_llk_*/llk_lib/llk_defs.h), and the kernel_lib chain
+// (ttnn/cpp/ttnn/kernel_lib/eltwise_chain.inl) names them qualified as
+// `ckernel::ReluConfig` / `ckernel::ReluType`. Inject the global definitions
+// into namespace ckernel with using-declarations so those qualified names
+// resolve to the one true type (no second definition, no ODR divergence).
+using ::ReluType;
+using ::ReluConfig;
 ALWI void llk_pack_relu_config(ReluType type) { __emule_compute_ctx().pack_relu_mode = type; }
 ALWI void llk_pack_relu_config(const ReluConfig& config) {
     __emule_compute_ctx().pack_relu_mode = config.get_mode();
@@ -1051,6 +1062,10 @@ ALWI void pack_init(uint32_t = 0, uint32_t = 0) {}
 ALWI void pack_dest_init(uint32_t = 0) {}
 ALWI void pack_reconfig_l1_acc(uint32_t enable) { llk_pack_reconfig_l1_acc(enable); }
 ALWI void pack_relu_config(ReluType t) { llk_pack_relu_config(t); }
+// silicon public form `pack_relu_config(const ReluConfig&)` (tt_metal/hw/inc/
+// api/compute/pack.h -> llk_pack_relu_config(config)). The kernel_lib chain
+// brackets each ReLU pack site with ckernel::pack_relu_config(ReluConfig::{zero,none}()).
+ALWI void pack_relu_config(const ReluConfig& config) { llk_pack_relu_config(config); }
 // silicon BH/WH integer-config overload: low 4 bits = mode (0=NO_RELU,
 // 3=MAX_THRESHOLD_RELU, else MIN_THRESHOLD_RELU); upper 16 bits = threshold
 // (uint16, reinterpreted to float by silicon — emule matches by casting the

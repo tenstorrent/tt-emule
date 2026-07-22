@@ -28,6 +28,15 @@ inline uint32_t get_output_num_faces(uint32_t) { return 4; }
 // does not include this header, so there is no include cycle.
 #include "jit_hw/api/cb_api.h"
 
+// Per-operand unpack destination data format. Silicon (tt_metal/hw/ckernels/
+// <arch>/metal/llk_io/llk_operands.h) returns `unpack_dst_format[operand_id]`.
+// The kernel_lib chain (ttnn/cpp/ttnn/kernel_lib/eltwise_chain.inl) calls this
+// to decide `enable_unpack_to_dest` (true only for Float32/UInt32/Int32), which
+// selects the A2D vs B2D datacopy path. unpack_dst_format[] is the same per-CB
+// format table (populated from the EMULE_CB_DATA_FORMATS JIT define) the other
+// emule format helpers read, so this is faithful to the silicon decision.
+inline uint32_t get_operand_dst_format(uint32_t operand_id) { return unpack_dst_format[operand_id]; }
+
 // ---- Tilize/Untilize/Matmul trackers ----
 // The pack/unpack tilize trackers and the matmul-transpose flag are per-compute-
 // thread state, held in ComputeThreadCtx (emule_thread_ctx.h) and reached via
