@@ -196,6 +196,7 @@ enum NocScatterWriteChunkEncoding : uint8_t {
     CHUNK_ENCODING_SEMINC_FLUSH = 3,
 };
 static constexpr uint8_t NOC_SCATTER_WRITE_MAX_CHUNKS = 4;
+static constexpr uint8_t NOC_SCATTER_WRITE_MIN_CHUNKS = 2;  // matches tt_metal/fabric/fabric_edm_packet_header.hpp
 struct NocUnicastScatterCommandHeader {
     uint64_t noc_address[NOC_SCATTER_WRITE_MAX_CHUNKS] = {};
     uint16_t chunk_size[NOC_SCATTER_WRITE_MAX_CHUNKS - 1] = {};
@@ -918,6 +919,20 @@ namespace common::experimental {}
 namespace mesh::experimental {}
 
 }  // namespace tt::tt_fabric
+
+// Real tt_metal/fabric/hw/inc/linear/api.h does `using namespace tt::tt_fabric::common::experimental;`
+// at file scope before entering tt::tt_fabric::linear::experimental, which is what makes callers like
+// multicast_common.hpp reference UnicastWriteUpdateMask/UnicastScatterWriteUpdateMask/
+// NocUnicastScatterCommandHeader/etc. unqualified. Mirror that with narrow using-declarations (not a
+// blanket `using namespace tt::tt_fabric`) — this namespace also holds this shim's own
+// eth_chan_directions, which collides with the real global one (hostdevcommon/fabric_common.h) that
+// other kernels (e.g. moe_utils.hpp) already reference unqualified.
+using tt::tt_fabric::NOC_SCATTER_WRITE_MAX_CHUNKS;
+using tt::tt_fabric::NOC_SCATTER_WRITE_MIN_CHUNKS;
+using tt::tt_fabric::NocUnicastScatterCommandHeader;
+using tt::tt_fabric::UnicastWriteUpdateMask;
+using tt::tt_fabric::UnicastScatterWriteUpdateMask;
+using tt::tt_fabric::UnicastAtomicIncUpdateMask;
 
 // --- PACKET_HEADER_TYPE + global FabricConnectionManager ---
 // Silicon exposes PACKET_HEADER_TYPE at global scope; keep that. It is the header type the fabric config
