@@ -146,11 +146,6 @@ extern "C" uint8_t* __emule_noc_resolve(uint32_t x, uint32_t y, uint64_t addr);
 // it) so every kernel header sees it.
 #include "jit_hw/internal/emule_thread_ctx.h"
 
-// NoC-read-pending counter (NoC Barrier Missing check in cb_pop_front); not used
-// by the L1 chokepoint. The chokepoint and the rest of its sanitizer
-// thread-locals live together in internal/emule_l1_to_ptr.h. See ASAN.md.
-extern thread_local uint32_t __emule_pending_noc_reads;
-
 // L1 access chokepoint — single definition shared with dataflow_api.h.
 #include "jit_hw/internal/emule_l1_to_ptr.h"
 

@@ -268,7 +268,6 @@ files:
   - {kind: namespace, name: tt_emule}
   - {kind: extern_c, name: __emule_dram_ptr}
   - {kind: extern_c, name: __emule_noc_resolve}
-  - {kind: global, name: __emule_pending_noc_reads}
   - {kind: global, name: bank_to_dram_offset}
   - {kind: global, name: bank_to_l1_offset}
   - {kind: global, name: my_x}
@@ -2364,6 +2363,7 @@ files:
   - {kind: struct, name: __emule_uk_state}
   - {kind: struct, name: __emule_matmul_bridge}
   - {kind: enum, name: ReluType}
+  - {kind: struct, name: EmuleSanitizerState}
   - {kind: struct, name: ThreadCommonCtx}
   - {kind: struct, name: ComputeThreadCtx}
   - {kind: struct, name: DatamovementThreadCtx}
@@ -2654,17 +2654,6 @@ files:
   symbols:
   - {kind: global, name: my_x}
   - {kind: global, name: my_y}
-  - {kind: global, name: __emule_logical_x}
-  - {kind: global, name: __emule_logical_y}
-  - {kind: global, name: __emule_pending_noc_reads}
-  - {kind: global, name: __emule_cb_reserve_file}
-  - {kind: global, name: __emule_cb_reserve_line}
-  - {kind: global, name: __emule_cb_wait_file}
-  - {kind: global, name: __emule_cb_wait_line}
-  - {kind: global, name: __emule_cb_reserved_pages}
-  - {kind: global, name: __emule_cb_waited_pages}
-  - {kind: global, name: __emule_cb_reserve_dangling}
-  - {kind: global, name: __emule_cb_wait_dangling}
   - {kind: function, name: __emule_asan_cb_on_reserve}
   - {kind: function, name: __emule_asan_cb_on_push}
   - {kind: function, name: __emule_asan_cb_on_wait}
@@ -2674,18 +2663,6 @@ files:
   summary: 'The per-access L1 sanitizer checks lifted out of the __emule_local_l1_to_ptr chokepoint: plain `__emule_l1_translate` + semaphore/CB-resolve(+boundary)/OOB-tensor/padding helpers, and the sanitizer
     thread-locals they consume. Reached only when TT_METAL_EMULE_ASAN is on. See docs/ASAN.md.'
   symbols:
-  - {kind: global, name: __emule_sem_l1_range_start}
-  - {kind: global, name: __emule_sem_l1_range_end}
-  - {kind: global, name: __emule_l1_unreserved_base}
-  - {kind: global, name: __emule_l1_tensor_ranges}
-  - {kind: global, name: __emule_l1_tensor_ranges_count}
-  - {kind: global, name: __emule_l1_padding_ranges}
-  - {kind: global, name: __emule_l1_padding_ranges_count}
-  - {kind: global, name: __emule_l1_host_ranges}
-  - {kind: global, name: __emule_l1_host_ranges_count}
-  - {kind: global, name: __emule_cb_reserved_pages}
-  - {kind: global, name: __emule_cb_waited_pages}
-  - {kind: global, name: __emule_cb_boundary_strict}
   - {kind: function, name: __emule_l1_translate}
   - {kind: function, name: __emule_asan_check_semaphore}
   - {kind: function, name: __emule_asan_cb_resolve}
@@ -2697,13 +2674,9 @@ files:
     behind EMULE_ASAN_IMPLEMENTATION. Moved here from jit_hw/ root.'
   symbols:
   - {kind: function, name: __emule_asan_enabled}
-  - {kind: global, name: __emule_kernel_name}
   - {kind: extern_c, name: __emule_asan_panic}
   - {kind: global, name: my_x}
   - {kind: global, name: my_y}
-  - {kind: global, name: __emule_logical_x}
-  - {kind: global, name: __emule_logical_y}
-  - {kind: global, name: __processor_id}
   - {kind: function, name: __emule_asan_symbolize}
   - {kind: function, name: __emule_asan_collapse_angles}
   - {kind: function, name: __emule_asan_print_trace}

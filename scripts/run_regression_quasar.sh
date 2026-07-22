@@ -188,29 +188,30 @@ echo "== Tier 3b: DFB Multi-P/C STRIDED =="
 
 # Group A: DM-DM multi-P/C explicit/implicit sync
 run_test "DMTest1xDFB1Sx1S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB1Sx1S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTest1xDFB1Sx1S_2_0/ImplicitSyncFalse"
 run_test "DMTest1xDFB1Sx1S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB1Sx1S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTest1xDFB1Sx1S_2_0/ImplicitSyncTrue"
 run_test "DMTest1xDFB1Sx4S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB1Sx4S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTest1xDFB1Sx4S_2_0/ImplicitSyncFalse"
 run_test "DMTest1xDFB1Sx4S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB1Sx4S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTest1xDFB1Sx4S_2_0/ImplicitSyncTrue"
 run_test "DMTest1xDFB4Sx1S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx1S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTest1xDFB4Sx1S_2_0/ImplicitSyncFalse"
 run_test "DMTest1xDFB4Sx1S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx1S/ImplicitSyncTrue"
-run_test "DMTest1xDFB4Sx4S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx4S/ImplicitSyncFalse"
-run_test "DMTest1xDFB4Sx4S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx4S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTest1xDFB4Sx1S_2_0/ImplicitSyncTrue"
+# DMTest1xDFB4Sx4S has no Metal 2.0 equivalent: 4+4=8 DM cores exceeds the Gen2 6-DM-core
+# user cap (tt-metal tests/tt_metal/tt_metal/api/dataflow_buffer/test_dataflow_buffer_base.cpp
+# comment on the DFB_TEST_2_0 sweep) — legacy could do it via num_threads_per_cluster, which
+# Metal 2.0's num_threads (literal DM core count) can't replicate. Coverage genuinely dropped
+# upstream, not renamed.
 run_test "DMTest1xDFB2Sx4S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB2Sx4S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTest1xDFB2Sx4S_2_0/ImplicitSyncFalse"
 run_test "DMTest1xDFB2Sx4S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB2Sx4S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTest1xDFB2Sx4S_2_0/ImplicitSyncTrue"
 run_test "DMTest1xDFB4Sx2S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx2S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTest1xDFB4Sx2S_2_0/ImplicitSyncFalse"
 run_test "DMTest1xDFB4Sx2S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTest1xDFB4Sx2S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTest1xDFB4Sx2S_2_0/ImplicitSyncTrue"
 
 # ===========================================================================
 # Tier 3c: DFB Compute Bridge Tests (Groups B/C)
@@ -220,55 +221,55 @@ echo "== Tier 3c: DFB Compute Bridge Tests (Groups B/C) =="
 
 # Group B: DM producer → Tensix consumer
 run_test "DMTensixTest1xDFB1Sx1S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB1Sx1S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTensixTest1xDFB1Sx1S_2_0/ImplicitSyncFalse"
 run_test "DMTensixTest1xDFB1Sx1S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB1Sx1S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTensixTest1xDFB1Sx1S_2_0/ImplicitSyncTrue"
 run_test "DMTensixTest1xDFB1Sx4S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB1Sx4S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTensixTest1xDFB1Sx4S_2_0/ImplicitSyncFalse"
 run_test "DMTensixTest1xDFB1Sx4S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB1Sx4S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTensixTest1xDFB1Sx4S_2_0/ImplicitSyncTrue"
 run_test "DMTensixTest1xDFB4Sx1S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx1S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTensixTest1xDFB4Sx1S_2_0/ImplicitSyncFalse"
 run_test "DMTensixTest1xDFB4Sx1S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx1S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTensixTest1xDFB4Sx1S_2_0/ImplicitSyncTrue"
 run_test "DMTensixTest1xDFB4Sx4S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx4S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTensixTest1xDFB4Sx4S_2_0/ImplicitSyncFalse"
 run_test "DMTensixTest1xDFB4Sx4S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx4S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTensixTest1xDFB4Sx4S_2_0/ImplicitSyncTrue"
 run_test "DMTensixTest1xDFB2Sx4S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB2Sx4S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTensixTest1xDFB2Sx4S_2_0/ImplicitSyncFalse"
 run_test "DMTensixTest1xDFB2Sx4S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB2Sx4S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTensixTest1xDFB2Sx4S_2_0/ImplicitSyncTrue"
 run_test "DMTensixTest1xDFB4Sx2S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx2S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTensixTest1xDFB4Sx2S_2_0/ImplicitSyncFalse"
 run_test "DMTensixTest1xDFB4Sx2S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.DMTensixTest1xDFB4Sx2S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.DMTensixTest1xDFB4Sx2S_2_0/ImplicitSyncTrue"
 
 # Group C: Tensix producer → DM consumer
 run_test "TensixDMTest1xDFB1Sx1S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB1Sx1S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.TensixDMTest1xDFB1Sx1S_2_0/ImplicitSyncFalse"
 run_test "TensixDMTest1xDFB1Sx1S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB1Sx1S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.TensixDMTest1xDFB1Sx1S_2_0/ImplicitSyncTrue"
 run_test "TensixDMTest1xDFB1Sx4S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB1Sx4S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.TensixDMTest1xDFB1Sx4S_2_0/ImplicitSyncFalse"
 run_test "TensixDMTest1xDFB1Sx4S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB1Sx4S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.TensixDMTest1xDFB1Sx4S_2_0/ImplicitSyncTrue"
 run_test "TensixDMTest1xDFB4Sx1S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx1S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.TensixDMTest1xDFB4Sx1S_2_0/ImplicitSyncFalse"
 run_test "TensixDMTest1xDFB4Sx1S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx1S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.TensixDMTest1xDFB4Sx1S_2_0/ImplicitSyncTrue"
 run_test "TensixDMTest1xDFB4Sx4S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx4S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.TensixDMTest1xDFB4Sx4S_2_0/ImplicitSyncFalse"
 run_test "TensixDMTest1xDFB4Sx4S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx4S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.TensixDMTest1xDFB4Sx4S_2_0/ImplicitSyncTrue"
 run_test "TensixDMTest1xDFB2Sx4S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB2Sx4S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.TensixDMTest1xDFB2Sx4S_2_0/ImplicitSyncFalse"
 run_test "TensixDMTest1xDFB2Sx4S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB2Sx4S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.TensixDMTest1xDFB2Sx4S_2_0/ImplicitSyncTrue"
 run_test "TensixDMTest1xDFB4Sx2S" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx2S/ImplicitSyncFalse"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.TensixDMTest1xDFB4Sx2S_2_0/ImplicitSyncFalse"
 run_test "TensixDMTest1xDFB4Sx2S_IS" "$API_BIN" \
-    --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.TensixDMTest1xDFB4Sx2S/ImplicitSyncTrue"
+    --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.TensixDMTest1xDFB4Sx2S_2_0/ImplicitSyncTrue"
 
 # ===========================================================================
 # Tier 3e: DFB BLOCKED Consumer
@@ -276,26 +277,11 @@ run_test "TensixDMTest1xDFB4Sx2S_IS" "$API_BIN" \
 echo ""
 echo "== Tier 3e: DFB BLOCKED Consumer =="
 
-for test in DMTest1xDFB1Sx4B DMTest1xDFB4Sx1B DMTest1xDFB4Sx4B DMTest1xDFB4Sx2B DMTest1xDFB2Sx4B; do
-    run_test "${test}" "$API_BIN" \
-        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncFalse"
-    run_test "${test}_IS" "$API_BIN" \
-        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
-done
-
-for test in DMTensixTest1xDFB1Sx4B DMTensixTest1xDFB4Sx1B DMTensixTest1xDFB4Sx4B DMTensixTest1xDFB4Sx2B DMTensixTest1xDFB2Sx4B; do
-    run_test "${test}" "$API_BIN" \
-        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncFalse"
-    run_test "${test}_IS" "$API_BIN" \
-        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
-done
-
-for test in TensixDMTest1xDFB1Sx4B TensixDMTest1xDFB4Sx1B TensixDMTest1xDFB4Sx4B TensixDMTest1xDFB4Sx2B TensixDMTest1xDFB2Sx4B; do
-    run_test "${test}" "$API_BIN" \
-        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncFalse"
-    run_test "${test}_IS" "$API_BIN" \
-        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
-done
+# No Metal 2.0 equivalent: the BLOCKED DFB access pattern (the "*B"-suffixed configs this
+# tier exercised) was dropped from the Metal 2.0 single-DFB sweep entirely — only STRIDED
+# and ALL survive (tests/tt_metal/tt_metal/api/dataflow_buffer/*.cpp; confirmed by full-tree
+# grep, "BLOCKED" appears nowhere in the current DFB test sources). Coverage genuinely
+# dropped upstream, not renamed — nothing to remap this tier to.
 
 # ===========================================================================
 # Tier 3f: DFB Multi-Core
@@ -305,17 +291,15 @@ echo "== Tier 3f: DFB Multi-Core =="
 
 for test in MultiCoreDMTest2Core_1Sx1S MultiCoreDMTest2Core_2Sx2S; do
     run_test "${test}" "$API_BIN" \
-        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncFalse"
+        --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.${test}_2_0/ImplicitSyncFalse"
     run_test "${test}_IS" "$API_BIN" \
-        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
+        --gtest_filter="M2ImplicitSync/DFBImplicitSyncParamFixture_2_0.${test}_2_0/ImplicitSyncTrue"
 done
 
-for test in MultiCoreDMTest2Core_1Sx4B; do
-    run_test "${test}" "$API_BIN" \
-        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncFalse"
-    run_test "${test}_IS" "$API_BIN" \
-        --gtest_filter="ImplicitSync/DFBImplicitSyncParamFixture.${test}/ImplicitSyncTrue"
-done
+# MultiCoreDMTest2Core_1Sx4B (BLOCKED) has no Metal 2.0 equivalent — same BLOCKED-access-
+# pattern drop as Tier 3e above. The surviving multi-core sweep only has an ALL-pattern
+# variant (MultiCoreDMTest2Core_1Sx4A_2_0), which is a different config, not a rename of
+# this one, so it must not be silently substituted here.
 
 # ===========================================================================
 # Tier 3g: DFB Config Validation

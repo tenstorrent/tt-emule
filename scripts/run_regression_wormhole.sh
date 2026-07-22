@@ -32,6 +32,7 @@ INTEGRATION_BIN="$TEST_DIR/unit_tests_integration"
 LEGACY_BIN="$TEST_DIR/unit_tests_legacy"
 DM_BIN="$TEST_DIR/unit_tests_data_movement"
 PER_CORE_ALLOC_BIN="$TEST_DIR/unit_tests_per_core_allocation"
+FIBER_ASAN_BIN="$TEST_DIR/unit_tests_fiber_asan"
 TTNN_BIN="$TTNN_TEST_DIR/unit_tests_ttnn"
 
 PASS=0; FAIL=0; SKIP=0
@@ -54,6 +55,7 @@ _gtest_xml_args() {
 # (the full arch): DRAM bank topology, tilize/format, basic L1/JIT/NOC/reduce.
 CI_TIER="${CI_TIER:-full}"
 PR_TIER=(
+    fiber_asan_isolation
     tilize_untilize
     SimpleL1Buffer
     SimpleDramBuffer
@@ -145,6 +147,10 @@ fi
 echo ""
 echo "== Tier 1: Host-only =="
 unset TT_METAL_MOCK_CLUSTER_DESC_PATH TT_METAL_EMULE_MODE TT_METAL_SLOW_DISPATCH_MODE 2>/dev/null || true
+
+# Per-fiber ASAN sanitizer-state isolation (pure unit test, no device). Regression
+# fence for the fiber-engine per-fiber-state fix — see EmuleSanitizerState.
+run_test "fiber_asan_isolation" "$FIBER_ASAN_BIN"
 
 run_test "bit_utils"          "$API_BIN" \
     --gtest_filter="Host.ExtractBitArray:Host.PackBitArray:Host.PackExtractBitArray:Host.ExtractPackBitArray"
