@@ -213,7 +213,15 @@ Checks run in this order inside `__emule_local_l1_to_ptr`:
    `__emule_l1_translate` (offset-vs-absolute disambiguation only), **not**
    `__emule_local_l1_to_ptr`. This is required: the chokepoint cannot tell a
    valid `noc_semaphore_wait()` from a stray scalar write once both arrive as the
-   same address, so routing the API through it false-positives. A firmware-offset
+   same address, so routing the API through it false-positives. The
+   remote/multicast semaphore-set APIs (`noc_semaphore_set_remote`,
+   `noc_semaphore_set_multicast`, `noc_semaphore_set_multicast_loopback_src`) are
+   exempt the same way: they read their LOCAL semaphore source via
+   `__emule_l1_translate` (not `__emule_local_l1_to_ptr` / `noc_async_write`) before
+   the remote resolver+memcpy, so pushing one's own semaphore to a remote core does
+   not trip this check. Without that, a legitimate `noc_semaphore_set_remote(get_semaphore(id), ...)`
+   — e.g. `minimal_matmul`'s `dm_in1_sender_out.cpp` in1-valid handshake — would
+   false-positive on the local sem read. A firmware-offset
    semaphore (e.g. a constexpr receiver-semaphore offset, which `__emule_sem_atomic`
    explicitly supports) is *neither* a live tensor *nor*, in general, inside the
    sem range — so it would trip the **OOB** check (§4), not the semaphore check;
