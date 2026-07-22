@@ -28,4 +28,11 @@ ALWI void copy_dest_values(uint32_t dst_src, uint32_t dst_dst) {
         __emule_compute_ctx().dst[dst_dst][i] = __emule_compute_ctx().dst[dst_src][i];
 }
 
+// DataFormat-templated overload — real silicon uses the format to pick the SFPU copy variant;
+// emule's DST is a flat float array regardless of format, so this just delegates.
+template <DataFormat>
+ALWI void copy_dest_values(uint32_t dst_src, uint32_t dst_dst) {
+    copy_dest_values(dst_src, dst_dst);
+}
+
 } // namespace ckernel

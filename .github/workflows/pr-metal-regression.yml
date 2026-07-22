@@ -259,7 +259,9 @@ jobs:
     needs: [changes, build]
     if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'pull_request' }}
     runs-on: tt-ubuntu-2204-xlarge-stable
-    timeout-minutes: 90
+    # 90 min was a pre-existing near-miss (observed ~89.5 min under max-parallel: 1 serialization);
+    # bumped for real headroom.
+    timeout-minutes: 120
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     strategy:

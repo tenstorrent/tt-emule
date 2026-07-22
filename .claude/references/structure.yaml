@@ -42,6 +42,14 @@ files:
   - {kind: global, name: TILE_COUNTERS_PER_NEO}
   - {kind: struct, name: TileCounter}
   - {kind: class, name: TileCounterArray}
+- path: include/tt_emule/wall_clock.hpp
+  section: include/tt_emule/
+  summary: Host-backed RISCV_DEBUG_REG_WALL_CLOCK_{L,H} counter for spin()/device_delay_spin.cpp, hosted in the long-lived runtime (not jit_hw) so the ticker thread outlives the ephemeral kernel .so.
+  symbols:
+  - {kind: namespace, name: tt_emule}
+  - {kind: struct, name: WallClock}
+  - {kind: function, name: wall_clock}
+  - {kind: extern_c, name: visibility}
 - path: include/tt_emule/worker_l1_mmap.hpp
   section: include/tt_emule/
   summary: Worker-L1 backing allocator (__emule_mmap_worker_l1) — a plain 64-bit MAP_NORESERVE mmap; the offset model frees worker L1 from any placement window, so a galaxy-scale pool lives anywhere in
@@ -68,6 +76,12 @@ files:
   - {kind: extern_c, name: __emule_fabric_route_follow}
   - {kind: macro, name: PROGRAMMABLE_CORE_TYPE_DEFINED}
   - {kind: enum, name: ProgrammableCoreType}
+  - {kind: using, name: NOC_SCATTER_WRITE_MAX_CHUNKS}
+  - {kind: using, name: NOC_SCATTER_WRITE_MIN_CHUNKS}
+  - {kind: using, name: NocUnicastScatterCommandHeader}
+  - {kind: using, name: UnicastWriteUpdateMask}
+  - {kind: using, name: UnicastScatterWriteUpdateMask}
+  - {kind: using, name: UnicastAtomicIncUpdateMask}
   - {kind: using, name: PACKET_HEADER_TYPE}
   - {kind: function, name: get_noc_address_components}
   - {kind: using, name: WorkerToFabricEdmSender}
@@ -134,6 +148,7 @@ files:
   - {kind: enum, name: SfpuType}
   - {kind: enum, name: Transpose}
   - {kind: global, name: APPROX}
+  - {kind: function, name: load_blocking}
   - {kind: namespace, name: sfpu}
   - {kind: function, name: silu_init}
   - {kind: function, name: exp_init}
@@ -204,6 +219,11 @@ files:
 - path: include/jit_hw/ckernel_sfpu_silu.h
   section: include/jit_hw/
   summary: stub of silicon SFPU silu ckernel (emule scalar impl in `api/compute/eltwise_unary/sigmoid.h`)
+- path: include/jit_hw/cmath_common.h
+  section: include/jit_hw/
+  summary: Narrow forwarder so blackhole/wormhole SFPU sqrt's bare cmath_common.h include resolves on emule's JIT path; no-ops sqrt_init()'s replay-buffer counter reset.
+  symbols:
+  - {kind: struct, name: p_setrwc}
 - path: include/jit_hw/core_config.h
   section: include/jit_hw/
   summary: '`enum class ProgrammableCoreType`; `MaxProcessorsPerCoreType`/`MaxProcessorsForThreadingVariables`/`MAX_NUM_NOCS_PER_CORE` constants'
@@ -2425,6 +2445,8 @@ files:
   - {kind: macro, name: FORCE_INLINE}
   - {kind: enum, name: InlineWriteDst}
   - {kind: global, name: write_at_cmd_buf}
+  - {kind: extern_c, name: __emule_wall_clock_lo_addr}
+  - {kind: extern_c, name: __emule_wall_clock_hi_addr}
   - {kind: macro, name: RISCV_DEBUG_REG_WALL_CLOCK_L}
   - {kind: macro, name: RISCV_DEBUG_REG_WALL_CLOCK_H}
   - {kind: function, name: flush_l2_cache_line}
@@ -2712,3 +2734,6 @@ files:
 - path: include/tt_emule/detail/kernel_patcher.hpp
   section: include/tt_emule/detail/
   summary: Kernel patch-pass internals (not public) — the RISC-V/L1 rewrite rules (`apply_x86_rewrites`), line-preserving regex replace, and recursive include inlining/shadow-skip/normalization; see docs/jit-l1-patch-pass.md.
+- path: include/jit_hw/tt_metal/tools/profiler/kernel_profiler.hpp
+  section: include/jit_hw/tt_metal/tools/profiler/
+  summary: Shadows the tt_metal/-prefixed kernel_profiler.hpp include spelling (forwards to the bare-path shim) so kernels using either spelling get the same no-op profiler.
