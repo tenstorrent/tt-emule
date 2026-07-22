@@ -132,6 +132,13 @@ public:
     vFloat& operator+=(const vFloat& o) { for (uint32_t i = 0; i < 32; ++i) v[i] += o.v[i]; return *this; }
     vFloat& operator-=(const vFloat& o) { for (uint32_t i = 0; i < 32; ++i) v[i] -= o.v[i]; return *this; }
     vFloat& operator*=(const vFloat& o) { for (uint32_t i = 0; i < 32; ++i) v[i] *= o.v[i]; return *this; }
+
+    // Raw-builtin handle accessor. On silicon `sfpi::vFloat::get()` returns the
+    // underlying __rvtt_vec_t LReg handle, which the __builtin_rvtt_sfp* intrinsics
+    // consume directly (kernels that hand-write SFPMAD Horner chains call
+    // `__builtin_rvtt_sfpmad(a.get(), b.get(), c.get(), mod)`). Emule models the
+    // handle as the register value itself, so get() returns the vFloat by value.
+    vFloat get() const { return *this; }
 };
 
 class vInt {
@@ -180,6 +187,25 @@ inline vFloat __emule_sfpu_mad(const vFloat& a, const vFloat& b, const vFloat& c
     vFloat r;
     for (uint32_t i = 0; i < 32; ++i) r.v[i] = __emule_sfpu_finalize(std::fmaf(a.v[i], b.v[i], c.v[i]));
     return r;
+}
+
+// ---- Raw sfpi builtin layer (__builtin_rvtt_sfpmad) ----
+// Kernels' hand-written Horner / range-reduction helpers call the sfpi intrinsic
+// spelling directly, e.g. `__builtin_rvtt_sfpmad(a.get(), b.get(), c.get(),
+// SFPMAD_MOD1_OFFSET_NONE)`. On silicon this is the SFPMAD instruction over
+// __rvtt_vec_t LReg handles; the mod1 selector picks NEGATE_VA/VC modifiers
+// (mod1 != 0). Emule routes the plain (OFFSET_NONE) form through __emule_sfpu_mad
+// — a single-rounding fmaf with the BITEXACT finalize hook, matching SFPMAD's
+// contract — and fails loud on the unmodeled NEGATE modifiers (mirrors the
+// __emule_sfp_mad raw-TTI policy) rather than silently computing a*b+c.
+// Value from upstream sfpi_constants.h (SFPMAD_MOD1_OFFSET_NONE == 0).
+inline constexpr unsigned int SFPMAD_MOD1_OFFSET_NONE = 0;
+[[noreturn]] void __emule_sfpu_unsupported(const char* op);  // defined below (fail-loud)
+inline vFloat __builtin_rvtt_sfpmad(const vFloat& a, const vFloat& b, const vFloat& c, unsigned int mod1) {
+    if (mod1 != SFPMAD_MOD1_OFFSET_NONE) {
+        __emule_sfpu_unsupported("__builtin_rvtt_sfpmad mod1 != OFFSET_NONE (NEGATE modifier not modeled)");
+    }
+    return __emule_sfpu_mad(a, b, c);
 }
 
 // ---- Arithmetic and comparison ops ----
@@ -792,6 +818,112 @@ inline vFloat abs(const vFloat& v) {
         std::memcpy(&r.v[i], &b, 4);
     }
     return r;
+}
+
+// ============================================================================
+// Bit-decompose / integer field ops (SFPEXMAN / SFPSHFT / SFPSETSGN_V) used by
+// the exponent-ALU (exp2/log2/pow) and magic-root (cbrt) evaluators. Faithful
+// ports of runtime/sfpi/include/sfpi_lib.h — same enums, same field arithmetic.
+// ============================================================================
+
+// exexp with the raw biased exponent (deprecated sfpi spelling of
+// exexp(v, ExponentMode::Biased)). Kept because the kernels still call it.
+inline vInt exexp_nodebias(const vFloat& v) { return exexp(v, ExponentMode::Biased); }
+
+// SFPEXMAN mantissa modes (sfpi_lib.h): FractionOnly (PAD9) returns the 23-bit
+// fraction; WithUnitBit/ImplicitOne (PAD8) prepends the implicit leading 1.
+enum class MantissaMode { FractionOnly, WithUnitBit, ImplicitOne = WithUnitBit };
+// SFPSHFT modes. WH has only Logical; Arithmetic kept for source compatibility.
+enum class ShiftMode { Logical, Arithmetic };
+
+// vMag: 31-bit magnitude in u32 format (SFPEXMAN output). vSMag: 32-bit
+// sign-magnitude. Both are plain 32-lane bit vectors so as<>/reinterpret and the
+// SFPCAST convert() below operate on them the same way silicon's LReg views do.
+class vMag {
+public:
+    std::array<uint32_t, __EMULE_SFPI_LANES> v{};
+    constexpr vMag() = default;
+    constexpr vMag(uint32_t x) { for (auto& lane : v) lane = x; }
+    operator vInt() const { vInt r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = static_cast<int32_t>(v[i]); return r; }
+};
+class vSMag {
+public:
+    std::array<uint32_t, __EMULE_SFPI_LANES> v{};
+    constexpr vSMag() = default;
+    constexpr vSMag(uint32_t x) { for (auto& lane : v) lane = x; }
+};
+
+// SFPEXMAN: extract the mantissa field. WithUnitBit ORs in the implicit 1
+// (bit23), FractionOnly returns the bare 23-bit fraction. Result is an integer
+// magnitude (fraction * 2^23), matching the hardware's PAD8/PAD9 output.
+inline vMag exman(const vFloat& v, MantissaMode mode = MantissaMode::FractionOnly) {
+    vMag r;
+    for (uint32_t i = 0; i < 32; ++i) {
+        uint32_t b; std::memcpy(&b, &v.v[i], 4);
+        uint32_t man = b & 0x7FFFFFu;
+        r.v[i] = (mode == MantissaMode::WithUnitBit) ? (man | 0x800000u) : man;
+    }
+    return r;
+}
+
+// SFPSHFT: barrel shift by a per-lane signed amount — left when amt >= 0, right
+// (logical) when amt < 0. Logical fills with zeros; Arithmetic keeps the sign on
+// right shifts. |amt| >= 32 yields 0 (logical) / sign-fill (arithmetic).
+inline vInt shft(const vInt& v, const vInt& amt, ShiftMode mode = ShiftMode::Logical) {
+    vInt r;
+    for (uint32_t i = 0; i < 32; ++i) {
+        int a = amt.v[i];
+        uint32_t u = static_cast<uint32_t>(v.v[i]);
+        if (a >= 0) {
+            r.v[i] = (a < 32) ? static_cast<int32_t>(u << a) : 0;
+        } else {
+            int s = -a;
+            if (mode == ShiftMode::Arithmetic) {
+                r.v[i] = (s < 32) ? (v.v[i] >> s) : (v.v[i] < 0 ? -1 : 0);
+            } else {
+                r.v[i] = (s < 32) ? static_cast<int32_t>(u >> s) : 0;
+            }
+        }
+    }
+    return r;
+}
+inline vInt shft(const vInt& v, int amt, ShiftMode mode = ShiftMode::Logical) {
+    return shft(v, vInt(amt), mode);
+}
+
+// vInt left shift (SFPSHFT immediate, positive amount). Complements the vUInt
+// right-shift already defined above.
+inline vInt operator<<(const vInt& a, int s) {
+    vInt r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = static_cast<int32_t>(static_cast<uint32_t>(a.v[i]) << s); return r;
+}
+inline vInt& operator<<=(vInt& a, int s) {
+    for (uint32_t i = 0; i < 32; ++i) a.v[i] = static_cast<int32_t>(static_cast<uint32_t>(a.v[i]) << s); return a;
+}
+
+// copysgn(v, sgn) = |v| with the sign bit copied from sgn (SFPSETSGN_V float).
+inline vFloat copysgn(const vFloat& v, const vFloat& sgn) {
+    vFloat r;
+    for (uint32_t i = 0; i < 32; ++i) {
+        uint32_t bv, bs; std::memcpy(&bv, &v.v[i], 4); std::memcpy(&bs, &sgn.v[i], 4);
+        uint32_t rb = (bv & 0x7FFFFFFFu) | (bs & 0x80000000u);
+        std::memcpy(&r.v[i], &rb, 4);
+    }
+    return r;
+}
+
+// SFPCAST from a magnitude / sign-magnitude integer to fp32. Both reinterpret
+// the lane bits as a sign-magnitude integer and route through int32_to_float
+// (vMag always has bit31 == 0, so it is a plain magnitude). Mirrors sfpi's
+// convert<vFloat>(vMag/vSMag). Only the vFloat target is used by the kernels.
+template <typename ToType>
+inline ToType convert(const vMag& m, RoundMode round = RoundMode::NearestEven) {
+    vInt t; for (uint32_t i = 0; i < 32; ++i) t.v[i] = static_cast<int32_t>(m.v[i]);
+    return int32_to_float(t, round);
+}
+template <typename ToType>
+inline ToType convert(const vSMag& s, RoundMode round = RoundMode::NearestEven) {
+    vInt t; for (uint32_t i = 0; i < 32; ++i) t.v[i] = static_cast<int32_t>(s.v[i]);
+    return int32_to_float(t, round);
 }
 // vec_min_max(a,b): a <- min(a,b), b <- max(a,b)  (SFPSWAP min/max; used to
 // clamp, e.g. ckernel_sfpu_exp.h). vec_max_min is the swapped variant.

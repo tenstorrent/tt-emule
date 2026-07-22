@@ -42,6 +42,17 @@
 #include <cmath>
 #include <limits>
 
+// sfpi:: SIMD vector shim (vFloat/vInt/vUInt, v_if, dst_reg, exexp/setexp, ...).
+// On silicon the sfpi toolchain makes `namespace sfpi` unconditionally available
+// to every compute (TRISC) kernel via the sfpi include dir. Kernels therefore
+// open `namespace sfpi { ... }` and use vFloat after including only
+// `api/compute/common.h` (no per-op ckernel_sfpu_*.h needed). Emule mirrors that
+// here: pull in the self-contained sfpi shim (it transitively brings its own
+// emule_thread_ctx.h -> sfpi_types.h) so any kernel that includes common.h sees
+// sfpi::vFloat, exactly like the real path. #pragma once makes this idempotent
+// with the ckernel_sfpu_*.h / compute_kernel_api.h headers that also include it.
+#include "jit_hw/sfpi.h"
+
 // ---- TRISC execution macros ----
 // On device, PACK/MATH/UNPACK select which TRISC core runs the code.
 // In emulation, all three share one thread — execute everything.
@@ -49,7 +60,12 @@
 #define MATH(x) x
 #define UNPACK(x) x
 
-#define ALWI FORCE_INLINE
+// ALWI ("always inline") has a single definition, in jit_hw/jit_kernel_stubs.hpp
+// (`inline __attribute__((always_inline))`, the expansion of FORCE_INLINE),
+// which is included at the top of this header. Do NOT redefine it here: an
+// unguarded `#define ALWI FORCE_INLINE` clashes with the stubs definition
+// (-Wmacro-redefined) and, since risc_attribs.h (FORCE_INLINE) is included
+// further below, would expand to an as-yet-undefined token at this point.
 
 // ---- VectorMode ----
 // Silicon: selects which SFPU lanes are active for an SFPU op. Emule has no
