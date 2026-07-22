@@ -6,6 +6,7 @@
 #include "cb_sync_state.hpp"
 #include "dfb_sync_state.hpp"
 #include "tile_counter.hpp"
+#include "wall_clock.hpp"  // __emule_wall_clock_lo_addr/_hi_addr (RISCV_DEBUG_REG_WALL_CLOCK_* backing)
 #include "jit_hw/internal/emule_core_state.h"  // tt_emule::CoreState (per-core coords)
 #include "worker_l1_mmap.hpp"                  // __emule_mmap_worker_l1 (worker L1 backing)
 #include <cstdio>
