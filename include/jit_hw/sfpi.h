@@ -285,12 +285,22 @@ inline void __emule_sfpi_endif() {
 //
 // __emule_compute_ctx().sfpu.dst_base points to the active DST tile's element-0;
 // __emule_compute_ctx().sfpu.cursor is the 32-lane window offset (advanced by dst_reg++).
-// If callers forget to set the base, the shim falls back to a per-thread
-// scratch tile so reads/writes don't segfault.
-
+// The three built-in shims (llk_math_eltwise_unary_sfpu_params.h, exp.h,
+// deep_sfpu.h) wire dst_base to &dst[idst][0] before running an SFPU op. When no
+// shim wired a base — the exploratory raw `for d: dst_reg[d] = f(dst_reg[d])`
+// loops (piecewise_generic.cpp), Newton sqrt/rsqrt, etc. — dst_reg must still
+// address the REAL DST register file that copy_tile filled and pack_tile will
+// emit. The DST file __emule_compute_ctx().dst[16][1024] is one contiguous fp32
+// buffer and __emule_sfpi_lane_index() maps addr across tile boundaries
+// (tile = row_face/64 → tile*__EMULE_SFPI_TILE_ELEMS), so the base for the
+// raw/current-tile path is simply element-0 of the whole file, &dst[0][0]
+// (== tile 0, the tile copy_tile/pack_tile use with idst=0). Mirrors the shims'
+// &dst[idst][0] with idst folded through the cursor+lane_index math. (The
+// disjoint dst_fallback scratch it replaced silently diverged: eval read/wrote
+// scratch while copy_tile/pack_tile touched the real DST → IDENTITY output.)
 
 inline float* __emule_sfpi_active_dst() {
-    return __emule_compute_ctx().sfpu.dst_base ? __emule_compute_ctx().sfpu.dst_base : __emule_compute_ctx().sfpu.dst_fallback;
+    return __emule_compute_ctx().sfpu.dst_base ? __emule_compute_ctx().sfpu.dst_base : &__emule_compute_ctx().dst[0][0];
 }
 
 // SFPU lane i (0..31) at DST address `addr` → row-major index into the 32x32 tile.

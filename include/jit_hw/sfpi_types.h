@@ -55,7 +55,7 @@ struct SfpuState {
     };
     __MaskFrame frames[16] = {};          // predication stack (was __emule_sfpi_frames)
     int      frame_depth = 0;             // stack depth (was __emule_sfpi_frame_depth)
-    float    dst_fallback[__EMULE_SFPI_TILE_ELEMS] = {};  // scratch DST (was __emule_sfpi_dst_fallback)
+    float    dst_fallback[__EMULE_SFPI_TILE_ELEMS] = {};  // reserved/unused: raw dst_reg (no dst_base) resolves to the real DST file &dst[0][0]; slot kept so SfpuState layout stays stable for the prebuilt runner TU
     vUInt    lreg[16] = {};               // SFPU LReg file (was __emule_lreg)
     uint32_t prgm_creg[3] = {0, 0, 0};    // programmable const regs (was __emule_prgm_creg)
     // multichip SDPA SFPU extensions (not in the original fiber-rebase SfpuState):
