@@ -156,13 +156,24 @@ Lower-level pack paths in
 High-level entry in
 [`pack_untilize.h`](../include/jit_hw/api/compute/pack_untilize.h).
 Scatters `(block_rt_dim × block_ct_dim)` DST tiles to `ocb` in
-row-major order. Output region is `(block_rt_dim * TILE_DIM)` rows ×
+row-major order. Output region is `(block_rt_dim * rows_per_tile)` rows ×
 `(full_ct_dim * row_cols)` cols where `row_cols = TILE_DIM` normally or
-`row_num_datums` when `narrow_row` is set. Writes the
-`block_ct_dim`-wide column-block starting at column index
-`block_c_index * block_ct_dim`. Format-aware: bf16 / fp32 / uint16
-(matching the unpack format). cb page_size is sync granularity; the L1
-byte layout is always row-major.
+`row_num_datums` when `narrow_row` is set. `rows_per_tile` is the FACED
+tile height, honoring the `face_r_dim` / `num_faces` runtime args exactly
+as silicon's packer does: `rows_per_tile = face_r_dim * ((num_faces > 2)
+? 2 : 1)` — i.e. `num_faces` 1–2 emit a single face-row (`face_r_dim`
+rows), 3–4 stack two (`2 * face_r_dim`). The defaults `face_r_dim = 16,
+num_faces = 4` give `TILE_DIM` (32), so full-tile callers are unchanged;
+short faced tiles (e.g. `face_r_dim = 8, num_faces = 2` on the (8,32)
+untilize / sdpa-reduce / compressor paths) emit only their faced height.
+Emitting a hardcoded `TILE_DIM` rows would over-write the output CB —
+which is sized to the faced height — and clobber the adjacent scratch CB.
+This mirrors the silicon LLK `_llk_pack_untilize_`'s
+`num_faces_per_rdim_tile * face_r_dim` row count
+(`tt-llk/.../llk_pack_untilize.h`). Writes the `block_ct_dim`-wide
+column-block starting at column index `block_c_index * block_ct_dim`.
+Format-aware: bf16 / fp32 / uint16 (matching the unpack format). cb
+page_size is sync granularity; the L1 byte layout is always row-major.
 
 Used by transpose_wh's sharded compute kernel (with `narrow_row=true,
 row_num_datums=8` for the H % 32 != 0 case).

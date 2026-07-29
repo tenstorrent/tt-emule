@@ -95,8 +95,8 @@ template <uint32_t block_ct_dim = 8, uint32_t full_ct_dim = block_ct_dim,
           bool diagonal = false, bool narrow_row = false,
           uint32_t row_num_datums = 32, uint32_t tile_dst_ct_offset = 0, bool dense = false>
 inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
-                                uint32_t block_c_index = 0, uint32_t /*face_r_dim*/ = 16,
-                                uint32_t /*num_faces*/ = 4, uint32_t /*tile_dst_rt_offset*/ = 0) {
+                                uint32_t block_c_index = 0, uint32_t face_r_dim = 16,
+                                uint32_t num_faces = 4, uint32_t /*tile_dst_rt_offset*/ = 0) {
     static_assert(!diagonal, "pack_untilize_dest: diagonal packer mode not modelled");
     static_assert(!dense,    "pack_untilize_dest: dense packer mode not modelled");
 
@@ -114,8 +114,20 @@ inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
     const uint32_t full_row_bytes = full_ct_dim * row_cols * elem_size;
     uint8_t* const base           = __emule_compute::cb_write_ptr_at(ocb, 0);
 
+    // Silicon's packer emits the FACED tile height, not a full 32-row tile:
+    // num_faces 1-2 arrange the faces in a single face-row (out rows =
+    // face_r_dim), num_faces 3-4 stack two face-rows (out rows = 2*face_r_dim).
+    // The output CB is sized to this faced height, so writing a hardcoded
+    // TILE_DIM (32) rows over-writes it — for the <32-row faced tiles used by
+    // the untilize / sdpa-reduce / compressor paths that clobbers the adjacent
+    // scratch CB (tt-emule-blaze cos_sin OOB). Bound the write to the faced
+    // height instead. Defaults (face_r_dim=16, num_faces=4) → 32, unchanged.
+    const uint32_t faces_high    = (num_faces + 1u) / 2u;   // 1-2 faces → 1, 3-4 → 2
+    const uint32_t rows_per_tile = face_r_dim * faces_high;  // 8 for (8,32); 32 for full tile
+    ASSERT(rows_per_tile <= TILE_DIM);  // no-op contract in JIT mode (see llk_pack.h)
+
     auto target = [&](uint32_t rt, uint32_t ct, uint32_t r, uint32_t c) -> uint8_t* {
-        const uint32_t out_row = rt * TILE_DIM + r;
+        const uint32_t out_row = rt * rows_per_tile + r;
         const uint32_t out_col = (block_c_index * block_ct_dim + ct) * row_cols + c;
         return base + out_row * full_row_bytes + out_col * elem_size;
     };
@@ -123,7 +135,7 @@ inline void pack_untilize_dest(uint32_t ocb = 0, uint32_t block_rt_dim = 1,
     for (uint32_t rt = 0; rt < block_rt_dim; ++rt) {
         for (uint32_t ct = 0; ct < block_ct_dim; ++ct) {
             const uint32_t dst_idx = tile_dst_ct_offset + rt * block_ct_dim + ct;
-            for (uint32_t r = 0; r < TILE_DIM; ++r) {
+            for (uint32_t r = 0; r < rows_per_tile; ++r) {
                 for (uint32_t c = 0; c < row_cols; ++c) {
                     const float src = __emule_compute_ctx().dst[dst_idx][r * TILE_DIM + c];
                     uint8_t* dst_ptr = target(rt, ct, r, c);
