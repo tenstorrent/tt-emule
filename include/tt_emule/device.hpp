@@ -31,7 +31,7 @@ struct CoreCoord {
 class Core {
 public:
     static constexpr size_t L1_SIZE = 1024 * 1024; // 1 MB
-    static constexpr size_t MAX_CBS = 32;
+    static constexpr size_t MAX_CBS = 64;
 
     // Default constructor: WORKER role, 1 MB L1.
     explicit Core(CoreCoord coord) : coord_(coord) {

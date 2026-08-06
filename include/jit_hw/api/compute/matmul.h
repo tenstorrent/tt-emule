@@ -123,6 +123,21 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
         }
     }
 #endif
+    // Wormhole and Blackhole clear the low BF16 result bit for LoFi/HiFi2.
+    // Keep the value in DST as float32, but quantize it to that representable
+    // result so both BF16 packing and FP32 destination accumulation match
+    // silicon's math-fidelity behavior.
+    constexpr auto fidelity = static_cast<uint8_t>(MATH_FIDELITY);
+    if constexpr (fidelity == static_cast<uint8_t>(MathFidelity::LoFi) ||
+                  fidelity == static_cast<uint8_t>(MathFidelity::HiFi2)) {
+        for (uint32_t m = 0; m < M; ++m) {
+            for (uint32_t n = 0; n < N; ++n) {
+                uint16_t bf16 = __emule_bf16::from_f32(__emule_compute_ctx().dst[idst][m * DIM + n]);
+                bf16 &= 0xFFFEu;
+                __emule_compute_ctx().dst[idst][m * DIM + n] = __emule_bf16::to_f32(bf16);
+            }
+        }
+    }
 }
 
 // ---- Block matmul stubs (not used by bmm.cpp simple path) ----

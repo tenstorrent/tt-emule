@@ -191,8 +191,8 @@ struct ThreadCommonCtx {
     uint32_t my_thread_id = 0;   // get_my_thread_id() (was __emule_my_thread_id)
 
     // Cross-role CB state (shared base — a CB producer/consumer may be either role).
-    uint32_t cb_self_consume_mask = 0;            // was __emule_cb_self_consume_mask
-    uint32_t cb_self_produce_mask = 0;            // was __emule_cb_self_produce_mask
+    uint64_t cb_self_consume_mask = 0;            // was __emule_cb_self_consume_mask
+    uint64_t cb_self_produce_mask = 0;            // was __emule_cb_self_produce_mask
     LocalCBInterface local_cb[__EMULE_CTX_MAX_CBS]{};  // per-RISC CB ring ptrs (was __emule_local_cb)
 
     // Per-fiber ASAN sanitizer state (see EmuleSanitizerState above): the

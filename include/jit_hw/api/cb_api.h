@@ -52,18 +52,20 @@ extern thread_local uint8_t my_y[2];
 
 // ---- Constexpr tile metadata arrays (populated by JIT defines) ----
 // EMULE_TILE_SIZES is defined by the JIT compiler as a comma-separated list of
-// 32 page sizes (one per CB index), matching the real device's unpack_tile_size[].
+// 64 page sizes (the host-side maximum across supported architectures), matching
+// emulated_program_runner's fixed EMULE_NUM_CBS metadata payload. Runtime arch
+// validation still prevents Wormhole kernels from using CB indices above 31.
 
 #ifdef EMULE_TILE_SIZES
-constexpr uint16_t unpack_tile_size[32] = { EMULE_TILE_SIZES };
+constexpr uint16_t unpack_tile_size[__EMULE_CTX_MAX_CBS] = { EMULE_TILE_SIZES };
 #else
-constexpr uint16_t unpack_tile_size[32] = {};
+constexpr uint16_t unpack_tile_size[__EMULE_CTX_MAX_CBS] = {};
 #endif
 
 // Per-CB data format arrays (tt::DataFormat enum values) — emule's single source of
 // truth, the analog of the device's compile-time unpack_src_format[]/pack_dst_format[]
 // (generated into chlkc_descriptors.h by genfiles.cpp::compute_data_formats). The two
-// L1-side arrays are populated from EMULE_CB_DATA_FORMATS (a 32-value list the JIT
+// L1-side arrays are populated from EMULE_CB_DATA_FORMATS (a 64-value list the JIT
 // compiler builds from each CB's CircularBufferImpl::data_format(idx)); for a given CB id
 // both equal the L1 tile's format. DataFormat::Invalid (0xFF) marks unconfigured slots
 // (mirrors the host's std::optional<DataFormat> empty state) — format-dispatch consumers
@@ -71,20 +73,24 @@ constexpr uint16_t unpack_tile_size[32] = {};
 // (Float32) stubs: emule's DST register file is always fp32, so they are immaterial to
 // the emulated pack/unpack math.
 #ifdef EMULE_CB_DATA_FORMATS
-constexpr uint8_t unpack_src_format[32] = { EMULE_CB_DATA_FORMATS };
-constexpr uint8_t pack_dst_format[32]   = { EMULE_CB_DATA_FORMATS };
+constexpr uint8_t unpack_src_format[__EMULE_CTX_MAX_CBS] = { EMULE_CB_DATA_FORMATS };
+constexpr uint8_t pack_dst_format[__EMULE_CTX_MAX_CBS]   = { EMULE_CB_DATA_FORMATS };
 #else
-constexpr uint8_t unpack_src_format[32] = {
+constexpr uint8_t unpack_src_format[__EMULE_CTX_MAX_CBS] = {
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
     255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
     255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
 };
-constexpr uint8_t pack_dst_format[32] = {
+constexpr uint8_t pack_dst_format[__EMULE_CTX_MAX_CBS] = {
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
     255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
     255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
 };
 #endif
-constexpr uint8_t unpack_dst_format[32] = {};  // DST-side (fp32) stub
-constexpr uint8_t pack_src_format[32]   = {};  // DST-side (fp32) stub
+constexpr uint8_t unpack_dst_format[__EMULE_CTX_MAX_CBS] = {};  // DST-side (fp32) stub
+constexpr uint8_t pack_src_format[__EMULE_CTX_MAX_CBS]   = {};  // DST-side (fp32) stub
 
 // Per-CB tile height/width (elements). Populated by the JIT compiler from each
 // CB's host-side Tile spec (CircularBufferConfig::tiles()[idx]->get_height()/
@@ -94,35 +100,44 @@ constexpr uint8_t pack_src_format[32]   = {};  // DST-side (fp32) stub
 // fallback below is the standard full 32×32 tile (used by TUs that don't emit
 // these defines, e.g. a compute kernel with no CB metadata).
 #ifdef EMULE_TILE_R_DIM
-constexpr uint8_t unpack_tile_r_dim[32] = { EMULE_TILE_R_DIM };
+constexpr uint8_t unpack_tile_r_dim[__EMULE_CTX_MAX_CBS] = { EMULE_TILE_R_DIM };
 #else
-constexpr uint8_t unpack_tile_r_dim[32] = {
+constexpr uint8_t unpack_tile_r_dim[__EMULE_CTX_MAX_CBS] = {
+    32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
+    32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
 };
 #endif
 #ifdef EMULE_TILE_C_DIM
-constexpr uint8_t unpack_tile_c_dim[32] = { EMULE_TILE_C_DIM };
+constexpr uint8_t unpack_tile_c_dim[__EMULE_CTX_MAX_CBS] = { EMULE_TILE_C_DIM };
 #else
-constexpr uint8_t unpack_tile_c_dim[32] = {
+constexpr uint8_t unpack_tile_c_dim[__EMULE_CTX_MAX_CBS] = {
+    32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
+    32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
 };
 #endif
-constexpr uint8_t unpack_num_faces_r_dim[32] = {
+constexpr uint8_t unpack_num_faces_r_dim[__EMULE_CTX_MAX_CBS] = {
+    2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
     2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
 };
-constexpr uint8_t unpack_num_faces_c_dim[32] = {
+constexpr uint8_t unpack_num_faces_c_dim[__EMULE_CTX_MAX_CBS] = {
+    2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
     2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
 };
 // Per-CB face row dim (16) and faces-per-tile (4) for standard 32x32 tiles. The
 // chlkc analogs on silicon; SDPA streaming's sdpa_unpack_format_changed() reads
 // these to decide whether a CB-switch needs a data-format reconfig.
-constexpr uint8_t unpack_tile_face_r_dim[32] = {
+constexpr uint8_t unpack_tile_face_r_dim[__EMULE_CTX_MAX_CBS] = {
+    16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,
+    16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,
     16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,
     16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,
 };
-constexpr uint8_t unpack_tile_num_faces[32] = {
+constexpr uint8_t unpack_tile_num_faces[__EMULE_CTX_MAX_CBS] = {
+    4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
     4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
 };
 
@@ -159,7 +174,7 @@ inline void cb_reserve_back(
     // advancing, as the multi-core topk final kernel needs.)
     __emule_asan_cb_on_reserve(cb_id, n, site_file, site_line);
     // This thread produces cb_id (see __emule_self->cb_self_produce_mask).
-    __emule_self->cb_self_produce_mask |= (1u << cb_id);
+    __emule_self->cb_self_produce_mask |= (uint64_t{1} << cb_id);
     // Lock-free fast path (safe for SPSC — only consumer decrements occupied).
     if ((cb.num_pages - cb.occupied.load(std::memory_order_acquire)) >= n) {
         return;
@@ -187,7 +202,7 @@ inline void cb_push_back(uint32_t cb_id, uint32_t n) {
     __emule_cb_advance_wr(cb_id, n);
     tt_emule::cb_sync_push(__emule_self->cbs[cb_id], n);
     // This thread produces cb_id (see __emule_self->cb_self_produce_mask).
-    __emule_self->cb_self_produce_mask |= (1u << cb_id);
+    __emule_self->cb_self_produce_mask |= (uint64_t{1} << cb_id);
     // Reset the PACK auto-advance offset on batch commit (see cb_reserve_back).
     // PACK state is compute-only; a DM (reader) cb_push_back runs on a
     // DatamovementThreadCtx, so guard the compute-ctx access (else it's an OOB write).
@@ -234,7 +249,7 @@ inline void cb_wait_front(
     // Mark this CB as consumed-by-this-thread so a later cb_reserve_back on it
     // (the in-place recycle idiom) does not block waiting on a non-existent
     // other consumer. See __emule_self->cb_self_consume_mask.
-    __emule_self->cb_self_consume_mask |= (1u << cb_id);
+    __emule_self->cb_self_consume_mask |= (uint64_t{1} << cb_id);
     // Lock-free fast path (safe for SPSC — only producer increments occupied).
     if (cb.occupied.load(std::memory_order_acquire) >= n) {
         return;
