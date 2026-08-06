@@ -79,6 +79,11 @@ focused reference; start here and follow the links.
   and reports a growing pass-rate metric (not a gate). Manifest-entry
   granularity, the pytest-9.0.3 collection-error pre-filter, fleet policy
   (#189), local reproduction (`scripts/post_commit_sweep/`).
+- [asan-nightly-sweep.md](docs/asan-nightly-sweep.md) — the nightly ASAN sweep:
+  the same entry set with the sanitizers armed, to find ASAN violations in
+  tt-metal's kernels rather than to measure a pass rate. Why `-s`/`-v`/`--forked`
+  are correctness requirements, findings-report-only vs invalid-run-fails,
+  finding deduplication, and per-check selection.
 
 **Integration & build**
 - [metal-integration.md](docs/metal-integration.md) — how emule injects into

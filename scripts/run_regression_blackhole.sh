@@ -189,6 +189,10 @@ run_test "object_intent_controls"  "$API_BIN" --gtest_filter="MeshDeviceFixture.
 run_test "write_beyond_res_pages" "$API_BIN" --gtest_filter="MeshDeviceFixture.CB_Boundary_*Violation*:-MeshDeviceFixture.*NoViolation*"
 run_test "cb_boundary_controls"   "$API_BIN" --gtest_filter="MeshDeviceFixture.CB_Boundary_*NoViolation*"
 run_test "write_outside_tensor"   "$API_BIN" --gtest_filter="MeshDeviceFixture.OOB_Tensor_*"
+# Per-check selection (TT_METAL_EMULE_ASAN_CHECKS): a named check must still fire
+# and an unnamed one must not. Pure env/predicate tests plus one behavioural
+# control; no death tests (see the file header for why).
+run_test "asan_check_selection" "$API_BIN" --gtest_filter="*Asan_Checks_*"
 
 # ===========================================================================
 # Tier 4: TTNN INT32 (blackhole_P100.yaml)

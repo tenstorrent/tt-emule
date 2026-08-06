@@ -119,7 +119,131 @@ enum class ReluType : uint8_t;
 // cross-fiber contamination in tt-emule #241; likewise OOB / semaphore). The host
 // arms it per launch (set_sanitizer_thread_locals); the check LOGIC is unchanged,
 // only the storage location. See docs/ASAN.md.
+// ---- Per-check selection ---------------------------------------------------
+// One bit per sanitizer, so a run can enable a subset instead of all-or-nothing.
+// This is the SINGLE definition of the name<->bit mapping: tt-metal's host side
+// includes this header (emule_sanitizers.cpp / host_sanitizers.cpp) and arms the
+// mask, the kernel side reads it out of the per-fiber state below.
+//
+// The mask is parsed ONCE on the host from TT_METAL_EMULE_ASAN_CHECKS and armed
+// per launch, exactly like cb_boundary_strict — deliberately not a getenv on the
+// kernel side, because every kernel memory access flows through the L1
+// chokepoint and a string parse there would dominate the check itself.
+//
+// TT_METAL_EMULE_ASAN remains the master switch: an empty/absent CHECKS list
+// means "all", so existing runs and tests are unaffected.
+enum EmuleAsanCheck : uint32_t {
+    EMULE_ASAN_CHK_UAF            = 1u << 0,   // host: Use-After-Free
+    EMULE_ASAN_CHK_HOST_ALIGN     = 1u << 1,   // host: L1/DRAM host-address alignment
+    EMULE_ASAN_CHK_METADATA       = 1u << 2,   // host: program metadata overflow
+    EMULE_ASAN_CHK_OOB            = 1u << 3,   // kernel+host: out-of-bounds L1/DRAM
+    EMULE_ASAN_CHK_PADDING        = 1u << 4,   // kernel: tensor padding band
+    EMULE_ASAN_CHK_SEMAPHORE      = 1u << 5,   // kernel: illegal semaphore access
+    EMULE_ASAN_CHK_CB_BOUNDARY    = 1u << 6,   // kernel: CB write/read window
+    EMULE_ASAN_CHK_CB_RESERVATION = 1u << 7,   // kernel: CB over-reserve (always on)
+    EMULE_ASAN_CHK_NOC_RACE       = 1u << 8,   // kernel: pop with NoC read pending
+    EMULE_ASAN_CHK_NOC_ALIGN      = 1u << 9,   // kernel: NoC transfer alignment
+    EMULE_ASAN_CHK_DIRTY_CB       = 1u << 10,  // host: unflushed reserve/wait
+    EMULE_ASAN_CHK_OBJECT_INTENT  = 1u << 11,  // host: post-launch memcmp
+};
+inline constexpr uint32_t EMULE_ASAN_CHK_ALL = (1u << 12) - 1;
+
+// CB Reservation Overflow is structurally load-bearing: gating it would let an
+// over-reserve block forever on the space wait instead of reporting a clear
+// error, so it stays on even when deselected. Documented, not silent — see
+// docs/ASAN.md.
+inline constexpr uint32_t EMULE_ASAN_CHK_ALWAYS_ON = EMULE_ASAN_CHK_CB_RESERVATION;
+
+struct EmuleAsanCheckName {
+    const char* name;
+    uint32_t bit;
+};
+inline constexpr EmuleAsanCheckName EMULE_ASAN_CHECK_NAMES[] = {
+    {"uaf", EMULE_ASAN_CHK_UAF},
+    {"host_align", EMULE_ASAN_CHK_HOST_ALIGN},
+    {"metadata", EMULE_ASAN_CHK_METADATA},
+    {"oob", EMULE_ASAN_CHK_OOB},
+    {"padding", EMULE_ASAN_CHK_PADDING},
+    {"semaphore", EMULE_ASAN_CHK_SEMAPHORE},
+    {"cb_boundary", EMULE_ASAN_CHK_CB_BOUNDARY},
+    {"cb_reservation", EMULE_ASAN_CHK_CB_RESERVATION},
+    {"noc_race", EMULE_ASAN_CHK_NOC_RACE},
+    {"noc_align", EMULE_ASAN_CHK_NOC_ALIGN},
+    {"dirty_cb", EMULE_ASAN_CHK_DIRTY_CB},
+    {"object_intent", EMULE_ASAN_CHK_OBJECT_INTENT},
+};
+
+// Parse a comma/space-separated check list into a mask. Empty, null, or a list
+// containing "all" -> every check. An unrecognized name is IGNORED rather than
+// silently dropping the whole list: a typo must not quietly disable the sweep.
+// `unknown_out` (optional) receives the first unrecognized name so the caller can
+// warn. Header-only and dependency-free so both repos share one implementation.
+inline uint32_t emule_asan_parse_checks(const char* csv, char* unknown_out = nullptr,
+                                        uint32_t unknown_cap = 0) {
+    if (unknown_out != nullptr && unknown_cap > 0) {
+        unknown_out[0] = '\0';
+    }
+    if (csv == nullptr || csv[0] == '\0') {
+        return EMULE_ASAN_CHK_ALL;
+    }
+    uint32_t mask = 0;
+    const char* p = csv;
+    while (*p != '\0') {
+        while (*p == ',' || *p == ' ' || *p == '\t') {
+            ++p;
+        }
+        const char* start = p;
+        while (*p != '\0' && *p != ',' && *p != ' ' && *p != '\t') {
+            ++p;
+        }
+        const auto len = static_cast<uint32_t>(p - start);
+        if (len == 0) {
+            continue;
+        }
+        if (len == 3 && start[0] == 'a' && start[1] == 'l' && start[2] == 'l') {
+            return EMULE_ASAN_CHK_ALL;
+        }
+        bool matched = false;
+        for (const auto& e : EMULE_ASAN_CHECK_NAMES) {
+            uint32_t n = 0;
+            while (e.name[n] != '\0') {
+                ++n;
+            }
+            if (n != len) {
+                continue;
+            }
+            bool same = true;
+            for (uint32_t i = 0; i < len; ++i) {
+                if (e.name[i] != start[i]) {
+                    same = false;
+                    break;
+                }
+            }
+            if (same) {
+                mask |= e.bit;
+                matched = true;
+                break;
+            }
+        }
+        if (!matched && unknown_out != nullptr && unknown_cap > 0 && unknown_out[0] == '\0') {
+            uint32_t n = len < unknown_cap - 1 ? len : unknown_cap - 1;
+            for (uint32_t i = 0; i < n; ++i) {
+                unknown_out[i] = start[i];
+            }
+            unknown_out[n] = '\0';
+        }
+    }
+    // A list that named nothing recognizable would otherwise disable everything
+    // and report a clean run; fall back to all so a typo cannot hide bugs.
+    return mask == 0 ? EMULE_ASAN_CHK_ALL : (mask | EMULE_ASAN_CHK_ALWAYS_ON);
+}
+
 struct EmuleSanitizerState {
+    // Which checks are live this launch (bitmask of EmuleAsanCheck). Armed by the
+    // host from TT_METAL_EMULE_ASAN_CHECKS; defaults to every check so a state
+    // that was never armed behaves exactly as before this field existed.
+    uint32_t check_mask = EMULE_ASAN_CHK_ALL;
+
     // Diagnostic identity (read by the [ASAN ERROR] trace + CB messages). my_x/my_y
     // stay separate worker-thread-locals — the scheduler restores those on swap.
     const char* kernel_name = nullptr;

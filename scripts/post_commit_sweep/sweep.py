@@ -20,6 +20,11 @@ The `run` default is **hybrid**: pass 1 no-forked (fast), then re-run only
 entries that left no usable XML with `--forked`. `--forked` forces forking
 everywhere (no retry); `--no-retry` is pass 1 only. See `entry_needs_retry` and
 the README/docs for the measured ~0.8s/test fork cost that motivates it.
+
+`--asan` runs the same entry set with the emule sanitizers armed, to surface
+ASAN violations in tt-metal's kernels rather than to measure a pass rate. It
+implies `--forked` and adds `-s`/`-v`; findings are extracted from the logs by
+`scripts/asan_sweep/parse_asan_results.py`. See docs/asan-nightly-sweep.md.
 """
 
 import argparse
@@ -229,10 +234,15 @@ def select_shard(entries, shard_index, shard_count):
             if i % shard_count == (shard_index - 1)]
 
 
-def build_runtime_env(tt_metal_dir: Path, build_dir: Path, arch: str, pytest_bin: Path):
+def build_runtime_env(tt_metal_dir: Path, build_dir: Path, arch: str, pytest_bin: Path,
+                      asan: bool = False):
     """The full environment for an emule pytest invocation: build/runtime layout
     + emule env + arch variant env. Mirrors scripts/run_ttnn_pytests_<arch>.sh
-    and snapshots/bh_sanity/env_setup.sh."""
+    and snapshots/bh_sanity/env_setup.sh.
+
+    `asan` arms the emule sanitizers for the whole shard. Core dumps are left
+    suppressed (TT_METAL_EMULE_ASAN_ALLOW_CORE stays unset) — an ASAN abort
+    dumps a multi-GB core, which fills a runner's disk within a few entries."""
     cfg = ARCH_CONFIG[arch]
     cluster_examples = tt_metal_dir / "tt_metal/third_party/umd/tests/cluster_descriptor_examples"
     env = dict(os.environ)
@@ -245,6 +255,8 @@ def build_runtime_env(tt_metal_dir: Path, build_dir: Path, arch: str, pytest_bin
     env["TT_METAL_HOME"] = str(tt_metal_dir)
     env["TT_METAL_RUNTIME_ROOT"] = str(tt_metal_dir)
     env.update(EMULE_ENV)
+    if asan:
+        env["TT_METAL_EMULE_ASAN"] = "1"
     env["MESH_DEVICE"] = cfg["mesh_device"]
     env["TT_METAL_MOCK_CLUSTER_DESC_PATH"] = str(cluster_examples / cfg["cluster_desc"])
     # Make the toolchain pytest's dir first on PATH (manifest cmds call `pytest`
@@ -304,10 +316,11 @@ def collect_filter(rec, *, tt_metal_dir, runtime_env, pytest_bin):
 
 
 def run_entry(rec, *, tt_metal_dir, out_dir, runtime_env, pytest_bin,
-              forked=False, dry_run=False):
+              forked=False, dry_run=False, asan=False):
     """Execute one entry: `timeout <wallclock> <exe> [--forked] <args> --junitxml=`
     with stdout+stderr to <out>/<slug>.log. `forked` toggles per-test process
-    isolation. Returns the entry rc."""
+    isolation. `asan` adds the two pytest flags the sanitizer report needs to
+    survive (see below). Returns the entry rc."""
     s = rec["slug"]
     xml_path = out_dir / f"{s}.xml"
     log_path = out_dir / f"{s}.log"
@@ -352,7 +365,16 @@ def run_entry(rec, *, tt_metal_dir, out_dir, runtime_env, pytest_bin,
                 if a not in bad_files and not any(a.startswith(bf + "::") for bf in bad_files)]
     forked_args = ["--forked"] if (forked and "--forked" not in run_args) else []
     ignore_args = [f"--ignore={f}" for f in bad_files]
-    argv = ["timeout", str(rec["wallclock"]), exe] + forked_args + ignore_args + run_args
+    # Both ASAN flags are load-bearing, not cosmetic:
+    #   -s  pytest's fd-level capture points fd 2 at a temp file it only drains
+    #       during teardown. An [ASAN ERROR] report ends in abort(), so teardown
+    #       never runs and the entire report — header, kernel identity, backtrace
+    #       — is discarded; the log shows only "Fatal Python error: Aborted".
+    #       Measured on this stack: 0 reports captured without -s, 1 with it.
+    #   -v  prints each nodeid before its test runs, which is what lets
+    #       parse_asan_results.py attribute a log region to a specific test.
+    asan_args = [f for f in ("-s", "-v") if f not in run_args] if (asan and rec["is_pytest"]) else []
+    argv = ["timeout", str(rec["wallclock"]), exe] + forked_args + asan_args + ignore_args + run_args
     if rec["is_pytest"]:
         argv.append(f"--junitxml={xml_path}")
 
@@ -446,16 +468,24 @@ def cmd_run(args):
     if not shard:
         sys.stderr.write("ERROR: shard selected zero entries\n")
         return 2
-    runtime_env = build_runtime_env(tt_metal_dir, build_dir, args.arch, pytest_bin)
+    asan = args.asan or os.environ.get("SWEEP_ASAN") == "1"
+    runtime_env = build_runtime_env(tt_metal_dir, build_dir, args.arch, pytest_bin, asan=asan)
 
     # Modes (see module docstring): hybrid (default) = no-forked then forked
     # retry of failed entries; --forked = fork everything; --no-retry = pass 1 only.
-    force_forked = args.forked or os.environ.get("SWEEP_FORKED") == "1"
+    #
+    # ASAN implies forked-all. The sanitizers abort() on the FIRST violation, so
+    # without per-test forking one finding ends the entry's process and hides
+    # every later one in the same file. Forked, only the child dies: the parent
+    # runs the remaining tests and still writes a complete JUnit XML, so one
+    # entry can report many findings — and the pass-2 retry becomes moot.
+    force_forked = args.forked or asan or os.environ.get("SWEEP_FORKED") == "1"
     do_retry = not (args.no_retry or os.environ.get("SWEEP_NO_RETRY") == "1") and not force_forked
     mode = "forked-all" if force_forked else ("hybrid" if do_retry else "no-forked")
 
     print(f"== post-commit sweep run ==")
     print(f"  arch:        {args.arch} (sku={ARCH_CONFIG[args.arch]['sku']})")
+    print(f"  asan:        {'ON (TT_METAL_EMULE_ASAN=1)' if asan else 'off'}")
     print(f"  tt_metal:    {tt_metal_dir}")
     print(f"  build_dir:   {build_dir}")
     print(f"  out_dir:     {out_dir}")
@@ -472,7 +502,7 @@ def cmd_run(args):
     for rec in shard:
         run_entry(rec, tt_metal_dir=tt_metal_dir, out_dir=out_dir,
                   runtime_env=runtime_env, pytest_bin=pytest_bin,
-                  forked=force_forked, dry_run=args.dry_run)
+                  forked=force_forked, dry_run=args.dry_run, asan=asan)
 
     # Pass 2 — forked retry of entries that produced no usable XML.
     if do_retry and not args.dry_run:
@@ -484,7 +514,7 @@ def cmd_run(args):
             for rec in retry:
                 run_entry(rec, tt_metal_dir=tt_metal_dir, out_dir=out_dir,
                           runtime_env=runtime_env, pytest_bin=pytest_bin,
-                          forked=True, dry_run=False)
+                          forked=True, dry_run=False, asan=asan)
         else:
             print("\n--- pass 2: no entries needed a forked retry ---")
 
@@ -522,6 +552,10 @@ def main():
                          "Default is the hybrid: no-forked pass 1 + --forked retry of failed entries.")
     pr.add_argument("--no-retry", action="store_true",
                     help="no-forked pass only, skip the --forked retry (also via SWEEP_NO_RETRY=1)")
+    pr.add_argument("--asan", action="store_true",
+                    help="arm the emule sanitizers (TT_METAL_EMULE_ASAN=1) and add the -s/-v "
+                         "pytest flags their report needs to survive an abort(). Implies "
+                         "--forked. Also via SWEEP_ASAN=1.")
     pr.add_argument("--dry-run", action="store_true", help="print commands, don't execute")
     pr.add_argument("--allow-audit-fail", action="store_true")
     pr.set_defaults(func=cmd_run)

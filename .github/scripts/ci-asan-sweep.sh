@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# CI per-shard adapter for the nightly ASAN sweep: runs ONE shard of tt-metal's
+# post-commit ttnn entry set with the emule sanitizers armed, to surface ASAN
+# violations in tt-metal's kernels. Thin by design — the run logic is sweep.py's
+# `--asan` mode so CI and local runs stay identical. See docs/asan-nightly-sweep.md.
+#
+# Findings are report-only (a violation never fails this job — the aggregate job
+# publishes them). An INVALID run is different and DOES fail: if no entry ever
+# reached the emulator, "0 findings" means the lane is broken, not that the code
+# is clean. That distinction is the whole reason this script has an exit code.
+#
+# Required env: TT_METAL_DIR, BUILD_DIR, TT_EMULE_ARCH, SHARD_INDEX, SHARD_COUNT.
+# Optional:     OUT_DIR, MANIFEST, PYTEST_BIN, SWEEP_ONLY, ASAN_CHECKS.
+
+set -uo pipefail
+
+: "${TT_METAL_DIR:?TT_METAL_DIR must be set}"
+: "${BUILD_DIR:?BUILD_DIR must be set}"
+: "${TT_EMULE_ARCH:?TT_EMULE_ARCH must be set (blackhole|wormhole)}"
+: "${SHARD_INDEX:?SHARD_INDEX must be set}"
+: "${SHARD_COUNT:?SHARD_COUNT must be set}"
+
+MANIFEST="${MANIFEST:-$TT_METAL_DIR/tests/pipeline_reorg/ttnn_sanity_tests.yaml}"
+PYTEST_BIN="${PYTEST_BIN:-/opt/ttmlir-toolchain/venv/bin/pytest}"
+OUT_DIR="${OUT_DIR:-${RUNNER_TEMP:-/tmp}/asan-sweep-out}"
+ASAN_CHECKS="${ASAN_CHECKS:-all}"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TT_EMULE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+mkdir -p "$OUT_DIR"
+
+# Per-shard JIT cache. ASAN is folded into the kernel cache key (it compiles with
+# -g), so an ASAN lane never shares the plain sweep's cached .so files. Isolating
+# per shard also keeps two shards on one runner from racing the same cache dir.
+export TT_EMULE_JIT_CACHE_DIR="${TT_EMULE_JIT_CACHE_DIR:-${RUNNER_TEMP:-/tmp}/tt_emule_jit_asan_${SHARD_INDEX}}"
+
+# Leave TT_METAL_EMULE_ASAN_ALLOW_CORE UNSET so __emule_asan_panic keeps its
+# prctl(PR_SET_DUMPABLE, 0) suppression. Each abort would otherwise dump a
+# multi-GB core, and a sweep aborts many times — that fills a runner's disk.
+unset TT_METAL_EMULE_ASAN_ALLOW_CORE
+
+# Per-check selection. Exported unconditionally (including "all") so the run does
+# not inherit a narrowed list from the environment. An unrecognized name falls back
+# to every check rather than to none — a typo must not silence the sweep and report
+# clean — so a subset is echoed here to make what ran auditable from the log.
+export TT_METAL_EMULE_ASAN_CHECKS="$ASAN_CHECKS"
+if [ "$ASAN_CHECKS" != "all" ]; then
+    echo "::notice::ASAN check subset active: '$ASAN_CHECKS' — checks outside this list will"\
+         "not fire, so this run's '0 findings' only covers the listed checks."
+fi
+
+echo "== ci-asan-sweep.sh =="
+echo "  TT_EMULE_ARCH:  $TT_EMULE_ARCH"
+echo "  TT_METAL_DIR:   $TT_METAL_DIR"
+echo "  BUILD_DIR:      $BUILD_DIR"
+echo "  OUT_DIR:        $OUT_DIR"
+echo "  SHARD:          $SHARD_INDEX of $SHARD_COUNT"
+echo "  ASAN_CHECKS:    $ASAN_CHECKS"
+echo "  JIT cache:      $TT_EMULE_JIT_CACHE_DIR"
+echo ""
+
+# pytest-timeout is required by the manifest cmds; pytest-forked by --asan's
+# forced per-test forking. Install idempotently (pinned), mirroring
+# ci-post-commit-sweep.sh. Use the venv's python, not the pytest binary.
+VENV_PY="$(dirname "$PYTEST_BIN")/python"
+for pkg in pytest-timeout==2.4.0 pytest-forked==1.6.0; do
+    name="${pkg%%==*}"
+    if ! "$VENV_PY" -m pip show "$name" >/dev/null 2>&1; then
+        echo "Installing $pkg into the toolchain venv…"
+        "$VENV_PY" -m pip install --quiet "$pkg"
+    fi
+done
+
+# Ensure the `import ttnn` -> emule _ttnn.so symlink (a fresh tt-metal checkout
+# lacks the post-build step; mirrors ci-post-commit-sweep.sh).
+if [ ! -e "$TT_METAL_DIR/ttnn/ttnn/_ttnn.so" ]; then
+    ln -sfn "$BUILD_DIR/lib/_ttnn.so" "$TT_METAL_DIR/ttnn/ttnn/_ttnn.so"
+fi
+
+"$VENV_PY" "$TT_EMULE_DIR/scripts/post_commit_sweep/sweep.py" run \
+    --arch "$TT_EMULE_ARCH" --manifest "$MANIFEST" \
+    --tt-metal-dir "$TT_METAL_DIR" --build-dir "$BUILD_DIR" \
+    --out-dir "$OUT_DIR" \
+    --shard-index "$SHARD_INDEX" --shard-count "$SHARD_COUNT" \
+    --pytest-bin "$PYTEST_BIN" \
+    --asan
+sweep_rc=$?
+
+# ---------------------------------------------------------------------------
+# Validity gate — the emule_postflight contract from
+# tt-metal/tt_metal/impl/emulation/emule_setup.sh, adapted for --forked.
+#
+# emule_postflight looks for "execute_program_emulated", but that marker is
+# emitted from INSIDE the test process, and pytest-forked runs each test in a
+# forked child whose stdout/stderr it only replays when the child FAILS. On an
+# all-passing entry every such line is discarded, so requiring it would fail a
+# perfectly good run. Two markers that do survive are used instead:
+#   * the emule-mode banner, logged by the PARENT at import (rtoptions.cpp);
+#   * the executed-test count from the JUnit XML, which proves work happened
+#     rather than just an import.
+# An [ASAN ERROR] is unaffected by the child-output discard: the panic is
+# [[noreturn]], so a violation always kills the child, which always makes
+# pytest-forked replay its output.
+# ---------------------------------------------------------------------------
+log_count=$(find "$OUT_DIR" -name '*.log' 2>/dev/null | wc -l)
+emule_mode=$(grep -rlE "simulator/emule target device" "$OUT_DIR" --include='*.log' 2>/dev/null | wc -l)
+# Informational: present only for entries that had a failing/crashing child.
+emulated=$(grep -rlF "execute_program_emulated" "$OUT_DIR" --include='*.log' 2>/dev/null | wc -l)
+findings=$(grep -rhF "[ASAN ERROR]" "$OUT_DIR" --include='*.log' 2>/dev/null | wc -l)
+# Real-hardware markers must never appear: emule is CPU-only, and their presence
+# would mean the run bypassed the emulator (so every check was inert).
+hw_markers=$(grep -rlE "Established firmware bundle version|Mapped hugepage|KMD version" \
+    "$OUT_DIR" --include='*.log' 2>/dev/null | wc -l)
+executed=$("$VENV_PY" - "$OUT_DIR" <<'PY'
+import sys, glob, os, xml.etree.ElementTree as ET
+total = 0
+for p in glob.glob(os.path.join(sys.argv[1], "**", "*.xml"), recursive=True):
+    try:
+        r = ET.parse(p).getroot()
+    except ET.ParseError:
+        continue
+    for s in ([r] if r.tag == "testsuite" else r.findall("testsuite")):
+        if s.tag != "testsuite":
+            continue
+        t = int(s.get("tests") or 0)
+        total += t - int(s.get("skipped") or 0)
+print(max(total, 0))
+PY
+)
+
+echo ""
+echo "== shard $SHARD_INDEX done =="
+echo "  sweep rc:               $sweep_rc"
+echo "  entry logs:             $log_count"
+echo "  logs in emule mode:     $emule_mode"
+echo "  executed tests (XML):   $executed"
+echo "  [ASAN ERROR] lines:     $findings"
+echo "  logs w/ runner detail:  $emulated (only entries that had a failing child)"
+echo "  real-HW marker logs:    $hw_markers"
+
+if [ "$log_count" -eq 0 ]; then
+    echo "::error::INVALID RUN — no entry logs produced; the shard ran nothing."
+    exit 1
+fi
+if [ "$emule_mode" -eq 0 ]; then
+    echo "::error::INVALID RUN — the emule-mode banner appears in no log, so tt-metal did not"\
+         "select the emulator. Every sanitizer was inert; '0 findings' is meaningless."
+    exit 1
+fi
+if [ "${executed:-0}" -eq 0 ]; then
+    echo "::error::INVALID RUN — 0 tests executed (all skipped/deselected or collection failed);"\
+         "'0 findings' says nothing about metal."
+    exit 1
+fi
+if [ "$hw_markers" -ne 0 ]; then
+    echo "::error::INVALID RUN — real-hardware markers present in $hw_markers log(s);"\
+         "this did not run on the emulator."
+    exit 1
+fi
+
+# Findings themselves are report-only: the aggregate job publishes them.
+echo "  VALID emule run — findings are reported, not gated."
+exit 0

@@ -26,6 +26,14 @@ inline bool __emule_asan_enabled() {
     return cached != 0;
 }
 
+// Is one specific check live this launch? The mask is armed by the host from
+// TT_METAL_EMULE_ASAN_CHECKS (see EmuleAsanCheck in internal/emule_thread_ctx.h)
+// and read straight out of the per-fiber state — no getenv on the access path.
+// Callers are already behind __emule_asan_enabled(), so this only narrows.
+inline bool __emule_asan_check_on(uint32_t check_bit) {
+    return (__emule_self->san.check_mask & check_bit) != 0;
+}
+
 // The kernel source path + logical/processor identity the trace prints now live
 // in the per-fiber context (`__emule_self->san`); nullptr/absent when no kernel is
 // on the stack (host-API checks) or __emule_self is null.

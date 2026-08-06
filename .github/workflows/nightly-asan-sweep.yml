@@ -1,0 +1,322 @@
+# SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Runs tt-metal's post-commit ttnn entry set under emule with the sanitizers
+# armed (TT_METAL_EMULE_ASAN=1), to find ASAN violations in tt-metal's kernels.
+# Distinct from Nightly Post-Commit Sweep, which runs the same entries with the
+# sanitizers OFF to measure a pass rate: that lane asks "does metal work?", this
+# one asks "does metal violate memory rules while working?".
+#
+# REPORT-ONLY. A finding never fails the run — the aggregate job publishes it.
+# An INVALID run does fail (see ci-asan-sweep.sh): if no entry reached the
+# emulator, "0 findings" means the lane is broken, not that the code is clean.
+#
+# Runs at the PINNED tt-metal SHA, not main tip — a finding must be attributable
+# to a reproducible tree, and main tip would mix in API drift.
+#
+# Findings are extracted from the entry logs (not the XML) because the report
+# only exists in the aborting process's stderr; see docs/asan-nightly-sweep.md.
+
+name: Nightly ASAN Sweep
+
+on:
+  schedule:
+    # 11:00 UTC — after Post-Commit Sweep (03:30, up to 240min) and Nightly Metal
+    # Upstream (07:00) have cleared, so the three never contend for xlarge
+    # runners, and this lane can read the same-pin ASAN-off results as a baseline.
+    - cron: '0 11 * * *'
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Arch to sweep (blackhole|wormhole).'
+        required: false
+        default: blackhole
+      asan-checks:
+        description: >-
+          Which sanitizer checks to enable: "all", or a comma-separated subset of
+          uaf,host_align,metadata,oob,padding,semaphore,cb_boundary,
+          cb_reservation,noc_race,noc_align,dirty_cb,object_intent. Use a subset to
+          isolate one check when another fires first (a violation aborts the
+          process, so the loudest check hides the rest). An unrecognized name falls
+          back to ALL rather than to none, so a typo cannot silence the sweep.
+          cb_reservation stays on even when deselected. A subset narrows what
+          "0 findings" means, so the run summary reports the active list.
+        required: false
+        default: all
+      only:
+        description: >-
+          Comma-separated entry slugs to run instead of the full set (SWEEP_ONLY)
+          — for iterating on one op without paying for a whole sweep.
+        required: false
+        default: ""
+
+  # ⚠️ TEMPORARY — DELETE THIS `push:` BLOCK BEFORE MERGING.
+  # A workflow file that is not yet on the default branch is unreachable by both
+  # `schedule` (cron fires only from the default branch) and `workflow_dispatch`
+  # (the dispatch UI lists only default-branch workflows), so a push trigger is
+  # the only way to exercise this lane on its own branch. Scoped to the branch
+  # AND to the files that change the run, so unrelated commits don't start a
+  # sweep. Left in after merge it would run a full ASAN sweep on every push.
+  push:
+    branches:
+      - smeydanshahiTT/ci
+    paths:
+      - .github/workflows/nightly-asan-sweep.yml
+      - .github/scripts/ci-asan-sweep.sh
+      - .github/scripts/ci-build.sh
+      - scripts/post_commit_sweep/sweep.py
+      - scripts/asan_sweep/**
+
+concurrency:
+  group: nightly-asan-sweep
+  # Scheduled runs QUEUE: a sweep holds xlarge runners under the max-parallel 2
+  # fleet policy (issue #189), and cancelling mid-run wastes the whole build.
+  # Push runs supersede each other so branch iteration can't stack sweeps up.
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+env:
+  # MUST equal the length of the matrix.shard list in `sweep` — round-robin
+  # sharding pairs SHARD_INDEX 1..N with SHARD_COUNT=N. Change both together.
+  SHARD_COUNT: '6'
+
+# Inputs are resolved at the point of use (step-level `env:`), not hoisted into
+# workflow-level `env` — that mirrors how every other workflow here reads them
+# and keeps `inputs` in a context scope it is documented to be available in.
+# Each use needs its `|| default`: on `push` and `schedule` there are no inputs.
+
+jobs:
+  build:
+    name: Build tt-metal (pinned) against tt-emule
+    runs-on: tt-ubuntu-2204-large-stable
+    timeout-minutes: 180
+    continue-on-error: true
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
+    outputs:
+      pin: ${{ steps.pin.outputs.sha }}
+    steps:
+      - name: Checkout tt-emule
+        uses: actions/checkout@v4
+        with:
+          path: tt-emule
+
+      - name: Resolve pinned tt-metal SHA
+        id: pin
+        shell: bash
+        run: |
+          SHA=$(grep -vE '^\s*(#|$)' tt-emule/tt-metal-pin.txt | head -1 | awk '{print $1}')
+          if [ -z "$SHA" ]; then
+            echo "::error::tt-metal-pin.txt has no SHA"; exit 1
+          fi
+          echo "Pinned tt-metal SHA: $SHA"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tt-metal at pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ steps.pin.outputs.sha }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Init required tt-metal submodules
+        shell: bash
+        run: |
+          cd tt-metal
+          git submodule update --init --depth=1 tt_metal/third_party/umd
+          git submodule update --init --depth=1 tt_metal/third_party/tracy
+
+      - name: Restore ccache
+        # Same key prefix as the other pinned lanes: ASAN is a runtime switch, not
+        # a build flag, so this shares their warm cache rather than a cold one.
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: tt-metal-${{ steps.pin.outputs.sha }}-clang20-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            tt-metal-${{ steps.pin.outputs.sha }}-clang20-${{ runner.os }}-
+            tt-metal-${{ steps.pin.outputs.sha }}-clang20-
+
+      - name: Build
+        env:
+          TT_EMULE_DIR: ${{ github.workspace }}/tt-emule
+          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
+          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-build.sh
+
+      - name: Stage cluster descriptors with build artifact
+        shell: bash
+        run: |
+          mkdir -p tt-metal/build_emule/_cluster_descs
+          cp -r tt-metal/tt_metal/third_party/umd/tests/cluster_descriptor_examples \
+                tt-metal/build_emule/_cluster_descs/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: asan-tt-metal-build-${{ github.run_id }}
+          path: tt-metal/build_emule/
+          retention-days: 1
+          if-no-files-found: error
+
+  sweep:
+    name: ASAN sweep (shard ${{ matrix.shard }}/6)
+    needs: build
+    runs-on: tt-ubuntu-2204-xlarge-stable
+    # ASAN is slower than the plain sweep: the L1 chokepoint instruments every
+    # access, Object-Intent snapshots + memcmps live L1 buffers per launch, the
+    # kernel JIT cache starts cold (ASAN is in the cache key), and --forked pays
+    # ~0.8s per test. Same 240min ceiling as the plain sweep, which it may need.
+    timeout-minutes: 240
+    continue-on-error: true
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
+    strategy:
+      fail-fast: false
+      max-parallel: 2   # fleet policy: at most 2 xlarge runners at once (issue #189)
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - name: Checkout tt-emule
+        uses: actions/checkout@v4
+        with:
+          path: tt-emule
+
+      - name: Checkout tt-metal at pinned SHA
+        uses: actions/checkout@v4
+        with:
+          repository: tenstorrent/tt-metal
+          ref: ${{ needs.build.outputs.pin }}
+          path: tt-metal
+          fetch-depth: 1
+          submodules: false
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: asan-tt-metal-build-${{ github.run_id }}
+          path: tt-metal/build_emule/
+
+      - name: Restore executable bits on test binaries
+        # actions/upload-artifact@v4 strips Unix mode bits.
+        shell: bash
+        run: |
+          find tt-metal/build_emule -name '*.so' -exec chmod +x {} + 2>/dev/null || true
+          chmod +x tt-metal/build_emule/test/tt_metal/unit_tests_* 2>/dev/null || true
+          chmod +x tt-metal/build_emule/test/ttnn/unit_tests_* 2>/dev/null || true
+
+      - name: Place cluster descriptors
+        shell: bash
+        run: |
+          mkdir -p tt-metal/tt_metal/third_party/umd/tests
+          cp -r tt-metal/build_emule/_cluster_descs/cluster_descriptor_examples \
+                tt-metal/tt_metal/third_party/umd/tests/
+
+      - name: Install SFPI toolchain
+        shell: bash
+        run: bash tt-metal/install_dependencies.sh --sfpi
+
+      - name: Run ASAN sweep shard
+        env:
+          TT_METAL_DIR: ${{ github.workspace }}/tt-metal
+          BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule
+          TT_EMULE_ARCH: ${{ inputs.arch || 'blackhole' }}
+          SHARD_INDEX:  ${{ matrix.shard }}
+          SHARD_COUNT:  ${{ env.SHARD_COUNT }}
+          ASAN_CHECKS:  ${{ inputs.asan-checks || 'all' }}
+          SWEEP_ONLY:   ${{ inputs.only || '' }}
+          OUT_DIR:      ${{ runner.temp }}/asan-sweep-out
+        shell: bash
+        run: bash tt-emule/.github/scripts/ci-asan-sweep.sh
+
+      - name: Upload shard logs + XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # No arch in the name: one arch runs per run, and github.run_id already
+          # scopes it. Keeping it out means the report job's download pattern
+          # cannot silently drift out of sync with this name.
+          name: asan-results-shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/asan-sweep-out/*
+          retention-days: 30
+          if-no-files-found: warn
+
+  report:
+    name: Aggregate findings + report
+    needs: [build, sweep]
+    if: ${{ always() }}
+    runs-on: tt-ubuntu-2204-large-stable
+    timeout-minutes: 30
+    continue-on-error: true   # a parse/upload/Slack hiccup must not fail the run
+    container:
+      image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
+    steps:
+      - name: Checkout tt-emule
+        uses: actions/checkout@v4
+        with:
+          path: tt-emule
+
+      - name: Download all shard results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: asan-results-shard-*-${{ github.run_id }}
+          path: shard-artifacts
+          merge-multiple: true
+
+      - name: Parse findings
+        id: parse
+        env:
+          ARCH: ${{ inputs.arch || 'blackhole' }}
+          # Empty if the build job failed; the parser reports an unknown pin
+          # rather than crashing on it.
+          PIN: ${{ needs.build.outputs.pin }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          python3 tt-emule/scripts/asan_sweep/parse_asan_results.py \
+            --results-dir shard-artifacts \
+            --arch "$ARCH" --pin-sha "$PIN" \
+            --known tt-emule/.github/known-asan-findings.txt \
+            --out-summary report/summary.md \
+            --out-dev report/findings.md \
+            --out-headline report/headline.json \
+            --out-candidates report/known-asan-findings.candidate.txt
+          cat report/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asan-report-${{ github.run_id }}
+          path: report/*
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Notify Slack
+        if: ${{ always() }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.NIGHTLY_SLACK_WEBHOOK_URL }}
+          ARCH: ${{ inputs.arch || 'blackhole' }}
+        shell: bash
+        run: |
+          # Step-level env isn't visible to `if:`, so gate inside the step.
+          [ -n "$SLACK_WEBHOOK_URL" ] || { echo "no NIGHTLY_SLACK_WEBHOOK_URL secret; skipping Slack"; exit 0; }
+          headline=report/headline.json
+          [ -f "$headline" ] || { echo "no headline.json; skipping Slack"; exit 0; }
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          # Build the payload with python (json.dumps) so this does not depend on jq
+          # being in the container; args via argv avoid shell-quoting pitfalls.
+          python3 -c "
+          import json, sys
+          d = json.load(open('report/headline.json'))['findings']
+          text = ('tt-emule ASAN sweep (%s): %d finding(s), %d new, %d categor(y/ies)\n%s'
+                  % (sys.argv[1], d['total'], d['new'], d['categories'], sys.argv[2]))
+          json.dump({'text': text}, open('slack-payload.json', 'w'))
+          " "$ARCH" "$url"
+          curl -sf -X POST -H 'Content-Type: application/json' \
+            --data @slack-payload.json \
+            "$SLACK_WEBHOOK_URL" || echo "Slack post failed (non-fatal)"

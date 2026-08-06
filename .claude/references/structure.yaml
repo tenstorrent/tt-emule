@@ -2383,6 +2383,12 @@ files:
   - {kind: struct, name: __emule_uk_state}
   - {kind: struct, name: __emule_matmul_bridge}
   - {kind: enum, name: ReluType}
+  - {kind: enum, name: EmuleAsanCheck}
+  - {kind: global, name: EMULE_ASAN_CHK_ALL}
+  - {kind: global, name: EMULE_ASAN_CHK_ALWAYS_ON}
+  - {kind: struct, name: EmuleAsanCheckName}
+  - {kind: global, name: EMULE_ASAN_CHECK_NAMES}
+  - {kind: function, name: emule_asan_parse_checks}
   - {kind: struct, name: EmuleSanitizerState}
   - {kind: struct, name: ThreadCommonCtx}
   - {kind: struct, name: ComputeThreadCtx}
@@ -2696,6 +2702,7 @@ files:
     behind EMULE_ASAN_IMPLEMENTATION. Moved here from jit_hw/ root.'
   symbols:
   - {kind: function, name: __emule_asan_enabled}
+  - {kind: function, name: __emule_asan_check_on}
   - {kind: extern_c, name: __emule_asan_panic}
   - {kind: global, name: my_x}
   - {kind: global, name: my_y}

@@ -21,7 +21,7 @@ extern "C" bool __emule_noc_addr_is_dram(uint64_t noc_addr);
 // write = 16B. A DRAM read from a 32B-aligned source into a 16B- (but not 32B-)
 // aligned L1 destination is legal even though their low bits differ.
 inline void __emule_check_noc_read_alignment(uint64_t src_noc_addr, uint32_t dst_local_l1_addr) {
-    if (!__emule_asan_enabled()) return;
+    if (!__emule_asan_enabled() || !__emule_asan_check_on(EMULE_ASAN_CHK_NOC_ALIGN)) return;
     uint32_t src_off = static_cast<uint32_t>(src_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
     // L1 destination: 16-byte alignment.
     if ((dst_local_l1_addr & 0xF) != 0) {
@@ -49,7 +49,7 @@ inline void __emule_check_noc_read_alignment(uint64_t src_noc_addr, uint32_t dst
 }
 
 inline void __emule_check_noc_write_alignment(uint32_t src_local_l1_addr, uint64_t dst_noc_addr) {
-    if (!__emule_asan_enabled()) return;
+    if (!__emule_asan_enabled() || !__emule_asan_check_on(EMULE_ASAN_CHK_NOC_ALIGN)) return;
     uint32_t dst_off = static_cast<uint32_t>(dst_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
     // L1 source: 16-byte alignment.
     if ((src_local_l1_addr & 0xF) != 0) {

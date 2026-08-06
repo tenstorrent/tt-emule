@@ -81,7 +81,8 @@ inline void __emule_asan_cb_on_wait(
 // reads must be barriered first (gated NoC-read-pending race check); then clear
 // the dangling wait and shrink the waited window (saturating at 0).
 inline void __emule_asan_cb_on_pop(uint32_t cb_id, uint32_t n) {
-    if (__emule_asan_enabled() && __emule_self->san.pending_noc_reads > 0) {
+    if (__emule_asan_enabled() && __emule_asan_check_on(EMULE_ASAN_CHK_NOC_RACE) &&
+        __emule_self->san.pending_noc_reads > 0) {
         __emule_asan_panic(
                 "[ASAN ERROR] Race Condition: cb_pop_front(cb_id=%u) called while a NoC read is still pending "
                 "(%u outstanding) — missing noc_async_read_barrier()\n",

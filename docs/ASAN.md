@@ -72,6 +72,64 @@ The one exception is **CB Reservation Overflow** (in
 structurally load-bearing — gating it would let an over-reserve deadlock on the
 space wait instead of reporting a clear error.
 
+## Per-check selection (`TT_METAL_EMULE_ASAN_CHECKS`)
+
+Under the master switch, this narrows *which* checks run. It exists because a
+violation aborts the process: the first check to fire hides every other one in
+that process, so isolating a specific check is often the only way to see past a
+loud one.
+
+The value is a comma- (or space-) separated list of names; absent, empty, or
+`all` means every check. The name↔bit mapping is defined once, in
+`include/jit_hw/internal/emule_thread_ctx.h` (`EmuleAsanCheck`,
+`EMULE_ASAN_CHECK_NAMES`, `emule_asan_parse_checks`), and both repos consume it —
+tt-metal's `emule_sanitizers.cpp` and `host_sanitizers.cpp` include that header.
+
+| Name | Check |
+|---|---|
+| `uaf` | Use-After-Free |
+| `host_align` | host L1/DRAM address alignment |
+| `metadata` | Metadata Overflow (the ASAN report only — see below) |
+| `oob` | Out-of-Bounds Write, L1 and DRAM |
+| `padding` | Tensor Padding Violation |
+| `semaphore` | Illegal Semaphore Access |
+| `cb_boundary` | CB Boundary Violation |
+| `cb_reservation` | CB Reservation Overflow (always on) |
+| `noc_race` | NoC read pending on `cb_pop_front` |
+| `noc_align` | NOC Transfer Alignment |
+| `dirty_cb` | Dirty CB |
+| `object_intent` | Object Intent Violation |
+
+**Where the mask lives.** The host parses the variable once per launch and arms
+`EmuleOobTensorState::check_mask`, which `set_sanitizer_thread_locals` copies into
+the per-fiber `__emule_self->san.check_mask`. Kernel-side checks then test it via
+`__emule_asan_check_on()`. This mirrors how `cb_boundary_strict` already worked,
+and it is deliberate: every kernel memory access flows through the L1 chokepoint,
+so a `getenv` and string parse there would cost more than the check it guards.
+`cb_boundary_strict` and `object_intent_strict` are now *derived* from the mask
+rather than set independently, so the mask stays the single place a check is
+turned on or off. Host-side checks call `asan_check_enabled()` directly (re-read
+per call, like the master switch, so a combined gtest run can toggle it).
+
+**An unrecognized name widens to every check rather than narrowing to none.** A
+typo would otherwise disable the sanitizers and yield a clean report that means
+nothing; failing loud-and-broad is the safe direction. `emule_asan_parse_checks`
+reports the first unrecognized name so a caller can warn.
+
+**Two things it deliberately does not gate.** `cb_reservation` stays on when
+deselected, for the deadlock reason above. And for `metadata`, only the
+`[ASAN ERROR]` report is gated — `check_program_metadata_size`'s `TT_THROW` is the
+functional validator its caller depends on, not a sanitizer, so deselecting the
+check must not change program-load behaviour.
+
+`TT_METAL_EMULE_ASAN_SKIP_DIRTY_CB` predates this and still works, as a
+subtractive override applied after the list.
+
+Guarded by `tests/tt_metal/tt_metal/api/emule/test_asan_check_selection.cpp`
+(Tier 3a). `death_test_env.cpp` forces the list to `all` for the whole api test
+binary, so a developer or CI shell that exports a narrowed list cannot turn the
+suite into a pile of confusing "failed to die" reports.
+
 ## Live-range registries
 
 Three per-device registries in `tt-metal/tt_metal/impl/emulation/emule_live_ranges.hpp`:

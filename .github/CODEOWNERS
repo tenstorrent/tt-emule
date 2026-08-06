@@ -15,3 +15,10 @@
 /include/jit_hw/internal/emule_cb_ptr.h      @smeydanshahiTT @xanderchin @arminaleTT @sgholamiTT
 /include/jit_hw/internal/emule_l1_to_ptr.h   @smeydanshahiTT @xanderchin @arminaleTT @sgholamiTT
 /docs/ASAN.md                                @smeydanshahiTT @xanderchin @arminaleTT @sgholamiTT
+
+# Nightly ASAN sweep (CI lane that drives the sanitizers at tt-metal's ttnn suite)
+/.github/workflows/nightly-asan-sweep.yml    @smeydanshahiTT @xanderchin @arminaleTT @sgholamiTT
+/.github/scripts/ci-asan-sweep.sh            @smeydanshahiTT @xanderchin @arminaleTT @sgholamiTT
+/.github/known-asan-findings.txt             @smeydanshahiTT @xanderchin @arminaleTT @sgholamiTT
+/scripts/asan_sweep/                         @smeydanshahiTT @xanderchin @arminaleTT @sgholamiTT
+/docs/asan-nightly-sweep.md                  @smeydanshahiTT @xanderchin @arminaleTT @sgholamiTT

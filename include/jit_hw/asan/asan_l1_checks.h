@@ -44,6 +44,7 @@ inline uint8_t* __emule_l1_translate(uint32_t l1_addr) {
 
 // Check 1 — Illegal Semaphore Access: raw access into the reserved sem region.
 inline void __emule_asan_check_semaphore(uint32_t l1_addr) {
+    if (!__emule_asan_check_on(EMULE_ASAN_CHK_SEMAPHORE)) return;
     if (__emule_self->san.sem_l1_range_end > 0 &&
         l1_addr >= __emule_self->san.sem_l1_range_start && l1_addr < __emule_self->san.sem_l1_range_end) {
         __emule_asan_panic(
@@ -102,6 +103,7 @@ inline bool __emule_asan_cb_resolve(uint32_t l1_addr, uint8_t*& out) {
 // require a live-tensor extent; also record the matched extent for the runner's
 // Object Intent check.
 inline void __emule_asan_check_oob_tensor(uint32_t l1_off) {
+    if (!__emule_asan_check_on(EMULE_ASAN_CHK_OOB)) return;
     if (__emule_self->san.l1_tensor_ranges == nullptr || l1_off < __emule_self->san.l1_unreserved_base) return;
     bool in_tensor = false;
     uint64_t matched_packed = 0;
@@ -150,6 +152,7 @@ inline void __emule_asan_check_oob_tensor(uint32_t l1_off) {
 
 // Check 4 — Tensor Padding Violation: write into a buffer's [logical, physical) pad.
 inline void __emule_asan_check_padding(uint32_t l1_off) {
+    if (!__emule_asan_check_on(EMULE_ASAN_CHK_PADDING)) return;
     if (__emule_self->san.l1_padding_ranges == nullptr) return;
     for (uint32_t i = 0; i < __emule_self->san.l1_padding_ranges_count; ++i) {
         uint64_t packed = __emule_self->san.l1_padding_ranges[i];
