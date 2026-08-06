@@ -2,6 +2,10 @@
 
 A complete, step-by-step guide to building tt-emule and all its dependencies from scratch on a new machine.
 
+For the known-good Apple-silicon Mac workflow (x86_64 Ubuntu under Lima), see
+[docs/macos-lima-reproduction.md](docs/macos-lima-reproduction.md). It records
+the tested branch pair and a focused Wormhole/Blackhole verification script.
+
 ## Prerequisites
 
 ### Required Repositories

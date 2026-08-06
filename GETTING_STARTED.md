@@ -13,6 +13,10 @@ Quick path: clone, build, verify, then wire up a new ttnn test. Skip to `BUILD_G
 
 Preferably use an `mlir` IRD docker that already has these.
 
+On an Apple-silicon Mac, build inside an x86_64 Lima VM rather than directly on
+macOS. See [Reproducing tt-emule on an Apple-silicon Mac](docs/macos-lima-reproduction.md)
+for the known-good VM configuration and focused Wormhole/Blackhole smoke test.
+
 ## 2. Clone
 
 `tt-emule` and `tt-metal` must be siblings (tt-metal's `TT_EMULE_PATH` defaults to `../tt-emule`).
