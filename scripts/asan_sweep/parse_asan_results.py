@@ -10,11 +10,10 @@ Consumes a directory of per-entry `<slug>.log` + `<slug>.xml` produced by
   --out-summary    summary.md   — compact, for the Actions run summary page
   --out-dev        findings.md  — one section per finding, with evidence
   --out-headline   headline.json — machine-readable counts (trend/alerting/Slack)
-  --out-candidates a known-asan-findings.txt-shaped list of everything seen
 
-Exit status: non-zero when the run found a violation that is not in --known, or
-when it produced no data at all. That is what makes the CI lane fail on an ASAN
-error instead of reporting it quietly.
+Exit status: non-zero when the run found any violation, or when it produced no
+data at all. That is what makes the CI lane fail on an ASAN error instead of
+reporting it quietly.
 
 Why the LOG and not just the XML: a sanitizer violation ends in abort(), so the
 only record of *what* was violated is the report the dying process wrote to
@@ -200,7 +199,7 @@ def resolve_site(detail, frames, kernel):
     nothing but runner and libc frames.
 
     Falling back to the kernel's basename (never its full path) keeps a finding
-    key stable across workspaces, which is what makes the allowlist portable.
+    key stable across workspaces and across runs.
     """
     return site_from_detail(detail) or pick_site(frames) or basename(kernel or "")
 
@@ -329,28 +328,6 @@ def parse_xml(path: Path):
     return out
 
 
-def load_known(path):
-    """Known-findings allowlist: one `<Category>|<site>` key per line, `#` comments.
-
-    Report-only today, so this only splits the report into "known" and "new". It
-    is the same mechanism that would let the lane become a gate later (fail only
-    on new keys) without redesigning anything — mirroring the
-    known-failures-quasar.txt convention already used by the C++ regression.
-    """
-    known = set()
-    if not path:
-        return known
-    p = Path(path)
-    if not p.is_file():
-        sys.stderr.write(f"note: no known-findings file at {p} — every finding is 'new'\n")
-        return known
-    for raw in p.read_text().splitlines():
-        line = raw.split("#", 1)[0].strip()
-        if line:
-            known.add(line)
-    return known
-
-
 def collect(results_dir: Path):
     findings = {}
     entries = {}
@@ -385,9 +362,8 @@ def collect(results_dir: Path):
     return findings, entries
 
 
-def render_summary(findings, entries, known, *, arch, pin):
+def render_summary(findings, entries, *, arch, pin):
     total = len(findings)
-    new = [f for f in findings.values() if f.key not in known]
     raw = sum(f.count for f in findings.values())
     cats = sorted({f.category for f in findings.values()})
     reached = sum(1 for e in entries.values() if e["reached_emule"])
@@ -427,7 +403,7 @@ def render_summary(findings, entries, known, *, arch, pin):
         f"- **entries:** {len(entries)} ({reached} reached the emulator"
         + (f", {len(empty)} executed nothing" if empty else "") + ")",
         f"- **tests executed:** {executed}",
-        f"- **distinct findings:** **{total}** ({len(new)} new, {total - len(new)} known)",
+        f"- **distinct findings:** **{total}**",
         f"- **categories:** {len(cats)}" + (f" — {', '.join(cats)}" if cats else ""),
         f"- **raw `[ASAN ERROR]` lines:** {raw} (deduplicated into the {total} above)",
         "",
@@ -443,13 +419,12 @@ def render_summary(findings, entries, known, *, arch, pin):
               " they reached the emulator but recorded nothing, so they contribute no"
               " coverage. Check their logs for a collection crash or a wallclock kill.", ""]
     if total:
-        L += ["| Category | Site | Entries | Tests | Raw | Status |",
-              "|---|---|---:|---:|---:|---|"]
+        L += ["| Category | Site | Entries | Tests | Raw |",
+              "|---|---|---:|---:|---:|"]
         for f in sorted(findings.values(),
                         key=lambda x: (-len(x.entries), x.category, x.site)):
-            status = "known" if f.key in known else "**NEW**"
             L.append(f"| {f.category} | `{display_site(f.site)}` | "
-                     f"{len(f.entries)} | {len(f.tests)} | {f.count} | {status} |")
+                     f"{len(f.entries)} | {len(f.tests)} | {f.count} |")
         L.append("")
     else:
         L += ["No `[ASAN ERROR]` findings in this run.", ""]
@@ -459,7 +434,7 @@ def render_summary(findings, entries, known, *, arch, pin):
     return "\n".join(L) + "\n"
 
 
-def render_dev(findings, known, *, arch, pin):
+def render_dev(findings, *, arch, pin):
     L = [f"# emule ASAN sweep findings — {arch} @ `{pin}`", ""]
     if not findings:
         L += ["No findings.", ""]
@@ -472,7 +447,6 @@ def render_dev(findings, known, *, arch, pin):
     for f in sorted(findings.values(), key=lambda x: (x.category, x.site)):
         L += [f"## {f.category} — `{display_site(f.site)}`", "",
               f"- **key:** `{f.key}`",
-              f"- **status:** {'known' if f.key in known else 'NEW'}",
               f"- **kernel:** `{f.kernel or '(none reported)'}`",
               f"- **raw occurrences:** {f.count} across {len(f.entries)} entry/entries",
               ]
@@ -499,12 +473,9 @@ def main():
                     help="dir of per-entry <slug>.log / <slug>.xml (shards merged)")
     ap.add_argument("--arch", default="blackhole")
     ap.add_argument("--pin-sha", default="")
-    ap.add_argument("--known", default=None, help="known-findings allowlist")
     ap.add_argument("--out-summary", default=None)
     ap.add_argument("--out-dev", default=None)
     ap.add_argument("--out-headline", default=None)
-    ap.add_argument("--out-candidates", default=None,
-                    help="write every finding key here, allowlist-shaped")
     args = ap.parse_args()
 
     results = Path(args.results_dir)
@@ -513,16 +484,14 @@ def main():
         return 2
 
     pin = args.pin_sha or "unknown"
-    known = load_known(args.known)
     findings, entries = collect(results)
-    new_keys = sorted(k for k in findings if k not in known)
 
     if args.out_summary:
         Path(args.out_summary).write_text(
-            render_summary(findings, entries, known, arch=args.arch, pin=pin))
+            render_summary(findings, entries, arch=args.arch, pin=pin))
     if args.out_dev:
         Path(args.out_dev).write_text(
-            render_dev(findings, known, arch=args.arch, pin=pin))
+            render_dev(findings, arch=args.arch, pin=pin))
     if args.out_headline:
         Path(args.out_headline).write_text(json.dumps({
             "arch": args.arch,
@@ -537,50 +506,30 @@ def main():
             "no_data": len(entries) == 0,
             "findings": {
                 "total": len(findings),
-                "new": len(new_keys),
-                "known": len(findings) - len(new_keys),
                 "categories": len({f.category for f in findings.values()}),
                 "raw_lines": sum(f.count for f in findings.values()),
                 "by_category": dict(Counter(f.category for f in findings.values())),
-                "new_keys": new_keys,
+                "keys": sorted(findings),
             },
         }, indent=2) + "\n")
-    if args.out_candidates:
-        lines = [
-            "# emule ASAN sweep — every finding observed in this run.",
-            "# Format: <Category>|<site>   (one key per line, '#' comments)",
-            f"# arch={args.arch} pin={pin}",
-            "#",
-            "# Triage each entry before promoting it into",
-            "# .github/known-asan-findings.txt: a key here is an OBSERVATION, not a",
-            "# verdict. Allowlisting a real bug hides it.",
-            "",
-        ]
-        lines += sorted(findings)
-        Path(args.out_candidates).write_text("\n".join(lines) + "\n")
 
     if not entries:
         print("::error::ASAN sweep produced NO DATA — no shard result files were found, so "
               "no test ran and no sanitizer executed. This is not a clean sweep.")
-    print(f"entries={len(entries)} findings={len(findings)} new={len(new_keys)} "
+    print(f"entries={len(entries)} findings={len(findings)} "
           f"raw={sum(f.count for f in findings.values())}")
-    for k in new_keys:
-        print(f"  NEW  {k}")
+    for k in sorted(findings):
+        print(f"  FINDING  {k}")
 
-    # A sanitizer violation is a real defect, so the run goes RED for it. Only
-    # findings absent from --known do that: entries in that file are already
-    # triaged and tracked, and a lane that is permanently red for a known backlog
-    # gets ignored, which is worse than no lane at all. Fix a finding or record it
-    # in known-asan-findings.txt — the one thing that must not happen is a
-    # violation quietly passing.
-    #
-    # NO DATA fails too: a run that tested nothing has not shown the tree is clean.
+    # A sanitizer violation is a real defect, so the run goes RED for it — every
+    # finding, no allowlist. NO DATA fails too: a run that tested nothing has not
+    # shown the tree is clean.
     if not entries:
         print("::error::FAILING: the sweep produced no data.")
         return 1
-    if new_keys:
-        print(f"::error::FAILING: {len(new_keys)} new ASAN finding(s) not in the "
-              f"known-findings allowlist. See the run summary and findings.md.")
+    if findings:
+        print(f"::error::FAILING: {len(findings)} ASAN finding(s). "
+              "See the run summary and findings.md.")
         return 1
     return 0
 

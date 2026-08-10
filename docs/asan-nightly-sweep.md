@@ -58,18 +58,17 @@ cache starts cold because ASAN is part of the cache key (kernels compile with
 
 ## What makes the run fail
 
-A sanitizer violation is a defect, so the run goes **red** for it. Precisely, the
-report job fails when:
+A sanitizer violation is a defect, so the run goes **red** for it — every
+finding, no allowlist. Two layers fail independently:
 
-- a finding is **not** listed in `.github/known-asan-findings.txt`, or
-- the sweep produced **no data** (no shard result files at all), or
-- any shard failed to report in — it was INVALID, crashed, or never started.
-
-Findings that *are* in the allowlist keep the run green. That is the whole point
-of the allowlist: a lane that is permanently red for a known, tracked backlog
-gets ignored, which is worse than having no lane. Either fix a finding or record
-it with a reason; the one outcome that must never happen is a violation passing
-quietly.
+- each **sweep shard** fails when any of its own entries hits an `[ASAN ERROR]`,
+  so the run's job list shows exactly which buckets violated. The verdict lands
+  at the **end** of the shard: every entry still runs to completion (a violation
+  aborts only the offending test's forked child), and the findings check is the
+  script's last step;
+- the **report job** fails when any finding exists across the whole set, when
+  the sweep produced **no data** (no shard result files at all), or when any
+  shard failed to report in — it was INVALID, crashed, or never started.
 
 An **invalid** run fails for a different reason than a finding does: if no entry
 reached the emulator, "0 findings" means the lane is broken, not that metal is
@@ -79,13 +78,13 @@ clean.
 no log contains the emule-mode banner, if no logs were produced at all, or if
 real-hardware markers appear.
 
-**One verdict, rendered once.** The build and sweep jobs are `continue-on-error`
-on purpose: a shard that dies must not stop the other five or decide the run by
-itself, so every shard runs to completion and the report job judges the whole set.
-That would leave a hole — a dead shard contributes no results, which reads exactly
-like "that shard found nothing" — so each shard writes a `shard-<n>.ok` marker
-**only** when it passes its validity gate, and the report fails if any marker is
-missing. A slice of the test set that never ran cannot be called clean.
+**Per-shard verdicts, one aggregate.** The sweep matrix runs with `fail-fast`
+off, so a red shard (findings or INVALID) never cancels the other five, and the
+report job runs on `always()` to judge the whole set. A shard that dies before
+its validity gate would leave a hole — it contributes no results, which reads
+exactly like "that shard found nothing" — so each shard writes a `shard-<n>.ok`
+marker **only** when it passes its validity gate, and the report fails if any
+marker is missing. A slice of the test set that never ran cannot be called clean.
 
 That gate runs *inside* a shard, so it cannot speak for shards that never
 started — a failed build, or an Actions outage killing jobs during "Set up job".
@@ -130,13 +129,6 @@ non-plumbing frame, then the kernel's basename.
 ever reports the first, since the first one aborts. Per-test forking bounds that
 masking to a single test rather than a whole file, but it does not remove it.
 
-`.github/known-asan-findings.txt` splits the report into "known" and "NEW", and
-NEW is what fails the run. Each run also writes
-`known-asan-findings.candidate.txt` — every key it saw, allowlist-shaped — so
-promoting a triaged finding is a copy, not a retype. A key there is an
-observation, not a verdict: allowlisting an untriaged finding hides a real metal
-bug.
-
 ## Per-check selection
 
 The `asan-checks` dispatch input takes `all` or a comma-separated subset of
@@ -180,7 +172,6 @@ python3 scripts/post_commit_sweep/sweep.py run \
 # Aggregate whatever is in an output dir.
 python3 scripts/asan_sweep/parse_asan_results.py \
     --results-dir /tmp/asan-out --arch blackhole \
-    --known .github/known-asan-findings.txt \
     --out-summary /tmp/summary.md --out-dev /tmp/findings.md
 ```
 

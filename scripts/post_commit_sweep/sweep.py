@@ -425,7 +425,7 @@ def run_entry(rec, *, tt_metal_dir, out_dir, runtime_env, pytest_bin,
     # every entry collapsed: one line per entry saying whether it tripped anything.
     if asan_hits:
         detail = ", ".join(f"{c} x{n}" for c, n in asan_hits.most_common())
-        print(f"::warning::{rec['name']}: {sum(asan_hits.values())} ASAN hit(s) — {detail}")
+        print(f"::error::{rec['name']}: {sum(asan_hits.values())} ASAN hit(s) — {detail}")
     else:
         print(f"  {rec['name']}: no ASAN hits (rc={proc.returncode})")
     sys.stdout.flush()

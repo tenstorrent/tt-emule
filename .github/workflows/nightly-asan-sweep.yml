@@ -8,12 +8,10 @@
 # sanitizers OFF to measure a pass rate: that lane asks "does metal work?", this
 # one asks "does metal violate memory rules while working?".
 #
-# The run FAILS on any ASAN finding that is not already recorded in
-# .github/known-asan-findings.txt, and also when a shard is INVALID (reached no
-# emulator) or the sweep produced no data at all — a run that tested nothing has
-# not shown the tree is clean. Findings that ARE in the allowlist keep the run
-# green: they are already triaged and tracked, and a lane that is permanently red
-# for a known backlog gets ignored, which is worse than no lane.
+# The run FAILS on any ASAN finding — each sweep shard goes red the moment its
+# own entries hit one, and the report job renders the aggregate verdict. It also
+# fails when a shard is INVALID (reached no emulator) or the sweep produced no
+# data at all — a run that tested nothing has not shown the tree is clean.
 #
 # Runs at the PINNED tt-metal SHA, not main tip — a finding must be attributable
 # to a reproducible tree, and main tip would mix in API drift.
@@ -218,12 +216,14 @@ jobs:
     # kernel JIT cache starts cold (ASAN is in the cache key), and --forked pays
     # ~0.8s per test. Same 240min ceiling as the plain sweep, which it may need.
     timeout-minutes: 240
-    # A shard that dies (INVALID, a crash, an Actions hiccup) must not stop the
-    # others or decide the run on its own — every shard runs to completion and the
-    # report job renders one verdict over the whole set. Shard health is not lost:
-    # each shard drops a shard-<n>.ok marker only on a VALID run, and the report
-    # fails if any marker is missing.
-    continue-on-error: true
+    # A shard FAILS on its own findings, so the run's job list shows exactly
+    # which buckets violated — but only AT THE END of its run: ci-asan-sweep.sh
+    # executes every entry to completion and exits non-zero as its final step if
+    # any entry hit an [ASAN ERROR]. fail-fast is off, so a red shard never
+    # cancels the others, and the report job runs on always() to render the
+    # aggregate verdict. Each shard also drops a shard-<n>.ok marker on any
+    # VALID run (findings or not); a missing marker is how the report catches a
+    # shard that died before its validity gate could run.
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     strategy:
@@ -302,8 +302,8 @@ jobs:
     if: ${{ always() }}
     runs-on: tt-ubuntu-2204-large-stable
     timeout-minutes: 30
-    # NOT continue-on-error: this job is the gate. parse_asan_results.py exits
-    # non-zero on a new finding or on no-data, and that has to reach the run's
+    # NOT continue-on-error: this job is the aggregate gate. parse_asan_results.py
+    # exits non-zero on any finding or on no-data, and that has to reach the run's
     # conclusion. The Slack step tolerates its own failures inline instead.
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
@@ -321,11 +321,11 @@ jobs:
           merge-multiple: true
 
       - name: Verify every shard reported
-        # The sweep jobs are continue-on-error, so a shard that died leaves no
-        # failure for the run to trip over — it just contributes no results, which
-        # would otherwise look like "that shard found nothing". Each VALID shard
-        # writes shard-<n>.ok; a missing marker means that slice of the test set
-        # never really ran, so the verdict below cannot be trusted.
+        # A shard that died before its validity gate (e.g. in "Set up job")
+        # contributes no results, which would otherwise look like "that shard
+        # found nothing". Each VALID shard writes shard-<n>.ok; a missing marker
+        # means that slice of the test set never really ran, so the verdict
+        # below cannot be trusted.
         shell: bash
         run: |
           set -uo pipefail
@@ -354,11 +354,9 @@ jobs:
           python3 tt-emule/scripts/asan_sweep/parse_asan_results.py \
             --results-dir shard-artifacts \
             --arch "$ARCH" --pin-sha "$PIN" \
-            --known tt-emule/.github/known-asan-findings.txt \
             --out-summary report/summary.md \
             --out-dev report/findings.md \
-            --out-headline report/headline.json \
-            --out-candidates report/known-asan-findings.candidate.txt
+            --out-headline report/headline.json
           cat report/summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload reports
@@ -395,8 +393,8 @@ jobs:
                       'so nothing was tested. Not a clean run.\n%s' % (arch, url))
           else:
               d = h['findings']
-              text = ('tt-emule ASAN sweep (%s): %d finding(s), %d new, %d categor(y/ies)\n%s'
-                      % (arch, d['total'], d['new'], d['categories'], url))
+              text = ('tt-emule ASAN sweep (%s): %d finding(s), %d categor(y/ies)\n%s'
+                      % (arch, d['total'], d['categories'], url))
           json.dump({'text': text}, open('slack-payload.json', 'w'))
           " "$ARCH" "$url"
           curl -sf -X POST -H 'Content-Type: application/json' \

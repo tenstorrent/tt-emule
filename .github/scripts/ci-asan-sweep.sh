@@ -8,12 +8,16 @@
 # violations in tt-metal's kernels. Thin by design — the run logic is sweep.py's
 # `--asan` mode so CI and local runs stay identical. See docs/asan-nightly-sweep.md.
 #
-# Findings never fail this job: the report job gates on them across every shard,
-# so one shard cannot decide the run. An INVALID shard — one that ran but reached
-# no emulator — exits non-zero here AND withholds its shard-<n>.ok marker, which
-# is what the report job checks. The marker matters because the sweep jobs are
-# continue-on-error (a dead shard must not stop the rest), so a job-level failure
-# alone would go unnoticed.
+# This job FAILS when its own entries hit any [ASAN ERROR], so a red shard in the
+# run's job list points straight at the suites that violated. The verdict is
+# rendered AT THE END: the sweep always runs every entry to completion first
+# (a violation aborts only the offending test's forked child), and the findings
+# grep + exit 1 below are the last thing this script does. An INVALID shard —
+# one that ran but reached no emulator — also exits non-zero AND withholds its
+# shard-<n>.ok marker. The marker is written on every VALID run, findings or not:
+# it tells the report job "this slice really executed", separately from the exit
+# code, so the aggregate verdict can still distinguish a shard that found bugs
+# from one that never ran its tests.
 #
 # Required env: TT_METAL_DIR, BUILD_DIR, TT_EMULE_ARCH, SHARD_INDEX, SHARD_COUNT.
 # Optional:     OUT_DIR, MANIFEST, PYTEST_BIN, SWEEP_ONLY, ASAN_CHECKS.
@@ -165,13 +169,17 @@ if [ "$hw_markers" -ne 0 ]; then
     exit 1
 fi
 
-# Completion marker. The sweep jobs are continue-on-error so one bad shard cannot
-# stop the others, which means a shard that dies leaves no failure for the run to
-# trip over. This marker is how the report job still notices: it is written ONLY
-# on a valid run, and the report fails if any shard's marker is missing.
+# Completion marker: written on every VALID run, findings or not. The report job
+# fails if any shard's marker is missing — that is how a shard that died before
+# this gate (an Actions hiccup in "Set up job") is still caught, since it leaves
+# neither a marker nor results.
 echo "shard=$SHARD_INDEX arch=$TT_EMULE_ARCH entries=$log_count findings=$findings" \
     > "$OUT_DIR/shard-${SHARD_INDEX}.ok"
 
-# Findings do not fail this job — the report job gates on them across all shards.
-echo "  VALID emule run — findings are gated by the report job, not here."
+if [ "$findings" -ne 0 ]; then
+    echo "::error::$findings [ASAN ERROR] line(s) in this shard's entries — see the"\
+         "per-entry annotations above and this shard's log artifact."
+    exit 1
+fi
+echo "  VALID emule run — no ASAN findings in this shard."
 exit 0
