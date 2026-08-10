@@ -12,6 +12,10 @@ Consumes a directory of per-entry `<slug>.log` + `<slug>.xml` produced by
   --out-headline   headline.json — machine-readable counts (trend/alerting/Slack)
   --out-candidates a known-asan-findings.txt-shaped list of everything seen
 
+Exit status: non-zero when the run found a violation that is not in --known, or
+when it produced no data at all. That is what makes the CI lane fail on an ASAN
+error instead of reporting it quietly.
+
 Why the LOG and not just the XML: a sanitizer violation ends in abort(), so the
 only record of *what* was violated is the report the dying process wrote to
 stderr. The XML says a test crashed with signal 6; the log says it was an
@@ -278,6 +282,23 @@ def parse_log(path: Path):
     return hits, reached, hw
 
 
+def find_xml(log: Path) -> Path:
+    """The JUnit file for an entry log.
+
+    sweep.py asks pytest for `<slug>.xml`, but tt-metal's root conftest renames
+    the report to `<slug>_<YYYYmmdd>_<HHMMSS>.xml` whenever CI=true (so that
+    serial pytest invocations don't clobber one report). Matching the exact name
+    therefore finds nothing in CI while working locally, which silently drops
+    every crash-signal correlation from the report. Accept both spellings, newest
+    last (the timestamp suffix sorts lexically).
+    """
+    exact = log.with_suffix(".xml")
+    if exact.is_file():
+        return exact
+    stamped = sorted(log.parent.glob(f"{log.stem}_*.xml"))
+    return stamped[-1] if stamped else exact
+
+
 def parse_xml(path: Path):
     """Per-entry XML outcome counts + the set of tests killed by a signal."""
     out = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0,
@@ -336,7 +357,7 @@ def collect(results_dir: Path):
     for log in sorted(results_dir.rglob("*.log")):
         slug = log.stem
         hits, reached, hw = parse_log(log)
-        xml = parse_xml(log.with_suffix(".xml"))
+        xml = parse_xml(find_xml(log))
         entries[slug] = {
             "reached_emule": reached, "hw_markers": hw,
             "hits": len(hits), **{k: xml[k] for k in
@@ -372,12 +393,40 @@ def render_summary(findings, entries, known, *, arch, pin):
     reached = sum(1 for e in entries.values() if e["reached_emule"])
     invalid = [s for s, e in entries.items() if not e["reached_emule"]]
     hw = [s for s, e in entries.items() if e["hw_markers"]]
+    # Ran but recorded no test: wallclock SIGTERM, a collection crash, or a
+    # partial XML write. Its "no findings" covers nothing and must not be
+    # counted as coverage.
+    empty = sorted(s for s, e in entries.items()
+                   if e["reached_emule"] and e["tests"] - e["skipped"] <= 0)
+    executed = sum(max(e["tests"] - e["skipped"], 0) for e in entries.values())
+
+    # No entries at all means no shard produced results — a build failure, or
+    # shards that never started (a GitHub Actions outage does exactly this: they
+    # die in "Set up job", before ci-asan-sweep.sh and therefore before its
+    # validity gate can run). Reporting that as "no findings" would read as a
+    # clean sweep, which is the one thing this lane must never do.
+    if not entries:
+        return "\n".join([
+            f"## emule ASAN sweep — {arch}",
+            "",
+            f"- **pin:** `{pin}`",
+            "",
+            "> ### NO DATA — this run proves nothing",
+            ">",
+            "> No shard produced any result file, so no test was executed and no"
+            " sanitizer ran. This is **not** a clean sweep; it is an absent one."
+            " Check whether the build job failed or the shard jobs never started,"
+            " then re-run.",
+            "",
+        ]) + "\n"
 
     L = [
         f"## emule ASAN sweep — {arch}",
         "",
         f"- **pin:** `{pin}`",
-        f"- **entries:** {len(entries)} ({reached} reached the emulator)",
+        f"- **entries:** {len(entries)} ({reached} reached the emulator"
+        + (f", {len(empty)} executed nothing" if empty else "") + ")",
+        f"- **tests executed:** {executed}",
         f"- **distinct findings:** **{total}** ({len(new)} new, {total - len(new)} known)",
         f"- **categories:** {len(cats)}" + (f" — {', '.join(cats)}" if cats else ""),
         f"- **raw `[ASAN ERROR]` lines:** {raw} (deduplicated into the {total} above)",
@@ -389,6 +438,10 @@ def render_summary(findings, entries, known, *, arch, pin):
     if invalid:
         L += [f"> **{len(invalid)} entry/entries never reached the emulator** — their "
               "'no findings' result is not evidence of anything.", ""]
+    if empty:
+        L += [f"> **{len(empty)} entry/entries executed no tests** (`{'`, `'.join(empty)}`) —"
+              " they reached the emulator but recorded nothing, so they contribute no"
+              " coverage. Check their logs for a collection crash or a wallclock kill.", ""]
     if total:
         L += ["| Category | Site | Entries | Tests | Raw | Status |",
               "|---|---|---:|---:|---:|---|"]
@@ -479,6 +532,9 @@ def main():
                 "reached_emule": sum(1 for e in entries.values() if e["reached_emule"]),
                 "invalid": sorted(s for s, e in entries.items() if not e["reached_emule"]),
             },
+            # True when no shard produced results: downstream must not read
+            # "0 findings" as "clean". See render_summary's NO DATA branch.
+            "no_data": len(entries) == 0,
             "findings": {
                 "total": len(findings),
                 "new": len(new_keys),
@@ -503,11 +559,29 @@ def main():
         lines += sorted(findings)
         Path(args.out_candidates).write_text("\n".join(lines) + "\n")
 
+    if not entries:
+        print("::error::ASAN sweep produced NO DATA — no shard result files were found, so "
+              "no test ran and no sanitizer executed. This is not a clean sweep.")
     print(f"entries={len(entries)} findings={len(findings)} new={len(new_keys)} "
           f"raw={sum(f.count for f in findings.values())}")
     for k in new_keys:
         print(f"  NEW  {k}")
-    # Report-only: findings never set a nonzero exit code.
+
+    # A sanitizer violation is a real defect, so the run goes RED for it. Only
+    # findings absent from --known do that: entries in that file are already
+    # triaged and tracked, and a lane that is permanently red for a known backlog
+    # gets ignored, which is worse than no lane at all. Fix a finding or record it
+    # in known-asan-findings.txt — the one thing that must not happen is a
+    # violation quietly passing.
+    #
+    # NO DATA fails too: a run that tested nothing has not shown the tree is clean.
+    if not entries:
+        print("::error::FAILING: the sweep produced no data.")
+        return 1
+    if new_keys:
+        print(f"::error::FAILING: {len(new_keys)} new ASAN finding(s) not in the "
+              f"known-findings allowlist. See the run summary and findings.md.")
+        return 1
     return 0
 
 

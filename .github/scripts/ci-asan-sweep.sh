@@ -8,10 +8,12 @@
 # violations in tt-metal's kernels. Thin by design — the run logic is sweep.py's
 # `--asan` mode so CI and local runs stay identical. See docs/asan-nightly-sweep.md.
 #
-# Findings are report-only (a violation never fails this job — the aggregate job
-# publishes them). An INVALID run is different and DOES fail: if no entry ever
-# reached the emulator, "0 findings" means the lane is broken, not that the code
-# is clean. That distinction is the whole reason this script has an exit code.
+# Findings never fail this job: the report job gates on them across every shard,
+# so one shard cannot decide the run. An INVALID shard — one that ran but reached
+# no emulator — exits non-zero here AND withholds its shard-<n>.ok marker, which
+# is what the report job checks. The marker matters because the sweep jobs are
+# continue-on-error (a dead shard must not stop the rest), so a job-level failure
+# alone would go unnoticed.
 #
 # Required env: TT_METAL_DIR, BUILD_DIR, TT_EMULE_ARCH, SHARD_INDEX, SHARD_COUNT.
 # Optional:     OUT_DIR, MANIFEST, PYTEST_BIN, SWEEP_ONLY, ASAN_CHECKS.
@@ -163,6 +165,13 @@ if [ "$hw_markers" -ne 0 ]; then
     exit 1
 fi
 
-# Findings themselves are report-only: the aggregate job publishes them.
-echo "  VALID emule run — findings are reported, not gated."
+# Completion marker. The sweep jobs are continue-on-error so one bad shard cannot
+# stop the others, which means a shard that dies leaves no failure for the run to
+# trip over. This marker is how the report job still notices: it is written ONLY
+# on a valid run, and the report fails if any shard's marker is missing.
+echo "shard=$SHARD_INDEX arch=$TT_EMULE_ARCH entries=$log_count findings=$findings" \
+    > "$OUT_DIR/shard-${SHARD_INDEX}.ok"
+
+# Findings do not fail this job — the report job gates on them across all shards.
+echo "  VALID emule run — findings are gated by the report job, not here."
 exit 0

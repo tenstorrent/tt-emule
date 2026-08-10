@@ -56,14 +56,62 @@ cache starts cold because ASAN is part of the cache key (kernels compile with
   tests and still writes a complete JUnit XML, so one entry can report many
   findings.
 
-## Findings are report-only; invalid runs are not
+## What makes the run fail
 
-A finding never fails the run — the aggregate job publishes it. An **invalid**
-run does fail, because the two are not the same claim: if no entry reached the
-emulator, "0 findings" means the lane is broken, not that metal is clean.
+A sanitizer violation is a defect, so the run goes **red** for it. Precisely, the
+report job fails when:
+
+- a finding is **not** listed in `.github/known-asan-findings.txt`, or
+- the sweep produced **no data** (no shard result files at all), or
+- any shard failed to report in — it was INVALID, crashed, or never started.
+
+Findings that *are* in the allowlist keep the run green. That is the whole point
+of the allowlist: a lane that is permanently red for a known, tracked backlog
+gets ignored, which is worse than having no lane. Either fix a finding or record
+it with a reason; the one outcome that must never happen is a violation passing
+quietly.
+
+An **invalid** run fails for a different reason than a finding does: if no entry
+reached the emulator, "0 findings" means the lane is broken, not that metal is
+clean.
+
 `ci-asan-sweep.sh` enforces the `emule_postflight` contract per shard, failing if
-no log contains `execute_program_emulated`, if no logs were produced at all, or
-if real-hardware markers appear.
+no log contains the emule-mode banner, if no logs were produced at all, or if
+real-hardware markers appear.
+
+**One verdict, rendered once.** The build and sweep jobs are `continue-on-error`
+on purpose: a shard that dies must not stop the other five or decide the run by
+itself, so every shard runs to completion and the report job judges the whole set.
+That would leave a hole — a dead shard contributes no results, which reads exactly
+like "that shard found nothing" — so each shard writes a `shard-<n>.ok` marker
+**only** when it passes its validity gate, and the report fails if any marker is
+missing. A slice of the test set that never ran cannot be called clean.
+
+That gate runs *inside* a shard, so it cannot speak for shards that never
+started — a failed build, or an Actions outage killing jobs during "Set up job".
+The report covers that case separately: when no shard produced any result file at
+all, the summary, the `no_data` flag in `headline.json`, and the Slack post all
+say **NO DATA** rather than "no findings", and the parser emits a CI error
+annotation. An absent sweep and a clean sweep must never look alike.
+
+## Following a run while it happens
+
+Each entry's pytest output is **teed**: it streams into the job log as it runs and
+is also written to the artifact. A sweep can take two hours, so a job log showing
+only the command line makes a running shard impossible to follow and hides a
+violation until the artifact is downloaded.
+
+Each entry is wrapped in a collapsible `::group::`, and after it closes an
+ungrouped one-liner reports what that entry tripped — a `::warning::` with the
+per-category counts if anything fired, otherwise a plain "no ASAN hits". So the
+run reads as a scannable timeline even with every group collapsed, and hits
+surface as annotations on the run page.
+
+Shard jobs are named after the suites they cover (`ASAN sweep 2/6 · eltwise-1,
+matmul, reduce`) rather than by number alone. The mapping is computed by the
+build job's `plan` step — sharding is a deterministic round-robin over the
+manifest's entry order — and drives the job matrix, so the names cannot drift
+from what actually runs. `SHARD_COUNT` is the single place to change the count.
 
 ## Reading the report
 
@@ -82,9 +130,12 @@ non-plumbing frame, then the kernel's basename.
 ever reports the first, since the first one aborts. Per-test forking bounds that
 masking to a single test rather than a whole file, but it does not remove it.
 
-`.github/known-asan-findings.txt` splits the report into "known" and "NEW". It is
-deliberately empty until findings are triaged at the current pin — allowlisting
-an untriaged key hides a real metal bug.
+`.github/known-asan-findings.txt` splits the report into "known" and "NEW", and
+NEW is what fails the run. Each run also writes
+`known-asan-findings.candidate.txt` — every key it saw, allowlist-shaped — so
+promoting a triaged finding is a copy, not a retype. A key there is an
+observation, not a verdict: allowlisting an untriaged finding hides a real metal
+bug.
 
 ## Per-check selection
 

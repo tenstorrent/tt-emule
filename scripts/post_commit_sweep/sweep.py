@@ -35,6 +35,7 @@ import shlex
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
+from collections import Counter
 from pathlib import Path
 
 try:
@@ -73,6 +74,11 @@ WALLCLOCK_CAP = 5400
 DEFAULT_PER_TEST_TIMEOUT = 300  # injected only when the manifest cmd lacks one
 
 ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+# Live per-entry violation counter. Same grammar as
+# scripts/asan_sweep/parse_asan_results.py — that report stays the authority;
+# this only surfaces hits in the job log while the run is still in progress.
+ASAN_LINE_RE = re.compile(r"\[ASAN ERROR\]\s+([^:]+):")
 
 
 def slug(name: str) -> str:
@@ -388,11 +394,40 @@ def run_entry(rec, *, tt_metal_dir, out_dir, runtime_env, pytest_bin,
         print("::endgroup::")
         return 0
 
+    # Tee the child's output: to the artifact log AND to this job's stdout, so a
+    # run can be watched live. Writing only to the file (the previous behaviour)
+    # left the job log showing nothing but the command line for up to two hours,
+    # which makes a running sweep impossible to follow and an ASAN hit invisible
+    # until the artifact is downloaded.
+    asan_hits = Counter()
     with log_path.open("wb") as logf:
-        proc = subprocess.run(argv, cwd=str(tt_metal_dir), env=env,
-                              stdout=logf, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen(argv, cwd=str(tt_metal_dir), env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        pending = 0
+        for raw in proc.stdout:
+            logf.write(raw)
+            line = raw.decode("utf-8", "replace").rstrip("\n")
+            m = ASAN_LINE_RE.search(line)
+            if m:
+                asan_hits[m.group(1).strip()] += 1
+            sys.stdout.write(line + "\n")
+            # Block-buffered on a pipe, so flush periodically (and immediately on a
+            # violation) or "live" output arrives in multi-minute bursts.
+            pending += 1
+            if m is not None or pending >= 100:
+                sys.stdout.flush()
+                pending = 0
+        proc.wait()
+    sys.stdout.flush()
     print(f"rc={proc.returncode} (entry={rec['name']})")
     print("::endgroup::")
+    # Printed OUTSIDE the group so the run reads as a scannable timeline even with
+    # every entry collapsed: one line per entry saying whether it tripped anything.
+    if asan_hits:
+        detail = ", ".join(f"{c} x{n}" for c, n in asan_hits.most_common())
+        print(f"::warning::{rec['name']}: {sum(asan_hits.values())} ASAN hit(s) — {detail}")
+    else:
+        print(f"  {rec['name']}: no ASAN hits (rc={proc.returncode})")
     sys.stdout.flush()
     return proc.returncode
 

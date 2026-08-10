@@ -8,9 +8,12 @@
 # sanitizers OFF to measure a pass rate: that lane asks "does metal work?", this
 # one asks "does metal violate memory rules while working?".
 #
-# REPORT-ONLY. A finding never fails the run — the aggregate job publishes it.
-# An INVALID run does fail (see ci-asan-sweep.sh): if no entry reached the
-# emulator, "0 findings" means the lane is broken, not that the code is clean.
+# The run FAILS on any ASAN finding that is not already recorded in
+# .github/known-asan-findings.txt, and also when a shard is INVALID (reached no
+# emulator) or the sweep produced no data at all — a run that tested nothing has
+# not shown the tree is clean. Findings that ARE in the allowlist keep the run
+# green: they are already triaged and tracked, and a lane that is permanently red
+# for a known backlog gets ignored, which is worse than no lane.
 #
 # Runs at the PINNED tt-metal SHA, not main tip — a finding must be attributable
 # to a reproducible tree, and main tip would mix in API drift.
@@ -78,6 +81,8 @@ concurrency:
 env:
   # MUST equal the length of the matrix.shard list in `sweep` — round-robin
   # sharding pairs SHARD_INDEX 1..N with SHARD_COUNT=N. Change both together.
+  # Number of shards; the matrix is generated from it by the build job's `plan`
+  # step, so this is the single place to change the shard count.
   SHARD_COUNT: '6'
 
 # Inputs are resolved at the point of use (step-level `env:`), not hoisted into
@@ -90,11 +95,15 @@ jobs:
     name: Build tt-metal (pinned) against tt-emule
     runs-on: tt-ubuntu-2204-large-stable
     timeout-minutes: 180
+    # Never blocks the verdict: if the build dies there is nothing to sweep, and
+    # the report job turns that into an explicit NO DATA failure rather than a
+    # half-run that looks green.
     continue-on-error: true
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     outputs:
       pin: ${{ steps.pin.outputs.sha }}
+      shards: ${{ steps.plan.outputs.matrix }}
     steps:
       - name: Checkout tt-emule
         uses: actions/checkout@v4
@@ -147,6 +156,44 @@ jobs:
         shell: bash
         run: bash tt-emule/.github/scripts/ci-build.sh
 
+      - name: Plan shards (name each one after the suites it covers)
+        id: plan
+        env:
+          ARCH: ${{ inputs.arch || 'blackhole' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Sharding is a deterministic round-robin over the manifest's entry
+          # order, so the mapping can be computed here and used to label each job.
+          # "ASAN sweep 2/6" tells a reader nothing; "2/6 · eltwise-1, matmul,
+          # reduce" tells them what a red shard actually covered.
+          /opt/ttmlir-toolchain/venv/bin/python - <<'PLAN' >> "$GITHUB_OUTPUT"
+          import json, os, subprocess
+          n = int(os.environ["SHARD_COUNT"])
+          arch = os.environ["ARCH"]
+          out = subprocess.run(
+              ["/opt/ttmlir-toolchain/venv/bin/python",
+               "tt-emule/scripts/post_commit_sweep/sweep.py", "expand",
+               "--arch", arch,
+               "--manifest", "tt-metal/tests/pipeline_reorg/ttnn_sanity_tests.yaml"],
+              capture_output=True, text=True, check=True).stdout
+          slugs = [e["slug"] for e in json.loads(out)["entries"]]
+
+          def short(s):
+              # ttnn-eltwise-group-1 -> eltwise-1; ttnn-conv-group -> conv.
+              return s.removeprefix("ttnn-").replace("-group", "") or s
+
+          include = []
+          for i in range(1, n + 1):
+              members = [short(sl) for j, sl in enumerate(slugs) if j % n == i - 1]
+              # The i/N prefix lives in the label because `env` is not one of the
+              # contexts available in a job's `name:`.
+              include.append({"shard": i,
+                              "label": f"{i}/{n} · " + (", ".join(members) or "(empty)")})
+          print("matrix=" + json.dumps({"include": include}))
+          PLAN
+          echo "--- planned shards ---"; cat "$GITHUB_OUTPUT"
+
       - name: Stage cluster descriptors with build artifact
         shell: bash
         run: |
@@ -163,7 +210,7 @@ jobs:
           if-no-files-found: error
 
   sweep:
-    name: ASAN sweep (shard ${{ matrix.shard }}/6)
+    name: ASAN sweep ${{ matrix.label }}
     needs: build
     runs-on: tt-ubuntu-2204-xlarge-stable
     # ASAN is slower than the plain sweep: the L1 chokepoint instruments every
@@ -171,14 +218,19 @@ jobs:
     # kernel JIT cache starts cold (ASAN is in the cache key), and --forked pays
     # ~0.8s per test. Same 240min ceiling as the plain sweep, which it may need.
     timeout-minutes: 240
+    # A shard that dies (INVALID, a crash, an Actions hiccup) must not stop the
+    # others or decide the run on its own — every shard runs to completion and the
+    # report job renders one verdict over the whole set. Shard health is not lost:
+    # each shard drops a shard-<n>.ok marker only on a VALID run, and the report
+    # fails if any marker is missing.
     continue-on-error: true
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     strategy:
       fail-fast: false
       max-parallel: 2   # fleet policy: at most 2 xlarge runners at once (issue #189)
-      matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+      # Built by the `plan` step so each job is named after the suites it runs.
+      matrix: ${{ fromJSON(needs.build.outputs.shards) }}
     steps:
       - name: Checkout tt-emule
         uses: actions/checkout@v4
@@ -250,7 +302,9 @@ jobs:
     if: ${{ always() }}
     runs-on: tt-ubuntu-2204-large-stable
     timeout-minutes: 30
-    continue-on-error: true   # a parse/upload/Slack hiccup must not fail the run
+    # NOT continue-on-error: this job is the gate. parse_asan_results.py exits
+    # non-zero on a new finding or on no-data, and that has to reach the run's
+    # conclusion. The Slack step tolerates its own failures inline instead.
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     steps:
@@ -265,6 +319,26 @@ jobs:
           pattern: asan-results-shard-*-${{ github.run_id }}
           path: shard-artifacts
           merge-multiple: true
+
+      - name: Verify every shard reported
+        # The sweep jobs are continue-on-error, so a shard that died leaves no
+        # failure for the run to trip over — it just contributes no results, which
+        # would otherwise look like "that shard found nothing". Each VALID shard
+        # writes shard-<n>.ok; a missing marker means that slice of the test set
+        # never really ran, so the verdict below cannot be trusted.
+        shell: bash
+        run: |
+          set -uo pipefail
+          missing=()
+          for i in $(seq 1 "${SHARD_COUNT}"); do
+            [ -f "shard-artifacts/shard-${i}.ok" ] || missing+=("$i")
+          done
+          echo "markers found: $(ls shard-artifacts/shard-*.ok 2>/dev/null | wc -l) of ${SHARD_COUNT}"
+          if [ "${#missing[@]}" -ne 0 ]; then
+            echo "::error::Shard(s) ${missing[*]} did not complete validly — their part of the"\
+                 "test set never ran, so this run cannot be called clean. Check those shard jobs."
+            exit 1
+          fi
 
       - name: Parse findings
         id: parse
@@ -312,9 +386,17 @@ jobs:
           # being in the container; args via argv avoid shell-quoting pitfalls.
           python3 -c "
           import json, sys
-          d = json.load(open('report/headline.json'))['findings']
-          text = ('tt-emule ASAN sweep (%s): %d finding(s), %d new, %d categor(y/ies)\n%s'
-                  % (sys.argv[1], d['total'], d['new'], d['categories'], sys.argv[2]))
+          h = json.load(open('report/headline.json'))
+          arch, url = sys.argv[1], sys.argv[2]
+          if h.get('no_data'):
+              # Never post '0 findings' for a run that produced no results — that
+              # reads as a clean sweep when in fact nothing ran.
+              text = ('tt-emule ASAN sweep (%s): NO DATA — no shard produced results, '
+                      'so nothing was tested. Not a clean run.\n%s' % (arch, url))
+          else:
+              d = h['findings']
+              text = ('tt-emule ASAN sweep (%s): %d finding(s), %d new, %d categor(y/ies)\n%s'
+                      % (arch, d['total'], d['new'], d['categories'], url))
           json.dump({'text': text}, open('slack-payload.json', 'w'))
           " "$ARCH" "$url"
           curl -sf -X POST -H 'Content-Type: application/json' \
