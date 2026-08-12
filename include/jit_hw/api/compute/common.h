@@ -716,8 +716,9 @@ inline void __emule_eltwise_binary_tile(uint32_t icb0, uint32_t icb1,
                                         uint32_t itile0, uint32_t itile1,
                                         uint32_t idst) {
     const bool thin_b1 = __emule_thin_broadcast_b1(icb0, icb1);
-    const bool is_32b = __emule_compute::cb_is_32bit_format(icb0);
-    const uint32_t elem_b = __emule_compute::cb_is_32bit_format(icb1) ? 4u : 2u;
+    const bool is_32b_a = __emule_compute::cb_is_32bit_format(icb0);
+    const bool is_32b_b = __emule_compute::cb_is_32bit_format(icb1);
+    const uint32_t elem_b = is_32b_b ? 4u : 2u;
     // Operand 0 / output shape (tiny-tile aware); the DST stays the 32-strided grid
     // (index r*32+c). A thin broadcast operand is a [1,W]-style row vector replicated
     // across rows, holding n_b1 contiguous elements indexed by (r*32+c) % n_b1 (= col c).
@@ -728,32 +729,25 @@ inline void __emule_eltwise_binary_tile(uint32_t icb0, uint32_t icb1,
     const uint32_t n_b1 = __emule_compute::cb_page_size(icb1) / elem_b;
     const uint8_t* p0 = __emule_compute::cb_read_ptr_at(icb0, itile0);
     const uint8_t* p1 = __emule_compute::cb_read_ptr_at(icb1, itile1);
+    // Decode one CB element by its own format: cb_is_32bit_format read as float,
+    // else bf16. Each operand reads independently — operand 1 must not inherit
+    // operand 0's format, or a mixed bf16/fp32 pair silently mis-reads operand 1.
+    auto load = [](const uint8_t* p, uint32_t idx, bool is_32b) -> float {
+        return is_32b ? reinterpret_cast<const float*>(p)[idx]
+                      : __emule_bf16::to_f32(reinterpret_cast<const uint16_t*>(p)[idx]);
+    };
     auto apply = [](float a, float b) -> float {
         if constexpr (Op == EltwiseBinaryType::ELWADD) return a + b;
         if constexpr (Op == EltwiseBinaryType::ELWSUB) return a - b;
         return a * b;  // ELWMUL
     };
-    if (is_32b) {
-        const float* buf0 = reinterpret_cast<const float*>(p0);
-        const float* buf1 = reinterpret_cast<const float*>(p1);
-        for (uint32_t r = 0; r < th0; r++)
-            for (uint32_t c = 0; c < tw0; c++) {
-                const float a = buf0[__emule_nfaces::tile_rc_to_nfaces(r, c, th0, tw0)];
-                const float v1 = thin_b1 ? buf1[(r * 32u + c) % n_b1]
-                                         : buf1[__emule_nfaces::tile_rc_to_nfaces(r, c, th1, tw1)];
-                __emule_compute_ctx().dst[idst][r * 32u + c] = apply(a, v1);
-            }
-    } else {
-        const uint16_t* buf0 = reinterpret_cast<const uint16_t*>(p0);
-        const uint16_t* buf1 = reinterpret_cast<const uint16_t*>(p1);
-        for (uint32_t r = 0; r < th0; r++)
-            for (uint32_t c = 0; c < tw0; c++) {
-                const float a = __emule_bf16::to_f32(buf0[__emule_nfaces::tile_rc_to_nfaces(r, c, th0, tw0)]);
-                const float v1 = thin_b1 ? __emule_bf16::to_f32(buf1[(r * 32u + c) % n_b1])
-                                         : __emule_bf16::to_f32(buf1[__emule_nfaces::tile_rc_to_nfaces(r, c, th1, tw1)]);
-                __emule_compute_ctx().dst[idst][r * 32u + c] = apply(a, v1);
-            }
-    }
+    for (uint32_t r = 0; r < th0; r++)
+        for (uint32_t c = 0; c < tw0; c++) {
+            const float a = load(p0, __emule_nfaces::tile_rc_to_nfaces(r, c, th0, tw0), is_32b_a);
+            const uint32_t idx_b = thin_b1 ? ((r * 32u + c) % n_b1)
+                                           : __emule_nfaces::tile_rc_to_nfaces(r, c, th1, tw1);
+            __emule_compute_ctx().dst[idst][r * 32u + c] = apply(a, load(p1, idx_b, is_32b_b));
+        }
 }
 
 // Forward decl: format-aware CB→row-major-float reader (defined below). Lets the
