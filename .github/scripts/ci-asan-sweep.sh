@@ -14,21 +14,25 @@
 # (a violation aborts only the offending test's forked child), and the findings
 # grep + exit 1 below are the last thing this script does. An INVALID shard —
 # one that ran but reached no emulator — also exits non-zero AND withholds its
-# shard-<n>.ok marker. The marker is written on every VALID run, findings or not:
+# bucket-<id>.ok marker. The marker is written on every VALID run, findings or not:
 # it tells the report job "this slice really executed", separately from the exit
 # code, so the aggregate verdict can still distinguish a shard that found bugs
 # from one that never ran its tests.
 #
-# Required env: TT_METAL_DIR, BUILD_DIR, TT_EMULE_ARCH, SHARD_INDEX, SHARD_COUNT.
-# Optional:     OUT_DIR, MANIFEST, PYTEST_BIN, SWEEP_ONLY, ASAN_CHECKS.
+# Required env: TT_METAL_DIR, BUILD_DIR, TT_EMULE_ARCH.
+# Bucket:       BUCKET_ID, SWEEP_ONLY (the bucket's manifest entries).
+# Optional:     OUT_DIR, MANIFEST, PYTEST_BIN, ASAN_CHECKS, SHARD_INDEX/COUNT.
 
 set -uo pipefail
 
 : "${TT_METAL_DIR:?TT_METAL_DIR must be set}"
 : "${BUILD_DIR:?BUILD_DIR must be set}"
 : "${TT_EMULE_ARCH:?TT_EMULE_ARCH must be set (blackhole|wormhole)}"
-: "${SHARD_INDEX:?SHARD_INDEX must be set}"
-: "${SHARD_COUNT:?SHARD_COUNT must be set}"
+# Bucket identity. SWEEP_ONLY carries the bucket's entries, so the shard index is
+# a formality (1 of 1); BUCKET_ID names the completion marker the report checks.
+SHARD_INDEX="${SHARD_INDEX:-1}"
+SHARD_COUNT="${SHARD_COUNT:-1}"
+BUCKET_ID="${BUCKET_ID:-shard-$SHARD_INDEX}"
 
 MANIFEST="${MANIFEST:-$TT_METAL_DIR/tests/pipeline_reorg/ttnn_sanity_tests.yaml}"
 PYTEST_BIN="${PYTEST_BIN:-/opt/ttmlir-toolchain/venv/bin/pytest}"
@@ -59,15 +63,29 @@ if [ "$ASAN_CHECKS" != "all" ]; then
     echo "::notice::ASAN check subset active: '$ASAN_CHECKS' — checks outside this list will"\
          "not fire, so this run's '0 findings' only covers the listed checks."
 fi
+# Passed through from the workflow's skip-dirty-cb input (or the environment for a
+# local run). Announced because it changes what a clean result means.
+if [ -n "${TT_METAL_EMULE_ASAN_SKIP_DIRTY_CB:-}" ] && [ "${TT_METAL_EMULE_ASAN_SKIP_DIRTY_CB}" != "0" ]; then
+    echo "::notice::Dirty CB check SKIPPED for this run — every other check is on. Findings"\
+         "here are what Dirty CB would otherwise have masked; a clean result does not"\
+         "mean the CB handshakes are balanced."
+fi
 
 echo "== ci-asan-sweep.sh =="
 echo "  TT_EMULE_ARCH:  $TT_EMULE_ARCH"
 echo "  TT_METAL_DIR:   $TT_METAL_DIR"
 echo "  BUILD_DIR:      $BUILD_DIR"
 echo "  OUT_DIR:        $OUT_DIR"
-echo "  SHARD:          $SHARD_INDEX of $SHARD_COUNT"
+echo "  bucket:         $BUCKET_ID"
+echo "  entries:        ${SWEEP_ONLY:-(all)}"
 echo "  ASAN_CHECKS:    $ASAN_CHECKS"
+echo "  skip Dirty CB:  ${TT_METAL_EMULE_ASAN_SKIP_DIRTY_CB:-0}"
 echo "  JIT cache:      $TT_EMULE_JIT_CACHE_DIR"
+# Runner capacity, logged because it is the main lever on shard wall-clock: emule
+# runs a fiber-worker pool per test, so cores translate fairly directly into
+# throughput. Recorded here so a future decision to move this lane to a smaller,
+# more plentiful runner class can be made from measurements rather than guesswork.
+echo "  runner:         $(nproc) cores, $(free -g 2>/dev/null | awk '/^Mem:/{print $2"GB RAM"}') ${RUNNER_NAME:+($RUNNER_NAME)}"
 echo ""
 
 # pytest-timeout is required by the manifest cmds; pytest-forked by --asan's
@@ -140,7 +158,7 @@ PY
 )
 
 echo ""
-echo "== shard $SHARD_INDEX done =="
+echo "== bucket $BUCKET_ID done =="
 echo "  sweep rc:               $sweep_rc"
 echo "  entry logs:             $log_count"
 echo "  logs in emule mode:     $emule_mode"
@@ -173,8 +191,8 @@ fi
 # fails if any shard's marker is missing — that is how a shard that died before
 # this gate (an Actions hiccup in "Set up job") is still caught, since it leaves
 # neither a marker nor results.
-echo "shard=$SHARD_INDEX arch=$TT_EMULE_ARCH entries=$log_count findings=$findings" \
-    > "$OUT_DIR/shard-${SHARD_INDEX}.ok"
+echo "bucket=$BUCKET_ID arch=$TT_EMULE_ARCH entries=$log_count findings=$findings" \
+    > "$OUT_DIR/bucket-${BUCKET_ID}.ok"
 
 if [ "$findings" -ne 0 ]; then
     echo "::error::$findings [ASAN ERROR] line(s) in this shard's entries — see the"\

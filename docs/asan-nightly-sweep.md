@@ -106,11 +106,36 @@ per-category counts if anything fired, otherwise a plain "no ASAN hits". So the
 run reads as a scannable timeline even with every group collapsed, and hits
 surface as annotations on the run page.
 
-Shard jobs are named after the suites they cover (`ASAN sweep 2/6 · eltwise-1,
-matmul, reduce`) rather than by number alone. The mapping is computed by the
-build job's `plan` step — sharding is a deterministic round-robin over the
-manifest's entry order — and drives the job matrix, so the names cannot drift
-from what actually runs. `SHARD_COUNT` is the single place to change the count.
+## Buckets and owners
+
+The sweep is split into buckets grouped by **code owner**, not by size, so a red
+job names the team to hand it to. The table lives in
+`scripts/asan_sweep/buckets.py` and drives the job matrix directly, so the job
+names cannot drift from what actually runs.
+
+| Bucket | Owner | Entries |
+|---|---|---|
+| `eltwise` | eltwise | eltwise-1..4 |
+| `matmul-reduce-fused` | mmfusedreduce | matmul, reduce, fused-1, fused-2 |
+| `conv-sdpa` | convolutions + sdpa | conv, sdpa, indexer-score |
+| `data-movement` | ops-data-movement | data-movement |
+| `pool` | convolutions | pool |
+| `misc` | ttnn-core | misc-ops, core-ttnn-unit-test |
+
+Ownership comes from tt-metal's CODEOWNERS rules for each entry's test path.
+`matmul-reduce-fused` is kept apart from `conv-sdpa` because those teams share no
+members at all, whereas convolutions and sdpa do overlap.
+
+Sizes are uneven as a consequence: `eltwise` is ~63% of the test set and is the
+run's critical path, while `data-movement` is a few minutes. Splitting it is a
+wall-clock decision rather than an ownership one, so it stays whole for now.
+
+The `plan` step fails the build if the manifest gains an entry that no bucket
+claims. An unassigned entry would simply never be swept, and every bucket would
+still report success — coverage would shrink with nothing to show for it.
+
+The `only` dispatch input collapses the matrix to a single ad-hoc bucket, for
+iterating on one entry without paying for a whole sweep.
 
 ## Reading the report
 
@@ -131,33 +156,25 @@ masking to a single test rather than a whole file, but it does not remove it.
 
 ## Per-check selection
 
-The `asan-checks` dispatch input takes `all` or a comma-separated subset of
-`uaf, host_align, metadata, oob, padding, semaphore, cb_boundary, cb_reservation,
-noc_race, noc_align, dirty_cb, object_intent`. It becomes
-`TT_METAL_EMULE_ASAN_CHECKS` for the run. Absent, empty, or `all` means every
-check, so a run that does not set it behaves exactly as before the option existed.
+The `asan-checks` dispatch input becomes `TT_METAL_EMULE_ASAN_CHECKS` for the
+run: `all` (the default), or a comma-separated allowlist of `uaf, host_align,
+metadata, oob, padding, semaphore, cb_boundary, cb_reservation, noc_race,
+noc_align, dirty_cb, object_intent`. Absent, empty, or `all` means every check,
+so a run that does not set it behaves exactly as before the option existed.
 
-Selecting a subset is how you isolate one check when another is firing first:
-because a violation aborts the process, the loudest check hides the rest, and
-narrowing the list is more direct than reading around the noise.
+Narrowing matters because a violation aborts the process: the loudest check hides
+every other one in that test. An unrecognized name falls back to every check
+rather than to none — a typo must not be able to silence the sanitizers and report
+a clean run — and `cb_reservation` stays on even when the list names something
+else, since gating it turns an over-reserve into a silent deadlock instead of a
+clear report.
 
-Two deliberate behaviours:
-
-- **An unrecognized name falls back to every check**, not to none. A typo that
-  silently disabled the sanitizers would produce a clean report that means
-  nothing. The adapter echoes an active subset into the log so what actually ran
-  is auditable, and the run summary is only ever a statement about the checks that
-  were enabled.
-- **CB Reservation Overflow stays on even when deselected.** Gating it would turn
-  an over-reserve into a silent deadlock on the space wait instead of a clear
-  report, so it is structurally load-bearing rather than optional.
-
-The mask is parsed once on the host and armed per launch — the same path
-`cb_boundary_strict` already took — so the kernel-side checks read it out of the
-per-fiber state rather than calling `getenv` on the L1 access path. The
-name↔bit mapping is defined once, in tt-emule's
-`include/jit_hw/internal/emule_thread_ctx.h`, and consumed by both repos.
-`TT_METAL_EMULE_ASAN_SKIP_DIRTY_CB` still works as a subtractive override.
+**Skipping just Dirty CB** has its own dispatch flag, `skip-dirty-cb`, because it
+is the common case: Dirty CB is usually the check that fires first, so turning
+only it off is how you see what it was masking (that is how earlier manual sweeps
+surfaced the OOB and CB-undersize bugs underneath it). The flag sets
+`TT_METAL_EMULE_ASAN_SKIP_DIRTY_CB=1`, a subtractive override applied after the
+check list, and leaves every other check on.
 
 ## Running it locally
 

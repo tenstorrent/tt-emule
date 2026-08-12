@@ -35,16 +35,24 @@ on:
         default: blackhole
       asan-checks:
         description: >-
-          Which sanitizer checks to enable: "all", or a comma-separated subset of
-          uaf,host_align,metadata,oob,padding,semaphore,cb_boundary,
-          cb_reservation,noc_race,noc_align,dirty_cb,object_intent. Use a subset to
-          isolate one check when another fires first (a violation aborts the
-          process, so the loudest check hides the rest). An unrecognized name falls
-          back to ALL rather than to none, so a typo cannot silence the sweep.
-          cb_reservation stays on even when deselected. A subset narrows what
-          "0 findings" means, so the run summary reports the active list.
+          Which sanitizer checks to enable: "all" (default), or a comma-separated
+          subset of uaf,host_align,metadata,oob,padding,semaphore,cb_boundary,
+          cb_reservation,noc_race,noc_align,dirty_cb,object_intent. Narrowing helps
+          because a violation aborts the process, so the loudest check hides the
+          rest. An unrecognized name falls back to ALL rather than to none, so a
+          typo cannot silence the sweep; cb_reservation stays on regardless. A
+          subset narrows what "0 findings" means, so the active list is echoed
+          into the run.
         required: false
         default: all
+      skip-dirty-cb:
+        description: >-
+          Run every check EXCEPT Dirty CB. Dirty CB is usually the check that fires
+          first, so turning only it off is how you see what it was masking. Leaves
+          all other checks on; independent of asan-checks.
+        type: boolean
+        required: false
+        default: false
       only:
         description: >-
           Comma-separated entry slugs to run instead of the full set (SWEEP_ONLY)
@@ -76,12 +84,8 @@ concurrency:
   # Push runs supersede each other so branch iteration can't stack sweeps up.
   cancel-in-progress: ${{ github.event_name == 'push' }}
 
-env:
-  # MUST equal the length of the matrix.shard list in `sweep` — round-robin
-  # sharding pairs SHARD_INDEX 1..N with SHARD_COUNT=N. Change both together.
-  # Number of shards; the matrix is generated from it by the build job's `plan`
-  # step, so this is the single place to change the shard count.
-  SHARD_COUNT: '6'
+# No shard count here: the job set comes from scripts/asan_sweep/buckets.py, which
+# groups entries by code owner. Add or re-cut a bucket there.
 
 # Inputs are resolved at the point of use (step-level `env:`), not hoisted into
 # workflow-level `env` — that mirrors how every other workflow here reads them
@@ -107,6 +111,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: tt-emule
+
+      - name: Runner capacity
+        # Logged on both tiers (the shards log theirs in ci-asan-sweep.sh) so the
+        # choice of runner class for this lane stays an evidence-based one. emule
+        # is pure CPU — no Tenstorrent card is involved — so this lane can live on
+        # whatever class has the capacity for it.
+        shell: bash
+        run: |
+          echo "build runner: $(nproc) cores, $(free -g | awk '/^Mem:/{print $2}')GB RAM, ${RUNNER_NAME:-unknown}"
 
       - name: Resolve pinned tt-metal SHA
         id: pin
@@ -154,43 +167,50 @@ jobs:
         shell: bash
         run: bash tt-emule/.github/scripts/ci-build.sh
 
-      - name: Plan shards (name each one after the suites it covers)
+      - name: Plan buckets (and refuse to silently drop a new entry)
         id: plan
         env:
           ARCH: ${{ inputs.arch || 'blackhole' }}
+          ONLY: ${{ inputs.only || '' }}
         shell: bash
         run: |
           set -euo pipefail
-          # Sharding is a deterministic round-robin over the manifest's entry
-          # order, so the mapping can be computed here and used to label each job.
-          # "ASAN sweep 2/6" tells a reader nothing; "2/6 · eltwise-1, matmul,
-          # reduce" tells them what a red shard actually covered.
+          # Buckets are grouped by code owner (scripts/asan_sweep/buckets.py), so a
+          # red job names the team to hand it to. The validate() call is the point
+          # of doing this here rather than in YAML: if tt-metal adds a manifest
+          # entry no bucket claims, the sweep would still report success while
+          # quietly covering less, so that fails the build instead.
           /opt/ttmlir-toolchain/venv/bin/python - <<'PLAN' >> "$GITHUB_OUTPUT"
-          import json, os, subprocess
-          n = int(os.environ["SHARD_COUNT"])
-          arch = os.environ["ARCH"]
+          import json, os, subprocess, sys
+          sys.path.insert(0, "tt-emule/scripts/asan_sweep")
+          import buckets
           out = subprocess.run(
               ["/opt/ttmlir-toolchain/venv/bin/python",
                "tt-emule/scripts/post_commit_sweep/sweep.py", "expand",
-               "--arch", arch,
+               "--arch", os.environ["ARCH"],
                "--manifest", "tt-metal/tests/pipeline_reorg/ttnn_sanity_tests.yaml"],
               capture_output=True, text=True, check=True).stdout
           slugs = [e["slug"] for e in json.loads(out)["entries"]]
-
-          def short(s):
-              # ttnn-eltwise-group-1 -> eltwise-1; ttnn-conv-group -> conv.
-              return s.removeprefix("ttnn-").replace("-group", "") or s
-
-          include = []
-          for i in range(1, n + 1):
-              members = [short(sl) for j, sl in enumerate(slugs) if j % n == i - 1]
-              # The i/N prefix lives in the label because `env` is not one of the
-              # contexts available in a job's `name:`.
-              include.append({"shard": i,
-                              "label": f"{i}/{n} · " + (", ".join(members) or "(empty)")})
-          print("matrix=" + json.dumps({"include": include}))
+          unassigned, stale = buckets.validate(slugs)
+          if unassigned:
+              print("::error::Manifest entries belong to no bucket: "
+                    + ", ".join(unassigned)
+                    + ". Add them in scripts/asan_sweep/buckets.py — unassigned entries "
+                      "are never swept, which silently shrinks coverage.", file=sys.stderr)
+              raise SystemExit(1)
+          if stale:
+              print("::warning::Buckets claim entries the manifest no longer has: "
+                    + ", ".join(stale), file=sys.stderr)
+          only = os.environ.get("ONLY", "").strip()
+          if only:
+              # Targeted re-run: one ad-hoc bucket instead of the owner set, so a
+              # single entry can be iterated on without paying for a whole sweep.
+              m = {"include": [{"id": "adhoc", "label": f"adhoc ({only})", "only": only}]}
+          else:
+              m = buckets.matrix()
+          print("matrix=" + json.dumps(m))
           PLAN
-          echo "--- planned shards ---"; cat "$GITHUB_OUTPUT"
+          echo "--- planned buckets ---"; cat "$GITHUB_OUTPUT"
 
       - name: Stage cluster descriptors with build artifact
         shell: bash
@@ -208,7 +228,7 @@ jobs:
           if-no-files-found: error
 
   sweep:
-    name: ASAN sweep ${{ matrix.label }}
+    name: ASAN sweep · ${{ matrix.label }}
     needs: build
     runs-on: tt-ubuntu-2204-xlarge-stable
     # ASAN is slower than the plain sweep: the L1 chokepoint instruments every
@@ -276,10 +296,16 @@ jobs:
           TT_METAL_DIR: ${{ github.workspace }}/tt-metal
           BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule
           TT_EMULE_ARCH: ${{ inputs.arch || 'blackhole' }}
-          SHARD_INDEX:  ${{ matrix.shard }}
-          SHARD_COUNT:  ${{ env.SHARD_COUNT }}
+          # Each job runs its bucket's entries verbatim (SWEEP_ONLY) rather than a
+          # round-robin slice, which is what lets the job name describe what ran.
+          BUCKET_ID:    ${{ matrix.id }}
+          SWEEP_ONLY:   ${{ matrix.only }}
+          SHARD_INDEX:  1
+          SHARD_COUNT:  1
           ASAN_CHECKS:  ${{ inputs.asan-checks || 'all' }}
-          SWEEP_ONLY:   ${{ inputs.only || '' }}
+          # Subtractive override applied after ASAN_CHECKS; empty on schedule/push,
+          # which leaves Dirty CB on.
+          TT_METAL_EMULE_ASAN_SKIP_DIRTY_CB: ${{ inputs.skip-dirty-cb && '1' || '' }}
           OUT_DIR:      ${{ runner.temp }}/asan-sweep-out
         shell: bash
         run: bash tt-emule/.github/scripts/ci-asan-sweep.sh
@@ -291,7 +317,7 @@ jobs:
           # No arch in the name: one arch runs per run, and github.run_id already
           # scopes it. Keeping it out means the report job's download pattern
           # cannot silently drift out of sync with this name.
-          name: asan-results-shard-${{ matrix.shard }}-${{ github.run_id }}
+          name: asan-results-${{ matrix.id }}-${{ github.run_id }}
           path: ${{ runner.temp }}/asan-sweep-out/*
           retention-days: 30
           if-no-files-found: warn
@@ -316,7 +342,7 @@ jobs:
       - name: Download all shard results
         uses: actions/download-artifact@v4
         with:
-          pattern: asan-results-shard-*-${{ github.run_id }}
+          pattern: asan-results-*-${{ github.run_id }}
           path: shard-artifacts
           merge-multiple: true
 
@@ -326,19 +352,24 @@ jobs:
         # found nothing". Each VALID shard writes shard-<n>.ok; a missing marker
         # means that slice of the test set never really ran, so the verdict
         # below cannot be trusted.
+        env:
+          MATRIX: ${{ needs.build.outputs.shards }}
         shell: bash
         run: |
           set -uo pipefail
-          missing=()
-          for i in $(seq 1 "${SHARD_COUNT}"); do
-            [ -f "shard-artifacts/shard-${i}.ok" ] || missing+=("$i")
-          done
-          echo "markers found: $(ls shard-artifacts/shard-*.ok 2>/dev/null | wc -l) of ${SHARD_COUNT}"
-          if [ "${#missing[@]}" -ne 0 ]; then
-            echo "::error::Shard(s) ${missing[*]} did not complete validly — their part of the"\
-                 "test set never ran, so this run cannot be called clean. Check those shard jobs."
-            exit 1
-          fi
+          # Checked against the buckets the plan actually emitted, so a targeted
+          # `only` run is judged on what it was asked to run, not on all six.
+          python3 - <<'PY'
+          import json, os, sys, pathlib
+          ids = [b["id"] for b in json.loads(os.environ["MATRIX"])["include"]]
+          missing = [i for i in ids if not pathlib.Path(f"shard-artifacts/bucket-{i}.ok").is_file()]
+          print(f"markers: {len(ids) - len(missing)} of {len(ids)} bucket(s) reported in")
+          if missing:
+              print("::error::Bucket(s) " + ", ".join(missing) + " did not complete validly — "
+                    "their entries never ran, so this run cannot be called clean. "
+                    "Check those jobs.")
+              sys.exit(1)
+          PY
 
       - name: Parse findings
         id: parse
