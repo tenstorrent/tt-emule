@@ -134,10 +134,18 @@ Four pieces cooperate (all in `emulated_program_runner.cpp`, fed by the shim + a
   host-side: `append_fabric_connection_rt_args` (which runs unguarded in emule) records each connection's
   `(forwarding_direction, neighbor)` via `__emule_fabric_record_conn` (compiled only under
   `TT_METAL_USE_EMULE`) — both src-keyed (`g_conn_route`) and per connection-owner core (`g_mux_dir`, keyed
-  by the mux core's *logical* coords). The tables are **reset per op** (`execute_program_emulated` marks them
-  dirty; the next op's first record clears them) — without this, a later op that gives a chip a *different*
-  line orientation would corrupt the ordering. The signals are recovered **entirely emule-side** (no device
-  kernel is modified — emule must run the same kernel silicon runs), in precedence order:
+  by the mux core's *logical* coords). The tables are **scoped per op**: `execute_program_emulated` marks them
+  dirty and the next op's first record clears them — without this, a later op that gives a chip a *different*
+  line orientation would corrupt the ordering. Recording runs during **host program construction**, which
+  ttnn's **program cache skips on a cache hit**, so a repeated op (e.g. the 2nd `reduce_scatter` in a
+  `reduce_scatter → all_gather → reduce_scatter` stack) would otherwise never re-record and would inherit the
+  intervening op's routes — sending the ring's fabric semaphore increments the wrong way, so half the chips'
+  readers wait forever (quiescent deadlock). Because routing is a property of the program, the resolved
+  (memoized) program **snapshots** `g_conn_route`/`g_worker_dir`/`g_mux_dir` at first resolve and **restores**
+  them into the globals at every dispatch, so a cache hit reinstates its own directions. (`g_ring_adj`, the
+  static physical ring, stays globally accumulated and is not snapshotted.) The signals are recovered
+  **entirely emule-side** (no device kernel is modified — emule must run the same kernel silicon runs), in
+  precedence order:
   1. **Mux core → direction** — the *mux* path: the worker connects to a direction-specific mux core, so the
      sender carries the mux's NOC coords (`build_connection_to_fabric_endpoint`); the teleport translates
      them back to the mux's logical core and looks up the direction the mux→EDM append recorded in
@@ -257,8 +265,16 @@ silicon/CI failure; the emule harness (`scripts/run_ttnn_pytests_bh_loudbox.sh`)
   carried no route and fell back to the single physical neighbor — the wrong chip on a >2-chip mesh); and
   (2) the `PacketHeaderPool` cursor + route table are homed in the per-fiber `ThreadCommonCtx` (a fresh
   object per program launch), so the pool resets per launch like silicon's `.bss` rather than leaking the
-  cursor/route-id across ops on a persistent worker. Together these bring the sub-tile-width / row-major /
-  `WIDTH_SHARDED` gemma shapes to PCC 1.0.
+  cursor/route-id across ops on a persistent worker; and (3) the writer's barrier + `out_ready` are a
+  **bidirectional** multicast — a route of `num_connections` headers where header 0 carries the forward hop
+  count and header 1 the backward — so the route-manager `*_with_state` shims tag each header with its
+  connection index (`conn.get(i).sender.emule_conn_index = i`), letting the teleport resolve header `i` to
+  connection `i`'s direction (fwd=0 / bwd=1). Without the tag every header carries the default index 0, the
+  teleport sends both arms the same way, the peers on the other arm never get their increment, and the
+  barrier (`num_total_targets = fwd + bwd`) never fills — a quiescent deadlock on a >2-chip ring (the T3000
+  1×8 split, where only single-direction chips would otherwise clear via range-match). Together these bring
+  the sub-tile-width / row-major / `WIDTH_SHARDED` gemma shapes to PCC 1.0, and let `ttnn.all_reduce` (which
+  lowers its all-gather phase through this broadcast factory) run on the 8-chip Wormhole ring.
 - **all_to_all_dispatch** — the first consumer of the **direct 4-directional** fabric path
   (`open_direction_connections_async`). Three shims make it faithful under emule: (1) the *stateless*
   `linear::experimental::fabric_unicast/multicast_noc_unicast_atomic_inc` free functions — the portable path
@@ -268,10 +284,13 @@ silicon/CI failure; the emule harness (`scripts/run_ttnn_pytests_bh_loudbox.sh`)
   per-connection direction comes from the connection open-sequence index (above). The init barrier, per-token
   data relays, and metadata write+semaphore all land on the correct chips. `_trace` variants are
   auto-deselected under emule (trace capture needs fast dispatch).
-- **Out of emule scope (need fast dispatch):** `all_reduce`, `all_broadcast`, `all_to_all`, the MoE
-  dispatch/combine ops, fused matmul-CCL, and `all_gather`'s `subcore_grid` partition CCL/compute cores via a
-  **sub-device manager**, which `TT_FATAL`s under slow dispatch (`sub_device_manager_tracker.cpp:98`) — the
-  largest coverage gap (~35 `apc` + ~190 `nightly` configs). Every `_trace`/perf variant likewise needs fast
+- **Out of emule scope (need fast dispatch):** the canonical `all_reduce` / `all_broadcast` / `all_to_all`
+  test suites, the MoE dispatch/combine ops, fused matmul-CCL, and `all_gather`'s `subcore_grid` — all
+  partition CCL/compute cores via a **sub-device manager**, which `TT_FATAL`s under slow dispatch
+  (`sub_device_manager_tracker.cpp:98`) — the largest coverage gap (~35 `apc` + ~190 `nightly` configs).
+  (The **composite `ttnn.all_reduce`** — lowered to `reduce_scatter` + broadcast `all_gather` via
+  `all_reduce_async`, *without* a sub-device manager — is **not** in this gap: it runs under slow dispatch on
+  the 8-chip Wormhole ring, as gpt-oss's tensor-parallel reduction exercises.) Every `_trace`/perf variant likewise needs fast
   dispatch (trace capture is a fast-dispatch feature; auto-deselected under emule). `deepseek_ccl_ops` is a
   separate JIT-shim gap (`is_ncrisc`). All are CI-green on hardware.
 

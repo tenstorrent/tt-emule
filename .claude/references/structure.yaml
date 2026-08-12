@@ -309,6 +309,8 @@ files:
   - {kind: function, name: get_semaphore}
   - {kind: namespace, name: ckernel}
   - {kind: enum, name: ThreadId}
+  - {kind: function, name: __emule_mbox_arg_group}
+  - {kind: function, name: __emule_mbox_self_group}
   - {kind: function, name: mailbox_read}
   - {kind: function, name: mailbox_write}
 - path: include/jit_hw/llk_defs.h
@@ -2346,6 +2348,7 @@ files:
     not parse ComputeThreadCtx
   symbols:
   - {kind: namespace, name: tt_emule}
+  - {kind: struct, name: CoreMailbox}
   - {kind: struct, name: CoreState}
 - path: include/jit_hw/internal/emule_fiber_bridge.h
   section: include/jit_hw/internal/

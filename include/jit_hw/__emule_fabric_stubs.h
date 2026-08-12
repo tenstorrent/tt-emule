@@ -511,7 +511,15 @@ public:
     template <typename... A> void close(A&&...) {}
     template <typename... A> void close_start(A&&...) {}
     template <typename... A> void close_finish(A&&...) {}
-    ConnectionSlot& get(uint32_t i = 0) { return slots_[i & 7]; }
+    // Slot i is connection i. The teleport resolves a 1D send's destination by the sender's
+    // emule_conn_index against g_conn_route[src] (index 0 = forward, 1 = backward — the order the host
+    // records connections). Stamp it in the accessor so every route-managed send (a bidirectional
+    // broadcast multicast stamps header i through slot i) carries its connection's direction — mirroring
+    // FabricConnectionManager::get_{forward,backward}_connection, which stamp their fixed index the same way.
+    ConnectionSlot& get(uint32_t i = 0) {
+        slots_[i & 7].sender.emule_conn_index = static_cast<uint8_t>(i & 7);
+        return slots_[i & 7];
+    }
     uint8_t get_tag(uint32_t i = 0) { return slots_[i & 7].tag; }
     WorkerToFabricEdmSender& get_forward_connection() { return fwd_; }
     WorkerToFabricEdmSender& get_backward_connection() { return bwd_; }

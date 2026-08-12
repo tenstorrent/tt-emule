@@ -52,6 +52,17 @@ public:
     uint32_t   get_tile_hw()     const { return ::get_tile_hw(cb_id_); }
     DataFormat get_dataformat()  const { return ::get_dataformat(cb_id_); }
 
+    // ---- Direct tile-element read ----
+    // Read the uint32 at word `element_offset` of tile `tile_index`, from the CB's current read pointer.
+    // Silicon does this on the UNPACK thread and mailboxes the value to MATH/PACK; emule threads share host
+    // memory, so the mailbox hop collapses to a direct read. get_read_ptr() already returns the byte host
+    // address (CB memory is mmap'd below 4 GB), so — unlike silicon's fifo_rd_ptr (16 B units, needs << 4) —
+    // no shift is applied. Used by the manual_seed kernel to read the seed out of its communication CB.
+    uint32_t read_tile_value(uint32_t tile_index, uint32_t element_offset) const {
+        const uintptr_t base = static_cast<uintptr_t>(get_read_ptr()) + get_tile_size() * tile_index;
+        return reinterpret_cast<volatile uint32_t*>(base)[element_offset];
+    }
+
     // ---- Scoped lock ----
     // Returns an RAII Lock wrapping the CB region.  In emulation, the CB sync
     // operations (reserve_back / wait_front) already use mutexes, so the lock

@@ -100,6 +100,7 @@ inline void fabric_multicast_noc_unicast_write_set_state(
 template <UnicastWriteUpdateMask Mask = UnicastWriteUpdateMask::None, typename ConnMgr, typename Cmd = std::nullptr_t>
 inline void fabric_multicast_noc_unicast_write_with_state(
     ConnMgr& conn, uint8_t route_id, uint32_t src_addr, Cmd cmd = nullptr, uint16_t size = 0) {
+    // conn.get(i) stamps slot i's direction (fwd=0/bwd=1); a bidirectional multicast routes header i there.
     PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
         fabric_multicast_noc_unicast_write_with_state<Mask>(&conn.get(i).sender, hdr, src_addr, cmd, size);
     });
@@ -129,6 +130,8 @@ inline void fabric_multicast_noc_unicast_atomic_inc_set_state(
 }
 template <UnicastAtomicIncUpdateMask Mask = UnicastAtomicIncUpdateMask::None, typename ConnMgr, typename Cmd = std::nullptr_t>
 inline void fabric_multicast_noc_unicast_atomic_inc_with_state(ConnMgr& conn, uint8_t route_id, Cmd cmd = nullptr) {
+    // conn.get(i) stamps slot i's direction (fwd=0/bwd=1); a bidirectional multicast (barrier + out_ready)
+    // routes header i through connection i so each arm reaches its own peers. See docs/fabric-ccl-emulation.md.
     PacketHeaderPool::for_each_header(route_id, [&](tt::tt_fabric::PacketHeader* hdr, uint8_t i) {
         fabric_multicast_noc_unicast_atomic_inc_with_state<Mask>(&conn.get(i).sender, hdr, cmd);
     });
