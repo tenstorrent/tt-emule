@@ -60,7 +60,11 @@ chokepoint rebases unconditionally. See the per-site audit in the derisk doc.
   — returns `EMULE_SEM_BASE + id*ALIGN` (a pure offset).
 - `Semaphore` (`jit_hw/api/dataflow/noc_semaphore.h`) — stores the offset; `atom()`
   rebases `bridge_l1 + offset` directly (bypassing the sanitizer chokepoint, which
-  would otherwise trap the legitimate semaphore-region access).
+  would otherwise trap the legitimate semaphore-region access). The remote-relay
+  paths (`noc_semaphore_set_remote` / `_set_multicast[_loopback_src]`) translate
+  their local semaphore source via `__emule_sem_l1_to_ptr` for the same reason,
+  and kernel-body casts that derive from `get_semaphore` are routed there by the
+  patch pass's S1/S2 rules (see [jit-l1-patch-pass.md](jit-l1-patch-pass.md)).
 - `get_write_ptr`/`get_read_ptr` (`jit_hw/api/cb_api.h`) — the CB ring is maintained
   in host-pointer space; these subtract `bridge_l1` so the value a kernel sees is an
   offset.
