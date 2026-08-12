@@ -82,6 +82,83 @@ inline void apply_x86_rewrites(std::string& src) {
     // on tt_l1_ptr. A missed site derefs a small offset → immediate SIGSEGV at
     // the real kernel line, surfaced for a targeted rule. ----
 
+    // S1 (semaphore provenance, inline): a pointer cast whose operand IS a
+    // get_semaphore(...) call (optionally + trailing arithmetic). The address is
+    // by construction the kernel's own semaphore, which silicon addresses as
+    // plain L1, so the Illegal-Semaphore ASAN check must not fire on it — route
+    // it through __emule_sem_l1_to_ptr (skips ONLY that check, and only inside
+    // the reserved region; see jit_hw/internal/emule_l1_to_ptr.h) instead of the
+    // fully-checked chokepoint. Runs BEFORE P1/P2 so the semaphore form is
+    // claimed first; the wrapped output's two-level paren nesting is
+    // unmatchable by the one-nested-level operand classes below, so it is never
+    // re-wrapped. get_semaphore's own argument allows one nested paren level
+    // (get_semaphore(get_compile_time_arg_val(N))).
+    static const std::regex sem_inline_cast_re(
+        R"(reinterpret_cast<\s*([^>]*\*)\s*>\s*\(\s*(get_semaphore\s*\((?:[^()]|\([^()]*\))*\)(?:[^()]|\([^()]*\))*?)\s*\))");
+    src = emule_line_preserving_replace(
+        src, sem_inline_cast_re,
+        "reinterpret_cast<$1>((uintptr_t)__emule_sem_l1_to_ptr((uint32_t)($2)))");
+    // The C-style spelling of the same inline form.
+    static const std::regex sem_inline_cstyle_re(
+        R"(\(\s*([\w:][\w:\s]*\*)\s*\)\s*\(\s*(get_semaphore\s*\((?:[^()]|\([^()]*\))*\)(?:[^()]|\([^()]*\))*?)\s*\))");
+    src = emule_line_preserving_replace(
+        src, sem_inline_cstyle_re,
+        "($1)((uintptr_t)__emule_sem_l1_to_ptr((uint32_t)($2)))");
+
+    // S2 (semaphore provenance, store-then-cast): collect variables assigned
+    // from get_semaphore (plus the transitive `w = <sem-var> [...]` closure,
+    // mirroring P4's), and translate their casts via __emule_sem_l1_to_ptr — in
+    // the same three cast forms P4 rewrites, plus the tt_l1_ptr form P1 would
+    // otherwise claim (this pass runs first, so it wins). A sem var is also
+    // collected by P4 below (get_semaphore is in its producer list); that is the
+    // deliberate loud fallback: any cast form S2 doesn't know is rebased by P4
+    // through the fully-checked chokepoint and surfaces as an ASAN abort at the
+    // real kernel line, rather than silently losing the translation.
+    {
+        static const std::regex sem_var_re(
+            R"RE(\b(?:const\s+)?(?:uint32_t|auto)\s+([A-Za-z_]\w*)\s*=\s*get_semaphore\s*\()RE");
+        std::set<std::string> sem_vars;
+        for (std::sregex_iterator it(src.begin(), src.end(), sem_var_re), end; it != end; ++it) {
+            sem_vars.insert((*it)[1].str());
+        }
+        bool sem_grew = true;
+        while (sem_grew) {
+            sem_grew = false;
+            for (const auto& c : std::vector<std::string>(sem_vars.begin(), sem_vars.end())) {
+                const std::regex derived_re(
+                    R"RE(\b(?:const\s+)?(?:uint32_t|auto)\s+([A-Za-z_]\w*)\s*=\s*)RE" + c + R"RE(\b)RE");
+                for (std::sregex_iterator it(src.begin(), src.end(), derived_re), end; it != end; ++it) {
+                    if (sem_vars.insert((*it)[1].str()).second) {
+                        sem_grew = true;
+                    }
+                }
+            }
+        }
+        for (const auto& v : sem_vars) {
+            // reinterpret_cast to ANY pointer target (tt_l1_ptr, attribute-less,
+            // or a `_l1_ptr` macro type) — no P1 partition needed: S2 runs first.
+            const std::regex sem_ric_re(
+                R"RE(reinterpret_cast<\s*([^>]*\*|\w*_l1_ptr)\s*>\s*\(\s*()RE" +
+                v + R"RE(\b(?:[^()]|\([^()]*\))*?)\s*\))RE");
+            src = emule_line_preserving_replace(
+                src, sem_ric_re,
+                "reinterpret_cast<$1>((uintptr_t)__emule_sem_l1_to_ptr((uint32_t)($2)))");
+            // C-style form `(<type>*)(v [+ arith])`.
+            const std::regex sem_cstyle_re(
+                R"RE(\(\s*([\w:][\w:\s]*\*)\s*\)\s*\(\s*()RE" +
+                v + R"RE(\b(?:[^()]|\([^()]*\))*?)\s*\))RE");
+            src = emule_line_preserving_replace(
+                src, sem_cstyle_re,
+                "($1)((uintptr_t)__emule_sem_l1_to_ptr((uint32_t)($2)))");
+            // C-style form with a bare (unparenthesised) operand `(<type>*)v`.
+            const std::regex sem_cstyle_bare_re(
+                R"RE(\(\s*([\w:][\w:\s]*\*)\s*\)\s*()RE" + v + R"RE()\b)RE");
+            src = emule_line_preserving_replace(
+                src, sem_cstyle_bare_re,
+                "($1)((uintptr_t)__emule_sem_l1_to_ptr((uint32_t)($2)))");
+        }
+    }
+
     // P1: cast to a tt_l1_ptr-attributed pointer (covers one- and two-step —
     // the deref cast re-adds the attribute). Operand allows one nested-paren level.
     // The `(?!\s*&)` skips an address-of operand — a `reinterpret_cast<tt_l1_ptr

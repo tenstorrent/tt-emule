@@ -803,17 +803,29 @@ inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc,
 
 // 4-byte unicast write of a local L1 word to a remote semaphore. Silicon
 // uses write_reg_cmd_buf for this (separate cmd buffer from the data path);
-// in emule the resolver+memcpy is identical to noc_async_write of 4 bytes.
+// in emule this is the same resolver+memcpy as a 4-byte noc_async_write —
+// except the local source is BY CONTRACT a semaphore word (e.g.
+// Semaphore::relay_unicast reads our own sem), so it is translated via the
+// sanctioned-semaphore path: routing it through the checked chokepoint would
+// trip the Illegal-Semaphore ASAN check on the API's own legitimate access.
 inline void noc_semaphore_set_remote(
     uint32_t src_local_l1_addr, uint64_t dst_noc_addr, uint8_t noc = noc_index) {
-    noc_async_write(src_local_l1_addr, dst_noc_addr, sizeof(uint32_t), noc);
+    __emule_check_noc_write_alignment(src_local_l1_addr, dst_noc_addr);
+    uint8_t* src = __emule_sem_l1_to_ptr(src_local_l1_addr);
+    uint8_t* dst = __emule_resolve_noc_addr(dst_noc_addr);
+    if (!src || !dst) {
+        fprintf(stderr, "EMULE WARN: noc_semaphore_set_remote skipped (src=%p src_addr=0x%x dst=%p dst_addr=0x%llx) "
+                "[from phys (%u,%u) logical (%u,%u)]\n",
+                (void*)src, src_local_l1_addr, (void*)dst, (unsigned long long)dst_noc_addr,
+                my_x[0], my_y[0], __emule_self->core->logical_x, __emule_self->core->logical_y);
+        return;
+    }
+    std::memcpy(dst, src, sizeof(uint32_t));
     // This sets a SEMAPHORE on a remote core; a fiber there may be parked in
     // noc_semaphore_wait on it (e.g. SDPA chain relay_unicast of the data-valid
     // sem). Wake it — same wake-on-sync-write invariant as noc_semaphore_inc /
     // _set / _set_multicast (the waiter parks on the same resolved host addr).
-    if (uint8_t* d = __emule_resolve_noc_addr(dst_noc_addr)) {
-        __emule_fiber_wake(d);
-    }
+    __emule_fiber_wake(dst);
 }
 
 // Multicast a semaphore value to multiple cores.
@@ -827,13 +839,15 @@ inline void noc_semaphore_set_multicast(
         uint32_t y_start = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + 3 * NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
         uint32_t off     = static_cast<uint32_t>(dst_mcast_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
         uint32_t sem_val;
-        std::memcpy(&sem_val, __emule_local_l1_to_ptr(src_local_l1_addr), sizeof(uint32_t));
+        std::memcpy(&sem_val, __emule_sem_l1_to_ptr(src_local_l1_addr), sizeof(uint32_t));
         fprintf(stderr, "EMULE DBG: noc_semaphore_set_multicast (%u,%u)->(%u,%u) offset=0x%x val=%u num_dests=%u "
                 "[from logical (%u,%u)]\n",
                 x_start, y_start, x_end, y_end, off, sem_val, num_dests,
                 __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
-    uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
+    // Local source is a semaphore word by contract — sanctioned-semaphore
+    // translation, same reasoning as noc_semaphore_set_remote above.
+    uint8_t* src = __emule_sem_l1_to_ptr(src_local_l1_addr);
     __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t), /*include_self=*/false, noc);
 }
 
@@ -848,13 +862,15 @@ inline void noc_semaphore_set_multicast_loopback_src(
         uint32_t y_start = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + 3 * NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
         uint32_t off     = static_cast<uint32_t>(dst_mcast_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
         uint32_t sem_val;
-        std::memcpy(&sem_val, __emule_local_l1_to_ptr(src_local_l1_addr), sizeof(uint32_t));
+        std::memcpy(&sem_val, __emule_sem_l1_to_ptr(src_local_l1_addr), sizeof(uint32_t));
         fprintf(stderr, "EMULE DBG: noc_semaphore_set_multicast_loopback_src (%u,%u)->(%u,%u) offset=0x%x val=%u num_dests=%u "
                 "[from logical (%u,%u)]\n",
                 x_start, y_start, x_end, y_end, off, sem_val, num_dests,
                 __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
-    uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
+    // Local source is a semaphore word by contract — sanctioned-semaphore
+    // translation, same reasoning as noc_semaphore_set_remote above.
+    uint8_t* src = __emule_sem_l1_to_ptr(src_local_l1_addr);
     __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t), /*include_self=*/true, noc);
 }
 

@@ -2365,6 +2365,7 @@ files:
     it consumes; included by jit_kernel_stubs.hpp and dataflow_api.h (was duplicated in both). See docs/ASAN.md.
   symbols:
   - {kind: function, name: __emule_local_l1_to_ptr}
+  - {kind: function, name: __emule_sem_l1_to_ptr}
 - path: include/jit_hw/internal/emule_thread_ctx.h
   section: include/jit_hw/internal/
   summary: per-RISC fiber context (`ThreadCommonCtx`/`ComputeThreadCtx`/`DatamovementThreadCtx`) holding all formerly-global per-thread state (rt_args, cbs, dst, sfpu, pack/llk state, …); reached via `__emule_self`/`__emule_compute_ctx()`,
