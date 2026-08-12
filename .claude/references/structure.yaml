@@ -485,15 +485,23 @@ files:
   - {kind: enum, name: LRegs}
   - {kind: fwd, name: vFloat}
   - {kind: fwd, name: vInt}
+  - {kind: fwd, name: vSMag}
+  - {kind: using, name: vMag}
   - {kind: fwd, name: vUInt}
   - {kind: class, name: vFloat}
   - {kind: class, name: vInt}
+  - {kind: class, name: vSMag}
   - {kind: function, name: __emule_sfpu_finalize}
+  - {kind: function, name: __emule_sfpu_unsupported}
   - {kind: function, name: __emule_sfpu_mad}
+  - {kind: function, name: __emule_rvtt_sfpmad}
+  - {kind: macro, name: SFPMAD_MOD1_OFFSET_NONE}
+  - {kind: macro, name: __builtin_rvtt_sfpmad}
   - {kind: struct, name: vCond}
   - {kind: function, name: v_and}
   - {kind: function, name: v_or}
   - {kind: function, name: v_not}
+  - {kind: function, name: __emule_vint_to_cond}
   - {kind: function, name: __emule_sfpi_push_if}
   - {kind: function, name: __emule_sfpi_elseif}
   - {kind: function, name: __emule_sfpi_else}
@@ -511,7 +519,6 @@ files:
   - {kind: function, name: __emule_sfp_wf}
   - {kind: function, name: __emule_half_to_float_bits}
   - {kind: function, name: __emule_sfploadi}
-  - {kind: function, name: __emule_sfpu_unsupported}
   - {kind: function, name: __emule_sfp_mad}
   - {kind: function, name: __emule_sfp_addi}
   - {kind: function, name: __emule_sfp_round_ties_away}
@@ -537,12 +544,19 @@ files:
   - {kind: function, name: float_to_fp16b}
   - {kind: function, name: float_to_fp16a}
   - {kind: function, name: setsgn}
+  - {kind: function, name: copysgn}
   - {kind: struct, name: Converter}
   - {kind: enum, name: ExponentMode}
+  - {kind: enum, name: MantissaMode}
+  - {kind: enum, name: ShiftMode}
   - {kind: function, name: exexp}
+  - {kind: function, name: exexp_nodebias}
+  - {kind: function, name: exman}
+  - {kind: function, name: shft}
   - {kind: function, name: setexp}
   - {kind: function, name: addexp}
   - {kind: function, name: int32_to_float}
+  - {kind: function, name: convert}
   - {kind: function, name: abs}
   - {kind: function, name: vec_min_max}
   - {kind: function, name: vec_max_min}
@@ -554,7 +568,6 @@ files:
   - {kind: class, name: sFloat16b}
   - {kind: class, name: sFloat16a}
   - {kind: class, name: vFloat16b}
-  - {kind: function, name: convert}
   - {kind: class, name: __vCRegFloat}
   - {kind: class, name: __vCRegInt}
   - {kind: global, name: vConstFloatPrgm0}
@@ -2646,6 +2659,9 @@ files:
 - path: include/jit_hw/tt_metal/fabric/hw/inc/mesh/api.h
   section: include/jit_hw/tt_metal/fabric/hw/inc/mesh/
   summary: fabric include-path shim → `jit_hw/__emule_fabric_stubs.h` (multichip fabric out of scope)
+- path: include/jit_hw/sfpu/ckernel_sfpu_converter.h
+  section: include/jit_hw/sfpu/
+  summary: include-path shim — resolves `sfpu/ckernel_sfpu_converter.h` on emule's JIT -I set by pulling in `jit_hw/sfpi.h` (the emule sfpi shadow) instead of the per-arch silicon header.
 - path: include/jit_hw/sfpu/ckernel_sfpu_rsqrt_compat.h
   section: include/jit_hw/sfpu/
   summary: forwarder → real per-arch `sfpu/ckernel_sfpu_rsqrt_compat.h` so the metal-layer `ckernel_sfpu_sqrt.h` include resolves on emule's JIT -I set

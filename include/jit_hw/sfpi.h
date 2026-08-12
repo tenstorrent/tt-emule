@@ -110,6 +110,8 @@ enum class LRegs : uint8_t {
 
 class vFloat;
 class vInt;
+class vSMag;
+using vMag = vSMag;
 class vUInt;
 
 class vFloat {
@@ -128,6 +130,7 @@ public:
     // (__emule_compute_ctx().sfpu.mask is declared later in this header).
     vFloat(const vFloat&) = default;
     vFloat& operator=(const vFloat& o);
+    const vFloat& get() const { return *this; }
 
     vFloat& operator+=(const vFloat& o) { for (uint32_t i = 0; i < 32; ++i) v[i] += o.v[i]; return *this; }
     vFloat& operator-=(const vFloat& o) { for (uint32_t i = 0; i < 32; ++i) v[i] -= o.v[i]; return *this; }
@@ -148,6 +151,33 @@ public:
     vInt& operator-=(const vInt& o) { for (uint32_t i = 0; i < 32; ++i) v[i] -= o.v[i]; return *this; }
     vInt& operator&=(const vInt& o) { for (uint32_t i = 0; i < 32; ++i) v[i] &= o.v[i]; return *this; }
     vInt& operator|=(const vInt& o) { for (uint32_t i = 0; i < 32; ++i) v[i] |= o.v[i]; return *this; }
+    vInt& operator^=(const vInt& o) { for (uint32_t i = 0; i < 32; ++i) v[i] ^= o.v[i]; return *this; }
+    // Silicon SFPU SHFT uses the low 5 bits of the shift operand; mask to
+    // match, avoiding signed-shift UB on shifts >=32 or <0. Left-shift is
+    // done through unsigned to avoid the signed-overflow UB (see #237 review).
+    vInt& operator<<=(int shift) {
+        uint32_t s = static_cast<uint32_t>(shift) & 31u;
+        for (uint32_t i = 0; i < 32; ++i)
+            v[i] = static_cast<int32_t>(static_cast<uint32_t>(v[i]) << s);
+        return *this;
+    }
+    vInt& operator>>=(int shift) {
+        uint32_t s = static_cast<uint32_t>(shift) & 31u;
+        for (uint32_t i = 0; i < 32; ++i) v[i] >>= s;
+        return *this;
+    }
+};
+
+class vSMag {
+public:
+    std::array<int32_t, __EMULE_SFPI_LANES> v{};
+    constexpr vSMag() = default;
+    constexpr vSMag(int32_t x) { for (auto& lane : v) lane = x; }
+    operator vInt() const {
+        vInt r;
+        for (uint32_t i = 0; i < 32; ++i) r.v[i] = v[i];
+        return r;
+    }
 };
 
 
@@ -171,6 +201,8 @@ inline float __emule_sfpu_finalize(float x) {
     return x;
 }
 
+[[noreturn]] void __emule_sfpu_unsupported(const char* op);
+
 // Partially-fused multiply-add (single rounding), matching SFPMAD's contract.
 // C++ operator chains (a*b + c) round twice; ops that need the fused result
 // call this explicitly. Provided as the faithful primitive + the place the
@@ -181,6 +213,19 @@ inline vFloat __emule_sfpu_mad(const vFloat& a, const vFloat& b, const vFloat& c
     for (uint32_t i = 0; i < 32; ++i) r.v[i] = __emule_sfpu_finalize(std::fmaf(a.v[i], b.v[i], c.v[i]));
     return r;
 }
+
+inline vFloat __emule_rvtt_sfpmad(const vFloat& a, const vFloat& b, const vFloat& c, unsigned mod1) {
+    if (mod1 != 0) __emule_sfpu_unsupported("SFPMAD mod1 != 0 (NEGATE modifier not modeled)");
+    return __emule_sfpu_mad(a, b, c);
+}
+
+#ifndef SFPMAD_MOD1_OFFSET_NONE
+#define SFPMAD_MOD1_OFFSET_NONE 0
+#endif
+
+#ifndef __builtin_rvtt_sfpmad
+#define __builtin_rvtt_sfpmad(a, b, c, mod1) sfpi::__emule_rvtt_sfpmad((a), (b), (c), (mod1))
+#endif
 
 // ---- Arithmetic and comparison ops ----
 
@@ -194,7 +239,21 @@ inline vInt operator+(const vInt& a, const vInt& b) { vInt r; for (uint32_t i = 
 inline vInt operator-(const vInt& a, const vInt& b) { vInt r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] - b.v[i]; return r; }
 inline vInt operator&(const vInt& a, const vInt& b) { vInt r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] & b.v[i]; return r; }
 inline vInt operator|(const vInt& a, const vInt& b) { vInt r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] | b.v[i]; return r; }
+inline vInt operator^(const vInt& a, const vInt& b) { vInt r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] ^ b.v[i]; return r; }
 inline vInt operator-(const vInt& a) { vInt r; for (uint32_t i = 0; i < 32; ++i) r.v[i] = -a.v[i]; return r; }
+inline vInt operator<<(const vInt& a, int shift) {
+    uint32_t s = static_cast<uint32_t>(shift) & 31u;
+    vInt r;
+    for (uint32_t i = 0; i < 32; ++i)
+        r.v[i] = static_cast<int32_t>(static_cast<uint32_t>(a.v[i]) << s);
+    return r;
+}
+inline vInt operator>>(const vInt& a, int shift) {
+    uint32_t s = static_cast<uint32_t>(shift) & 31u;
+    vInt r;
+    for (uint32_t i = 0; i < 32; ++i) r.v[i] = a.v[i] >> s;
+    return r;
+}
 
 // Per-lane condition (mask) — produced by comparison operators, consumed by v_if.
 struct vCond {
@@ -225,6 +284,14 @@ inline vCond v_not(const vCond& a) { vCond r; for (uint32_t i = 0; i < 32; ++i) 
 
 
 
+inline vCond __emule_vint_to_cond(const vInt& c) {
+    vCond cond;
+    for (uint32_t i = 0; i < 32; ++i) {
+        cond.mask[i] = c.v[i] != 0;
+    }
+    return cond;
+}
+
 inline void __emule_sfpi_push_if(const vCond& c) {
     auto& f = __emule_compute_ctx().sfpu.frames[__emule_compute_ctx().sfpu.frame_depth++];
     f.outer = __emule_compute_ctx().sfpu.mask;
@@ -234,6 +301,10 @@ inline void __emule_sfpi_push_if(const vCond& c) {
     }
 }
 
+inline void __emule_sfpi_push_if(const vInt& c) {
+    __emule_sfpi_push_if(__emule_vint_to_cond(c));
+}
+
 inline void __emule_sfpi_elseif(const vCond& c) {
     auto& f = __emule_compute_ctx().sfpu.frames[__emule_compute_ctx().sfpu.frame_depth - 1];
     for (uint32_t i = 0; i < 32; ++i) {
@@ -241,6 +312,10 @@ inline void __emule_sfpi_elseif(const vCond& c) {
         __emule_compute_ctx().sfpu.mask[i] = f.outer[i] && fresh;
         f.taken[i] = f.taken[i] || c.mask[i];
     }
+}
+
+inline void __emule_sfpi_elseif(const vInt& c) {
+    __emule_sfpi_elseif(__emule_vint_to_cond(c));
 }
 
 inline void __emule_sfpi_else() {
@@ -668,6 +743,19 @@ inline vFloat setsgn(const vFloat& x, int sgn) {
     return r;
 }
 
+inline vFloat copysgn(const vFloat& magnitude, const vFloat& sign_source) {
+    vFloat r;
+    for (uint32_t i = 0; i < 32; ++i) {
+        uint32_t mag_bits;
+        uint32_t sign_bits;
+        std::memcpy(&mag_bits, &magnitude.v[i], sizeof(mag_bits));
+        std::memcpy(&sign_bits, &sign_source.v[i], sizeof(sign_bits));
+        mag_bits = (mag_bits & 0x7FFFFFFFu) | (sign_bits & 0x80000000u);
+        std::memcpy(&r.v[i], &mag_bits, sizeof(r.v[i]));
+    }
+    return r;
+}
+
 // ---- Converter helpers used by topk kernels (eps/scale as float bits) ----
 
 struct Converter {
@@ -718,6 +806,8 @@ inline vCond operator&&(const vCond& a, const vCond& b) { return v_and(a, b); }
 // Biased (raw biased exponent e); Debias/NoDebias are retained as the
 // deprecated legacy aliases so existing callers still compile.
 enum class ExponentMode { Unbiased, Biased, Debias = Unbiased, NoDebias = Biased };
+enum class MantissaMode { Fraction, ImplicitOne };
+enum class ShiftMode { Arithmetic, Logical };
 
 inline vInt exexp(const vFloat& vf, ExponentMode mode = ExponentMode::Unbiased) {
     vInt r;
@@ -725,6 +815,45 @@ inline vInt exexp(const vFloat& vf, ExponentMode mode = ExponentMode::Unbiased) 
         uint32_t b; std::memcpy(&b, &vf.v[i], 4);
         int e = static_cast<int>((b >> 23) & 0xFF);
         r.v[i] = (mode == ExponentMode::Biased) ? e : (e - 127);
+    }
+    return r;
+}
+inline vInt exexp_nodebias(const vFloat& vf) {
+    return exexp(vf, ExponentMode::NoDebias);
+}
+inline vMag exman(const vFloat& vf, MantissaMode mode = MantissaMode::Fraction) {
+    vMag r;
+    for (uint32_t i = 0; i < 32; ++i) {
+        uint32_t b;
+        std::memcpy(&b, &vf.v[i], 4);
+        uint32_t m = b & 0x7FFFFFu;
+        uint32_t e = (b >> 23) & 0xFFu;
+        if (mode == MantissaMode::ImplicitOne && e != 0) {
+            m |= 0x800000u;
+        }
+        r.v[i] = static_cast<int32_t>(m);
+    }
+    return r;
+}
+inline vInt shft(const vInt& value, const vInt& shift, ShiftMode mode = ShiftMode::Arithmetic) {
+    // Silicon SFPU SHFT uses the low 5 bits of the (signed) shift operand — an
+    // input of 32 shifts by 0 on silicon, not 31. Mask instead of clamping to
+    // stay faithful, per #237 review. Left-shift goes through unsigned to avoid
+    // signed-overflow UB on sign-bit set (e.g. value.v[i] << 31).
+    vInt r;
+    for (uint32_t i = 0; i < 32; ++i) {
+        int s = shift.v[i];
+        if (s >= 0) {
+            uint32_t ls = static_cast<uint32_t>(s) & 31u;
+            r.v[i] = static_cast<int32_t>(static_cast<uint32_t>(value.v[i]) << ls);
+        } else {
+            uint32_t rs = static_cast<uint32_t>(-s) & 31u;
+            if (mode == ShiftMode::Logical) {
+                r.v[i] = static_cast<int32_t>(static_cast<uint32_t>(value.v[i]) >> rs);
+            } else {
+                r.v[i] = value.v[i] >> rs;
+            }
+        }
     }
     return r;
 }
@@ -783,6 +912,21 @@ inline vFloat int32_to_float(const vInt& in, RoundMode = RoundMode::NearestEven)
     }
     return r;
 }
+
+template <typename ToType>
+inline ToType convert(const vSMag& in, RoundMode = RoundMode::NearestEven);
+
+template <>
+inline vFloat convert<vFloat>(const vSMag& in, RoundMode) {
+    vFloat r;
+    for (uint32_t i = 0; i < 32; ++i) {
+        uint32_t b = static_cast<uint32_t>(in.v[i]);
+        float mag = static_cast<float>(b & 0x7FFFFFFFu);
+        r.v[i] = (b & 0x80000000u) ? -mag : mag;
+    }
+    return r;
+}
+
 // abs(vFloat): clear the sign bit (SFPABS float mode).
 inline vFloat abs(const vFloat& v) {
     vFloat r;

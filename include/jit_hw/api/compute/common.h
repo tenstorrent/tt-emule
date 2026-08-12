@@ -20,6 +20,7 @@
 #include "jit_hw/internal/cb_interface.h"
 #include "jit_hw/ckernel.h"
 #include "jit_hw/ckernel_defs.h"
+#include "jit_hw/sfpi.h"
 // llk_types.h provides ckernel::DataCopyType, ckernel::DstSync,
 // ckernel::PoolType, ckernel::ReduceDim, ckernel::MathFidelity (redefinition-
 // guarded), and global UnpackToDestEn. Safe to include here — types-only,
@@ -973,6 +974,13 @@ ALWI void copy_tile(uint32_t icb, uint32_t itile, uint32_t idst) {
     __emule_dst_check(idst, "copy_tile");
     __emule_dst_mark_dirty(idst);
     __emule_unpack_cb_tile_to(icb, itile, &__emule_compute_ctx().dst[idst][0]);
+    // Retarget the SFPI window at the freshly-copied DST slot so an
+    // SFPI-modify sequence following copy_tile reads from the right tile.
+    // Both dst_base and cursor live in ComputeThreadCtx.sfpu (per-fiber) —
+    // matches #223's per-fiber state model; a bare thread_local global would
+    // race between co-scheduled fibers on the same worker (issue #243).
+    __emule_compute_ctx().sfpu.dst_base = &__emule_compute_ctx().dst[idst][0];
+    __emule_compute_ctx().sfpu.cursor = 0;
     // Datacopy preserves the source datum verbatim, so the slot's int-ness
     // follows the source CB format (consulted by eqz; see __emule_dst_holds_int).
     __emule_dst_set_int(idst, __emule_compute::cb_is_int_format(icb));
