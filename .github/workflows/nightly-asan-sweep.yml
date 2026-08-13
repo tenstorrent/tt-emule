@@ -303,12 +303,10 @@ jobs:
           SHARD_INDEX:  1
           SHARD_COUNT:  1
           ASAN_CHECKS:  ${{ inputs.asan-checks || 'all' }}
-          # ⚠️ TEMPORARY — REVERT WITH THE `push:` BLOCK ABOVE.
-          # Forced on so a push-triggered branch run skips Dirty CB. A push event
-          # carries no inputs, so the skip-dirty-cb flag cannot reach this path;
-          # dispatching (gh workflow run -f skip-dirty-cb=true) needs none of this.
-          # Restore to: ${{ inputs.skip-dirty-cb && '1' || '' }}
-          TT_METAL_EMULE_ASAN_SKIP_DIRTY_CB: '1'
+          # Driven by the skip-dirty-cb input (a checkbox in the Run workflow
+          # dialog). Subtractive override applied after ASAN_CHECKS; empty on
+          # schedule and push, which leaves Dirty CB on.
+          TT_METAL_EMULE_ASAN_SKIP_DIRTY_CB: ${{ inputs.skip-dirty-cb && '1' || '' }}
           OUT_DIR:      ${{ runner.temp }}/asan-sweep-out
         shell: bash
         run: bash tt-emule/.github/scripts/ci-asan-sweep.sh
