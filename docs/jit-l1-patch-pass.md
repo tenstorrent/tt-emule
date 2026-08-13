@@ -53,6 +53,8 @@ silently corrupting memory. Diagnose with `EMULE_JIT_DEBUG=1` + gdb (ASAN off).
 |---|-------|---------|
 | 1 | `mhartid_re` | RISC-V `csrr … mhartid` → host processor-id read |
 | 2 | `fence_re` | RISC-V `fence` → host memory barrier |
+| 2a | `sem_inline_cast_re` / `sem_inline_cstyle_re` (S1) | translate an inline `get_semaphore(...)` cast via the sanctioned-semaphore path (`__emule_sem_l1_to_ptr`) |
+| 2b | `sem_var_re` + per-var casts (S2) | set-gated closure over `get_semaphore`-assigned vars: their casts also translate via `__emule_sem_l1_to_ptr` |
 | 3 | `l1_ptr_cast_re` (P1) | translate a `tt_l1_ptr`-attributed pointer cast |
 | 4 | `l1_arg_ptr_re` | translate an attr-less cast of `get_arg_val<uint32_t>(N)` |
 | 5 | `l1_named_arg_ptr_re` | translate the Metal 2.0 `get_arg(args::NAME)` form |
@@ -68,10 +70,38 @@ silently corrupting memory. Diagnose with `EMULE_JIT_DEBUG=1` + gdb (ASAN off).
 | P1 | `include_re` | (pipeline) find quote-includes to recurse into |
 | P2 | `inc_flag_re` | (pipeline) parse `-I"…"` kernel include roots |
 
-Ordering matters: **P1 runs before the `get_arg` rules** so their output isn't
-re-wrapped; **P2/P4 carry a `(?![^>]*\btt_l1_ptr\b)` negative lookahead** so they
-never touch a cast P1 already owns (no double translation); **P4 is gated on a
-collected variable set** so it can't match arbitrary scalar casts.
+Ordering matters: **S1/S2 run before every P rule** so a semaphore-derived cast
+is claimed by the sanctioned-semaphore path first (their wrapped output's
+two-level paren nesting is unmatchable by the one-nested-level operand classes
+below, so P1/P2/P4 never re-wrap it); **P1 runs before the `get_arg` rules** so
+their output isn't re-wrapped; **P2/P4 carry a `(?![^>]*\btt_l1_ptr\b)` negative
+lookahead** so they never touch a cast P1 already owns (no double translation);
+**P4 is gated on a collected variable set** so it can't match arbitrary scalar
+casts. `get_semaphore` stays in P4's producer list deliberately: a semaphore
+cast form S2 doesn't know falls through to P4's fully-checked chokepoint and
+surfaces as a loud ASAN abort at the real kernel line, not a silent
+mistranslation.
+
+---
+
+## S1/S2 — semaphore provenance (`__emule_sem_l1_to_ptr`)
+
+A cast whose address derives from `get_semaphore()` is BY CONSTRUCTION the
+kernel's own semaphore — silicon addresses the reserved region as plain L1
+(the mcast VALID/INVALID payload read, sdpa_decode's packed-nibble poll), so
+these must not trip the Illegal-Semaphore ASAN check. S1 matches the inline
+forms (`reinterpret_cast<T*>(get_semaphore(...))` and the C-style spelling,
+operand allowing trailing arithmetic and one nested paren level inside
+`get_semaphore`'s argument — `get_semaphore(get_compile_time_arg_val(N))`);
+S2 collects `uint32_t|auto v = get_semaphore(...)` vars plus the transitive
+`w = <sem-var> […]` closure and rewrites their casts in P4's three forms plus
+the `tt_l1_ptr` form P1 would otherwise claim. Both **rewrite to**
+`(uintptr_t)__emule_sem_l1_to_ptr((uint32_t)(…))`
+(`jit_hw/internal/emule_l1_to_ptr.h`): identical translation to the chokepoint
+but skipping only the Illegal-Semaphore check, and only while the address is
+inside the reserved region — a sem-derived address that leaves the region
+(bad id, arithmetic) falls through to the full check chain. See docs/ASAN.md
+(Illegal Semaphore Access) for the check-side view.
 
 ---
 

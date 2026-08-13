@@ -278,11 +278,26 @@ Checks run in this order inside `__emule_local_l1_to_ptr`:
    verified by `atomic_semaphore_receiver.cpp` aborting with `noc_semaphore_wait`
    on the stack before this exemption. The exemption also makes the free-function
    path consistent with the `Semaphore` class path (`noc_semaphore.h`), which
-   already operates on its cached pointer without the chokepoint. The check still
-   fires on RAW derefs into the sem region (anything that bypasses the sem API and
-   flows through `__emule_local_l1_to_ptr` directly — e.g. `l1_arg_ptr` arithmetic
-   or an explicit pointer cast in a compute kernel), which is exactly what
-   `test_semaphore_write.cpp` exercises.
+   already operates on its cached pointer without the chokepoint.
+
+   **get_semaphore-derived casts are exempt by provenance.** A kernel that
+   casts its OWN `get_semaphore()` address and reads/writes the word directly
+   is legal on silicon (the reserved region is plain L1) and is a real upstream
+   idiom — the mcast VALID/INVALID payload read (matmul
+   `reader_bmm_tile_layout_in0_receiver.cpp`) and the packed-nibble reduction
+   poll (sdpa_decode `writer_decode_all.cpp`). The JIT patch pass's
+   semaphore-provenance rules (S1/S2, `tt_emule/detail/kernel_patcher.hpp`)
+   route casts whose operand textually derives from `get_semaphore` through
+   `__emule_sem_l1_to_ptr` (`internal/emule_l1_to_ptr.h`), which skips ONLY this
+   check and only while the address stays inside the region — a sem-derived
+   address that leaves the region falls through to the full check chain. The
+   semaphore API's own local-source reads (`noc_semaphore_set_remote` /
+   `_set_multicast` / `_set_multicast_loopback_src`, reached by
+   `Semaphore::relay_unicast` / `relay_multicast`) use the same translation for
+   the same reason. The check still fires on raw derefs into the sem region
+   WITHOUT semaphore provenance (a stray computed offset, an overrun from an
+   adjacent region, a raw address smuggled through a runtime arg), which is
+   what tt-metal's `test_semaphore_write.cpp` exercises.
 2. **CB Boundary Violation** — `l1_addr` inside one of the
    `__emule_cbs[i].base + cb_size` ranges. If yes, check whether the
    access page is inside the active write window
