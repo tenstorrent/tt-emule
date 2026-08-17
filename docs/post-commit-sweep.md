@@ -116,10 +116,12 @@ reports them as **excluded files** (an env gap, not an emule failure) — they a
   capped at 90 min. Hitting the cap surfaces the entry as **truncated** in the
   report (it contributes 0 to the headline).
 - Fleet policy (issue **#189** — "pr-metal-regression is DDoSing our CI
-  fleet"): the nightly runs **off-peak (02:00 UTC)**, with **6 shards at
-  `max-parallel: 2`**, behind a `concurrency` group that forbids overlapping
-  runs, every job `continue-on-error`. It deliberately trades wall-clock for a
-  gentle footprint and **never gates a merge**.
+  fleet"): the nightly runs **off-peak (04:30 UTC)**, behind a `concurrency`
+  group that forbids overlapping runs, every job `continue-on-error`. It
+  **never gates a merge**. The shards ran at `max-parallel: 2` while they were
+  on self-hosted runners, which stretched the run to roughly 5.5 hours. On the
+  hosted pool that cap no longer buys anything, so all **6 shards run at once**.
+  The 04:30 start is offset so parallel sweeps do not contend for runners.
 
 ## Reporting
 

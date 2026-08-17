@@ -5,8 +5,8 @@
 # Runs tt-metal's per-arch post-commit ttnn lane under emule at the pinned SHA
 # and reports the pass rate + failure clustering. A growing coverage metric, NOT
 # a gate — every job is continue-on-error and the run never fails a merge.
-# Off-peak + 6 shards @ max-parallel 2 + concurrency lock: a gentle fleet
-# footprint after #189 ("pr-metal-regression is DDoSing our CI fleet").
+# Off-peak + 6 shards @ max-parallel 6 + concurrency lock. #189 ("pr-metal-regression
+# is DDoSing our CI fleet") capped this at 2 while the shards ran on the on-prem fleet.
 # Blackhole only today; wormhole is a one-line matrix add (see docs).
 # See docs/post-commit-sweep.md.
 
@@ -14,7 +14,8 @@ name: Nightly Post-Commit Sweep
 
 on:
   schedule:
-    - cron: '30 3 * * *'   # 03:30 UTC daily — off-peak, ahead of the 07/08 nightlies
+    - cron: '30 4 * * *'   # 04:30 UTC daily — off-peak, ahead of the 07/08 nightlies,
+                           # and offset so parallel sweeps do not contend for runners.
   workflow_dispatch: {}
 
 concurrency:
@@ -29,7 +30,7 @@ env:
 jobs:
   build:
     name: Build tt-metal (pinned) against tt-emule main
-    runs-on: tt-ubuntu-2204-large-stable
+    runs-on: tt-gh-large
     timeout-minutes: 180
     continue-on-error: true
     container:
@@ -105,14 +106,14 @@ jobs:
   sweep:
     name: Sweep (${{ matrix.arch }}, shard ${{ matrix.shard }}/6)
     needs: build
-    runs-on: tt-ubuntu-2204-xlarge-stable
+    runs-on: tt-gh-xlarge
     timeout-minutes: 240
     continue-on-error: true
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     strategy:
       fail-fast: false
-      max-parallel: 2   # fleet policy: at most 2 xlarge runners at once (issue #189)
+      max-parallel: 6   # all shards at once: the tt-gh-xlarge pool is not the on-prem fleet
       matrix:
         arch: [blackhole]
         shard: [1, 2, 3, 4, 5, 6]
@@ -179,7 +180,7 @@ jobs:
     name: Aggregate + report (${{ matrix.arch }})
     needs: [build, sweep]
     if: ${{ always() }}
-    runs-on: tt-ubuntu-2204-large-stable
+    runs-on: tt-gh-large
     timeout-minutes: 30
     continue-on-error: true   # report-only; a parse/upload/Slack hiccup must not fail the run
     container:
