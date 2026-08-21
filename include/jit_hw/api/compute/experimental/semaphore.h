@@ -15,10 +15,10 @@
 #include <unistd.h>
 
 #include "jit_hw/internal/emule_fiber_bridge.h"  // __emule_fiber_wait / _wake (park/wake)
+#include "jit_hw/internal/emule_thread_ctx.h"    // __emule_self (bridge_l1 rebase)
 
 // get_semaphore() is defined in jit_kernel_stubs.hpp (included by all JIT
-// kernels).  It returns a uint32_t L1 address (truncated host pointer) for
-// the given semaphore ID.
+// kernels).  It returns a 0-based uint32 L1 offset for the given semaphore ID.
 
 namespace ckernel {
 
@@ -64,10 +64,13 @@ public:
     }
 
 private:
-    uintptr_t local_l1_addr_;
+    uintptr_t local_l1_addr_;  // 0-based L1 offset of the semaphore
 
     std::atomic<uint32_t>* atom() const {
-        return reinterpret_cast<std::atomic<uint32_t>*>(local_l1_addr_);
+        // Rebase the offset onto this fiber's L1 (matches the dataflow
+        // Semaphore::atom() in api/dataflow/noc_semaphore.h). Direct — not via
+        // the sanitizer chokepoint: the semaphore region is legitimate here.
+        return reinterpret_cast<std::atomic<uint32_t>*>(__emule_self->bridge_l1 + local_l1_addr_);
     }
 };
 

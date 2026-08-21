@@ -290,15 +290,56 @@ ALWI void silu_tile(uint32_t idst) {
 ALWI void silu_tile_init_pack() { silu_tile_init(); }
 ALWI void silu_tile_pack(uint32_t idst) { silu_tile(idst); }
 
-// --- sfpu_reduce — SFPU-based reduction helper; emule reduces via other paths.
-// No-op stubs let JIT compile. Upstream now calls these with non-type (enum)
-// template args, e.g. sfpu_reduce<PoolType, reduce_format, ReduceDim>(idst, ct, rt)
-// and sfpu_reduce_init<PoolType, reduce_format>(), so accept value template
-// params plus any runtime args.
-template <auto ...Vs, typename ...Args>
-ALWI void sfpu_reduce(Args...) {}
-template <auto ...Vs, typename ...Args>
-ALWI void sfpu_reduce_init(Args...) {}
+// --- sfpu_reduce — the SFPU reduce path's intra-tile collapse. Upstream
+// pre-folds cross-tile sums/maxes into DST[idst] (add_binary_tile) and calls
+// this to collapse the tile itself along reduce_dim to the canonical position
+// real silicon leaves it at (col 0 per row for REDUCE_ROW, row 0 per col for
+// REDUCE_COL), zeroing the rest — same math/layout as reduce_tile (reduce.h),
+// but in-place on DST: no CB unpack, no scaler (this path always feeds a
+// pre-summed/maxed full 32x32 tile; a device-side post-multiply, not this
+// call, applies 1/N). Real LLK: compute_kernel_api.h's calculate_reduce.
+// Only ct_dim=rt_dim=1 (single tile) is exercised by any upstream call site
+// today; multi-tile REDUCE_ROW is unimplemented.
+template <PoolType pool_type, DataFormat format>
+ALWI void sfpu_reduce_init() {}
+
+template <PoolType pool_type, DataFormat format, ReduceDim reduce_dim>
+ALWI void sfpu_reduce(uint32_t idst, uint32_t ct_dim = 1, uint32_t rt_dim = 1) {
+    __emule_dst_check(idst, "sfpu_reduce");
+    auto& dst = __emule_compute_ctx().dst[idst];
+    if constexpr (reduce_dim == ReduceDim::REDUCE_COL) {
+        float row0[32];
+        for (uint32_t c = 0; c < 32; c++) {
+            if constexpr (pool_type == PoolType::MAX) {
+                float acc = -std::numeric_limits<float>::infinity();
+                for (uint32_t r = 0; r < 32; r++) acc = std::max(acc, dst[r * 32 + c]);
+                row0[c] = acc;
+            } else {
+                float acc = 0.0f;
+                for (uint32_t r = 0; r < 32; r++) acc += dst[r * 32 + c];
+                row0[c] = acc;
+            }
+        }
+        for (uint32_t c = 0; c < 32; c++) dst[c] = row0[c];
+        for (uint32_t r = 1; r < 32; r++)
+            for (uint32_t c = 0; c < 32; c++) dst[r * 32 + c] = 0.0f;
+    } else {
+        for (uint32_t r = 0; r < 32; r++) {
+            float result;
+            if constexpr (pool_type == PoolType::MAX) {
+                float acc = -std::numeric_limits<float>::infinity();
+                for (uint32_t c = 0; c < 32; c++) acc = std::max(acc, dst[r * 32 + c]);
+                result = acc;
+            } else {
+                float acc = 0.0f;
+                for (uint32_t c = 0; c < 32; c++) acc += dst[r * 32 + c];
+                result = acc;
+            }
+            dst[r * 32] = result;
+            for (uint32_t c = 1; c < 32; c++) dst[r * 32 + c] = 0.0f;
+        }
+    }
+}
 
 // --- topk (used by ttnn.topk via reduction/topk/device/kernels/compute/topk.cpp).
 //

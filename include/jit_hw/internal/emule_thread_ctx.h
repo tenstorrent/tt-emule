@@ -109,6 +109,56 @@ struct __emule_matmul_bridge {
 // ComputeThreadCtx can hold it without pulling in the compute headers.
 enum class ReluType : uint8_t;
 
+// ---- ASAN sanitizer per-launch state (per-fiber) --------------------------
+// Every per-launch datum the ASAN checks consume. Homed here (reached via
+// __emule_self) rather than in worker-`thread_local`s so it travels with the fiber
+// on a swap: under the cooperative fiber engine many kernels multiplex onto one
+// worker, and a kernel that yields mid-body (e.g. a semaphore wait that parks the
+// fiber) would otherwise have this state clobbered by a co-scheduled fiber — the
+// check then reads the wrong program's state and false-positives (the Dirty-CB
+// cross-fiber contamination in tt-emule #241; likewise OOB / semaphore). The host
+// arms it per launch (set_sanitizer_thread_locals); the check LOGIC is unchanged,
+// only the storage location. See docs/ASAN.md.
+struct EmuleSanitizerState {
+    // Diagnostic identity (read by the [ASAN ERROR] trace + CB messages). my_x/my_y
+    // stay separate worker-thread-locals — the scheduler restores those on swap.
+    const char* kernel_name = nullptr;
+    uint32_t logical_x = 0;
+    uint32_t logical_y = 0;
+    uint8_t  processor_id = 0;
+
+    // Illegal-Semaphore reserved region + L1 OOB / padding / host-poke extents
+    // (views into host-owned per-launch snapshots; the arrays outlive the launch).
+    uint32_t sem_l1_range_start = 0;
+    uint32_t sem_l1_range_end = 0;
+    uint32_t l1_unreserved_base = 0;
+    const uint64_t* l1_tensor_ranges = nullptr;
+    uint32_t l1_tensor_ranges_count = 0;
+    const uint64_t* l1_padding_ranges = nullptr;
+    uint32_t l1_padding_ranges_count = 0;
+    const uint64_t* l1_host_ranges = nullptr;
+    uint32_t l1_host_ranges_count = 0;
+
+    // DRAM OOB extents (consumed by the host __emule_dram_ptr, called in-fiber).
+    uint32_t dram_unreserved_base = 0;
+    const uint64_t* dram_tensor_ranges = nullptr;
+    uint32_t dram_tensor_ranges_count = 0;
+
+    // CB-Boundary window counters + Dirty-CB dangling flags / call sites (per CB).
+    bool cb_boundary_strict = false;
+    uint32_t cb_reserved_pages[__EMULE_CTX_MAX_CBS] = {};
+    uint32_t cb_waited_pages[__EMULE_CTX_MAX_CBS] = {};
+    bool cb_reserve_dangling[__EMULE_CTX_MAX_CBS] = {};
+    bool cb_wait_dangling[__EMULE_CTX_MAX_CBS] = {};
+    const char* cb_reserve_file[__EMULE_CTX_MAX_CBS] = {};
+    uint32_t cb_reserve_line[__EMULE_CTX_MAX_CBS] = {};
+    const char* cb_wait_file[__EMULE_CTX_MAX_CBS] = {};
+    uint32_t cb_wait_line[__EMULE_CTX_MAX_CBS] = {};
+
+    // NoC-read-pending race counter (bumped by noc_async_read, cleared by barrier).
+    uint32_t pending_noc_reads = 0;
+};
+
 // ---- Shared base: every RISC thread ---------------------------------------
 // (Identity/handles + the cross-role CB ring pointers are migrated in here in a
 // later stage; for now it carries the kind discriminator + the per-core link.)
@@ -128,6 +178,7 @@ struct ThreadCommonCtx {
                                             // source chip when a worker co-runs fibers from
                                             // multiple chips (mesh register/run dispatch).
     uint8_t* bridge_l1 = nullptr;           // was __emule_bridge_l1
+    uint32_t l1_size = 0;                   // this core's L1 size — offset-model OOB assert bound
     uint8_t* bridge_dram = nullptr;         // was __emule_bridge_dram
     tt_emule::CBSyncState* cbs = nullptr;          // was __emule_cbs
     tt_emule::EmuleDFBInterface* dfbs = nullptr;   // was __emule_dfbs
@@ -144,14 +195,20 @@ struct ThreadCommonCtx {
     uint32_t cb_self_produce_mask = 0;            // was __emule_cb_self_produce_mask
     LocalCBInterface local_cb[__EMULE_CTX_MAX_CBS]{};  // per-RISC CB ring ptrs (was __emule_local_cb)
 
-    // Object-Intent (ASAN) per-fiber resolved-range log. Fully fiber-local: the
-    // kernel-side OOB check appends each live-tensor extent it resolved a pointer into
-    // here, and the runner diffs any snapshotted extent that was modified without being
-    // recorded (post-launch). Living in the ctx (reached via __emule_self) means a fiber
-    // swap carries it — no thread-locals, nothing for the scheduler to restore. Inactive
-    // => no recording. Capacity is ample (kernels touch <10 buffers); overflow drops the
-    // excess, biasing the post-launch diff toward false positives, never negatives.
-    // See tt-emule #241, docs/ASAN.md, and emule_sanitizers.cpp (ObjectIntentTracker).
+    // Per-fiber ASAN sanitizer state (see EmuleSanitizerState above): the
+    // semaphore/OOB/padding/host + DRAM range views, the CB-Boundary window counters +
+    // Dirty-CB dangling flags, the NoC-read counter, and the diagnostic identity. On the
+    // base because both data-movement and compute kernels flow through the L1/CB checks.
+    // Fiber-local (reached via __emule_self) so a swap carries it — no thread-locals to
+    // restore. See tt-emule #241.
+    EmuleSanitizerState san;
+
+    // Object-Intent resolved-range log: the kernel-side OOB check appends each live-tensor
+    // extent it resolved a pointer into; the runner diffs any snapshotted extent modified
+    // without being recorded (post-launch). Inactive => no recording. Overflow drops the
+    // excess, biasing the diff toward false positives (FP-safe). Kept as flat ctx fields
+    // (not inside `san`): it was already made per-fiber in #241, and folding it would break
+    // the build against tt-metal pins whose runner still names san_resolved_* directly.
     bool     san_resolved_active = false;
     uint32_t san_resolved_count = 0;
     uint64_t san_resolved_log[__EMULE_SAN_RESOLVED_CAP] = {};
@@ -221,6 +278,9 @@ struct ComputeThreadCtx : ThreadCommonCtx {
     // thread_locals; per-fiber here so co-scheduled fibers at >1 fiber/worker don't race — #243).
     bool     dst_holds_int[16] = {};         // was __emule_dst_holds_int (common_globals.h)
     float    exp_init_scale = 1.0f;          // was __emule_exp_init_scale (exp.h)
+    uint32_t remainder_divisor_bits = 0;     // remainder_tile scalars staged by remainder_tile_init (remainder.h)
+    uint32_t remainder_recip_bits = 0;
+    uint32_t fmod_divisor_bits = 0;          // fmod_tile divisor staged by fmod_tile_init (fmod.h)
     uint32_t reduce_block_ct_dim = 1;        // was __emule_reduce_block_ct_dim (reduce_custom.h)
     std::mt19937 rand_engine{};              // was __emule_rand_engine (rand.h)
     bool     rand_deterministic = false;     // was __emule_rand_deterministic

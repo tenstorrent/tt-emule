@@ -144,6 +144,15 @@ A fix can span tt-umd → tt-metal → tt-emule. Order and push mechanics matter
   submodule pointer dangles for CI.
 - **Never push without explicit go-ahead**; for tt-emule's own PR, bump
   `tt-metal-pin.txt` to the (pushed) metal fix commit, using the **full** SHA.
+- **Re-sync the vendored e2e demo on any pin bump.** The end-to-end model lane
+  (`docs/e2e-models.md`) drives an emule-vendored copy of `simple_text_demo.py`
+  at `tt-metal/tests/emule/models/test_tt_transformers_text_demo.py`, which
+  tracks upstream only as of the pin SHA in its header. When you move
+  `tt-metal-pin.txt`, re-run
+  `git show <new-pin>:models/tt_transformers/demo/simple_text_demo.py` into the
+  vendored file and re-apply its two `# emule:` markers. The demo is not in the
+  C++ regression, so this drift is otherwise uncaught until the nightly e2e lane
+  runs against the new pin.
 - **jit_hw edits need no C++ rebuild.** Shims are compiled at JIT time, so a
   jit_hw change takes effect on the next kernel compile — clear the JIT cache and
   re-run; iteration is fast.

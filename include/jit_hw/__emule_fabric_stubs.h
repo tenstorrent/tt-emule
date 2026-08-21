@@ -31,6 +31,15 @@
 
 #include "jit_hw/tt-metalium/experimental/fabric/fabric_edm_types.hpp"  // tt::tt_fabric::Topology (single def)
 #include "jit_hw/internal/emule_thread_ctx.h"  // ThreadCommonCtx + __emule_self (per-fiber conn open-seq counter)
+#include "jit_hw/internal/emule_l1_to_ptr.h"  // __emule_local_l1_to_ptr + __emule_self (offset<->host ptr)
+
+// L1 offset model: fabric L1 addresses cross the shim as 0-based offsets. Narrow a header/payload
+// host pointer to its offset (widen with __emule_local_l1_to_ptr). Not a truncation — survives worker
+// L1 mapped above 4 GB, which the old `(uint32_t)ptr` truncation does not (the >4 GB galaxy needs this).
+inline uint32_t __emule_fabric_l1_off(const volatile void* p) {
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p) -
+                                 reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
+}
 
 // Runtime teleport hooks (resolved at JIT link time to the runner symbols).
 extern "C" void __emule_fabric_teleport(const void* packet_header, const void* payload, uint32_t payload_size);
@@ -42,6 +51,11 @@ extern "C" void __emule_fabric_set_route(
 // the dst chip by direction. Set at send time by the sender (which knows its own direction).
 extern "C" void __emule_fabric_set_route_dir(
     uint32_t hdr, uint32_t conn_index, uint32_t mux_x, uint32_t mux_y);
+// Carry a stamped route from a source header address to a destination address when the header bytes are
+// copied (a worker staging a packet header into a forwarder relay slot). On silicon the routing fields ride
+// inside the header, so a byte copy carries them for free; emule keeps them in the address-keyed side-table,
+// so the copy must replicate the entry. No-op when src carries no route. See docs/fabric-ccl-emulation.md.
+extern "C" void __emule_fabric_route_follow(uint32_t src_key, uint32_t dst_key);
 
 // ProgrammableCoreType — a single GLOBAL definition guarded by the same macro noc_semaphore.h uses, so
 // there is exactly one definition regardless of include order. CCL kernels (moe_utils.hpp) reference it
@@ -147,7 +161,42 @@ struct NocUnicastAtomicIncFusedCommandHeader {
     NocUnicastAtomicIncFusedCommandHeader(uint64_t a, uint64_t s, uint32_t v, bool f = true) :
         noc_address(a), semaphore_noc_address(s), val(v), flush(f) {}
 };
+static constexpr uint8_t NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS = 2;
+struct NocUnicastScatterAtomicIncFusedCommandHeader {
+    uint64_t noc_address[NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS] = {};
+    uint64_t semaphore_noc_address;
+    uint16_t chunk_size[NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS - 1] = {};  // last chunk size is implicit
+    uint16_t val;                                                             // semaphore increment value
+    bool flush;
+    NocUnicastScatterAtomicIncFusedCommandHeader(
+        std::initializer_list<uint64_t> noc_addresses, uint64_t semaphore_noc_address,
+        std::initializer_list<uint16_t> chunk_sizes, uint16_t val, bool flush = true) :
+        semaphore_noc_address(semaphore_noc_address), val(val), flush(flush) {
+        uint32_t i = 0;
+        for (uint64_t a : noc_addresses) {
+            if (i < NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS) {
+                noc_address[i++] = a;
+            }
+        }
+        uint32_t j = 0;
+        for (uint16_t s : chunk_sizes) {
+            if (j < NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS - 1) {
+                chunk_size[j++] = s;
+            }
+        }
+    }
+};
+// Per-chunk encoding for a scatter-write packet (silicon: fabric_edm_packet_header.hpp
+// NocScatterWriteChunkEncoding — 2 bits per chunk). The teleport reads it to tell a payload write from a
+// semaphore increment on a fused scatter-write + atomic-inc.
+enum NocScatterWriteChunkEncoding : uint8_t {
+    CHUNK_ENCODING_NOP = 0,
+    CHUNK_ENCODING_UNICAST_WRITE = 1,
+    CHUNK_ENCODING_SEMINC_NO_FLUSH = 2,
+    CHUNK_ENCODING_SEMINC_FLUSH = 3,
+};
 static constexpr uint8_t NOC_SCATTER_WRITE_MAX_CHUNKS = 4;
+static constexpr uint8_t NOC_SCATTER_WRITE_MIN_CHUNKS = 2;  // matches tt_metal/fabric/fabric_edm_packet_header.hpp
 struct NocUnicastScatterCommandHeader {
     uint64_t noc_address[NOC_SCATTER_WRITE_MAX_CHUNKS] = {};
     uint16_t chunk_size[NOC_SCATTER_WRITE_MAX_CHUNKS - 1] = {};
@@ -263,6 +312,81 @@ struct PacketHeader {
             }
         }
     }
+    // Mask-aware fused unicast-write+atomic-inc patch (mirrors api_common.h populate_unicast_fused_atomic_inc
+    // _fields<UpdateMask>): layout is noc_address@0, semaphore_noc_address@8, val@16 — the same slots the
+    // NOC_FUSED_UNICAST_ATOMIC_INC teleport (runner case 3) reads back. Bits = UnicastFusedAtomicIncUpdateMask.
+    template <uint32_t MaskBits>
+    void apply_fused_fields(uint16_t payload_size, const NocUnicastAtomicIncFusedCommandHeader& h) volatile {
+        constexpr bool upd_waddr = (MaskBits & 0x1u) != 0;   // WriteDstAddr
+        constexpr bool upd_saddr = (MaskBits & 0x2u) != 0;   // SemaphoreAddr
+        constexpr bool upd_val = (MaskBits & 0x4u) != 0;     // Val
+        constexpr bool upd_psize = (MaskBits & 0x10u) != 0;  // PayloadSize (Flush=0x8 is inert — teleport is synchronous)
+        if constexpr (upd_waddr) {
+            cmd_noc_address = h.noc_address;  // @0
+        }
+        if constexpr (upd_saddr) {
+            *reinterpret_cast<volatile uint64_t*>(&cmd_rest[0]) = h.semaphore_noc_address;  // @8
+        }
+        if constexpr (upd_val) {
+            *reinterpret_cast<volatile uint32_t*>(&cmd_rest[8]) = h.val;  // @16
+        }
+        if constexpr (upd_psize) {
+            payload_size_bytes = payload_size;
+        }
+    }
+    // Mask-aware fused scatter-write + atomic-inc patch (mirrors api_common.h
+    // populate_unicast_fused_scatter_write_atomic_inc_fields<UpdateMask>). Silicon encodes this op as a
+    // NOC_UNICAST_SCATTER_WRITE packet — N unicast-write chunks + 1 semaphore-increment chunk, distinguished
+    // by the per-chunk chunk_encoding, NOT a dedicated send-type. So the layout is the scatter-write command's:
+    // noc_address[4]@0 (write dsts, then the seminc dst), chunk_size[3]@32 (write sizes, then the seminc val),
+    // chunk_count@38, chunk_encoding@39 — exactly what the NOC_UNICAST_SCATTER_WRITE teleport (runner case 4)
+    // reads back. Bits = UnicastFusedScatterWriteAtomicIncUpdateMask.
+    template <uint32_t MaskBits>
+    void apply_fused_scatter_fields(uint16_t payload_size, const NocUnicastScatterAtomicIncFusedCommandHeader& h) volatile {
+        constexpr bool upd_waddr = (MaskBits & 0x1u) != 0;   // WriteDstAddrs
+        constexpr bool upd_saddr = (MaskBits & 0x2u) != 0;   // SemaphoreDstAddr
+        constexpr bool upd_chunks = (MaskBits & 0x4u) != 0;  // WriteChunkSizes
+        constexpr bool upd_val = (MaskBits & 0x8u) != 0;     // Val
+        constexpr bool upd_flush = (MaskBits & 0x10u) != 0;  // Flush — sets the chunk encodings (init)
+        constexpr bool upd_psize = (MaskBits & 0x20u) != 0;  // PayloadSize
+        constexpr uint8_t write_chunks = NOC_SCATTER_WRITE_ATOMIC_INC_FUSED_WRITE_CHUNKS;  // 2
+        volatile uint64_t* na = reinterpret_cast<volatile uint64_t*>(this);               // noc_address[]@0
+        cmd_rest[30] = static_cast<uint8_t>(write_chunks + 1);  // @38 chunk_count = writes + the seminc (constant)
+        if constexpr (upd_waddr) {
+            for (int i = 0; i < write_chunks; ++i) {
+                na[i] = h.noc_address[i];  // write chunk dsts @0, @8
+            }
+        }
+        if constexpr (upd_saddr) {
+            na[write_chunks] = h.semaphore_noc_address;  // the seminc chunk's dst = the semaphore @16
+        }
+        if constexpr (upd_chunks) {
+            uint16_t accumulated = 0;
+            for (int i = 0; i < write_chunks - 1; ++i) {
+                *reinterpret_cast<volatile uint16_t*>(&cmd_rest[24 + i * 2]) = h.chunk_size[i];  // @32
+                accumulated = static_cast<uint16_t>(accumulated + h.chunk_size[i]);
+            }
+            // last write chunk size is implicit on silicon (remaining payload); make it explicit @34
+            *reinterpret_cast<volatile uint16_t*>(&cmd_rest[24 + (write_chunks - 1) * 2]) =
+                static_cast<uint16_t>(payload_size - accumulated);
+        }
+        if constexpr (upd_val) {
+            // seminc value packed into the seminc chunk's size slot, after the write chunks @36
+            *reinterpret_cast<volatile uint16_t*>(&cmd_rest[24 + write_chunks * 2]) = h.val;
+        }
+        if constexpr (upd_flush) {
+            uint8_t enc = 0;  // @39: 2 bits/chunk — writes = UNICAST_WRITE, last = SEMINC_(NO_)FLUSH
+            for (int i = 0; i < write_chunks; ++i) {
+                enc |= static_cast<uint8_t>(CHUNK_ENCODING_UNICAST_WRITE << (i * 2));
+            }
+            enc |= static_cast<uint8_t>((h.flush ? CHUNK_ENCODING_SEMINC_FLUSH : CHUNK_ENCODING_SEMINC_NO_FLUSH)
+                                        << (write_chunks * 2));
+            cmd_rest[31] = enc;
+        }
+        if constexpr (upd_psize) {
+            payload_size_bytes = payload_size;
+        }
+    }
     // Routing setters — emule resolves the destination chip via the cluster neighbor table, not the
     // routing fields, so these are accepted but otherwise inert.
     template <typename... A>
@@ -326,7 +450,7 @@ struct WorkerToFabricEdmSender {
 
     // Stage the payload; the subsequent header flush performs the teleport.
     void send_payload_without_header_non_blocking_from_address(uint32_t src_addr, uint32_t size) {
-        pending_payload = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(src_addr));
+        pending_payload = __emule_local_l1_to_ptr(src_addr);  // src_addr is a 0-based L1 offset
         pending_size = size;
     }
     // Header sends → teleport using any staged payload.
@@ -359,7 +483,7 @@ private:
         // Record this connection's direction signals so the teleport can resolve a 1D dst by direction.
         __emule_fabric_set_route_dir(header_addr, emule_conn_index, emule_mux_x, emule_mux_y);
         __emule_fabric_teleport(
-            reinterpret_cast<const void*>(static_cast<uintptr_t>(header_addr)), pending_payload, pending_size);
+            __emule_local_l1_to_ptr(header_addr), pending_payload, pending_size);  // header_addr is a 0-based L1 offset
         pending_payload = nullptr;
         pending_size = 0;
     }
@@ -403,60 +527,72 @@ public:
 namespace emule_route {
 enum Kind : uint32_t { UNSET = 0, UNICAST_1D = 1, UNICAST_2D = 2, MCAST_1D = 3, MCAST_2D = 4 };
 inline uint32_t key(volatile PacketHeader* hdr) {
-    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hdr));
+    return __emule_fabric_l1_off(hdr);
 }
 }  // namespace emule_route
 
-// Explicit-destination 2D unicast: worker_routing_utils' 2D branch and the 2D-header data/metadata helpers
-// in moe_utils.hpp pass (dst_chip_id, dst_mesh_id). Selected only when the caller genuinely dispatches on a
-// 2D header type — under a 1D fabric config the header types are distinct (below), so `fabric_set_line_unicast_route`
-// takes its 1D branch (the 1-arg hop-distance form) and this overload is not reached; the `EMULE_FABRIC_2D`
-// build define matches that so a 1D-config's stray 2-arg call still records a 1D distance rather than
-// mis-reading a hop count as a chip id.
-inline bool fabric_set_unicast_route(volatile PacketHeader* hdr, uint16_t a, uint16_t b) {
-#ifdef EMULE_FABRIC_2D
-    __emule_fabric_set_route(emule_route::key(hdr), emule_route::UNICAST_2D, a, b, 0, 0, 0, 0);
-#else
-    __emule_fabric_set_route(emule_route::key(hdr), emule_route::UNICAST_1D, a, 0, 0, 0, 0, 0);
-#endif
-    return true;
-}
-// Non-overload helper: stamp the 1D unicast route (distance_in_hops) for a (packet_header, distance) pair.
-// Named distinctly so it never competes with the fabric_set_unicast_route overload set.
+// Stamp the 1D unicast route (distance_in_hops) for a (packet_header, distance) pair.
 template <typename HdrT, typename DistT>
 inline void __emule_set_unicast_route_1d(HdrT&& hdr, DistT&& target_num) {
     __emule_fabric_set_route(
         emule_route::key(reinterpret_cast<volatile PacketHeader*>(hdr)),
         emule_route::UNICAST_1D, static_cast<uint32_t>(target_num), 0, 0, 0, 0, 0);
 }
-// 1D unicast: `fabric_set_unicast_route<false>(hdr, distance)` stamps UNICAST_1D. A dedicated 2-arg overload
-// loses partial ordering to this perfect-forwarding variadic, so the variadic handles the 2-arg
-// (packet_header, distance) shape — the only 2-arg call to this name. The 3-arg (dst_chip, dst_mesh) form
-// matches the non-template overload above. See docs/fabric-ccl-emulation.md.
+// Stamp the explicit-destination unicast route (packet_header, dst_chip, dst_mesh). Templated on the header
+// pointer type: under a 2D fabric config the kernel's PACKET_HEADER_TYPE is HybridMeshPacketHeader (a type
+// DERIVED from the 48B PacketHeader), so a fixed `volatile PacketHeader*` parameter would need a
+// derived-to-base conversion and LOSE overload resolution to the exact-match variadic below — silently
+// dropping the route (kind UNSET → the teleport falls back to the physical neighbor, the wrong chip on a
+// submesh line). Deducing the header type keeps it an exact match. See docs/fabric-ccl-emulation.md.
+template <typename HdrT, typename ChipT, typename MeshT>
+inline void __emule_set_unicast_route_2d(HdrT&& hdr, ChipT&& dst_chip, MeshT&& dst_mesh) {
+    const uint32_t k = emule_route::key(reinterpret_cast<volatile PacketHeader*>(hdr));
+#ifdef EMULE_FABRIC_2D
+    __emule_fabric_set_route(
+        k, emule_route::UNICAST_2D, static_cast<uint32_t>(dst_chip), static_cast<uint32_t>(dst_mesh), 0, 0, 0, 0);
+#else
+    // 1D config's stray (chip, mesh) call: record the first arg as a hop distance, not a chip id.
+    __emule_fabric_set_route(k, emule_route::UNICAST_1D, static_cast<uint32_t>(dst_chip), 0, 0, 0, 0, 0);
+#endif
+}
+// Single variadic entry for fabric_set_unicast_route — dispatching on arity avoids the overload-resolution
+// hazard that a fixed base-pointer overload has against a derived (2D) header type. worker_routing_utils'
+// 2D branch passes (hdr, dst_chip_id, dst_mesh_id) [3 args]; the 1D branch / variadic reaches
+// `fabric_set_unicast_route<false>(hdr, distance)` [2 args]. See docs/fabric-ccl-emulation.md.
 template <bool RangeHopsEnabled = false, typename... A>
 inline bool fabric_set_unicast_route(A&&... args) {
     if constexpr (sizeof...(A) == 2) {
         __emule_set_unicast_route_1d(std::forward<A>(args)...);
+    } else if constexpr (sizeof...(A) == 3) {
+        __emule_set_unicast_route_2d(std::forward<A>(args)...);
     }
     return true;
 }
 
-// Line multicast (worker_routing_utils 2D branch): start (dst_chip, dst_mesh) + per-direction hop counts.
-// 2D builds only (under 1D the union args differ — handled in 1D bring-up); the teleport walks the route
-// table for each non-zero direction and replays the terminal op to every chip in the line.
-inline void fabric_set_mcast_route(
-    volatile PacketHeader* hdr, uint16_t dst_chip, uint16_t dst_mesh, uint16_t e, uint16_t w, uint16_t n, uint16_t s) {
+// Line multicast (worker_routing_utils 2D branch): (hdr, dst_chip, dst_mesh, e, w, n, s). Single variadic
+// dispatching on arity for the same reason as fabric_set_unicast_route above — a fixed base-pointer overload
+// would lose to the variadic no-op for a derived 2D header type and drop the route. The teleport walks the
+// route table for each non-zero direction and replays the terminal op to every chip in the line.
+template <typename HdrT>
+inline void __emule_set_mcast_route_impl(
+    HdrT&& hdr, uint16_t dst_chip, uint16_t dst_mesh, uint16_t e, uint16_t w, uint16_t n, uint16_t s) {
+    const uint32_t k = emule_route::key(reinterpret_cast<volatile PacketHeader*>(hdr));
 #ifdef EMULE_FABRIC_2D
-    __emule_fabric_set_route(emule_route::key(hdr), emule_route::MCAST_2D, dst_chip, dst_mesh, e, w, n, s);
+    __emule_fabric_set_route(k, emule_route::MCAST_2D, dst_chip, dst_mesh, e, w, n, s);
 #else
     // 1D line multicast: the route_info union maps the 2D args to {dst_chip=range_hops, dst_mesh=
     // start_distance_in_hops}; the per-direction hop counts {e,w,n,s} carry which way the line multicast
     // goes (exactly one is non-zero on a line) — the teleport reads that to pick the direction, so a middle
     // chip's backward barrier resolves backward even on the (untagged) mux path.
-    __emule_fabric_set_route(emule_route::key(hdr), emule_route::MCAST_1D, dst_mesh /*start*/, dst_chip /*range*/, e, w, n, s);
+    __emule_fabric_set_route(k, emule_route::MCAST_1D, dst_mesh /*start*/, dst_chip /*range*/, e, w, n, s);
 #endif
 }
-template <typename... A> inline void fabric_set_mcast_route(A&&...) {}
+template <typename... A>
+inline void fabric_set_mcast_route(A&&... args) {
+    if constexpr (sizeof...(A) == 7) {
+        __emule_set_mcast_route_impl(std::forward<A>(args)...);
+    }
+}
 template <typename... A> inline bool fabric_set_sparse_multicast_route(A&&...) { return true; }
 template <typename... A> inline void open_connections(A&&...) {}
 template <typename... A> inline void close_connections(A&&...) {}
@@ -472,7 +608,7 @@ inline void fabric_async_write(Conn& connection_handle, Hdr* packet_header, uint
     connection_handle.wait_for_empty_write_slot();
     connection_handle.send_payload_without_header_non_blocking_from_address(src_addr, size);
     connection_handle.send_payload_flush_blocking_from_address(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(const_cast<void*>(static_cast<const volatile void*>(packet_header)))),
+        __emule_fabric_l1_off(packet_header),
         sizeof(PacketHeader));
 }
 
@@ -491,6 +627,10 @@ enum class UnicastFusedAtomicIncUpdateMask : uint32_t {
     None = 0, WriteDstAddr = 1u << 0, SemaphoreAddr = 1u << 1, Val = 1u << 2, Flush = 1u << 3,
     PayloadSize = 1u << 4, All = 31
 };
+enum class UnicastFusedScatterWriteAtomicIncUpdateMask : uint32_t {
+    None = 0, WriteDstAddrs = 1u << 0, SemaphoreDstAddr = 1u << 1, WriteChunkSizes = 1u << 2,
+    Val = 1u << 3, Flush = 1u << 4, PayloadSize = 1u << 5, All = 63
+};
 #define __EMULE_FABRIC_MASK_OR(T)                                                            \
     constexpr T operator|(T a, T b) {                                                        \
         return static_cast<T>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));          \
@@ -500,6 +640,7 @@ __EMULE_FABRIC_MASK_OR(UnicastInlineWriteUpdateMask)
 __EMULE_FABRIC_MASK_OR(UnicastAtomicIncUpdateMask)
 __EMULE_FABRIC_MASK_OR(UnicastScatterWriteUpdateMask)
 __EMULE_FABRIC_MASK_OR(UnicastFusedAtomicIncUpdateMask)
+__EMULE_FABRIC_MASK_OR(UnicastFusedScatterWriteAtomicIncUpdateMask)
 #undef __EMULE_FABRIC_MASK_OR
 
 // Experimental sub-namespaces. linear::experimental holds the fabric send free-functions CCL kernels
@@ -554,7 +695,7 @@ inline void fabric_unicast_noc_unicast_write_with_state(
     client->wait_for_empty_write_slot();
     client->send_payload_without_header_non_blocking_from_address(src_addr, hdr->payload_size_bytes);
     client->send_payload_flush_non_blocking_from_address(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hdr)), sizeof(PacketHeader));
+        __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
 }
 
 // ---- Scatter write (stateful: set_state lays the static fields once, with_state patches only the masked
@@ -583,7 +724,7 @@ inline void fabric_unicast_noc_scatter_write_with_state(
     client->wait_for_empty_write_slot();
     client->send_payload_without_header_non_blocking_from_address(src_addr, hdr->payload_size_bytes);
     client->send_payload_flush_non_blocking_from_address(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hdr)), sizeof(PacketHeader));
+        __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
 }
 
 // ---- Unicast atomic inc (no payload; the teleport increments val@8 at the dst noc address) ----
@@ -616,7 +757,70 @@ inline void fabric_unicast_noc_unicast_atomic_inc_with_state(Conn* client, Packe
     }
     client->wait_for_empty_write_slot();
     client->send_payload_flush_non_blocking_from_address(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hdr)), sizeof(PacketHeader));
+        __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
+}
+
+// ---- Fused unicast-write + atomic-inc (stateful): set_state lays the static fields (payload size, val,
+// flush) once; with_state patches the per-packet write + semaphore dst addrs and reuses the rest. The
+// teleport (runner case 3, NOC_FUSED_UNICAST_ATOMIC_INC) writes the payload then increments the semaphore. ----
+template <UnicastFusedAtomicIncUpdateMask Mask = UnicastFusedAtomicIncUpdateMask::None, typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_fused_unicast_with_atomic_inc_set_state(
+    PacketHeader* hdr, uint8_t /*num_hops*/, Cmd cmd = nullptr, uint16_t packet_size_bytes = 0) {
+    hdr->noc_send_type = NOC_FUSED_UNICAST_ATOMIC_INC;
+    if constexpr (!std::is_same_v<Cmd, std::nullptr_t>) {
+        hdr->template apply_fused_fields<static_cast<uint32_t>(Mask)>(packet_size_bytes, cmd);
+    } else if constexpr (__mask_has(Mask, UnicastFusedAtomicIncUpdateMask::PayloadSize)) {
+        hdr->payload_size_bytes = packet_size_bytes;
+    }
+}
+template <
+    UnicastFusedAtomicIncUpdateMask Mask = UnicastFusedAtomicIncUpdateMask::None,
+    typename Conn,
+    typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_fused_unicast_with_atomic_inc_with_state(
+    Conn* client, PacketHeader* hdr, uint32_t src_addr, Cmd cmd = nullptr, uint16_t packet_size_bytes = 0) {
+    if constexpr (!std::is_same_v<Cmd, std::nullptr_t>) {
+        hdr->template apply_fused_fields<static_cast<uint32_t>(Mask)>(packet_size_bytes, cmd);
+    } else if constexpr (__mask_has(Mask, UnicastFusedAtomicIncUpdateMask::PayloadSize)) {
+        hdr->payload_size_bytes = packet_size_bytes;
+    }
+    client->wait_for_empty_write_slot();
+    client->send_payload_without_header_non_blocking_from_address(src_addr, hdr->payload_size_bytes);
+    client->send_payload_flush_non_blocking_from_address(
+        __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
+}
+
+// ---- Fused scatter-write (2 chunks) + atomic-inc (stateful). Silicon encodes it as a NOC_UNICAST_SCATTER_WRITE
+// packet — 2 write chunks + a 3rd semaphore-increment chunk, tagged via per-chunk chunk_encoding — so the
+// teleport (runner case 4) does the 2 writes + the semaphore inc. set_state lays payload size / chunk sizes /
+// val / encodings; with_state patches the write + sem dsts. ----
+template <
+    UnicastFusedScatterWriteAtomicIncUpdateMask Mask = UnicastFusedScatterWriteAtomicIncUpdateMask::None,
+    typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_fused_scatter_write_atomic_inc_set_state(
+    PacketHeader* hdr, uint8_t /*num_hops*/, Cmd cmd = nullptr, uint16_t packet_size_bytes = 0) {
+    hdr->noc_send_type = NOC_UNICAST_SCATTER_WRITE;
+    if constexpr (!std::is_same_v<Cmd, std::nullptr_t>) {
+        hdr->template apply_fused_scatter_fields<static_cast<uint32_t>(Mask)>(packet_size_bytes, cmd);
+    } else if constexpr (__mask_has(Mask, UnicastFusedScatterWriteAtomicIncUpdateMask::PayloadSize)) {
+        hdr->payload_size_bytes = packet_size_bytes;
+    }
+}
+template <
+    UnicastFusedScatterWriteAtomicIncUpdateMask Mask = UnicastFusedScatterWriteAtomicIncUpdateMask::None,
+    typename Conn,
+    typename Cmd = std::nullptr_t>
+inline void fabric_unicast_noc_fused_scatter_write_atomic_inc_with_state(
+    Conn* client, PacketHeader* hdr, uint32_t src_addr, Cmd cmd = nullptr, uint16_t packet_size_bytes = 0) {
+    if constexpr (!std::is_same_v<Cmd, std::nullptr_t>) {
+        hdr->template apply_fused_scatter_fields<static_cast<uint32_t>(Mask)>(packet_size_bytes, cmd);
+    } else if constexpr (__mask_has(Mask, UnicastFusedScatterWriteAtomicIncUpdateMask::PayloadSize)) {
+        hdr->payload_size_bytes = packet_size_bytes;
+    }
+    client->wait_for_empty_write_slot();
+    client->send_payload_without_header_non_blocking_from_address(src_addr, hdr->payload_size_bytes);
+    client->send_payload_flush_non_blocking_from_address(
+        __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
 }
 
 // ---- Multicast atomic inc: emule has no real multicast; the teleport reaches the single neighbor
@@ -687,7 +891,7 @@ inline void fabric_unicast_noc_unicast_atomic_inc(
     hdr->payload_size_bytes = 0;
     client->wait_for_empty_write_slot();
     client->send_payload_flush_non_blocking_from_address(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(const_cast<PacketHeader*>(hdr))), sizeof(PacketHeader));
+        __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
 }
 // Multicast atomic-inc: stamp the MCAST_1D extent (start_distance, range) — as the *_set_state form does —
 // so the teleport replays the atomic-inc to every chip in [start, start+range), then teleport.
@@ -701,7 +905,7 @@ inline void fabric_multicast_noc_unicast_atomic_inc(
 #endif
     client->wait_for_empty_write_slot();
     client->send_payload_flush_non_blocking_from_address(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(const_cast<PacketHeader*>(hdr))), sizeof(PacketHeader));
+        __emule_fabric_l1_off(hdr), sizeof(PacketHeader));
 }
 // Route-manager (RoutingPlaneConnectionManager&, route_id, ...) overloads and the stateless write forms
 // are not reached by any emule-supported op today; the variadic no-ops below absorb them. The concrete
@@ -715,6 +919,20 @@ namespace common::experimental {}
 namespace mesh::experimental {}
 
 }  // namespace tt::tt_fabric
+
+// Real tt_metal/fabric/hw/inc/linear/api.h does `using namespace tt::tt_fabric::common::experimental;`
+// at file scope before entering tt::tt_fabric::linear::experimental, which is what makes callers like
+// multicast_common.hpp reference UnicastWriteUpdateMask/UnicastScatterWriteUpdateMask/
+// NocUnicastScatterCommandHeader/etc. unqualified. Mirror that with narrow using-declarations (not a
+// blanket `using namespace tt::tt_fabric`) — this namespace also holds this shim's own
+// eth_chan_directions, which collides with the real global one (hostdevcommon/fabric_common.h) that
+// other kernels (e.g. moe_utils.hpp) already reference unqualified.
+using tt::tt_fabric::NOC_SCATTER_WRITE_MAX_CHUNKS;
+using tt::tt_fabric::NOC_SCATTER_WRITE_MIN_CHUNKS;
+using tt::tt_fabric::NocUnicastScatterCommandHeader;
+using tt::tt_fabric::UnicastWriteUpdateMask;
+using tt::tt_fabric::UnicastScatterWriteUpdateMask;
+using tt::tt_fabric::UnicastAtomicIncUpdateMask;
 
 // --- PACKET_HEADER_TYPE + global FabricConnectionManager ---
 // Silicon exposes PACKET_HEADER_TYPE at global scope; keep that. It is the header type the fabric config
@@ -795,9 +1013,9 @@ public:
 // ---- PacketHeaderPool ----
 // NOTE: PacketHeaderPool is defined in the `tt_metal/fabric/hw/inc/packet_header_pool.h` shadow (NOT
 // here). It must hand out pointers into the worker's real L1 reserved region (via
-// __emule_local_l1_to_ptr) so the (uint32_t)header truncation the teleport relies on round-trips —
-// .so static storage lives above 4 GB and would truncate to garbage. The shadow includes dev_mem_map.h
-// for the reserved MEM_PACKET_HEADER_POOL_BASE region, which this stub cannot reach.
+// __emule_local_l1_to_ptr) so the fabric shim's bridge_l1-relative header narrowing round-trips
+// through the teleport. The shadow includes dev_mem_map.h for the reserved MEM_PACKET_HEADER_POOL_BASE
+// region, which this stub cannot reach.
 struct HeaderTableEntry_t {
     PACKET_HEADER_TYPE* first = nullptr;
     PACKET_HEADER_TYPE* second = nullptr;

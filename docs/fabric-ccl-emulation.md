@@ -42,8 +42,11 @@ teleport. That host-side destination resolution (below) is the bulk of the fabri
 
 ## Inter-chip addressing — the foundation
 
-Each `SWEmuleChip` owns its **own** low-4 GB (`MAP_32BIT`-style) L1 mapping, so a kernel's 32-bit L1 address
-truncates to a valid host pointer — the property the whole teleport relies on. The corollary: the *same* L1
+Each `SWEmuleChip` owns its **own** L1 mapping. A kernel's 32-bit L1 address is a **0-based offset**; the
+fabric shim narrows a header/payload pointer to its offset and the teleport widens it back with
+`__emule_local_l1_to_ptr` onto the destination fiber's L1. It does **not** truncate the host pointer — the
+offset survives worker L1 mapped above 4 GB, which a >8-chip galaxy requires (an earlier design relied on the
+low-4 GB truncation being lossless; the offset model removes that ceiling). The corollary: the *same* L1
 offset is a *different* host pointer on each chip, so cross-chip delivery is fundamentally a "find the right
 chip's copy of this (core, offset)" problem. Two runtime hooks bridge it
 (`tt_metal/impl/emulation/emulated_program_runner.cpp`):
@@ -55,12 +58,6 @@ chip's copy of this (core, offset)" problem. Two runtime hooks bridge it
   worker to the right physical core on the destination chip; DRAM/ETH coordinates are taken verbatim
   (identical across chips — translating them would collapse distinct banks). Worker offsets are masked to the
   per-core L1 slot.
-- **`__emule_chip_relative_l1(p)`** — called from the semaphore chokepoint `__emule_sem_atomic`. A *global
-  semaphore* (created once, shared across the mesh) reaches a kernel as a single absolute host pointer valid
-  for only one chip's mapping; a worker on another chip spinning on it must hit *its own* chip's copy. This
-  remaps `(core, offset)` to the current chip. It is **faithful** — identical effect to silicon, where every
-  chip backs the same offset with its own L1 — and **inherent** to the per-chip-mapping model, not a hack
-  (tracked as workaround DM-1 only because it is a non-obvious bridge).
 
 ## The teleport
 
@@ -77,6 +74,10 @@ chip's copy of this (core, offset)" problem. Two runtime hooks bridge it
    - `2 NOC_UNICAST_ATOMIC_INC` — `fetch_add` (the CCL handshake counter).
    - `3 NOC_FUSED_UNICAST_ATOMIC_INC` — a payload write **and** a separate semaphore `fetch_add` (wakes both).
    - `4 NOC_UNICAST_SCATTER_WRITE` — per-chunk writes to several dst addresses.
+   - `8 NOC_FUSED_SCATTER_WRITE_ATOMIC_INC` — a 2-chunk scatter write **and** a semaphore `fetch_add` (the
+     fused reduce_scatter packet). Silicon folds the semaphore into a 3rd scatter chunk on send-type `4`;
+     emule tags it with a dedicated internal send-type (multicast already isn't wire-faithful at `5/6`) so
+     the delivery is a clean compose of the case-4 writes and the case-3 increment.
    - **multicast** (`5/6`, a line/range routing) — emule expresses it as the resolved target *list* and
      replays the same terminal command (write or atomic-inc) into each chip in the range. This is the CCL
      barrier broadcast.
@@ -109,18 +110,25 @@ Four pieces cooperate (all in `emulated_program_runner.cpp`, fed by the shim + a
 - **Per-send route metadata** — the kernel's route setters (`fabric_set_unicast_route` /
   `fabric_set_mcast_route`, shimmed) record each send's intent via `__emule_fabric_set_route`, keyed by the
   packet-header's L1 address (stable and identical between the shim's write and the teleport's read). Kinds:
-  `UNICAST_2D` (explicit `dst_dev`/`dst_mesh`), `UNICAST_1D` (hop distance), `MCAST_1D` (start + range).
+  `UNICAST_2D` (explicit `dst_dev`/`dst_mesh`), `MCAST_2D` (per-direction `{e,w,n,s}` hop counts), `UNICAST_1D`
+  (hop distance), `MCAST_1D` (start + range).
   emule gives the 1D (`LowLatencyPacketHeader`) and 2D (`HybridMesh`/`UDMHybridMesh`) packet-header C++ types
   **distinct** definitions — the 2D variants are empty-derived from the base with the identical 48B layout —
   and selects `PACKET_HEADER_TYPE` from the build-time `EMULE_FABRIC_2D` define. So the kernel's `if constexpr`
-  type dispatch (`worker_routing_utils`' `fabric_set_line_unicast_route`, moe_utils' portable send helpers)
-  picks the branch that matches the fabric config, exactly as silicon does: under a 1D fabric the hop-distance
-  branch — `fabric_set_unicast_route<false>(hdr, distance)` → `UNICAST_1D`; under 2D the explicit-destination
-  branch — `fabric_set_unicast_route(hdr, dst_chip, dst_mesh)` → `UNICAST_2D` (the teleport resolves the exact
-  physical chip). The 1D-distance shim is reached through the variadic overload — a dedicated 2-arg overload
-  loses partial ordering to the library's perfect-forwarding pack — so the variadic recognises the
-  `(packet_header, distance)` shape and stamps `UNICAST_1D`.
-  (`fabric_set_mcast_route` keys its 1D-vs-2D mapping off `EMULE_FABRIC_2D` directly.)
+  type dispatch (`worker_routing_utils`' `fabric_set_line_unicast_route` / `fabric_set_line_multicast_route`,
+  moe_utils' portable send helpers) picks the branch that matches the fabric config, exactly as silicon does:
+  under a 1D fabric the hop-distance branch — `fabric_set_unicast_route<false>(hdr, distance)` → `UNICAST_1D`;
+  under 2D the explicit-destination branch — `fabric_set_unicast_route(hdr, dst_chip, dst_mesh)` → `UNICAST_2D`
+  and `fabric_set_mcast_route(hdr, dst_chip, dst_mesh, e, w, n, s)` → `MCAST_2D` (the teleport resolves the
+  exact physical chip / line members).
+  **The route-setter shims dispatch on *arity*, not on a fixed header-pointer parameter type.** This matters
+  because the 2D header is *derived* from the base 48B `PacketHeader`: a shim overload taking a fixed
+  `volatile PacketHeader*` would require a derived→base conversion for a 2D `HybridMeshPacketHeader*` argument
+  and therefore **lose** overload resolution to the exact-match variadic catch-all — silently dropping the
+  route (kind `UNSET`), so the teleport falls back to the single physical neighbor (the wrong chip on a
+  submesh line, → a quiescent barrier deadlock). Folding both the 1D `(hdr, distance)` [2-arg] and 2D
+  `(hdr, dst_chip, dst_mesh)` [3-arg] / `(hdr, dst_chip, dst_mesh, e, w, n, s)` [7-arg] shapes into one
+  arity-dispatched variadic per setter keeps every header type an exact match, so the route is always stamped.
 - **Per-connection direction** — for 1D the dst chip is bound to the *connection* (which ethernet channel it
   opened on), information that lives in the firmware connection table emule skips. emule reconstructs it
   host-side: `append_fabric_connection_rt_args` (which runs unguarded in emule) records each connection's
@@ -169,9 +177,17 @@ Kernels are intercepted at the worker→fabric-client boundary, not the router. 
   `WorkerToFabricEdmSender` subclass: it teleports directly, so the mux relay is collapsed away.
 - **`PacketHeaderPool`** (`tt_metal/fabric/hw/inc/packet_header_pool.h`) — hands out header storage from the
   reserved L1 region via `__emule_local_l1_to_ptr`, so a header lives in the running fiber's **real** worker
-  L1. This is required: the kernel passes `(uint32_t)header` to the sender and the teleport re-extends that
-  `uint32` to a host pointer, and only L1-backed pointers survive the truncation. Partitioned per RISC by
-  `__emule_self->processor_id`.
+  L1 (kernels dereference `header->field`). The kernel/shim narrows `(uint32_t)header` to that header's
+  **0-based L1 offset** (`ptr - bridge_l1`); the teleport re-widens it with `__emule_local_l1_to_ptr`. The
+  shim's `key()` hands that **0-based offset** to `set_route`; the **runner** (companion tt-metal#49821,
+  `emule_route_key`) widens it back to the header's **full host pointer** (`bridge_l1 + offset`) to key the
+  route table — unique per *(chip, core, offset)*. The offset alone is **both** chip- and core-agnostic
+  (0-based within every core's L1), so an offset key — even chip-qualified — collides across cores of one
+  chip (one core's route overwriting another's → wrong-chip delivery → PCC fail / a fiber waiting on an
+  atomic-inc that lands elsewhere → deadlock); the full host pointer restores the per-core uniqueness the
+  old truncated-pointer key had, untruncated so it survives worker L1 mapped above 4 GB (the key is
+  host-side runner state, never a kernel/L1 value). Set and read run on the same fiber → same `bridge_l1`
+  → same key. Partitioned per RISC by `__emule_self->processor_id`.
   - **Per-fiber allocation state:** the allocation cursor and route table (`phdr_cursor` / `phdr_route_*`)
     live in the running fiber's `ThreadCommonCtx`, which the runner allocates fresh per program launch. That
     makes the pool reset per launch — mirroring silicon, where each program gets a fresh pool (zeroed kernel
@@ -217,7 +233,11 @@ silicon/CI failure; the emule harness (`scripts/run_ttnn_pytests_bh_loudbox.sh`)
   configs — **Linear** and **Ring**, both impls, multi-worker / multi-link, including the sub-tile-width /
   row-major / `WIDTH_SHARDED` gemma shapes (`test_all_gather_failing_shapes`, `test_all_gather_broken`); and
   `reduce_scatter` **16/16** (Linear + Ring, PCC ~1.0). On `box/nightly`, `all_gather` is **54/54** and the
-  2D + `minimal_*` suites are green. n300/p300 2-chip CCL stays green (the subsumed degenerate path).
+  2D + `minimal_*` suites are green. The **DRAM-resident** `FABRIC_2D` / fabric-MUX configs
+  (`all_gather_2d_fabric[_turning]`, `reduce_scatter_2d_fabric`, `minimal_all_gather_async`,
+  `minimal_reduce_scatter_async`) are green too — they exercise the arity-dispatched 2D route setters that
+  stamp the barrier atomic-inc's route for the derived `HybridMeshPacketHeader`. n300/p300 2-chip CCL stays
+  green (the subsumed degenerate path).
 - **Direction resolution** — a 1D send's direction comes from the mux-core → direction lookup (`g_mux_dir`;
   the sender carries the mux's NOC coords, the teleport translates them back), with range-matching as a
   fallback. Routes and atomic-incs resolve to the correct chips (e.g. `src=1 →N→ 5`, `src=5 →S→ 1`;
@@ -257,15 +277,21 @@ silicon/CI failure; the emule harness (`scripts/run_ttnn_pytests_bh_loudbox.sh`)
 
 ## Other limits & notes
 
-- **DRAM-resident CCL** — the canonical DRAM `point_to_point` shapes hit a pre-existing DRAM bank-view
-  collapse in `__emule_resolve_noc_addr` (distinct DRAM noc-addrs alias one backing), independent of the
-  fabric path (which is bit-exact for L1).
+- **DRAM-resident CCL** — faithful on both fabric paths. The 2-chip *direct* path is bit-exact after the
+  DRAM bank-view fix in the fabric address recompose (`safe_get_noc_addr` no longer applies the 2 MB
+  worker-slot mask to DRAM addresses). The 8-chip loudbox `FABRIC_2D` / fabric-MUX DRAM configs
+  (`all_gather_2d_fabric[_turning]`, `reduce_scatter_2d_fabric`, `minimal_all_gather_async`,
+  `minimal_reduce_scatter_async`) run without deadlock once the 2D route setters stamp the route for the
+  derived `HybridMeshPacketHeader` (the arity-dispatch fix above) — before it, the unstamped barrier
+  atomic-inc fell back to the physical neighbor (the other mesh row, outside the collective's submesh line),
+  so the consumer's barrier semaphore was never incremented and every fiber parked.
 - **Inert value-divergent stubs** — `get_fabric_max_packet_size()`→4096, `get_next_hop_router_direction`→EAST,
   `eth_chan_to_noc_xy` zeroed. Not load-bearing: the teleport resolves the destination from the control plane
   and the per-connection record, never from the kernel's (firmware-skipped) routing-table reads.
-- **Scaling past one mapping window** — the single-process design holds the whole mesh in one low-4 GB
-  window (the 8-chip loudbox fits comfortably); a larger mesh would need a shared-memory teleport transport
-  behind the same `__emule_fabric_teleport` seam.
+- **Scaling past one mapping window** — offset addressing decouples the fabric's L1 addresses from where
+  worker L1 is mapped, so the single-process design can hold a mesh larger than 4 GB (a >8-chip Blackhole
+  galaxy) once the worker-L1 mmap moves above the low-4 GB window (FULL-PLAN Phase 3); no shared-memory /
+  multi-process transport is needed behind the `__emule_fabric_teleport` seam.
 
 The live workarounds (WA-1 mux no-op, DM-1 chip-relative remap) are catalogued in
 `.claude/skills/workarounds/`.

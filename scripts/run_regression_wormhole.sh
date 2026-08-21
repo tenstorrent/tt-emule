@@ -32,6 +32,7 @@ INTEGRATION_BIN="$TEST_DIR/unit_tests_integration"
 LEGACY_BIN="$TEST_DIR/unit_tests_legacy"
 DM_BIN="$TEST_DIR/unit_tests_data_movement"
 PER_CORE_ALLOC_BIN="$TEST_DIR/unit_tests_per_core_allocation"
+FIBER_ASAN_BIN="$TEST_DIR/unit_tests_fiber_asan"
 TTNN_BIN="$TTNN_TEST_DIR/unit_tests_ttnn"
 
 PASS=0; FAIL=0; SKIP=0
@@ -54,6 +55,7 @@ _gtest_xml_args() {
 # (the full arch): DRAM bank topology, tilize/format, basic L1/JIT/NOC/reduce.
 CI_TIER="${CI_TIER:-full}"
 PR_TIER=(
+    fiber_asan_isolation
     tilize_untilize
     SimpleL1Buffer
     SimpleDramBuffer
@@ -146,6 +148,10 @@ echo ""
 echo "== Tier 1: Host-only =="
 unset TT_METAL_MOCK_CLUSTER_DESC_PATH TT_METAL_EMULE_MODE TT_METAL_SLOW_DISPATCH_MODE 2>/dev/null || true
 
+# Per-fiber ASAN sanitizer-state isolation (pure unit test, no device). Regression
+# fence for the fiber-engine per-fiber-state fix — see EmuleSanitizerState.
+run_test "fiber_asan_isolation" "$FIBER_ASAN_BIN"
+
 run_test "bit_utils"          "$API_BIN" \
     --gtest_filter="Host.ExtractBitArray:Host.PackBitArray:Host.PackExtractBitArray:Host.ExtractPackBitArray"
 run_test "host_buffer"        "$API_BIN" --gtest_filter="HostBufferTest.*"
@@ -195,15 +201,18 @@ echo "== Tier 3: JIT Kernel Execution =="
 run_test "TensixL1Tile"     "$API_BIN" --gtest_filter="MeshDeviceFixture.TensixTestSimpleL1ReadWrite*"
 
 # ===========================================================================
-# Tier 3a: API Sanity / Violation Checks
+# Tier 3a: ASan Checks
 # ===========================================================================
 echo ""
-echo "== Tier 3a: API Sanity / Violation Checks =="
+echo "== Tier 3a: ASan Checks =="
 
 # Filters use globs so positive controls + future additions are picked up
 # automatically — any change to an emule check should be validated by re-running
 # this block (see SANITIZER_CHECKS.md).
-run_test "alignment_writes"       "$API_BIN" --gtest_filter="MeshDeviceFixture.Noc*"
+# The DRAM-read alignment death/control tests are arch-specific (WH = 32 B, BH =
+# 64 B): exclude the _BH variants here — under wormhole_N150.yaml they'd fail the
+# 32 B rule / expect the 64 B message. blackhole runs the mirror set (excludes _WH).
+run_test "alignment_writes"       "$API_BIN" --gtest_filter="MeshDeviceFixture.Noc*:-MeshDeviceFixture.*_BH"
 run_test "cb_leak"                "$API_BIN" --gtest_filter="MeshDeviceFixture.Dirty_CB_*"
 # CB_Reservation: the *Overflow* death-tests are grouped ALONE (no in-parent
 # LaunchProgram before them), and the non-death ExactCapacity control runs in a
