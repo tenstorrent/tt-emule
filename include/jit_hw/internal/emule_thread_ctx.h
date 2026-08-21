@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <random>  // std::mt19937 (per-fiber rand engine, #243)
 #include <unordered_map>
+#include "jit_hw/internal/emule_cb_constants.h"  // EMULE_MAX_CBS
 // CoreState (per-core) lives in its own minimal header so device.hpp/umd can embed
 // it without parsing the kernel-only ThreadCommonCtx/ComputeThreadCtx below (whose
 // members reference kernel-only types such as sfpi).
@@ -66,17 +67,26 @@ struct LocalCBInterface {
     uint32_t fifo_wr_tile_ptr;
 };
 
-// local_cb array size: the max CB count across emule arches (BH=64, WH=32).
-// Hardcoded rather than NUM_CIRCULAR_BUFFERS because this header is also pulled by
-// the umd TU (via device.hpp), which lacks tt-metalium/ on its -I. A consistent
-// size across all TUs also keeps the ctx layout/ABI identical; cb_id is always
-// < the arch's NUM_CIRCULAR_BUFFERS ≤ this bound.
-static constexpr uint32_t __EMULE_CTX_MAX_CBS = 64;
+// Object-Intent (ASAN) resolved-range log capacity, per fiber. Ample — kernels resolve
+// pointers into <10 distinct buffers; overflow drops the excess (see ThreadCommonCtx).
+static constexpr uint32_t __EMULE_SAN_RESOLVED_CAP = 64;
 
 // Inline direct-write (noc_inline_dw_write) set/with-state cache entry, per NOC.
 struct __emule_dw_state {
     uint64_t addr = 0;
     uint32_t val = 0;
+};
+
+// unified_kernels stateful-NOC (preprogram-all-state → issue-txn) capture slot,
+// per NOC. One slot per transaction category (read/write/atomic/multicast) so a
+// sender that preprograms a write then an atomic-inc and issues both does not
+// alias the captured operands. Used by blaze/kernels/dataflow_utils.hpp.
+struct __emule_uk_state {
+    uint64_t noc_addr = 0;      // write: dst noc addr; read: src noc addr; atomic: target
+    uint32_t local_addr = 0;    // write: src local L1; read: dst local L1; multicast: src local
+    uint32_t len = 0;
+    uint32_t incr = 0;          // atomic increment value
+    bool include_self = false;  // multicast: mirrors NOC_CMD_BRCST_SRC_INCLUDE
 };
 
 // Matmul operand bridge: llk_unpack_AB_matmul records the operand CBs/tiles,
@@ -92,6 +102,56 @@ struct __emule_matmul_bridge {
 // api/compute/common.h; declared opaque here (complete type, size known) so
 // ComputeThreadCtx can hold it without pulling in the compute headers.
 enum class ReluType : uint8_t;
+
+// ---- ASAN sanitizer per-launch state (per-fiber) --------------------------
+// Every per-launch datum the ASAN checks consume. Homed here (reached via
+// __emule_self) rather than in worker-`thread_local`s so it travels with the fiber
+// on a swap: under the cooperative fiber engine many kernels multiplex onto one
+// worker, and a kernel that yields mid-body (e.g. a semaphore wait that parks the
+// fiber) would otherwise have this state clobbered by a co-scheduled fiber — the
+// check then reads the wrong program's state and false-positives (the Dirty-CB
+// cross-fiber contamination in tt-emule #241; likewise OOB / semaphore). The host
+// arms it per launch (set_sanitizer_thread_locals); the check LOGIC is unchanged,
+// only the storage location. See docs/ASAN.md.
+struct EmuleSanitizerState {
+    // Diagnostic identity (read by the [ASAN ERROR] trace + CB messages). my_x/my_y
+    // stay separate worker-thread-locals — the scheduler restores those on swap.
+    const char* kernel_name = nullptr;
+    uint32_t logical_x = 0;
+    uint32_t logical_y = 0;
+    uint8_t  processor_id = 0;
+
+    // Illegal-Semaphore reserved region + L1 OOB / padding / host-poke extents
+    // (views into host-owned per-launch snapshots; the arrays outlive the launch).
+    uint32_t sem_l1_range_start = 0;
+    uint32_t sem_l1_range_end = 0;
+    uint32_t l1_unreserved_base = 0;
+    const uint64_t* l1_tensor_ranges = nullptr;
+    uint32_t l1_tensor_ranges_count = 0;
+    const uint64_t* l1_padding_ranges = nullptr;
+    uint32_t l1_padding_ranges_count = 0;
+    const uint64_t* l1_host_ranges = nullptr;
+    uint32_t l1_host_ranges_count = 0;
+
+    // DRAM OOB extents (consumed by the host __emule_dram_ptr, called in-fiber).
+    uint32_t dram_unreserved_base = 0;
+    const uint64_t* dram_tensor_ranges = nullptr;
+    uint32_t dram_tensor_ranges_count = 0;
+
+    // CB-Boundary window counters + Dirty-CB dangling flags / call sites (per CB).
+    bool cb_boundary_strict = false;
+    uint32_t cb_reserved_pages[EMULE_MAX_CBS] = {};
+    uint32_t cb_waited_pages[EMULE_MAX_CBS] = {};
+    bool cb_reserve_dangling[EMULE_MAX_CBS] = {};
+    bool cb_wait_dangling[EMULE_MAX_CBS] = {};
+    const char* cb_reserve_file[EMULE_MAX_CBS] = {};
+    uint32_t cb_reserve_line[EMULE_MAX_CBS] = {};
+    const char* cb_wait_file[EMULE_MAX_CBS] = {};
+    uint32_t cb_wait_line[EMULE_MAX_CBS] = {};
+
+    // NoC-read-pending race counter (bumped by noc_async_read, cleared by barrier).
+    uint32_t pending_noc_reads = 0;
+};
 
 // ---- Shared base: every RISC thread ---------------------------------------
 // (Identity/handles + the cross-role CB ring pointers are migrated in here in a
@@ -112,6 +172,7 @@ struct ThreadCommonCtx {
                                             // source chip when a worker co-runs fibers from
                                             // multiple chips (mesh register/run dispatch).
     uint8_t* bridge_l1 = nullptr;           // was __emule_bridge_l1
+    uint32_t l1_size = 0;                   // this core's L1 size — offset-model OOB assert bound
     uint8_t* bridge_dram = nullptr;         // was __emule_bridge_dram
     tt_emule::CBSyncState* cbs = nullptr;          // was __emule_cbs
     tt_emule::EmuleDFBInterface* dfbs = nullptr;   // was __emule_dfbs
@@ -127,7 +188,45 @@ struct ThreadCommonCtx {
     // 64-bit so bit cb_id is valid for Blackhole's 64 CBs (1ull << cb_id, cb_id up to 63).
     uint64_t cb_self_consume_mask = 0;            // was __emule_cb_self_consume_mask
     uint64_t cb_self_produce_mask = 0;            // was __emule_cb_self_produce_mask
-    LocalCBInterface local_cb[__EMULE_CTX_MAX_CBS]{};  // per-RISC CB ring ptrs (was __emule_local_cb)
+    LocalCBInterface local_cb[EMULE_MAX_CBS]{};  // per-RISC CB ring ptrs (was __emule_local_cb)
+
+    // Per-fiber ASAN sanitizer state (see EmuleSanitizerState above): the
+    // semaphore/OOB/padding/host + DRAM range views, the CB-Boundary window counters +
+    // Dirty-CB dangling flags, the NoC-read counter, and the diagnostic identity. On the
+    // base because both data-movement and compute kernels flow through the L1/CB checks.
+    // Fiber-local (reached via __emule_self) so a swap carries it — no thread-locals to
+    // restore. See tt-emule #241.
+    EmuleSanitizerState san;
+
+    // Object-Intent resolved-range log: the kernel-side OOB check appends each live-tensor
+    // extent it resolved a pointer into; the runner diffs any snapshotted extent modified
+    // without being recorded (post-launch). Inactive => no recording. Overflow drops the
+    // excess, biasing the diff toward false positives (FP-safe). Kept as flat ctx fields
+    // (not inside `san`): it was already made per-fiber in #241, and folding it would break
+    // the build against tt-metal pins whose runner still names san_resolved_* directly.
+    bool     san_resolved_active = false;
+    uint32_t san_resolved_count = 0;
+    uint64_t san_resolved_log[__EMULE_SAN_RESOLVED_CAP] = {};
+
+    // Fabric PacketHeaderPool allocation state (per-fiber). Silicon re-zeroes these
+    // statics on every program launch (fresh kernel .bss); emule reuses the JIT .so,
+    // so a `thread_local` would leak the cursor + route table across ops on a persistent
+    // worker — the cursor overflows the per-RISC partition and the route_id table wraps,
+    // corrupting the fabric multicast routes → wrong-chip / garbage relays (tt-emule #221).
+    // Homing them in the per-fiber ctx (a fresh object per launch, see launch_cores) makes
+    // the pool fresh per program, matching silicon. Read/written by the packet_header_pool.h
+    // shadow via __emule_self. PHDR_MAX_ROUTES mirrors the shadow's MAX_ROUTES.
+    static constexpr uint32_t PHDR_MAX_ROUTES = 16;
+    uint32_t phdr_cursor = 0;                        // next free header index in this RISC partition
+    uint8_t  phdr_route_count = 0;                   // routes registered this launch
+    uint32_t phdr_route_first[PHDR_MAX_ROUTES] = {}; // route_id → first header index
+    uint8_t  phdr_route_num[PHDR_MAX_ROUTES] = {};   // route_id → header count
+
+    // Direct 4-directional fabric path: each WorkerToFabricEdmSender::build_from_args hands out the next
+    // connection open-sequence index here, which the teleport uses as the connection's dir_index into the
+    // host-recorded per-src connection table (g_conn_route). Fresh per launch (fresh ctx), matching the
+    // kernel opening its connections once from index 0. See docs/fabric-ccl-emulation.md.
+    uint32_t fabric_open_conn_seq = 0;
 
     explicit ThreadCommonCtx(Kind k) : kind(k) {}
     virtual ~ThreadCommonCtx() = default;  // owned via base ptr (runner/fiber)
@@ -152,8 +251,8 @@ struct ComputeThreadCtx : ThreadCommonCtx {
     uint32_t pack_face_r_dim = 16;       // was __emule_pack_face_r_dim
     uint32_t pack_num_faces = 4;         // was __emule_pack_num_faces
     uint32_t pack_num_tiles = 1;         // was __emule_pack_num_tiles
-    uint32_t pack_offset[__EMULE_CTX_MAX_CBS] = {};  // was __emule_pack_offset[NUM_CIRCULAR_BUFFERS]
-    uint32_t pack_width[__EMULE_CTX_MAX_CBS] = {};   // llk_pack_init blocked-width per CB (0 ⇒ width 1)
+    uint32_t pack_offset[EMULE_MAX_CBS] = {};  // was __emule_pack_offset[NUM_CIRCULAR_BUFFERS]
+    uint32_t pack_width[EMULE_MAX_CBS] = {};   // llk_pack_init blocked-width per CB (0 ⇒ width 1)
 
     // Op accumulators.
     float    welford_mean[32] = {};          // was __emule_welford_mean
@@ -174,6 +273,9 @@ struct ComputeThreadCtx : ThreadCommonCtx {
     // thread_locals; per-fiber here so co-scheduled fibers at >1 fiber/worker don't race — #243).
     bool     dst_holds_int[16] = {};         // was __emule_dst_holds_int (common_globals.h)
     float    exp_init_scale = 1.0f;          // was __emule_exp_init_scale (exp.h)
+    uint32_t remainder_divisor_bits = 0;     // remainder_tile scalars staged by remainder_tile_init (remainder.h)
+    uint32_t remainder_recip_bits = 0;
+    uint32_t fmod_divisor_bits = 0;          // fmod_tile divisor staged by fmod_tile_init (fmod.h)
     uint32_t reduce_block_ct_dim = 1;        // was __emule_reduce_block_ct_dim (reduce_custom.h)
     std::mt19937 rand_engine{};              // was __emule_rand_engine (rand.h)
     bool     rand_deterministic = false;     // was __emule_rand_deterministic
@@ -223,6 +325,10 @@ struct DatamovementThreadCtx : ThreadCommonCtx {
     __emule_dw_state dw_st[2];                      // was __emule_dw_st
     uint32_t  noc_cached_size[2] = {};             // was __emule_noc_cached_size (NUM_NOCS=2)
     uintptr_t noc_cached_write_dst[2] = {};        // was __emule_noc_cached_write_dst
+    __emule_uk_state uk_rd[2];                      // was __emule_uk_rd (PR #182)
+    __emule_uk_state uk_wr[2];                      // was __emule_uk_wr (PR #182)
+    __emule_uk_state uk_at[2];                      // was __emule_uk_at (PR #182)
+    __emule_uk_state uk_mc[2];                      // was __emule_uk_mc (PR #182)
 
     DatamovementThreadCtx() : ThreadCommonCtx(Kind::Datamovement) {}
 };

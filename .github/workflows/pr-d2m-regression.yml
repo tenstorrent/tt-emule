@@ -2,6 +2,17 @@
 # SHA tt-mlir itself pins, against the PR's tt-emule), then runs the
 # tt-mlir D2M pytest suite. Fails the PR on new failures, newly-passing
 # allowlist entries, or stale allowlist entries.
+#
+# DOCS-SKIP NOTE (read before re-enabling): the doc/config skip below uses
+# `paths-ignore`, which is safe ONLY while both jobs are disabled (see the
+# `if: ${{ false }}` on `build`/`test`). If a job here becomes a *required*
+# check on re-enable, do NOT extend `paths-ignore` — a path-filtered skip means
+# the required check never reports, leaving a docs-only PR stuck in
+# "Expected — waiting for status to report" (it can't merge). Instead mirror the
+# active metal gate (pr-metal-regression.yml): drop `paths-ignore`, always run,
+# and classify the changed-file set at runtime in a `changes` job behind an
+# always-reporting aggregator. Metal's doc set already includes `.claude/*`, so
+# claude-config-only changes already skip the real build on the gate that runs.
 
 name: PR D2M Regression
 
@@ -14,7 +25,14 @@ on:
       - 'LICENSE*'
       - 'NOTICE'
       - '.github/CODEOWNERS'
-  merge_group:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE*'
+      - 'NOTICE'
+      - '.github/CODEOWNERS'
 
 concurrency:
   group: pr-d2m-${{ github.workflow }}-${{ github.ref }}

@@ -17,25 +17,26 @@ name: PR Metal Regression
 # finished. Instead this workflow ALWAYS runs and the `changes` job below
 # decides — at runtime, over the full changed-file set — whether the heavy build
 # /test/ttnn jobs run. Either way the single `all-passed` check always reports,
-# so docs-only PRs pass instantly and code PRs get the real result. This also
-# sidesteps the merge-queue footgun where a path-skipped required check leaves
-# the queue waiting forever.
+# so docs-only PRs pass instantly and code PRs get the real result.
 on:
   pull_request:
     branches: [main]
-  merge_group:
+  push:
+    branches: [main]
 
 concurrency:
-  group: pr-regression-${{ github.workflow }}-${{ github.ref }}
+  # PR: group per source branch → cancel supersedes older runs. Push: head_ref
+  # is empty → group per sha, so no merged commit is cancelled or evicted from a
+  # shared pending slot (per-commit attribution).
+  group: pr-regression-${{ github.workflow }}-${{ github.head_ref || github.sha }}
   cancel-in-progress: true
 
 jobs:
-  # Decide whether the PR/merge-queue change touches anything that can affect
-  # regression. `code == 'false'` only when EVERY changed file is
-  # docs/agent-config/license (the set the old `paths-ignore` used). merge_group
-  # and unknown bases always run the full suite. The heavy jobs below gate on
-  # this output, so docs-only changes skip the build but `all-passed` still
-  # reports success.
+  # Decide whether the PR/push touches anything that can affect regression.
+  # `code == 'false'` only when EVERY changed file is docs/agent-config/license
+  # (the set the old `paths-ignore` used). Unknown bases always run the full
+  # suite. The heavy jobs below gate on this output, so docs-only changes skip
+  # the build but `all-passed` still reports success.
   changes:
     name: Detect non-docs changes
     runs-on: ubuntu-latest
@@ -57,11 +58,6 @@ jobs:
           PUSH_AFTER: ${{ github.sha }}
         run: |
           set -euo pipefail
-          # The merge queue verifies the real merge result — always run full.
-          if [ "$EVENT" = "merge_group" ]; then
-            echo "merge_group → full suite"
-            echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
           if [ "$EVENT" = "pull_request" ]; then
             base="$PR_BASE"; head="$PR_HEAD"
           else
@@ -231,11 +227,11 @@ jobs:
         # (quasar gets the known-failures allowlist; wh/bh are zero-tolerance).
         # Exits non-zero if any arch has a new failure.
         #
-        # CI_TIER controls the on-PR vs merge-queue split for C++:
+        # CI_TIER controls the on-PR vs on-push split for C++:
         #   pull_request → CI_TIER=pr: blackhole (PR_FULL_ARCHES) runs its full
         #     suite; wormhole + quasar run only their PR_TIER smoke set.
-        #   merge_group / other → CI_TIER=full: every arch runs its full suite,
-        #     so the in-queue regression is the full zero-tolerance pass.
+        #   push / other → CI_TIER=full: every arch runs its full suite, so the
+        #     on-push regression is identical to before this split.
         env:
           TT_METAL_DIR: ${{ github.workspace }}/tt-metal
           BUILD_DIR:    ${{ github.workspace }}/tt-metal/build_emule
@@ -254,26 +250,33 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
-  # Keep shards serialized within each architecture to avoid overwhelming the
-  # shared CPU runners while still allowing wormhole and blackhole to progress.
-  #
-  # The full sharded TTNN suites run in the merge queue (and any non-PR event),
-  # NOT on pull_request — on a PR the lightweight `ttnn-smoke-pr` job below
-  # replaces them. The full suite therefore gates the merge, not a post-merge push.
+  # Full sharded TTNN suites: on push (and any non-PR event), not on PRs — a PR
+  # runs the lightweight `ttnn-smoke-pr` job instead. `max-parallel: 1` keeps each
+  # arch on one runner, walking its 5 shards then its multi-chip leg (n300 for
+  # wormhole, bh_loudbox for blackhole): 2 TTNN runners on-push, one per arch.
   ttnn-pytest-wormhole:
-    name: TTNN Pytests (${{ matrix.arch }}, shard ${{ matrix.shard }}/5)
+    name: TTNN Pytests (${{ matrix.leg.suite }}, shard ${{ matrix.leg.shard }}/${{ matrix.leg.count }})
     needs: [changes, build]
     if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'pull_request' }}
     runs-on: tt-ubuntu-2204-xlarge-stable
-    timeout-minutes: 90
+    # 90 min was a pre-existing near-miss (observed ~89.5 min under max-parallel: 1 serialization);
+    # bumped for real headroom.
+    timeout-minutes: 120
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     strategy:
       fail-fast: false
       max-parallel: 1
       matrix:
-        arch: [wormhole]
-        shard: [1, 2, 3, 4, 5]
+        # Serial legs on one runner: wormhole sharded 5 ways, then the n300
+        # 2-device CCL suite as a single unsharded leg.
+        leg:
+          - { suite: wormhole, shard: 1, count: 5 }
+          - { suite: wormhole, shard: 2, count: 5 }
+          - { suite: wormhole, shard: 3, count: 5 }
+          - { suite: wormhole, shard: 4, count: 5 }
+          - { suite: wormhole, shard: 5, count: 5 }
+          - { suite: n300,     shard: 1, count: 1 }
     steps:
       - name: Checkout tt-emule (PR)
         uses: actions/checkout@v4
@@ -306,13 +309,13 @@ jobs:
         shell: bash
         run: bash tt-metal/install_dependencies.sh --sfpi
 
-      - name: Run TTNN pytest (${{ matrix.arch }}, shard ${{ matrix.shard }}/5)
+      - name: Run TTNN pytest (${{ matrix.leg.suite }}, shard ${{ matrix.leg.shard }}/${{ matrix.leg.count }})
         env:
           TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
           BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
-          TT_EMULE_ARCH: ${{ matrix.arch }}
-          SHARD_INDEX:   ${{ matrix.shard }}
-          SHARD_COUNT:   5
+          TT_EMULE_ARCH: ${{ matrix.leg.suite }}
+          SHARD_INDEX:   ${{ matrix.leg.shard }}
+          SHARD_COUNT:   ${{ matrix.leg.count }}
         shell: bash
         run: bash tt-emule/.github/scripts/ci-ttnn-pytests.sh
 
@@ -320,7 +323,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ttnn-pytests-results-${{ matrix.arch }}-shard-${{ matrix.shard }}
+          name: ttnn-pytests-results-${{ matrix.leg.suite }}-shard-${{ matrix.leg.shard }}
           path: |
             ${{ runner.temp }}/ttnn-pytests.log
             ${{ runner.temp }}/ttnn-junit-xml/*.xml
@@ -328,19 +331,28 @@ jobs:
           if-no-files-found: warn
 
   ttnn-pytest-blackhole:
-    name: TTNN Pytests (${{ matrix.arch }}, shard ${{ matrix.shard }}/5)
+    name: TTNN Pytests (${{ matrix.leg.suite }}, shard ${{ matrix.leg.shard }}/${{ matrix.leg.count }})
     needs: [changes, build]
     if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'pull_request' }}
     runs-on: tt-ubuntu-2204-xlarge-stable
-    timeout-minutes: 90
+    # Per-leg ceiling, sized for the bh_loudbox leg (whole CCL dirs, 1800s/file);
+    # the blackhole shards finish well under it.
+    timeout-minutes: 150
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     strategy:
       fail-fast: false
       max-parallel: 1
       matrix:
-        arch: [blackhole]
-        shard: [1, 2, 3, 4, 5]
+        # Serial legs on one runner: blackhole sharded 5 ways, then the
+        # bh_loudbox 8-device CCL suite as a single unsharded leg.
+        leg:
+          - { suite: blackhole,  shard: 1, count: 5 }
+          - { suite: blackhole,  shard: 2, count: 5 }
+          - { suite: blackhole,  shard: 3, count: 5 }
+          - { suite: blackhole,  shard: 4, count: 5 }
+          - { suite: blackhole,  shard: 5, count: 5 }
+          - { suite: bh_loudbox, shard: 1, count: 1 }
     steps:
       - name: Checkout tt-emule (PR)
         uses: actions/checkout@v4
@@ -373,13 +385,13 @@ jobs:
         shell: bash
         run: bash tt-metal/install_dependencies.sh --sfpi
 
-      - name: Run TTNN pytest (${{ matrix.arch }}, shard ${{ matrix.shard }}/5)
+      - name: Run TTNN pytest (${{ matrix.leg.suite }}, shard ${{ matrix.leg.shard }}/${{ matrix.leg.count }})
         env:
           TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
           BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
-          TT_EMULE_ARCH: ${{ matrix.arch }}
-          SHARD_INDEX:   ${{ matrix.shard }}
-          SHARD_COUNT:   5
+          TT_EMULE_ARCH: ${{ matrix.leg.suite }}
+          SHARD_INDEX:   ${{ matrix.leg.shard }}
+          SHARD_COUNT:   ${{ matrix.leg.count }}
         shell: bash
         run: bash tt-emule/.github/scripts/ci-ttnn-pytests.sh
 
@@ -387,7 +399,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ttnn-pytests-results-${{ matrix.arch }}-shard-${{ matrix.shard }}
+          name: ttnn-pytests-results-${{ matrix.leg.suite }}-shard-${{ matrix.leg.shard }}
           path: |
             ${{ runner.temp }}/ttnn-pytests.log
             ${{ runner.temp }}/ttnn-junit-xml/*.xml
@@ -396,7 +408,7 @@ jobs:
 
   # Lightweight TTNN gate for pull requests ONLY: the curated blackhole PR_TIER
   # smoke set across 2 parallel shards, replacing the full wormhole+blackhole
-  # sharded matrix above. The full suites still run in the merge queue.
+  # sharded matrix above. The full suites still run on push to main.
   ttnn-smoke-pr:
     name: TTNN Smoke (blackhole, PR, shard ${{ matrix.shard }}/2)
     needs: [changes, build]
@@ -477,6 +489,8 @@ jobs:
     name: All checks passed
     # Run even when a dependency failed/was skipped, so the gate always reports.
     if: ${{ always() }}
+    # n300 and bh_loudbox are matrix legs of ttnn-pytest-wormhole/-blackhole, so
+    # those job results already cover them — no separate needs entries.
     needs: [changes, build, test, ttnn-pytest-wormhole, ttnn-pytest-blackhole, ttnn-smoke-pr]
     runs-on: ubuntu-latest
     steps:
@@ -487,11 +501,11 @@ jobs:
         # 'failure', and docs-only runs leave build/test/ttnn 'skipped' (OK).
         # `changes` failing (detection error) also trips the gate — fail closed.
         #
-        # The on-PR and merge-queue paths each leave the other's TTNN jobs
-        # 'skipped': a pull_request runs ttnn-smoke-pr (the sharded ttnn-pytest-*
-        # are skipped); a merge_group runs ttnn-pytest-* (ttnn-smoke-pr is
-        # skipped). Both are OK here, so the same single required check ("All
-        # checks passed") covers both paths with no branch-protection change.
+        # The on-PR and on-push paths each leave the other's TTNN jobs 'skipped':
+        # a pull_request runs ttnn-smoke-pr (the sharded ttnn-pytest-* are
+        # skipped); a push runs ttnn-pytest-* (ttnn-smoke-pr is skipped). Both
+        # are OK here, so the same single required check ("All checks passed")
+        # covers both paths with no branch-protection change.
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: |
           echo "One or more required jobs did not succeed:"

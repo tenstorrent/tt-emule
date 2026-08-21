@@ -37,3 +37,22 @@ inline uint8_t* __emule_local_l1_to_ptr(uint32_t l1_addr) {
     __emule_asan_check_padding(l1_off);
     return __emule_l1_translate(l1_addr);
 }
+
+// Sanctioned-semaphore translation. Callers whose address provably derives from
+// get_semaphore() — the JIT patch pass's semaphore-provenance rules
+// (tt_emule/detail/kernel_patcher.hpp) and the semaphore API's own local-source
+// reads (noc_semaphore_set_remote / _set_multicast) — land here instead of
+// __emule_local_l1_to_ptr. A kernel addressing its own semaphore word is legal
+// on silicon (the reserved region is plain L1), so the Illegal-Semaphore check
+// must not fire on it; the check exists for addresses that stray INTO the
+// region without semaphore provenance. Only in-region containment is exempted:
+// a get_semaphore-derived address that leaves the region (bad id, arithmetic)
+// falls through to the full check chain like any other address.
+inline uint8_t* __emule_sem_l1_to_ptr(uint32_t l1_addr) {
+    if (__emule_asan_enabled() &&
+        !(__emule_self->san.sem_l1_range_end > 0 && l1_addr >= __emule_self->san.sem_l1_range_start &&
+          l1_addr < __emule_self->san.sem_l1_range_end)) {
+        return __emule_local_l1_to_ptr(l1_addr);
+    }
+    return __emule_l1_translate(l1_addr);
+}

@@ -22,14 +22,16 @@
 namespace ckernel {
 
 ALWI void remainder_tile_init(uint32_t param0, uint32_t param1) {
-    // No SFPU state to initialize: emule reads param0/param1 directly in
-    // remainder_tile rather than staging them into vConstFloatPrgm0/1.
-    (void)param0;
-    (void)param1;
+    // Upstream stages the divisor (param0) + host reciprocal (param1) into the SFPU const
+    // registers here; mirror that by staging them per-fiber for remainder_tile to read.
+    __emule_compute_ctx().remainder_divisor_bits = param0;
+    __emule_compute_ctx().remainder_recip_bits = param1;
 }
 
-ALWI void remainder_tile(uint32_t idst, uint32_t param0, uint32_t param1) {
+ALWI void remainder_tile(uint32_t idst) {
     __emule_dst_check(idst, "remainder_tile");
+    const uint32_t param0 = __emule_compute_ctx().remainder_divisor_bits;
+    const uint32_t param1 = __emule_compute_ctx().remainder_recip_bits;
     float divisor, recip;
     std::memcpy(&divisor, &param0, sizeof(float));
     std::memcpy(&recip, &param1, sizeof(float));

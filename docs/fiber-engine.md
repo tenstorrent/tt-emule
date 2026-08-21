@@ -319,10 +319,12 @@ engine is the substrate both rely on.
   across the K workers; cross-device wakes route to the home worker exactly as cross-core wakes.
 
 **Remaining for full multichip (not yet needed / out of scope):**
-- **Scaling beyond 2 chips** (T3000 8-chip → quietbox/galaxy). Inter-chip CCL **is** emulated for the
-  2-chip case (the concurrent dispatch here is the prerequisite; fabric transport is the teleport in
-  [`fabric-ccl-emulation.md`](fabric-ccl-emulation.md)), but ≥3 chips needs an on-demand L1Pool (the 2 GB
-  `MAP_32BIT` ceiling) + direction-aware multi-hop routing — see [#228](https://github.com/tenstorrent/tt-emule/issues/228).
+- **Scaling beyond 2 chips** (T3000 8-chip → quietbox/galaxy). Inter-chip CCL **is** emulated (the
+  concurrent dispatch here is the prerequisite; fabric transport is the teleport in
+  [`fabric-ccl-emulation.md`](fabric-ccl-emulation.md)); the 8-chip loudbox and a 32-chip galaxy
+  bring-up run in one process — worker L1 is a plain 64-bit mmap with no placement ceiling. Remaining
+  at galaxy scale: direction-aware multi-hop fabric routing (the wide-axis ring) — see
+  [#228](https://github.com/tenstorrent/tt-emule/issues/228).
 - **Heterogeneous meshes** (mixed arch / differing bank topology) would need the bank tables
   made per-device (keyed via the fiber context, like `core_map`). No current Tenstorrent board
   is heterogeneous, so this is deferred.
@@ -386,7 +388,11 @@ paired with 9.2).
 `run_until_idle` used to create K `std::thread` workers and join them every program. It now uses a
 **persistent pool** of K threads, created once (lazily, first run) and reused across every program:
 threads park on `start_cv_` between programs; `run_until_idle` bumps a generation counter +
-`notify_all` to launch a run and waits on `done_cv_` for `workers_done_ == W`. Each program activates
+`notify_all` to launch a run and waits on `done_cv_` for `workers_done_ == W`. The program state that a
+worker reads on wake — its ready queue, `W`, and the generation bump — is published in **one `mu_`
+critical section**, so a worker released for a generation always sees the matching `W`; a new `W`
+paired with a stale generation would let a just-preempted worker re-enter `inner_loop` and drive
+`workers_done_` past `W`, wedging the `done_cv_` wait. Each program activates
 only `W = min(K, fiber count)` workers (`home = i % W`), so surplus pool workers stay parked on
 `start_cv_` and per-fiber `wake()`/`yield()` (which notify `cv_`) never wake them — a tiny program at
 K=64 pays one start `notify_all`, not a per-op thread create/join nor a per-fiber herd. The pool is

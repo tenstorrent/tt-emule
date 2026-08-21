@@ -52,61 +52,60 @@ extern thread_local uint8_t my_y[2];
 
 // ---- Constexpr tile metadata arrays (populated by JIT defines) ----
 // EMULE_TILE_SIZES is defined by the JIT compiler as a comma-separated list of
-// 32 page sizes (one per CB index), matching the real device's unpack_tile_size[].
+// EMULE_MAX_CBS page sizes (one per CB index), matching the real device's
+// unpack_tile_size[].
 
-// Number of per-CB metadata slots the JIT arrays below reserve — must match the
-// runner's EMULE_NUM_CBS (emulated_program_runner.cpp). Blackhole supports 64
-// circular buffers (Wormhole 32), and ziveli's generic_op softmax/attention
-// kernels allocate CBs at ids up to ~53. The compute helpers index these
+// The per-CB metadata arrays use the shared emule capacity. Blackhole supports
+// 64 circular buffers (Wormhole uses the first 32), and ziveli's generic_op
+// softmax/attention kernels allocate CBs at ids up to ~53. The compute helpers index these
 // constexpr arrays by *raw* CB id — e.g. reduce_helpers_compute.inl probes
 // `unpack_src_format[input_cb]` inside a `constexpr` — so an array sized [32]
 // makes that constexpr (and the whole kernel) fail to compile. The runner emits
-// exactly EMULE_NUM_CBS metadata values per define (EMULE_TILE_SIZES,
+// EMULE_MAX_CBS metadata values per define (EMULE_TILE_SIZES,
 // EMULE_CB_DATA_FORMATS, EMULE_TILE_R_DIM, EMULE_TILE_C_DIM), already defaulting
 // unconfigured CBs to Invalid format (255 -> page-size fallback) and a 32x32
 // tile shape, so the arrays below fill directly from the defines. The #else
-// (no-metadata) fallbacks hardcode the same defaults across all slots.
-constexpr uint32_t EMULE_JIT_CB_SLOTS = 64;
-// The #else fallback arrays below hardcode EMULE_JIT_CB_SLOTS entries (64x255,
-// 64x32, etc.); fail loudly if the slot count is ever changed without updating them.
-static_assert(EMULE_JIT_CB_SLOTS == 64, "hardcoded fallback initializers below assume EMULE_JIT_CB_SLOTS == 64");
+// (no-metadata) fallbacks hardcode the same defaults across all slots. Guard
+// those literal initializer counts against the shared capacity.
+static_assert(EMULE_MAX_CBS == 64, "hardcoded fallback initializers below assume EMULE_MAX_CBS == 64");
 
 #ifdef EMULE_TILE_SIZES
-constexpr uint16_t unpack_tile_size[EMULE_JIT_CB_SLOTS] = { EMULE_TILE_SIZES };
+constexpr uint16_t unpack_tile_size[EMULE_MAX_CBS] = { EMULE_TILE_SIZES };
 #else
-constexpr uint16_t unpack_tile_size[EMULE_JIT_CB_SLOTS] = {};
+constexpr uint16_t unpack_tile_size[EMULE_MAX_CBS] = {};
 #endif
 
 // Per-CB data format arrays (tt::DataFormat enum values) — emule's single source of
 // truth, the analog of the device's compile-time unpack_src_format[]/pack_dst_format[]
 // (generated into chlkc_descriptors.h by genfiles.cpp::compute_data_formats). The two
-// L1-side arrays are populated from EMULE_CB_DATA_FORMATS (a 32-value list the JIT
-// compiler builds from each CB's CircularBufferImpl::data_format(idx)); for a given CB id
+// L1-side arrays are populated from EMULE_CB_DATA_FORMATS (an
+// EMULE_MAX_CBS-value list the JIT compiler builds from each CB's
+// CircularBufferImpl::data_format(idx)); for a given CB id
 // both equal the L1 tile's format. DataFormat::Invalid (0xFF) marks unconfigured slots
 // (mirrors the host's std::optional<DataFormat> empty state) — format-dispatch consumers
-// fall back to the page_size heuristic for those. Slots 32..EMULE_JIT_CB_SLOTS-1 are the
+// fall back to the page_size heuristic for those. Slots 32..EMULE_MAX_CBS-1 are the
 // unconfigured tail for high-index ziveli CBs the runner does not emit (see above). The two
 // DST-side arrays are all-zero (Float32) stubs: emule's DST register file is always fp32,
 // so they are immaterial to the emulated pack/unpack math.
 #ifdef EMULE_CB_DATA_FORMATS
-constexpr uint8_t unpack_src_format[EMULE_JIT_CB_SLOTS] = { EMULE_CB_DATA_FORMATS };
-constexpr uint8_t pack_dst_format[EMULE_JIT_CB_SLOTS]   = { EMULE_CB_DATA_FORMATS };
+constexpr uint8_t unpack_src_format[EMULE_MAX_CBS] = { EMULE_CB_DATA_FORMATS };
+constexpr uint8_t pack_dst_format[EMULE_MAX_CBS]   = { EMULE_CB_DATA_FORMATS };
 #else
-constexpr uint8_t unpack_src_format[EMULE_JIT_CB_SLOTS] = {
+constexpr uint8_t unpack_src_format[EMULE_MAX_CBS] = {
     255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
     255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
     255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
     255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
 };
-constexpr uint8_t pack_dst_format[EMULE_JIT_CB_SLOTS] = {
+constexpr uint8_t pack_dst_format[EMULE_MAX_CBS] = {
     255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
     255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
     255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
     255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
 };
 #endif
-constexpr uint8_t unpack_dst_format[EMULE_JIT_CB_SLOTS] = {};  // DST-side (fp32) stub
-constexpr uint8_t pack_src_format[EMULE_JIT_CB_SLOTS]   = {};  // DST-side (fp32) stub
+constexpr uint8_t unpack_dst_format[EMULE_MAX_CBS] = {};  // DST-side (fp32) stub
+constexpr uint8_t pack_src_format[EMULE_MAX_CBS]   = {};  // DST-side (fp32) stub
 
 // Per-CB tile height/width (elements). Populated by the JIT compiler from each
 // CB's host-side Tile spec (CircularBufferConfig::tiles()[idx]->get_height()/
@@ -115,13 +114,13 @@ constexpr uint8_t pack_src_format[EMULE_JIT_CB_SLOTS]   = {};  // DST-side (fp32
 // region so reduce_tile bounds its iteration instead of assuming 32×32. The
 // fallback below is the standard full 32×32 tile (used by TUs that don't emit
 // these defines, e.g. a compute kernel with no CB metadata).
-// Slots 32..EMULE_JIT_CB_SLOTS-1 default to a full 32x32 tile shape (as the runner
+// Slots 32..EMULE_MAX_CBS-1 default to a full 32x32 tile shape (as the runner
 // itself does for CBs with no Tile spec), so high-index ziveli CBs the runner never
 // emits still bound reduce_tile/copy_tile iteration correctly.
 #ifdef EMULE_TILE_R_DIM
-constexpr uint8_t unpack_tile_r_dim[EMULE_JIT_CB_SLOTS] = { EMULE_TILE_R_DIM };
+constexpr uint8_t unpack_tile_r_dim[EMULE_MAX_CBS] = { EMULE_TILE_R_DIM };
 #else
-constexpr uint8_t unpack_tile_r_dim[EMULE_JIT_CB_SLOTS] = {
+constexpr uint8_t unpack_tile_r_dim[EMULE_MAX_CBS] = {
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
@@ -129,33 +128,33 @@ constexpr uint8_t unpack_tile_r_dim[EMULE_JIT_CB_SLOTS] = {
 };
 #endif
 #ifdef EMULE_TILE_C_DIM
-constexpr uint8_t unpack_tile_c_dim[EMULE_JIT_CB_SLOTS] = { EMULE_TILE_C_DIM };
+constexpr uint8_t unpack_tile_c_dim[EMULE_MAX_CBS] = { EMULE_TILE_C_DIM };
 #else
-constexpr uint8_t unpack_tile_c_dim[EMULE_JIT_CB_SLOTS] = {
+constexpr uint8_t unpack_tile_c_dim[EMULE_MAX_CBS] = {
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
     32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,
 };
 #endif
-constexpr uint8_t unpack_num_faces_r_dim[EMULE_JIT_CB_SLOTS] = {
+constexpr uint8_t unpack_num_faces_r_dim[EMULE_MAX_CBS] = {
     2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
     2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
 };
-constexpr uint8_t unpack_num_faces_c_dim[EMULE_JIT_CB_SLOTS] = {
+constexpr uint8_t unpack_num_faces_c_dim[EMULE_MAX_CBS] = {
     2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
     2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
 };
 // Per-CB face row dim (16) and faces-per-tile (4) for standard 32x32 tiles. The
 // chlkc analogs on silicon; SDPA streaming's sdpa_unpack_format_changed() reads
 // these to decide whether a CB-switch needs a data-format reconfig.
-constexpr uint8_t unpack_tile_face_r_dim[EMULE_JIT_CB_SLOTS] = {
+constexpr uint8_t unpack_tile_face_r_dim[EMULE_MAX_CBS] = {
     16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,
     16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,
     16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,
     16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,
 };
-constexpr uint8_t unpack_tile_num_faces[EMULE_JIT_CB_SLOTS] = {
+constexpr uint8_t unpack_tile_num_faces[EMULE_MAX_CBS] = {
     4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
     4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
 };
@@ -327,16 +326,20 @@ inline void cb_pop_front(uint32_t cb_id, int32_t n)    { cb_pop_front(cb_id, sta
 // ---- Pointer accessors ----
 
 
-// Return uint32_t (truncated host pointer). CB memory is mmap'd below 4 GB.
-// Reads the calling thread's own per-RISC write/read pointer (emule_cb_ptr.h),
-// so concurrent reader and writer threads each see their own view — matching
-// silicon's per-RISC write/read pointer registers (the #139 fix).
+// Return a 0-based L1 offset (L1 offset model). The CB ring is maintained in
+// host-pointer space (emule_cb_ptr.h); convert to an offset only here, at the
+// value the kernel sees — __emule_l1_translate rebases it at the deref.
+// Reads the calling thread's own per-RISC write/read pointer, so concurrent
+// reader and writer threads each see their own view — matching silicon's
+// per-RISC write/read pointer registers (the #139 fix).
 inline uint32_t get_write_ptr(uint32_t cb_id) {
-    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_cb_wr_addr(cb_id)));
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_cb_wr_addr(cb_id)) -
+                                 reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
 }
 
 inline uint32_t get_read_ptr(uint32_t cb_id) {
-    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_cb_rd_addr(cb_id)));
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_cb_rd_addr(cb_id)) -
+                                 reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
 }
 
 // get_tile_size — return page size (bytes) for a CB.

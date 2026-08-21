@@ -22,11 +22,11 @@ disagree with a row here).
 
 | Silicon | Emule | Owner |
 |---|---|---|
-| Per-Tensix scratchpad SRAM (size set per arch via the SoC descriptor — see `metal_SocDescriptor`), 32-bit firmware addresses, RISC dereferences directly | Per-core `mmap(MAP_PRIVATE\|MAP_ANONYMOUS\|MAP_32BIT)` of `Core::l1_size()` bytes. 2-MB-aligned slot. Worker cores get MAP_32BIT (low 4GB) so the truncated host pointer is itself a valid host pointer. | `tt_emule::Core` (`tt-emule/include/tt_emule/device.hpp`); `L1Pool` (`tt-emule/include/tt_emule/l1_pool.hpp`) |
+| Per-Tensix scratchpad SRAM (size set per arch via the SoC descriptor — see `metal_SocDescriptor`), 32-bit firmware addresses, RISC dereferences directly | Per-core mmap of `Core::l1_size()` bytes; worker cores are 2-MB-aligned slots in a shared `L1Pool` backed by a plain 64-bit `mmap(...MAP_NORESERVE)` (no low-4GB placement). Kernel L1 addresses are **0-based firmware offsets**, rebased onto this fiber's `bridge_l1` only at the deref site. | `tt_emule::Core` (`tt-emule/include/tt_emule/device.hpp`); `L1Pool` (`tt-emule/include/tt_emule/l1_pool.hpp`) |
 
-**Key conversion**: `__emule_local_l1_to_ptr(uint32_t l1_addr)` —
-returns `__emule_bridge_l1 + l1_addr` for firmware offsets, or casts
-back to host pointer for already-absolute values.
+**Key conversion**: `__emule_local_l1_to_ptr(uint32_t l1_addr)` returns
+`bridge_l1 + l1_addr` **unconditionally** — the chokepoint `__emule_l1_translate`
+is a single code path (a debug OOB assert names an un-migrated site; no clamp).
 Lives in `tt-emule/include/jit_hw/jit_kernel_stubs.hpp`.
 
 **Pitfall**: `Core::reset_l1_bump()` must NOT memset the top of L1 — the
@@ -65,12 +65,12 @@ host-written tensor data.
 |---|---|---|
 | Async NOC transactions; `noc_async_*_barrier()` waits for ack from receiver | Synchronous memcpy via `__emule_resolve_noc_addr` bridge; barriers are no-ops | `__emule_resolve_noc_addr` and `__emule_multicast_write` in `${TT_METAL_DIR}/tt_metal/impl/emulation/emulated_program_runner.cpp` |
 
-**Critical fix**: `__emule_resolve_noc_addr` masks `l1_offset` with
-`L1_SLOT_MASK = 0x1FFFFF` (2MB-1). This handles the "NOC-OR truncated
-host pointer" pattern where a consumer kernel does
-`dst_noc_coord | (uint64_t)get_write_ptr(cb)` instead of the canonical
-`get_noc_addr(x, y, get_write_ptr(cb))`. Without the mask the resolver
-gets a host pointer where it expected a firmware offset.
+**NOC offset masking**: `__emule_resolve_noc_addr` masks the L1 component
+with `L1_SLOT_MASK = 0x1FFFFF` (2MB-1). Under the offset model the
+kernel-visible L1 value is already a 0-based offset (< L1 size), so the mask
+is now an **idempotent guard**; it still cleanly extracts the offset from the
+non-canonical `dst_noc_coord | (uint64_t)get_write_ptr(cb)` NOC-OR idiom
+(vs the canonical `get_noc_addr(x, y, get_write_ptr(cb))`).
 
 ### 2.3 Multicast
 
