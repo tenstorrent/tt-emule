@@ -4,7 +4,7 @@
 
 #pragma once
 // JIT dataflow API — self-contained implementation for JIT-compiled kernels.
-// Uses uint32_t L1 addresses (truncated host pointers from mmap'd-below-4GB L1)
+// Uses 0-based uint32 L1 offsets (rebased onto the per-fiber bridge_l1 at deref)
 // and __emule_self->cbs for circular buffer state.
 //
 // Address translation model:
@@ -73,16 +73,20 @@
 
 // ---- Bridge function declarations for cross-core access ----
 extern "C" uint8_t* __emule_resolve_noc_addr(uint64_t noc_addr);
+// Carry a stamped fabric route across a header-byte copy (worker → forwarder relay slot). No-op when the
+// source address carries no route. Declared here too (also in __emule_fabric_stubs.h) so the write
+// primitives below can call it without depending on fabric-header include order.
+extern "C" void __emule_fabric_route_follow(uint32_t src_key, uint32_t dst_key);
 // `include_self` mirrors silicon's NOC_CMD_BRCST_SRC_INCLUDE bit (see the
 // matching comment in tt_metal/impl/emulation/emulated_program_runner.cpp).
 // `true` for `_loopback_src` / `MCAST_INCL_SRC` callers, `false` otherwise.
+// `noc` is the NOC index the mcast rectangle was encoded on (noc_index): the
+// runtime uses it to undo the NOC1 start<->end coordinate swap before walking
+// the rectangle as a torus path (see emulated_program_runner.cpp).
 // Header signature MUST match the runner-side definition — extern "C" link
-// matches by name only; a mismatch leaves the 4th arg as register garbage.
+// matches by name only; a mismatch leaves the trailing args as register garbage.
 extern "C" void __emule_multicast_write(uint64_t mcast_addr, const uint8_t* src,
-                                        uint32_t size, bool include_self);
-// The runner owns the authoritative core-map classification. Do not infer DRAM
-// roles from addrgen tables here: their coordinate convention can differ from
-// the runner's virtual/logical mapping after a UMD uplift.
+                                        uint32_t size, bool include_self, uint8_t noc);
 extern "C" bool __emule_noc_addr_is_dram(uint64_t noc_addr);
 
 // ---- Debug logging (enabled by TT_EMULE_DEBUG_MULTICAST=1 env var) ----
@@ -92,29 +96,13 @@ inline bool __emule_debug_multicast() {
 }
 
 // ---- L1 address conversion helpers ----
-// Extract L1 offset from a host address using bitmask.
-// L1Pool allocates worker slots at 2 MB alignment, so addr & 0x1FFFFF
-// gives the offset within the slot — one AND instruction, no TLS lookup.
-//
-// IMPORTANT: This must only be called at NOC address construction time
-// (get_noc_addr, get_noc_multicast_addr) where the input is a host L1
-// pointer.  It must NOT be applied to firmware-style offsets like DRAM
-// bank addresses from get_noc_addr_from_bank_id (which can exceed 2MB).
+// L1 offset model: a local L1 address is already a 0-based firmware offset
+// (< 1.5 MB worker L1), so the 2 MB slot mask is idempotent here. It is kept as
+// a guard for NOC-address construction (get_noc_addr / get_noc_multicast_addr)
+// and must NOT be applied to firmware-style DRAM bank addresses from
+// get_noc_addr_from_bank_id (which can exceed 2 MB).
 inline uint32_t __emule_addr_to_offset(uint32_t addr) {
-    // The input is a LOCAL L1 address on the calling core (get_noc_addr / _multicast
-    // contract). Recover its L1 offset so the destination core can re-base it.
-    //
-    // Under TT_EMULE_L1_POOL_SLOTS_PER_CHIP=0 each core is individually mmap'd at an
-    // arbitrary (non-2MB-aligned) base, so a fixed SLOT_MASK does NOT recover the offset
-    // from an absolute host pointer (the sender's base would leak into the encoded NOC
-    // offset and the destination re-base would miss — this silently broke every
-    // get_noc_addr(x, y, get_semaphore(id)) CCL handshake, e.g. AGMM's receiver-sem
-    // set_remote). Subtract this core's bridge_l1 when addr is an absolute local pointer
-    // (>= base); pass sub-base values through the legacy 2 MB mask (raw offsets / the
-    // L1Pool 2MB-aligned mode). Semaphores and CBs live at the same offset on every core,
-    // so the re-based NOC address lands on the destination's matching object.
-    uint32_t base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
-    return (addr >= base) ? (addr - base) : (addr & 0x1FFFFF);
+    return addr & 0x1FFFFF;  // 2 MB slot mask; idempotent for in-L1 offsets
 }
 
 // L1 access chokepoint (__emule_local_l1_to_ptr) — single definition shared with
@@ -169,10 +157,22 @@ inline uint64_t get_noc_addr(uint32_t addr, uint8_t noc = noc_index) {
 }
 
 // safe_get_noc_addr — silicon's bounds-aware variant; fabric/CCL kernels (addrgen_api.h,
-// minimal_ccl_common.hpp) use it to (re)compose a NOC address. emule's __emule_addr_to_offset is
-// idempotent for in-slot offsets, so this round-trips a get_noc_address_components() decode exactly.
-inline uint64_t safe_get_noc_addr(uint32_t noc_x, uint32_t noc_y, uint32_t addr, uint8_t noc = noc_index) {
-    return get_noc_addr(noc_x, noc_y, addr, noc);
+// api_common.h, minimal_ccl_common.hpp) use it to (re)compose a NOC address, typically from the
+// (x, y, offset) triple that get_noc_address_components() decoded off an already-final NOC address
+// (e.g. the Wormhole DRAM-write recompose in linear/addrgen_api.h). `addr` is therefore a final
+// NOC-local offset (up to the full 36-bit local field), NOT a worker L1 pointer that needs the
+// 2 MB slot mask. Recombine it raw — same rationale as UnicastEndpoint::get_noc_unicast_addr
+// (endpoints.h): routing through __emule_addr_to_offset masks to 0x1FFFFF, which silently truncates
+// DRAM view offsets (Wormhole odd views live at +1 GB) so distinct banks on one channel collapse
+// onto the first 2 MB. __emule_resolve_noc_addr applies the worker-slot mask itself for WORKER
+// cores and keeps the full offset for DRAM, so no masking is needed here.
+// `noc` is unused — like get_noc_addr(x,y,addr) above and UnicastEndpoint::get_noc_unicast_addr,
+// emule doesn't model NOC0/NOC1 coord mirroring (the (x,y) already name the target and the resolver
+// decodes them regardless of noc). Name elided to keep silicon's signature without -Wunused-parameter.
+inline uint64_t safe_get_noc_addr(uint32_t noc_x, uint32_t noc_y, uint32_t addr, uint8_t /*noc*/ = noc_index) {
+    return (uint64_t(noc_y & 0x3F) << (NOC_ADDR_LOCAL_BITS + NOC_ADDR_NODE_ID_BITS)) |
+           (uint64_t(noc_x & 0x3F) << NOC_ADDR_LOCAL_BITS) |
+           uint64_t(addr);
 }
 inline uint64_t safe_get_noc_addr(uint32_t addr, uint8_t noc = noc_index) { return get_noc_addr(addr, noc); }
 
@@ -244,7 +244,7 @@ FORCE_INLINE void noc_async_read_page(
     } else {
         page_size = (1u << addrgen.log_base_2_of_page_size);
     }
-    if (__emule_asan_enabled()) ++__emule_pending_noc_reads;
+    if (__emule_asan_enabled()) ++__emule_self->san.pending_noc_reads;
     uint64_t noc_addr = addrgen.get_noc_addr(id, offset, noc);
     uint8_t* dst = __emule_local_l1_to_ptr(dst_local_l1_addr);
     uint8_t* src = __emule_resolve_noc_addr(noc_addr);
@@ -320,7 +320,7 @@ inline void noc_async_read(uint64_t src_noc_addr, uint32_t dst_local_l1_addr,
     // NOC addresses are already properly constructed by get_noc_addr() or
     // get_noc_addr_from_bank_id() — no fixup needed here.  Applying
     // __emule_fixup_noc_addr would destroy DRAM bank offsets (> 2MB).
-    if (__emule_asan_enabled()) ++__emule_pending_noc_reads;
+    if (__emule_asan_enabled()) ++__emule_self->san.pending_noc_reads;
     uint8_t* dst = __emule_local_l1_to_ptr(dst_local_l1_addr);
     uint8_t* src = __emule_resolve_noc_addr(src_noc_addr);
     if (__emule_debug_multicast()) {
@@ -439,6 +439,21 @@ inline void noc_async_write_one_packet_with_state(uint32_t src_local_l1_addr,
     const uint64_t full_dst = upper | uint64_t(__emule_addr_to_offset(dst_local_l1_addr));
     noc_async_write(src_local_l1_addr, full_dst,
                     __emule_datamovement_ctx().write_one_packet_state_size[noc & 1], noc);
+    // Fabric route-follow: this register-level primitive is what a forwarder relay uses to COPY a composed
+    // packet header (route already stamped, keyed by its L1 address) into a relay slot; the forwarder later
+    // teleports FROM the slot — a different L1 address — so carry the stamped route to the slot address, else
+    // the teleport's lookup misses and falls back to the wrong neighbor chip (multi-hop relay deadlock).
+    // No-op for ordinary payload writes (src carries no route). On silicon the routing fields ride inside the
+    // header, so the copy carries them for free; this mirrors that in emule's address-keyed side-table.
+    uint8_t* rf_src = __emule_local_l1_to_ptr(src_local_l1_addr);
+    uint8_t* rf_dst = __emule_resolve_noc_addr(full_dst);
+    if (rf_src != nullptr && rf_dst != nullptr) {
+        // Offset model: pass bridge_l1-relative offsets; the runner's emule_route_key widens them back to the
+        // full host-pointer key (matching set_route / the teleport read side).
+        __emule_fabric_route_follow(
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rf_src) - reinterpret_cast<uintptr_t>(__emule_self->bridge_l1)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rf_dst) - reinterpret_cast<uintptr_t>(__emule_self->bridge_l1)));
+    }
 }
 // Silicon adds `enable_noc_tracing` (and `posted` for write) template args
 // that control event-record / posted-vs-acked semantics. Both are no-ops in
@@ -477,12 +492,12 @@ inline void noc_async_write_multicast(
                 __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
-    __emule_multicast_write(dst_mcast_noc_addr, src, size, /*include_self=*/false);
+    __emule_multicast_write(dst_mcast_noc_addr, src, size, /*include_self=*/false, noc);
 }
 
 inline void noc_async_write_multicast_loopback_src(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
-    uint32_t size, uint32_t num_dests, bool /*linked*/ = false, uint8_t /*noc*/ = 0) {
+    uint32_t size, uint32_t num_dests, bool /*linked*/ = false, uint8_t noc = noc_index) {
     // Silicon: NOC_CMD_BRCST_SRC_INCLUDE set → sender receives the packet.
     // Cannot delegate to the non-loopback variant (which passes false).
     if (__emule_debug_multicast()) {
@@ -497,7 +512,7 @@ inline void noc_async_write_multicast_loopback_src(
                 __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
     uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
-    __emule_multicast_write(dst_mcast_noc_addr, src, size, /*include_self=*/true);
+    __emule_multicast_write(dst_mcast_noc_addr, src, size, /*include_self=*/true, noc);
 }
 
 // Single-packet (size <= NOC_MAX_BURST_SIZE) multicast write. Silicon takes
@@ -518,7 +533,7 @@ inline void noc_async_write_multicast_one_packet(
 // in cb_pop_front; see docs/ASAN.md). The reads themselves are synchronous
 // memcpys, so there's nothing to wait for.
 inline void noc_async_read_barrier(uint8_t noc = noc_index) {
-    __emule_pending_noc_reads = 0;
+    __emule_self->san.pending_noc_reads = 0;
 }
 inline void noc_async_write_barrier(uint8_t noc = noc_index) {}
 inline void noc_async_writes_flushed(uint8_t noc = noc_index) {}
@@ -631,11 +646,9 @@ FORCE_INLINE void noc_async_read_one_packet_with_state_with_trid(
     uint32_t dst_l1_addr,
     uint32_t /*trid*/,
     uint8_t noc = noc_index) {
-    // shard_base_l1 + shard_offset is the L1 address on the source core.
-    // In emule it may be a firmware-style L1 offset or a truncated host
-    // pointer (from l1_alloc / CB APIs); __emule_addr_to_offset canonicalizes
-    // both to the proper L1 offset so the OR with the cached upper coords
-    // doesn't corrupt the high bits of the reconstructed noc addr.
+    // shard_base_l1 + shard_offset is the 0-based L1 offset on the source core;
+    // __emule_addr_to_offset is an idempotent in-slot mask (the offset is already < 2 MB)
+    // before the OR with the cached upper coords of the reconstructed noc addr.
     uint64_t base = __emule_datamovement_ctx().shard_noc_addr_base[noc & 1];
     uint32_t size = __emule_datamovement_ctx().shard_size[noc & 1];
     uint32_t l1_off = __emule_addr_to_offset(shard_base_l1 + shard_offset);
@@ -658,9 +671,8 @@ template <bool inc_num_issued = true>
 inline void noc_async_read_with_state(
     uint32_t src_local_l1_addr, uint32_t dst_local_l1_addr, uint32_t size,
     uint8_t noc = noc_index) {
-    // Canonicalize src — it can be either a firmware-style L1 offset or a
-    // truncated host pointer in emule; __emule_addr_to_offset normalizes both
-    // to a proper L1 offset so the OR with cached upper coords is well-formed.
+    // __emule_addr_to_offset is an idempotent in-slot mask on src (already a 0-based
+    // L1 offset) before the OR with the cached upper coords.
     uint64_t upper = __emule_datamovement_ctx().shard_noc_addr_base[noc & 1]
                    & 0xFFFFFFFF00000000ULL;
     uint64_t full_src = upper | uint64_t(__emule_addr_to_offset(src_local_l1_addr));
@@ -689,39 +701,27 @@ inline void noc_async_read_inc_num_issued(uint32_t /*num_issued_reads_inc*/,
 #ifndef __EMULE_GET_SEMAPHORE_DEFINED
 #define __EMULE_GET_SEMAPHORE_DEFINED
 inline uint32_t get_semaphore(uint32_t semaphore_id) {
-    uint32_t l1_base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__emule_self->bridge_l1));
-    return l1_base + EMULE_SEM_BASE + semaphore_id * EMULE_SEM_ALIGN;
+    // L1 offset model: return the 0-based firmware offset. The rebase to a host
+    // pointer happens at the deref (the L1 pointer cast is translated at JIT
+    // time; NOC ops go through the chokepoint / resolver).
+    return EMULE_SEM_BASE + semaphore_id * EMULE_SEM_ALIGN;
 }
 #endif
-
-// Remap a local-L1 host pointer to the current chip's copy (multi-chip global semaphores);
-// no-op for single-chip. Defined in emulated_program_runner.cpp.
-extern "C" uint8_t* __emule_chip_relative_l1(uint8_t* p);
 
 // Atomic helpers for semaphore operations.
 // volatile reads are unreliable at -O3; use std::atomic for cross-thread visibility.
 inline std::atomic<uint32_t>* __emule_sem_atomic(volatile tt_l1_ptr uint32_t* sem_addr) {
-    // Plain translation (offset-vs-absolute disambiguation only), NOT the
-    // sanitizer chokepoint: this is the legitimate semaphore API, which the
-    // checks must exempt. See docs/ASAN.md §6.
-    uint32_t addr32 = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(const_cast<uint32_t*>(sem_addr)));
-    // Multi-chip: a global semaphore is passed to kernels as one absolute host pointer valid for only
-    // ONE chip's MAP_32BIT mmap. Remap the RAW pointer to the current chip's copy FIRST (before the
-    // offset-vs-absolute translation, which would otherwise mangle a peer-chip absolute pointer whose
-    // numeric value happens to be < the local l1_base). Single-chip short-circuits in the hook (no-op).
-    // DESIGN DIVERGENCE: see tt-emule/.claude/skills/workarounds (DM-1). Faithful mechanism, not a hack.
-    uint8_t* raw = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(addr32));
-    uint8_t* remapped = __emule_chip_relative_l1(raw);
-    uint8_t* final_ptr = (remapped != raw) ? remapped : __emule_local_l1_to_ptr(addr32);
-    if (__emule_debug_multicast()) {
-        fprintf(stderr, "[EMULE_FABRIC]   sem_atomic raw=%p remapped=%p final=%p\n",
-                (void*)raw, (void*)remapped, (void*)final_ptr);
-    }
-    return reinterpret_cast<std::atomic<uint32_t>*>(final_ptr);
+    // L1 offset model: sem_addr is already a translated host pointer — the L1
+    // pointer cast that produced it was rewritten to __emule_local_l1_to_ptr at
+    // JIT time, using THIS fiber's bridge_l1. One shared offset space needs no
+    // per-chip remap and
+    // no offset-vs-absolute disambiguation. Use it directly — do NOT route
+    // through the sanitizer chokepoint (the semaphore region is legitimate here).
+    return reinterpret_cast<std::atomic<uint32_t>*>(const_cast<uint32_t*>(sem_addr));
 }
 
 // Set semaphore value (local L1 store).
-// addr is a uint32_t L1 address (truncated host pointer).
+// addr is a 0-based uint32 L1 offset.
 inline void noc_semaphore_set(volatile tt_l1_ptr uint32_t* sem_addr, uint32_t val) {
     auto* a = __emule_sem_atomic(sem_addr);
     a->store(val, std::memory_order_release);
@@ -803,17 +803,29 @@ inline void noc_semaphore_inc(uint64_t noc_addr, uint32_t incr, uint8_t noc,
 
 // 4-byte unicast write of a local L1 word to a remote semaphore. Silicon
 // uses write_reg_cmd_buf for this (separate cmd buffer from the data path);
-// in emule the resolver+memcpy is identical to noc_async_write of 4 bytes.
+// in emule this is the same resolver+memcpy as a 4-byte noc_async_write —
+// except the local source is BY CONTRACT a semaphore word (e.g.
+// Semaphore::relay_unicast reads our own sem), so it is translated via the
+// sanctioned-semaphore path: routing it through the checked chokepoint would
+// trip the Illegal-Semaphore ASAN check on the API's own legitimate access.
 inline void noc_semaphore_set_remote(
     uint32_t src_local_l1_addr, uint64_t dst_noc_addr, uint8_t noc = noc_index) {
-    noc_async_write(src_local_l1_addr, dst_noc_addr, sizeof(uint32_t), noc);
+    __emule_check_noc_write_alignment(src_local_l1_addr, dst_noc_addr);
+    uint8_t* src = __emule_sem_l1_to_ptr(src_local_l1_addr);
+    uint8_t* dst = __emule_resolve_noc_addr(dst_noc_addr);
+    if (!src || !dst) {
+        fprintf(stderr, "EMULE WARN: noc_semaphore_set_remote skipped (src=%p src_addr=0x%x dst=%p dst_addr=0x%llx) "
+                "[from phys (%u,%u) logical (%u,%u)]\n",
+                (void*)src, src_local_l1_addr, (void*)dst, (unsigned long long)dst_noc_addr,
+                my_x[0], my_y[0], __emule_self->core->logical_x, __emule_self->core->logical_y);
+        return;
+    }
+    std::memcpy(dst, src, sizeof(uint32_t));
     // This sets a SEMAPHORE on a remote core; a fiber there may be parked in
     // noc_semaphore_wait on it (e.g. SDPA chain relay_unicast of the data-valid
     // sem). Wake it — same wake-on-sync-write invariant as noc_semaphore_inc /
     // _set / _set_multicast (the waiter parks on the same resolved host addr).
-    if (uint8_t* d = __emule_resolve_noc_addr(dst_noc_addr)) {
-        __emule_fiber_wake(d);
-    }
+    __emule_fiber_wake(dst);
 }
 
 // Multicast a semaphore value to multiple cores.
@@ -827,19 +839,21 @@ inline void noc_semaphore_set_multicast(
         uint32_t y_start = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + 3 * NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
         uint32_t off     = static_cast<uint32_t>(dst_mcast_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
         uint32_t sem_val;
-        std::memcpy(&sem_val, __emule_local_l1_to_ptr(src_local_l1_addr), sizeof(uint32_t));
+        std::memcpy(&sem_val, __emule_sem_l1_to_ptr(src_local_l1_addr), sizeof(uint32_t));
         fprintf(stderr, "EMULE DBG: noc_semaphore_set_multicast (%u,%u)->(%u,%u) offset=0x%x val=%u num_dests=%u "
                 "[from logical (%u,%u)]\n",
                 x_start, y_start, x_end, y_end, off, sem_val, num_dests,
                 __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
-    uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
-    __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t), /*include_self=*/false);
+    // Local source is a semaphore word by contract — sanctioned-semaphore
+    // translation, same reasoning as noc_semaphore_set_remote above.
+    uint8_t* src = __emule_sem_l1_to_ptr(src_local_l1_addr);
+    __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t), /*include_self=*/false, noc);
 }
 
 inline void noc_semaphore_set_multicast_loopback_src(
     uint32_t src_local_l1_addr, uint64_t dst_mcast_noc_addr,
-    uint32_t num_dests, bool /*linked*/ = false, uint8_t /*noc*/ = 0) {
+    uint32_t num_dests, bool /*linked*/ = false, uint8_t noc = noc_index) {
     // Silicon NOC_CMD_BRCST_SRC_INCLUDE: sender sees its own semaphore update.
     if (__emule_debug_multicast()) {
         uint32_t x_end   = (dst_mcast_noc_addr >> NOC_ADDR_LOCAL_BITS) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
@@ -848,14 +862,16 @@ inline void noc_semaphore_set_multicast_loopback_src(
         uint32_t y_start = (dst_mcast_noc_addr >> (NOC_ADDR_LOCAL_BITS + 3 * NOC_ADDR_NODE_ID_BITS)) & ((1u << NOC_ADDR_NODE_ID_BITS) - 1);
         uint32_t off     = static_cast<uint32_t>(dst_mcast_noc_addr & ((1ULL << NOC_ADDR_LOCAL_BITS) - 1));
         uint32_t sem_val;
-        std::memcpy(&sem_val, __emule_local_l1_to_ptr(src_local_l1_addr), sizeof(uint32_t));
+        std::memcpy(&sem_val, __emule_sem_l1_to_ptr(src_local_l1_addr), sizeof(uint32_t));
         fprintf(stderr, "EMULE DBG: noc_semaphore_set_multicast_loopback_src (%u,%u)->(%u,%u) offset=0x%x val=%u num_dests=%u "
                 "[from logical (%u,%u)]\n",
                 x_start, y_start, x_end, y_end, off, sem_val, num_dests,
                 __emule_self->core->logical_x, __emule_self->core->logical_y);
     }
-    uint8_t* src = __emule_local_l1_to_ptr(src_local_l1_addr);
-    __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t), /*include_self=*/true);
+    // Local source is a semaphore word by contract — sanctioned-semaphore
+    // translation, same reasoning as noc_semaphore_set_remote above.
+    uint8_t* src = __emule_sem_l1_to_ptr(src_local_l1_addr);
+    __emule_multicast_write(dst_mcast_noc_addr, src, sizeof(uint32_t), /*include_self=*/true, noc);
 }
 
 // Atomic increment fanned across a rectangular grid of cores. Silicon uses

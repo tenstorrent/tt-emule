@@ -18,16 +18,17 @@ enum class InlineWriteDst : uint8_t { DEFAULT = 0, L1 = 1, REG = 2 };
 // Command buffer index — unused in emulation, but kernels reference it.
 constexpr uint32_t write_at_cmd_buf = 0;
 
-// RISC-V debug-register addresses used by upstream
-// `ttnn/cpp/ttnn/operations/data_movement/common/kernels/common.hpp::spin()`.
-// spin() is a debug-only busy-wait that emule kernels never execute; the
-// addresses just need to be defined for the upstream header to compile.
-#ifndef RISCV_DEBUG_REG_WALL_CLOCK_L
-#define RISCV_DEBUG_REG_WALL_CLOCK_L 0
-#endif
-#ifndef RISCV_DEBUG_REG_WALL_CLOCK_H
-#define RISCV_DEBUG_REG_WALL_CLOCK_H 0
-#endif
+// RISC-V debug-register addresses used by upstream `common.hpp::spin()` and
+// `device_delay_spin.cpp`. Both busy-wait by re-reading this pair as a live 64-bit counter until
+// it advances past a target, so the backing storage must genuinely tick (a frozen value spins
+// forever) and must outlive this kernel's JIT-compiled .so (dlclose()'d once its Program is torn
+// down). Backed by tt_emule::wall_clock() (include/tt_emule/wall_clock.hpp), compiled into the
+// long-lived runtime — resolved here via extern "C" the same way other runtime hooks are (see
+// __emule_fabric_teleport in __emule_fabric_stubs.h).
+extern "C" uintptr_t __emule_wall_clock_lo_addr();
+extern "C" uintptr_t __emule_wall_clock_hi_addr();
+#define RISCV_DEBUG_REG_WALL_CLOCK_L __emule_wall_clock_lo_addr()
+#define RISCV_DEBUG_REG_WALL_CLOCK_H __emule_wall_clock_hi_addr()
 
 #ifndef DEBUG_SANITIZE_ETH
 #define DEBUG_SANITIZE_ETH(...) ((void)0)

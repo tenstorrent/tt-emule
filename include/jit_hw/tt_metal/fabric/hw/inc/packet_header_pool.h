@@ -5,11 +5,10 @@
 // emule shadow of tt_metal/fabric/hw/inc/packet_header_pool.h.
 //
 // The silicon pool hands out L1 addresses from the reserved MEM_PACKET_HEADER_POOL_BASE region. emule
-// must return a HOST pointer into the CURRENT worker's real L1 (MAP_32BIT low-2GB alias), because the
-// fabric kernels pass `(uint32_t)packet_header` to the sender and the teleport re-extends that uint32
-// as a host pointer — only L1-backed pointers survive that truncation (the .so's own static storage is
-// mapped above 4 GB and would truncate to garbage). We therefore map the same reserved L1 region
-// through __emule_local_l1_to_ptr.
+// must return a HOST pointer into the CURRENT worker's real L1 (via __emule_local_l1_to_ptr), because
+// the fabric shim narrows the header to a bridge_l1-relative offset (__emule_fabric_l1_off) and the
+// teleport re-widens it against bridge_l1 — a pointer outside the worker's L1 region would not
+// round-trip. We therefore map the same reserved L1 region through __emule_local_l1_to_ptr.
 //
 // Routes: silicon allocates contiguous blocks of headers and registers each block under a route_id
 // (header_table[route_id] = {first_header, num}); the route-variant fabric send API iterates a route's

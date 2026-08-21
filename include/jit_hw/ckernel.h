@@ -128,6 +128,15 @@ inline constexpr bool APPROX = false;
 
 // UnpackToDestEn lives in llk_types.h (global scope, not ckernel).
 
+// load_blocking: on silicon, drains a preceding store to the same L1 address before a
+// subsequent NoC read of it (a baby-RISCV store can retire before its write-request lands
+// in L1, and the RISC core and NoC engine are independent L1 clients with no program-order
+// guarantee between them). Emule's NOC transactions are synchronous memcpy against the same
+// host-mmap'd L1 (see noc_async_read_barrier/write_barrier, also no-ops here), so there is no
+// such hazard to guard against — a plain dereference is the faithful functional equivalent.
+template <typename T>
+inline T load_blocking(volatile T* ptr) { return *ptr; }
+
 // SFPU op-name function stubs. upstream kernels uses `ckernel::sfpu::<op>_init` as a
 // non-type template parameter for kernel init dispatch (e.g. via INIT_OP
 // wrapper macros). Emule has no SFPU vector hardware — the templates just

@@ -39,16 +39,13 @@ namespace unified_kernels {
 // sender that preprograms a write then an atomic-inc and issues both does not
 // alias the captured state.
 
-// Worker L1 slots are 2 MB-aligned. Some senders compose the destination as
-// `dst_noc_coord | (uint64_t)get_write_ptr(cb)` — an OR'd absolute host pointer
-// rather than a firmware L1 offset — so extract the within-slot offset from the
-// local field before resolving. A no-op for true offsets (< 2 MB). Matches the
-// mask __emule_multicast_write already applies host-side.
-FORCE_INLINE uint64_t __emule_uk_slotmask_local(uint64_t noc_addr) {
-    constexpr uint64_t local_mask = (uint64_t(1) << NOC_ADDR_LOCAL_BITS) - 1;
-    constexpr uint64_t slot_mask = 0x1FFFFFu;  // 2 MB - 1
-    return (noc_addr & ~local_mask) | ((noc_addr & local_mask) & slot_mask);
-}
+// Set the low NOC-local bits (an L1 offset) while preserving the saved upper
+// coords. The shadow does NOT slot-mask addresses at the replay site: emit-time
+// canonicalization — slot-masking worker-L1 offsets (the `dst_noc_coord |
+// (uint64_t)get_write_ptr(cb)` OR'd-host-pointer form) while leaving DRAM bank
+// offsets (> 2 MB) intact — is done role-aware by __emule_resolve_noc_addr
+// (emulated_program_runner.cpp). Masking here instead would truncate DRAM
+// destinations; see issue #252.
 FORCE_INLINE void __emule_uk_set_local_bits(uint64_t& noc_addr, uint32_t local) {
     constexpr uint64_t local_mask = (uint64_t(1) << NOC_ADDR_LOCAL_BITS) - 1;
     noc_addr = (noc_addr & ~local_mask) | (uint64_t(local) & local_mask);
@@ -198,12 +195,18 @@ FORCE_INLINE void unicast_write_with_state(
     auto& wr = __emule_datamovement_ctx().uk_wr[noc];
     if constexpr (set_addresses) {
         wr.local_addr = src_local_addr;
-        __emule_uk_set_local_bits(wr.noc_addr, dst_local_addr);
+        // Canonicalize the destination L1 offset before OR-ing into the saved
+        // upper coords — dst_local_addr can be a firmware offset or a truncated
+        // host pointer. Mirrors the read path (unicast_read_with_state) and
+        // noc_async_read_with_state in dataflow_api.h.
+        __emule_uk_set_local_bits(wr.noc_addr, __emule_addr_to_offset(dst_local_addr));
     }
     if constexpr (set_size) {
         wr.len = len_bytes;
     }
-    noc_async_write(wr.local_addr, __emule_uk_slotmask_local(wr.noc_addr), wr.len, noc);
+    // No slot-mask here: __emule_resolve_noc_addr masks worker-L1 offsets and
+    // preserves DRAM bank offsets (role-aware). Masking would truncate DRAM (#252).
+    noc_async_write(wr.local_addr, wr.noc_addr, wr.len, noc);
 }
 
 template <bool posted, bool increment_counters = false, uint8_t cmd_buf = write_cmd_buf>
@@ -357,7 +360,7 @@ FORCE_INLINE void multicast_write_issue_txn(uint8_t /*noc*/ = noc_index) {
     auto& mc = __emule_datamovement_ctx().uk_mc[noc_index];
     __emule_multicast_write(
         mc.noc_addr, __emule_local_l1_to_ptr(mc.local_addr), mc.len,
-        mc.include_self);
+        mc.include_self, noc_index);
 }
 
 template <uint32_t mcast_num_cores, bool loopback, bool is_part_of_receiver_grid,
@@ -381,7 +384,7 @@ FORCE_INLINE void multicast_write_with_state(uint32_t src_local_addr, uint32_t d
     }
     __emule_multicast_write(
         mc.noc_addr, __emule_local_l1_to_ptr(mc.local_addr), mc.len,
-        mc.include_self);
+        mc.include_self, noc_index);
 }
 
 #endif  // defined(COMPILE_FOR_BRISC) || defined(COMPILE_FOR_NCRISC)

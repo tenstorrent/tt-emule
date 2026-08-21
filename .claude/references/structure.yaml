@@ -25,19 +25,15 @@ files:
   - {kind: struct, name: DFBTCSlot}
   - {kind: struct, name: EmuleDFBInterface}
   - {kind: struct, name: DFBSyncState}
+- path: include/tt_emule/kernel_patcher.hpp
+  section: include/tt_emule/
+  summary: Opaque public API for the JIT kernel patch pass (`tt::emule::patch_kernel_source`) — the source→source transform the tt-metal emulation runner calls before compiling a kernel for x86.
 - path: include/tt_emule/l1_pool.hpp
   section: include/tt_emule/
   summary: '`class L1Pool`; `SLOT_SIZE`, `slot_ptr`, `num_slots`'
   symbols:
   - {kind: namespace, name: tt_emule}
   - {kind: class, name: L1Pool}
-- path: include/tt_emule/low4g_mmap.hpp
-  section: include/tt_emule/
-  summary: '`__emule_mmap_low4g(size)` — maps worker L1 in the low 4 GB (uint32-addressable aliasing window): MAP_32BIT first, then a /proc/self/maps-found [2 GB,4 GB) gap via MAP_FIXED. Lets ~16 BH chips
-    fit one process.'
-  symbols:
-  - {kind: namespace, name: tt_emule}
-  - {kind: function, name: __emule_mmap_low4g}
 - path: include/tt_emule/tile_counter.hpp
   section: include/tt_emule/
   summary: '`struct TileCounter`, `class TileCounterArray`; `TILE_COUNTERS_PER_NEO`; inc_posted/inc_acked/reset_all'
@@ -46,6 +42,21 @@ files:
   - {kind: global, name: TILE_COUNTERS_PER_NEO}
   - {kind: struct, name: TileCounter}
   - {kind: class, name: TileCounterArray}
+- path: include/tt_emule/wall_clock.hpp
+  section: include/tt_emule/
+  summary: Host-backed RISCV_DEBUG_REG_WALL_CLOCK_{L,H} counter for spin()/device_delay_spin.cpp, hosted in the long-lived runtime (not jit_hw) so the ticker thread outlives the ephemeral kernel .so.
+  symbols:
+  - {kind: namespace, name: tt_emule}
+  - {kind: struct, name: WallClock}
+  - {kind: function, name: wall_clock}
+  - {kind: extern_c, name: visibility}
+- path: include/tt_emule/worker_l1_mmap.hpp
+  section: include/tt_emule/
+  summary: Worker-L1 backing allocator (__emule_mmap_worker_l1) — a plain 64-bit MAP_NORESERVE mmap; the offset model frees worker L1 from any placement window, so a galaxy-scale pool lives anywhere in
+    64-bit space.
+  symbols:
+  - {kind: namespace, name: tt_emule}
+  - {kind: function, name: __emule_mmap_worker_l1}
 - path: include/hw/inc/api/debug/dprint.h
   section: include/hw/inc/api/debug/
   summary: macros `DPRINT`, `DPRINT_DATA0`, `DPRINT_DATA1`
@@ -58,11 +69,19 @@ files:
   summary: 'comprehensive fabric stub (multichip out of scope): `using PACKET_HEADER_TYPE`; `struct PacketHeader`/`LowLatencyPacketHeader`/`HybridMeshPacketHeader`; `namespace tt::tt_fabric` `Noc*CommandHeader`
     structs, `class RoutingPlaneConnectionManager`, `open_connections`/`close_connections` no-ops'
   symbols:
+  - {kind: function, name: __emule_fabric_l1_off}
   - {kind: extern_c, name: __emule_fabric_teleport}
   - {kind: extern_c, name: __emule_fabric_set_route}
   - {kind: extern_c, name: __emule_fabric_set_route_dir}
+  - {kind: extern_c, name: __emule_fabric_route_follow}
   - {kind: macro, name: PROGRAMMABLE_CORE_TYPE_DEFINED}
   - {kind: enum, name: ProgrammableCoreType}
+  - {kind: using, name: NOC_SCATTER_WRITE_MAX_CHUNKS}
+  - {kind: using, name: NOC_SCATTER_WRITE_MIN_CHUNKS}
+  - {kind: using, name: NocUnicastScatterCommandHeader}
+  - {kind: using, name: UnicastWriteUpdateMask}
+  - {kind: using, name: UnicastScatterWriteUpdateMask}
+  - {kind: using, name: UnicastAtomicIncUpdateMask}
   - {kind: using, name: PACKET_HEADER_TYPE}
   - {kind: struct, name: StreamId}
   - {kind: function, name: get_ptr_val}
@@ -139,6 +158,7 @@ files:
   - {kind: enum, name: SfpuType}
   - {kind: enum, name: Transpose}
   - {kind: global, name: APPROX}
+  - {kind: function, name: load_blocking}
   - {kind: namespace, name: sfpu}
   - {kind: function, name: silu_init}
   - {kind: function, name: exp_init}
@@ -209,6 +229,11 @@ files:
 - path: include/jit_hw/ckernel_sfpu_silu.h
   section: include/jit_hw/
   summary: stub of silicon SFPU silu ckernel (emule scalar impl in `api/compute/eltwise_unary/sigmoid.h`)
+- path: include/jit_hw/cmath_common.h
+  section: include/jit_hw/
+  summary: Narrow forwarder so blackhole/wormhole SFPU sqrt's bare cmath_common.h include resolves on emule's JIT path; no-ops sqrt_init()'s replay-buffer counter reset.
+  symbols:
+  - {kind: struct, name: p_setrwc}
 - path: include/jit_hw/core_config.h
   section: include/jit_hw/
   summary: '`enum class ProgrammableCoreType`; `MaxProcessorsPerCoreType`/`MaxProcessorsForThreadingVariables`/`MAX_NUM_NOCS_PER_CORE` constants'
@@ -273,7 +298,6 @@ files:
   - {kind: namespace, name: tt_emule}
   - {kind: extern_c, name: __emule_dram_ptr}
   - {kind: extern_c, name: __emule_noc_resolve}
-  - {kind: global, name: __emule_pending_noc_reads}
   - {kind: global, name: bank_to_dram_offset}
   - {kind: global, name: bank_to_l1_offset}
   - {kind: global, name: my_x}
@@ -847,11 +871,13 @@ files:
   - {kind: function, name: binary_min_uint32_tile}
 - path: include/jit_hw/api/compute/binary_remainder.h
   section: include/jit_hw/api/compute/
-  summary: '`ckernel::` `remainder_binary_tile`, `remainder_int32_tile` (+`_init`)'
+  summary: '`ckernel::` `remainder_binary_tile`, `remainder_int32_tile`, `remainder_uint32_tile` (+`_init`)'
   symbols:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: remainder_int32_tile}
   - {kind: function, name: remainder_int32_tile_init}
+  - {kind: function, name: remainder_uint32_tile}
+  - {kind: function, name: remainder_uint32_tile_init}
   - {kind: function, name: remainder_binary_tile}
   - {kind: function, name: remainder_binary_tile_init}
 - path: include/jit_hw/api/compute/binary_shift.h
@@ -1037,8 +1063,8 @@ files:
   - {kind: function, name: silu_tile}
   - {kind: function, name: silu_tile_init_pack}
   - {kind: function, name: silu_tile_pack}
-  - {kind: function, name: sfpu_reduce}
   - {kind: function, name: sfpu_reduce_init}
+  - {kind: function, name: sfpu_reduce}
   - {kind: namespace, name: __emule_topk}
   - {kind: function, name: merge_split_col}
   - {kind: function, name: sort_col}
@@ -2101,6 +2127,7 @@ files:
   - {kind: macro, name: NOC_UNICAST_ADDR_X}
   - {kind: macro, name: NOC_UNICAST_ADDR_Y}
   - {kind: extern_c, name: __emule_resolve_noc_addr}
+  - {kind: extern_c, name: __emule_fabric_route_follow}
   - {kind: extern_c, name: __emule_multicast_write}
   - {kind: extern_c, name: __emule_noc_addr_is_dram}
   - {kind: function, name: __emule_debug_multicast}
@@ -2157,7 +2184,6 @@ files:
   - {kind: macro, name: EMULE_SEM_ALIGN}
   - {kind: macro, name: __EMULE_GET_SEMAPHORE_DEFINED}
   - {kind: function, name: get_semaphore}
-  - {kind: extern_c, name: __emule_chip_relative_l1}
   - {kind: function, name: __emule_sem_atomic}
   - {kind: function, name: noc_semaphore_set}
   - {kind: function, name: noc_semaphore_wait}
@@ -2266,9 +2292,6 @@ files:
   symbols:
   - {kind: macro, name: NOC_ADDR_LOCAL_BITS}
   - {kind: struct, name: noc_traits_t}
-- path: include/jit_hw/cpp/ttnn/operations/data_movement/common/kernels/common.hpp
-  section: include/jit_hw/cpp/ttnn/operations/data_movement/common/kernels/
-  summary: forwarding shim → `ttnn/operations/data_movement/common/kernels/common.hpp`
 - path: include/jit_hw/experimental/kernel_args.h
   section: include/jit_hw/experimental/
   summary: '`experimental::` `struct RtaArg`/`CrtaArg`/`CtaVal`; `get_arg_addr`, `get_common_arg_addr`'
@@ -2364,6 +2387,7 @@ files:
     it consumes; included by jit_kernel_stubs.hpp and dataflow_api.h (was duplicated in both). See docs/ASAN.md.
   symbols:
   - {kind: function, name: __emule_local_l1_to_ptr}
+  - {kind: function, name: __emule_sem_l1_to_ptr}
 - path: include/jit_hw/internal/emule_thread_ctx.h
   section: include/jit_hw/internal/
   summary: per-RISC fiber context (`ThreadCommonCtx`/`ComputeThreadCtx`/`DatamovementThreadCtx`) holding all formerly-global per-thread state (rt_args, cbs, dst, sfpu, pack/llk state, …); reached via `__emule_self`/`__emule_compute_ctx()`,
@@ -2382,6 +2406,7 @@ files:
   - {kind: struct, name: __emule_uk_state}
   - {kind: struct, name: __emule_matmul_bridge}
   - {kind: enum, name: ReluType}
+  - {kind: struct, name: EmuleSanitizerState}
   - {kind: struct, name: ThreadCommonCtx}
   - {kind: struct, name: ComputeThreadCtx}
   - {kind: struct, name: DatamovementThreadCtx}
@@ -2445,6 +2470,8 @@ files:
   - {kind: macro, name: FORCE_INLINE}
   - {kind: enum, name: InlineWriteDst}
   - {kind: global, name: write_at_cmd_buf}
+  - {kind: extern_c, name: __emule_wall_clock_lo_addr}
+  - {kind: extern_c, name: __emule_wall_clock_hi_addr}
   - {kind: macro, name: RISCV_DEBUG_REG_WALL_CLOCK_L}
   - {kind: macro, name: RISCV_DEBUG_REG_WALL_CLOCK_H}
   - {kind: macro, name: DEBUG_SANITIZE_ETH}
@@ -2605,7 +2632,8 @@ files:
 - path: include/jit_hw/tt_metal/fabric/hw/inc/packet_header_pool.h
   section: include/jit_hw/tt_metal/fabric/hw/inc/
   summary: '`PacketHeaderPool` (route-based: contiguous header blocks per route_id + for_each_header) from the reserved MEM_PACKET_HEADER_POOL_BASE region of real worker L1 (via __emule_local_l1_to_ptr),
-    per-(core,risc)-thread partition; plus the route-variant multicast send overloads. So the (uint32_t)header truncation the teleport relies on round-trips and broadcast''s route API resolves'
+    per-(core,risc)-thread partition; plus the route-variant multicast send overloads, so (uint32_t)header narrows to a bridge_l1-relative offset (__emule_fabric_l1_off) that the teleport re-widens, and
+    broadcast''s route API resolves'
   symbols:
   - {kind: function, name: __emule_local_l1_to_ptr}
   - {kind: class, name: PacketHeaderPool}
@@ -2651,21 +2679,6 @@ files:
 - path: include/jit_hw/sfpu/ckernel_sfpu_rsqrt_compat.h
   section: include/jit_hw/sfpu/
   summary: forwarder → real per-arch `sfpu/ckernel_sfpu_rsqrt_compat.h` so the metal-layer `ckernel_sfpu_sqrt.h` include resolves on emule's JIT -I set
-- path: include/jit_hw/cpp/ttnn/kernel_lib/dest_helpers.hpp
-  section: include/jit_hw/cpp/ttnn/kernel_lib/
-  summary: Redirect shim — resolves the upstream `cpp/ttnn/kernel_lib/dest_helpers.hpp` include (only valid under -I ttnn/) to the real header reachable under emule's -I ttnn/cpp/.
-- path: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/dataflow/chunked_prefill_utils.hpp
-  section: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/dataflow/
-  summary: Redirect shim — resolves the upstream `cpp/ttnn/.../dataflow/chunked_prefill_utils.hpp` include to the real (portable C++) header under emule's -I ttnn/cpp/.
-- path: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/q_chunk_remapping.hpp
-  section: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/
-  summary: Redirect shim — resolves the upstream `cpp/ttnn/.../q_chunk_remapping.hpp` include to the real (portable zigzag index math) header under emule's -I ttnn/cpp/.
-- path: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/sdpa_streaming_qktv.hpp
-  section: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/
-  summary: Redirect shim — resolves the upstream `cpp/ttnn/.../sdpa_streaming_qktv.hpp` include to the real (portable C++) header under emule's -I ttnn/cpp/.
-- path: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/sliding_window_geometry.hpp
-  section: include/jit_hw/cpp/ttnn/operations/transformer/sdpa/device/kernels/
-  summary: Redirect shim — resolves the upstream `cpp/ttnn/.../sliding_window_geometry.hpp` include (SDPA reader/compute K-loop bound geometry) to the real portable header under emule's -I ttnn/cpp/.
 - path: include/jit_hw/experimental/llk_sfpu/ckernel_sfpu_sdpa.h
   section: include/jit_hw/experimental/llk_sfpu/
   summary: emule shadow of the raw-TTI SDPA SFPU header — verbatim silicon first-column helpers (exp polynomial/recip/softplus/fused-max-sub-exp, calculate_binop_with_scalar) over emule's sfpi+ckernel_ops
@@ -2694,17 +2707,6 @@ files:
   symbols:
   - {kind: global, name: my_x}
   - {kind: global, name: my_y}
-  - {kind: global, name: __emule_logical_x}
-  - {kind: global, name: __emule_logical_y}
-  - {kind: global, name: __emule_pending_noc_reads}
-  - {kind: global, name: __emule_cb_reserve_file}
-  - {kind: global, name: __emule_cb_reserve_line}
-  - {kind: global, name: __emule_cb_wait_file}
-  - {kind: global, name: __emule_cb_wait_line}
-  - {kind: global, name: __emule_cb_reserved_pages}
-  - {kind: global, name: __emule_cb_waited_pages}
-  - {kind: global, name: __emule_cb_reserve_dangling}
-  - {kind: global, name: __emule_cb_wait_dangling}
   - {kind: function, name: __emule_asan_cb_on_reserve}
   - {kind: function, name: __emule_asan_cb_on_push}
   - {kind: function, name: __emule_asan_cb_on_wait}
@@ -2714,18 +2716,6 @@ files:
   summary: 'The per-access L1 sanitizer checks lifted out of the __emule_local_l1_to_ptr chokepoint: plain `__emule_l1_translate` + semaphore/CB-resolve(+boundary)/OOB-tensor/padding helpers, and the sanitizer
     thread-locals they consume. Reached only when TT_METAL_EMULE_ASAN is on. See docs/ASAN.md.'
   symbols:
-  - {kind: global, name: __emule_sem_l1_range_start}
-  - {kind: global, name: __emule_sem_l1_range_end}
-  - {kind: global, name: __emule_l1_unreserved_base}
-  - {kind: global, name: __emule_l1_tensor_ranges}
-  - {kind: global, name: __emule_l1_tensor_ranges_count}
-  - {kind: global, name: __emule_l1_padding_ranges}
-  - {kind: global, name: __emule_l1_padding_ranges_count}
-  - {kind: global, name: __emule_l1_host_ranges}
-  - {kind: global, name: __emule_l1_host_ranges_count}
-  - {kind: global, name: __emule_cb_reserved_pages}
-  - {kind: global, name: __emule_cb_waited_pages}
-  - {kind: global, name: __emule_cb_boundary_strict}
   - {kind: function, name: __emule_l1_translate}
   - {kind: function, name: __emule_asan_check_semaphore}
   - {kind: function, name: __emule_asan_cb_resolve}
@@ -2737,13 +2727,9 @@ files:
     behind EMULE_ASAN_IMPLEMENTATION. Moved here from jit_hw/ root.'
   symbols:
   - {kind: function, name: __emule_asan_enabled}
-  - {kind: global, name: __emule_kernel_name}
   - {kind: extern_c, name: __emule_asan_panic}
   - {kind: global, name: my_x}
   - {kind: global, name: my_y}
-  - {kind: global, name: __emule_logical_x}
-  - {kind: global, name: __emule_logical_y}
-  - {kind: global, name: __processor_id}
   - {kind: function, name: __emule_asan_symbolize}
   - {kind: function, name: __emule_asan_collapse_angles}
   - {kind: function, name: __emule_asan_print_trace}
@@ -2754,7 +2740,6 @@ files:
     synchronous Layer-1 primitives (noc_async_read/write, noc_semaphore_inc, __emule_multicast_write)'
   symbols:
   - {kind: namespace, name: unified_kernels}
-  - {kind: function, name: __emule_uk_slotmask_local}
   - {kind: function, name: __emule_uk_set_local_bits}
   - {kind: function, name: unicast_write_increment_counters}
   - {kind: function, name: unicast_atomic_inc_increment_counters}
@@ -2777,3 +2762,9 @@ files:
   - {kind: function, name: multicast_write_set_state}
   - {kind: function, name: multicast_write_issue_txn}
   - {kind: function, name: multicast_write_with_state}
+- path: include/tt_emule/detail/kernel_patcher.hpp
+  section: include/tt_emule/detail/
+  summary: Kernel patch-pass internals (not public) — the RISC-V/L1 rewrite rules (`apply_x86_rewrites`), line-preserving regex replace, and recursive include inlining/shadow-skip/normalization; see docs/jit-l1-patch-pass.md.
+- path: include/jit_hw/tt_metal/tools/profiler/kernel_profiler.hpp
+  section: include/jit_hw/tt_metal/tools/profiler/
+  summary: Shadows the tt_metal/-prefixed kernel_profiler.hpp include spelling (forwards to the bare-path shim) so kernels using either spelling get the same no-op profiler.

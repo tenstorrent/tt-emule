@@ -25,7 +25,10 @@ on:
     branches: [main]
 
 concurrency:
-  group: pr-regression-${{ github.workflow }}-${{ github.ref }}
+  # PR: group per source branch → cancel supersedes older runs. Push: head_ref
+  # is empty → group per sha, so no merged commit is cancelled or evicted from a
+  # shared pending slot (per-commit attribution).
+  group: pr-regression-${{ github.workflow }}-${{ github.head_ref || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -247,26 +250,33 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
-  # Keep shards serialized within each architecture to avoid overwhelming the
-  # shared CPU runners while still allowing wormhole and blackhole to progress.
-  #
-  # The full sharded TTNN suites run on push to main (and any non-PR event), NOT
-  # on pull_request — on a PR the lightweight `ttnn-smoke-pr` job below replaces
-  # them. The on-push suite is therefore unchanged.
+  # Full sharded TTNN suites: on push (and any non-PR event), not on PRs — a PR
+  # runs the lightweight `ttnn-smoke-pr` job instead. `max-parallel: 1` keeps each
+  # arch on one runner, walking its 5 shards then its multi-chip leg (n300 for
+  # wormhole, bh_loudbox for blackhole): 2 TTNN runners on-push, one per arch.
   ttnn-pytest-wormhole:
-    name: TTNN Pytests (${{ matrix.arch }}, shard ${{ matrix.shard }}/5)
+    name: TTNN Pytests (${{ matrix.leg.suite }}, shard ${{ matrix.leg.shard }}/${{ matrix.leg.count }})
     needs: [changes, build]
     if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'pull_request' }}
     runs-on: tt-ubuntu-2204-xlarge-stable
-    timeout-minutes: 90
+    # 90 min was a pre-existing near-miss (observed ~89.5 min under max-parallel: 1 serialization);
+    # bumped for real headroom.
+    timeout-minutes: 120
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     strategy:
       fail-fast: false
       max-parallel: 1
       matrix:
-        arch: [wormhole]
-        shard: [1, 2, 3, 4, 5]
+        # Serial legs on one runner: wormhole sharded 5 ways, then the n300
+        # 2-device CCL suite as a single unsharded leg.
+        leg:
+          - { suite: wormhole, shard: 1, count: 5 }
+          - { suite: wormhole, shard: 2, count: 5 }
+          - { suite: wormhole, shard: 3, count: 5 }
+          - { suite: wormhole, shard: 4, count: 5 }
+          - { suite: wormhole, shard: 5, count: 5 }
+          - { suite: n300,     shard: 1, count: 1 }
     steps:
       - name: Checkout tt-emule (PR)
         uses: actions/checkout@v4
@@ -299,13 +309,13 @@ jobs:
         shell: bash
         run: bash tt-metal/install_dependencies.sh --sfpi
 
-      - name: Run TTNN pytest (${{ matrix.arch }}, shard ${{ matrix.shard }}/5)
+      - name: Run TTNN pytest (${{ matrix.leg.suite }}, shard ${{ matrix.leg.shard }}/${{ matrix.leg.count }})
         env:
           TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
           BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
-          TT_EMULE_ARCH: ${{ matrix.arch }}
-          SHARD_INDEX:   ${{ matrix.shard }}
-          SHARD_COUNT:   5
+          TT_EMULE_ARCH: ${{ matrix.leg.suite }}
+          SHARD_INDEX:   ${{ matrix.leg.shard }}
+          SHARD_COUNT:   ${{ matrix.leg.count }}
         shell: bash
         run: bash tt-emule/.github/scripts/ci-ttnn-pytests.sh
 
@@ -313,7 +323,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ttnn-pytests-results-${{ matrix.arch }}-shard-${{ matrix.shard }}
+          name: ttnn-pytests-results-${{ matrix.leg.suite }}-shard-${{ matrix.leg.shard }}
           path: |
             ${{ runner.temp }}/ttnn-pytests.log
             ${{ runner.temp }}/ttnn-junit-xml/*.xml
@@ -321,19 +331,28 @@ jobs:
           if-no-files-found: warn
 
   ttnn-pytest-blackhole:
-    name: TTNN Pytests (${{ matrix.arch }}, shard ${{ matrix.shard }}/5)
+    name: TTNN Pytests (${{ matrix.leg.suite }}, shard ${{ matrix.leg.shard }}/${{ matrix.leg.count }})
     needs: [changes, build]
     if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'pull_request' }}
     runs-on: tt-ubuntu-2204-xlarge-stable
-    timeout-minutes: 90
+    # Per-leg ceiling, sized for the bh_loudbox leg (whole CCL dirs, 1800s/file);
+    # the blackhole shards finish well under it.
+    timeout-minutes: 150
     container:
       image: ghcr.io/tenstorrent/tt-mlir/tt-mlir-ci-ubuntu-24-04:latest
     strategy:
       fail-fast: false
       max-parallel: 1
       matrix:
-        arch: [blackhole]
-        shard: [1, 2, 3, 4, 5]
+        # Serial legs on one runner: blackhole sharded 5 ways, then the
+        # bh_loudbox 8-device CCL suite as a single unsharded leg.
+        leg:
+          - { suite: blackhole,  shard: 1, count: 5 }
+          - { suite: blackhole,  shard: 2, count: 5 }
+          - { suite: blackhole,  shard: 3, count: 5 }
+          - { suite: blackhole,  shard: 4, count: 5 }
+          - { suite: blackhole,  shard: 5, count: 5 }
+          - { suite: bh_loudbox, shard: 1, count: 1 }
     steps:
       - name: Checkout tt-emule (PR)
         uses: actions/checkout@v4
@@ -366,13 +385,13 @@ jobs:
         shell: bash
         run: bash tt-metal/install_dependencies.sh --sfpi
 
-      - name: Run TTNN pytest (${{ matrix.arch }}, shard ${{ matrix.shard }}/5)
+      - name: Run TTNN pytest (${{ matrix.leg.suite }}, shard ${{ matrix.leg.shard }}/${{ matrix.leg.count }})
         env:
           TT_METAL_DIR:  ${{ github.workspace }}/tt-metal
           BUILD_DIR:     ${{ github.workspace }}/tt-metal/build_emule
-          TT_EMULE_ARCH: ${{ matrix.arch }}
-          SHARD_INDEX:   ${{ matrix.shard }}
-          SHARD_COUNT:   5
+          TT_EMULE_ARCH: ${{ matrix.leg.suite }}
+          SHARD_INDEX:   ${{ matrix.leg.shard }}
+          SHARD_COUNT:   ${{ matrix.leg.count }}
         shell: bash
         run: bash tt-emule/.github/scripts/ci-ttnn-pytests.sh
 
@@ -380,7 +399,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ttnn-pytests-results-${{ matrix.arch }}-shard-${{ matrix.shard }}
+          name: ttnn-pytests-results-${{ matrix.leg.suite }}-shard-${{ matrix.leg.shard }}
           path: |
             ${{ runner.temp }}/ttnn-pytests.log
             ${{ runner.temp }}/ttnn-junit-xml/*.xml
@@ -470,6 +489,8 @@ jobs:
     name: All checks passed
     # Run even when a dependency failed/was skipped, so the gate always reports.
     if: ${{ always() }}
+    # n300 and bh_loudbox are matrix legs of ttnn-pytest-wormhole/-blackhole, so
+    # those job results already cover them — no separate needs entries.
     needs: [changes, build, test, ttnn-pytest-wormhole, ttnn-pytest-blackhole, ttnn-smoke-pr]
     runs-on: ubuntu-latest
     steps:
