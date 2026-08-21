@@ -79,6 +79,14 @@ triage, or directly when finishing up a mock.
   Run the three sequentially (shared JIT cache). Any test that
   previously passed and now fails blocks ship; consult
   `.github/known-failures-quasar.txt` for the QS allowlist.
+- **Coverage came from an existing tt-metal test, not a new one.**
+  Prefer fixing the mock so a canonical tt-metal test passes over
+  authoring a test. A new tt-metal test is a last resort; when
+  genuinely unavoidable it must live under **`tests/emule/`** (e.g.
+  `tests/emule/ccl/`), formatted to tt-metal's pre-commit config
+  (**black line-length 120**, isort, autoflake), wired into the emule
+  pytest runner (`scripts/run_ttnn_pytests_*.sh`), with the pin bumped
+  to the companion commit. See the CLAUDE.md project rule.
 
 ## Documentation
 

@@ -1,40 +1,57 @@
 # L1 Emulation in tt-emule
 
 How tt-emule emulates per-core **L1 SRAM**. Read this before debugging an
-L1-addressing bug, extending the memory model, or auditing the host-pointer
-convention against silicon.
+L1-addressing bug, extending the memory model, or auditing the address model
+against silicon.
 
 On silicon, L1 is per-Tensix scratchpad SRAM that firmware addresses with small
-absolute addresses (e.g. a semaphore at `0xFFE30`). Emule backs each core's L1
-with a host `mmap` and translates between kernel-visible addresses and host
-pointers at well-defined points.
+absolute offsets (e.g. a semaphore at `0xFFE30`). Emule backs each core's L1 with
+a host `mmap` and follows the same convention: a kernel-visible L1 address is a
+small **0-based offset**, translated to a host pointer at the point of use.
 
 Companion docs: [cb-emulation.md](cb-emulation.md) (CBs live in L1),
 [dram-emulation.md](dram-emulation.md) (the banked sibling),
 [mem-zeros-handling.md](mem-zeros-handling.md) (the MEM_ZEROS region),
-[noc-emulation.md](noc-emulation.md) (NOC address resolution).
+[noc-emulation.md](noc-emulation.md) (NOC address resolution),
+[l1-offset-translation.md](l1-offset-translation.md) (the
+offset addressing model + the JIT patch pass, in depth).
 
 ---
 
 ## 1. Emulation model
 
-Each emulated core owns an L1 region in host memory. The governing convention is
-**host-pointer-everywhere**: every L1 address handed to a kernel
-(`get_write_ptr`, `get_read_ptr`, `get_semaphore`) is a real host pointer
-truncated to `uint32_t`. This works because worker L1 is mapped in the **low
-4 GB**, so the truncated pointer round-trips losslessly.
+Each emulated core owns an L1 region in host memory. A kernel-visible L1 address
+is a **0-based firmware offset** into that core's L1 (worker L1 is ~1.5 MB, so an
+offset fits in far less than 32 bits) — the same small-absolute-address convention
+silicon firmware uses. The offset is converted to a real 64-bit host pointer
+**only at the point it is dereferenced**, by adding the running fiber's L1 base
+(`__emule_self->bridge_l1`):
 
-This is **load-bearing, not an optimization**: tt-metal kernel source dereferences
-those addresses *directly* — `reinterpret_cast<T*>(cb.get_write_ptr())[i] = …`
-appears in 136 kernel sites (mask/scaler generators, fill-pad, …). emule runs the
-kernel as native JIT'd x86, so there is no hook on that raw `*ptr`; the address
-must already be a valid host pointer. Hence worker L1 *cannot* be moved above 4 GB
-or replaced by offsets/translation without editing pristine upstream kernels — the
-aliasing is fixed. The window spans all of `[0, 4 GB)`:
-`include/tt_emule/low4g_mmap.hpp` uses `MAP_32BIT` for `[0, 2 GB)` and a
-`/proc/self/maps`-found `MAP_FIXED` gap for `[2 GB, 4 GB)`, fitting ~16 BH /
-~27 WH chips in one process. Scaling past one window needs multi-process (the
-`uint32_t` L1-address truncation can't span a single process's 4 GB).
+```
+host_ptr = bridge_l1 + offset          // __emule_l1_translate()
+```
+
+A kernel invocation only ever dereferences its **own** core's L1 directly;
+cross-core and cross-chip access is expressed as a NOC address and resolved
+through `__emule_resolve_noc_addr` (a core-map lookup → the target core's own
+backing). So the running fiber's `bridge_l1` is always the correct base at a raw
+dereference.
+
+tt-metal kernel source dereferences L1 addresses two ways, both handled without
+editing the upstream kernel:
+- Through `noc_async_read` / `noc_async_write` (and the CB/semaphore APIs), which
+  translate the local address via the chokepoint `__emule_local_l1_to_ptr`.
+- By casting the address to a raw pointer and dereferencing it directly
+  (`reinterpret_cast<T*>(cb.get_write_ptr())[i] = …`, in mask/scaler generators,
+  fill-pad, etc.). These sites are rebased **at the cast** by a JIT-time
+  source-transform pass (`apply_x86_rewrites`), which writes a temp
+  `patched_kernel.cpp` — upstream kernel files stay pristine. See
+  [l1-offset-translation.md](l1-offset-translation.md).
+
+Because a kernel-visible address is an offset (not a host pointer), it is
+**address-space independent**: the same offset names the same L1 word on any chip
+in any process. Worker L1 does not have to be placed in the low 4 GB for the
+address to round-trip; where it is mapped is a backing detail (§2, §6).
 
 Consequences:
 - L1 is **zeroed once** at mmap time (`MAP_ANONYMOUS`), not re-zeroed per program
@@ -42,8 +59,9 @@ Consequences:
   [mem-zeros-handling.md](mem-zeros-handling.md).
 - There is **no SRAM size model** beyond the allocated region; no bank
   contention, no access latency.
-- A raw firmware-style offset (e.g. `0x1000`) and a truncated host pointer are
-  disambiguated at translation time (Section 3).
+- A debug build asserts an offset lands within the core's L1
+  (`__emule_self->l1_size`), so a value that is still an absolute/aliased address
+  surfaces as a named panic rather than a wild store.
 
 ---
 
@@ -55,24 +73,26 @@ Consequences:
 static constexpr size_t MAX_CBS = 32;
 enum class CoreRole { WORKER, DRAM };
 
-uint8_t*  l1_      = nullptr;             // mmap base (host pointer)
-uint32_t  l1_base_ = 0;                   // l1_ truncated to 32 bits, for kernels
+uint8_t*   l1_      = nullptr;            // mmap base (host pointer)
+uintptr_t  l1_base_ = 0;                  // = (uintptr_t)l1_ — full host pointer (offset model; no longer truncated)
 size_t    l1_size_ = 0;                   // worker L1 / DRAM bank size, from SoC descriptor
 CoreRole  role_    = CoreRole::WORKER;
 CBSyncState     cb_sync_states_[MAX_CBS] = {};
 ```
 
-Integrated builds set `l1_size_` from `metal_SocDescriptor` at chip
-construction (`SWEmuleChip` sizes worker pool slots and individual DRAM
-mmaps from `l1_size` / `dram_bank_size`); the L1 size is arch-dependent
-(1.5 MB on wormhole_b0, distinct on blackhole / quasar — see
-[BUILD_GUIDE.md](../BUILD_GUIDE.md) for arch defaults).
+Integrated builds set `l1_size_` from `metal_SocDescriptor` at chip construction
+(`SWEmuleChip` sizes worker-pool slots and individual DRAM mmaps from `l1_size` /
+`dram_bank_size`); the L1 size is arch-dependent (1.5 MB on wormhole_b0, distinct
+on blackhole / quasar — see [BUILD_GUIDE.md](../BUILD_GUIDE.md) for arch defaults).
 
-`mmap_region(size)` maps `MAP_PRIVATE | MAP_ANONYMOUS`, adding **`MAP_32BIT` for
-WORKER cores** so `l1_base_` fits in 32 bits. DRAM cores use a plain mmap (they
-are reached via the bank-aware NOC path, not a truncated pointer — see
-[dram-emulation.md](dram-emulation.md)). `MAP_ANONYMOUS` guarantees the region
-starts zeroed.
+`Core::l1_ptr(offset)` returns `l1_ + offset` with a loud bounds check.
+`Core::l1_alloc(bytes)` is a bump allocator returning a **0-based offset** (Quasar
+DFB fallback path — see §4).
+
+Worker L1 is backed by a plain 64-bit `mmap` (`l1_pool.hpp`, `worker_l1_mmap.hpp`),
+as are DRAM cores. Under the offset model the placement is a **backing detail, not
+an addressing constraint** — the kernel-visible address is an offset regardless of
+where L1 is mapped (§6).
 
 L1 alignment is `L1_ALIGNMENT` (16 bytes), injected as a JIT define from
 `hal::get_l1_alignment()`.
@@ -81,86 +101,71 @@ L1 alignment is `L1_ALIGNMENT` (16 bytes), injected as a JIT define from
 
 ## 3. Address resolution
 
-A single contiguous `MAP_32BIT` mmap with 2 MB-aligned slots serves every core
-(`include/tt_emule/l1_pool.hpp`: `SLOT_SIZE = 2 MB`). The tt-metal integration
-(`SWEmuleChip::worker_pool_`, built with `TT_EMULE_USE_L1_POOL`) owns this pool,
-so encoding a host pointer to an L1 offset is a single bitmask
-`addr & (SLOT_SIZE - 1)` (i.e., `addr & 0x1FFFFF`).
-A thread-local `__emule_bridge_l1` holds the current thread's core L1 base, used
-when *decoding* a firmware-style offset back to a host pointer (see
-`__emule_local_l1_to_ptr` below).
+The runner (`emulated_program_runner.cpp`), per emulated core/fiber, sets the
+fiber ctx's `bridge_l1 = core->l1_data()` and `l1_size = core->l1_size()` before
+launching the kernel. Every kernel L1 dereference resolves the offset against that
+base.
 
 Translation helpers:
 
 | Helper | Role | Where |
 |---|---|---|
-| `__emule_addr_to_offset(addr)` | **Encode**: host pointer → L1 offset (`addr & 0x1FFFFF`). | `include/jit_hw/api/dataflow/dataflow_api.h` |
-| `__emule_local_l1_to_ptr(l1_addr)` | Kernel-side dual path: if `l1_addr >= l1_base` treat as an absolute host pointer, else add to `__emule_bridge_l1`. | `include/jit_hw/jit_kernel_stubs.hpp` |
-| `__emule_resolve_noc_addr(noc_addr)` | **Decode**: NOC xy + lower-`NOC_ADDR_LOCAL_BITS` (36) offset → owning `Core` → `l1_ptr(offset)`. WORKER offsets are masked with `L1_SLOT_MASK 0x1FFFFF`. | `tt-metal/.../emulated_program_runner.cpp` |
-| `__emule_local_l1_ptr(offset)` | `extern "C"` legacy fast path (offset → host ptr); most paths now go through the resolver. | `tt-metal/.../emulated_program_runner.cpp` |
+| `__emule_l1_translate(off)` | **Decode**: L1 offset → host pointer, unconditionally `bridge_l1 + off` (debug-asserts `off < l1_size`). | `include/jit_hw/asan/asan_l1_checks.h` |
+| `__emule_local_l1_to_ptr(off)` | The kernel access chokepoint: ASAN checks (when enabled) then `__emule_l1_translate`. Every `noc_async_*` local address and every patched raw-deref cast flows through here. | `include/jit_hw/internal/emule_l1_to_ptr.h` |
+| `__emule_addr_to_offset(addr)` | **NOC-construction guard**: `addr & 0x1FFFFF`, idempotent for an in-L1 offset. Applied when building a NOC address in `get_noc_addr` / `get_noc_multicast_addr`; never applied to DRAM bank addresses. | `include/jit_hw/api/dataflow/dataflow_api.h` |
+| `__emule_resolve_noc_addr(noc_addr)` | **Decode a NOC address**: xy + lower-`NOC_ADDR_LOCAL_BITS` (36) offset → owning `Core` → `l1_ptr(offset)`. | `emulated_program_runner.cpp` |
 
-> Historical note: an `__emule_fixup_noc_addr` "fixup point" was removed — NOC
-> addresses are now constructed correctly by `get_noc_addr` /
-> `get_noc_addr_from_bank_id`, so no lower-bit fixup is applied (applying it
-> would corrupt DRAM bank offsets > 2 MB). The model is now just encode + decode.
+Because a local L1 address is already an offset, the NOC encode/decode path and
+the `& L1_SLOT_MASK` masking it performs are exact for in-L1 offsets and need no
+special handling.
 
 ---
 
 ## 4. Allocation, semaphores, CBs
 
-- **Bump allocation.** `Core::l1_alloc(bytes)` is a simple bump allocator
-  returning an absolute 32-bit address. Live use is the **Quasar DFB
-  fallback path** in tt-metal's `emulated_program_runner.cpp` (when no
-  upstream `finalize_addr` is supplied for a DFB, the runner bumps a
-  fresh region out of the core's L1). Worker WH/BH L1 is otherwise
-  addressed directly by truncated CB pointers.
-- **Semaphores** live in the kernel-config region of L1 at
-  `l1_base + EMULE_SEM_BASE + sem_id * EMULE_SEM_ALIGN` (`EMULE_SEM_ALIGN = 16`),
-  where `EMULE_SEM_BASE` is a JIT define computed by the runner from the HAL
-  kernel-config base + `ProgramConfig.sem_offset` (the same values real firmware
-  uses). See [noc-emulation.md](noc-emulation.md) §5 for semaphore *operations*.
-- **Circular buffers** are slices of L1; their sync state lives in
+- **Bump allocation.** `Core::l1_alloc(bytes)` returns a 0-based offset. Live use
+  is the **Quasar DFB fallback path** in `emulated_program_runner.cpp` (when no
+  upstream `finalize_addr` is supplied for a DFB, the runner bumps a fresh region
+  out of the core's L1). Worker WH/BH L1 is otherwise addressed by CB offsets.
+- **Semaphores** are firmware offsets: `get_semaphore(id)` returns
+  `EMULE_SEM_BASE + id * EMULE_SEM_ALIGN` (`EMULE_SEM_ALIGN = 16`), where
+  `EMULE_SEM_BASE` is a JIT define the runner computes from the HAL kernel-config
+  base + `ProgramConfig.sem_offset` (the same values real firmware uses). The
+  atomic operation rebases the offset onto `bridge_l1`. See
+  [noc-emulation.md](noc-emulation.md) §5 for semaphore *operations*.
+- **Circular buffers** are slices of L1; `get_write_ptr` / `get_read_ptr` return
+  0-based offsets (the per-RISC ring is maintained in host-pointer space and
+  converted to an offset at the accessor). Sync state lives in
   `Core::cb_sync_states_[]`. See [cb-emulation.md](cb-emulation.md).
 
 ---
 
 ## 5. Runtime bridge
 
-The program runner (`tt-metal/.../emulated_program_runner.cpp`), per emulated
-core/thread, sets `thread_local uint8_t* __emule_bridge_l1 = core->l1_data()`
-before launching the kernel. The dlopen'd kernel `.so` reaches the host runtime
-only through the `extern "C"` hooks above (exported via `-rdynamic` on
-`libtt_metal.so`). In `SWEmuleChip`, `read_from_device` / `write_to_device`
-delegate uniformly to `get_core(xy)->l1_ptr(offset)` + `memcpy`.
+The program runner, per emulated core/thread, sets `thread_local`/fiber-local ctx
+fields (`bridge_l1 = core->l1_data()`, `l1_size = core->l1_size()`) before
+launching the kernel. The dlopen'd kernel `.so` reaches the host runtime only
+through the `extern "C"` hooks and inline chokepoint above (exported via
+`-rdynamic` on `libtt_metal.so`). In `SWEmuleChip`, `read_from_device` /
+`write_to_device` delegate uniformly to `get_core(xy)->l1_ptr(offset)` + `memcpy`.
 
 ---
 
 ## 6. What's intentionally simplified
 
-- No L1 capacity pressure / eviction / bank conflicts — the mmap is as large
-  as the SoC-descriptor-derived `l1_size_` and accesses are direct.
+- No L1 capacity pressure / eviction / bank conflicts — the mmap is as large as
+  the SoC-descriptor-derived `l1_size_` and accesses are direct.
 - No per-program re-zeroing (one-time `MAP_ANONYMOUS` zero-init; the Quasar DFB
   fallback bump allocator is the one exception — see
   [mem-zeros-handling.md](mem-zeros-handling.md)).
-- **Low-4 GB address-space pressure.** Worker L1 must be uint32-addressable, so it
-  lives in the low 4 GB (`low4g_mmap.hpp`: `MAP_32BIT`'s `[0, 2 GB)` first, then a
-  `/proc/self/maps`-found `[2 GB, 4 GB)` gap via `MAP_FIXED`), shared with the
-  loader's text/data, the heap, every thread's stack, and the JIT-compiled kernel
-  `.so` mappings. Each worker core mapped individually would compete with those a
-  few megabytes at a time. `L1Pool` reserves one contiguous 2-MB-aligned slot pool
-  for all workers up front; cores that overflow it fall back to individual low-4 GB
-  mappings. The pool holds **one slot per Tensix core**
-  (`SWEmuleChip` sizes it to `num_tensix`, no headroom multiplier): a
-  worker's physical, NOC1, and translated coordinates all name the same
-  physical tile and resolve to one `Core`/one L1, and only WORKER cores draw
-  from the pool (eth/router cores are never instantiated; DRAM has its own
-  non-`MAP_32BIT` backing), so `num_tensix` is an exact upper bound. The pool
-  is mapped `MAP_NORESERVE` and is **not** eagerly written, so its slots cost
-  only virtual address space until a core is first touched (zero-fill on
-  fault, per §1). This is what lets a multi-chip mesh share the one low-4 GB
-  window — e.g. an 8-chip Blackhole loudbox needs ~8 × `num_tensix` × 2 MB ≈ 1.9 GB
-  of VA, which fits the full `[0, 4 GB)` window comfortably (it overflowed the
-  `[0, 2 GB)` half). ~16 BH chips fill the window; beyond that needs multi-process.
+- **Worker-L1 placement.** Worker L1 is a plain 64-bit `mmap` (`worker_l1_mmap.hpp`;
+  `MAP_NORESERVE`, so a slot costs only virtual address space until touched). `L1Pool`
+  reserves one 2-MB-aligned slot per Tensix core. Under the offset addressing model
+  (§1) the placement is unconstrained — the kernel-visible address is an offset
+  independent of where L1 is mapped — so a mesh whose total worker L1 exceeds 4 GB
+  (e.g. a 32-chip Blackhole galaxy, ≈ 9 GB) runs in one process, the backing landing
+  wherever the kernel places a 64-bit anonymous map (well above 4 GB). See
+  [l1-offset-translation.md](l1-offset-translation.md).
 
 ---
 

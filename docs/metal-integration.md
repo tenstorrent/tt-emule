@@ -35,9 +35,9 @@ std::unordered_map<tt_xy_pair, uint32_t> dram_core_to_channel_;
 uint32_t l1_size_; uint64_t dram_bank_size_;
 ```
 
-- Builds a single `MAP_32BIT` `L1Pool` (slots = 2× the SoC Tensix count). Worker
-  cores draw L1 from pool slots; DRAM cores use individual mmaps; pool exhaustion
-  falls back to individual `MAP_32BIT` mmaps. See [l1-emulation.md](l1-emulation.md).
+- Builds a single `L1Pool` (one slot per SoC Tensix core) from a plain 64-bit
+  `mmap`. Worker cores draw L1 from pool slots; DRAM cores use individual mmaps;
+  pool exhaustion falls back to an individual mmap. See [l1-emulation.md](l1-emulation.md).
 - `get_core(tt_xy_pair)` lazy-creates a `Core` with the right role.
 - `read_from_device` / `write_to_device` delegate uniformly to
   `get_core(xy)->l1_ptr(offset)` + `memcpy`.
@@ -114,8 +114,8 @@ prog_config.sem_offset`, passed as `EMULE_SEM_BASE`; each sem at
 **Memory bridge.** The dlopen'd `.so` reaches the host only through `extern "C"`
 hooks (visible via `-rdynamic`): the resolvers `__emule_resolve_noc_addr`,
 `__emule_multicast_write`, `__emule_dram_ptr`, `__emule_local_l1_ptr`, the fabric
-hooks (`__emule_fabric_teleport`, `__emule_fabric_resolve_remote`,
-`__emule_chip_relative_l1`, …), and the fiber thunks (`__emule_fiber_park/wake/…`).
+hooks (`__emule_fabric_teleport`, `__emule_fabric_resolve_remote`, …), and the
+fiber thunks (`__emule_fiber_park/wake/…`).
 All read `__emule_self`; since every hook runs inside a kernel fiber, a null
 `__emule_self` is a contract violation and they fail loudly (`emule_require_self`)
 rather than returning nullptr. (The single-bank `__emule_dram_ptr` /

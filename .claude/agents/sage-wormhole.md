@@ -107,7 +107,7 @@ behavior. Common patterns documented in `emule-mapping.md`:
 
 | HW concept | Emule strategy |
 |---|---|
-| L1 memory | per-core `mmap`(MAP_32BIT) + `Core::l1_data()` |
+| L1 memory | per-core `mmap` (plain 64-bit; kernel L1 addrs are 0-based offsets) + `Core::l1_data()` |
 | DRAM banking | `InterleavedAddrGen<DRAM>` + `bank_to_dram_offset[]` |
 | NOC | memcpy via `__emule_resolve_noc_addr` core map |
 | CB sync | `CBSyncState` mutex + condvar |

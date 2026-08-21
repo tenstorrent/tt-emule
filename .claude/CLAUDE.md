@@ -18,6 +18,20 @@ faithful mock APIs.
 - Always run the per-arch regression scripts after code changes and
   log the **full** output. Run them **sequentially** (shared JIT
   cache).
+- **Prefer making an existing tt-metal test pass over adding a new
+  one.** The goal is faithful silicon behavior, which the canonical
+  tt-metal suites already assert — a new test is a last resort, only
+  when the coverage genuinely does not exist and cannot be reached by
+  fixing the mock so an existing test passes. When a new tt-metal test
+  is truly unavoidable, add it under **`tests/emule/`** (the dedicated
+  emule-only test tree in tt-metal — e.g. `tests/emule/ccl/`), **never**
+  under `tests/ttnn/...` or another canonical suite. Its fixtures
+  (`mesh_device`, `device_params`, `silicon_arch_name`, …) resolve from
+  the root tt-metal `conftest.py`, so no per-dir conftest is needed.
+  Wire it into the emule pytest runners (`scripts/run_ttnn_pytests_*.sh`)
+  and bump `tt-metal-pin.txt` to the companion commit. Format Python to
+  tt-metal's pre-commit config (**black line-length 120**, isort,
+  autoflake) before pushing.
 - When fixing a failure in a mock API, the goal is **faithful to the
   canonical silicon implementation**. Don't create parallel or
   different code paths to work around bugs — if it works in silicon,
@@ -48,7 +62,7 @@ faithful mock APIs.
   index; per-subsystem references live under `docs/`
   (l1/dram/dest/cb/noc-emulation, metal-integration,
   tilize-untilize-pack, cb-dataformat, mem-zeros-handling,
-  DFB/QUASAR). Read the relevant doc before changing a subsystem
+  DFB/QUASAR, e2e-models). Read the relevant doc before changing a subsystem
   and update it in the same change. Verify every claim against
   actual code before writing it down — the docs must never assert
   something the source doesn't do.
@@ -67,6 +81,7 @@ faithful mock APIs.
 | Add a compute-kernel LLK shim (`<op>_tile` in `include/jit_hw/api/compute/`) | `/compute-llk-bringup` skill |
 | Diagnose ATOL/PCC failures (wrong bytes, partial zeros, off-by-N) | `/memory-debug` skill |
 | A tt-metal pin bump turned the regression red (device-open crash, JIT-compile error, hang) | `/uplift` skill |
+| Review an open PR, address its comments, and rebase/prep it to hand off for landing | `/shepherd-emule-pr` skill |
 | Parallelize a sweep of ≥4 similar mocks | `/parallel-mock-implementation` skill |
 | Map HW concept → existing emule strategy | `references/emule-mapping.md` |
 | Where in the pipeline to inject a change | [`docs/api-injection-points.md`](../docs/api-injection-points.md) |
@@ -101,6 +116,15 @@ faithful mock APIs.
   regression vs jit_hw API-surface drift), the cross-repo push chain,
   and verification (oracle before/after + curated-suite membership
   via `--collect-only`). Prove by build+run, never by `git log`.
+- **shepherd-emule-pr** — methodology for taking an open PR to
+  mergeable against the repo ethos: gather all three review surfaces,
+  verify every comment by build (the JIT compile-probe) not by trusting
+  "addressed", own ethos pass for the bug classes reviewers miss
+  (dangling refactored symbol, divergent-duplicate/ODR, silent silicon
+  divergence, superseded-by-main), then fix / register via
+  `/workarounds` / trim → rebase locally → hand the developer a
+  change+verification summary and drafted per-point comment to review
+  and push (the human stays in the loop for the force-push).
 
 ## Agents (launched by skills, can be invoked directly via Agent tool)
 
