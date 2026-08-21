@@ -5,6 +5,7 @@
 #pragma once
 #include "cb_sync_state.hpp"
 #include "dfb_sync_state.hpp"
+#include "l1_ptr_hints.hpp"
 #include "tile_counter.hpp"
 #include "wall_clock.hpp"  // __emule_wall_clock_lo_addr/_hi_addr (RISCV_DEBUG_REG_WALL_CLOCK_* backing)
 #include "jit_hw/internal/emule_core_state.h"  // tt_emule::CoreState (per-core coords)
@@ -71,11 +72,13 @@ public:
     uint8_t* l1_ptr(uint64_t offset) {
         if (offset >= l1_size_) {
             std::fprintf(stderr,
-                "[EMULE] Core::l1_ptr OOB: role=%s coord=(%zu,%zu) offset=0x%llx size=0x%zx\n",
+                "[EMULE] Core::l1_ptr OOB: role=%s coord=(%zu,%zu) offset=0x%llx size=0x%zx",
                 role_ == CoreRole::DRAM ? "DRAM" : "WORKER",
                 coord_.x, coord_.y,
                 static_cast<unsigned long long>(offset),
                 l1_size_);
+            format_l1_ptr_hints(stderr);
+            std::fprintf(stderr, "\n");
             std::abort();
         }
         return l1_ + offset;
