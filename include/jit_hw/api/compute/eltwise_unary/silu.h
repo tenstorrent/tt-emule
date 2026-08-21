@@ -50,4 +50,14 @@ ALWI void silu_tile(uint32_t idst) {
 #endif
 }
 
+template <bool approx = false>
+ALWI void silu_tile_init_pack() {
+    silu_tile_init<approx>();
+}
+
+template <VectorMode vector_mode = VectorMode::RC, bool approx = false>
+ALWI void silu_tile_pack(uint32_t idst) {
+    silu_tile<(int)vector_mode, approx>(idst);
+}
+
 }  // namespace ckernel

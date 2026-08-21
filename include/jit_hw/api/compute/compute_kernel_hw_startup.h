@@ -13,6 +13,14 @@
 #include "jit_hw/llk_sync_stubs.h"
 #include <cstring>
 
+#ifdef SFPU_ACTIVATION
+// TTNN's fused-activation matmul helper is a sibling include of the kernel
+// source, so emule cannot shadow it through -I ordering. The fused matmul
+// kernels include this startup header before that sibling helper, and define
+// SFPU_ACTIVATION only on the activation path.
+#include "jit_hw/api/compute/matmul_fused_act_emule.h"
+#endif
+
 // ---- Compute startup and init ----
 // Guard against double-definition: jit_kernel_stubs.hpp also has stub
 // overloads of the same signatures (for kernels that don't include this

@@ -50,4 +50,17 @@ ALWI void sigmoid_tile(uint32_t idst) {
 #endif
 }
 
+// Pack-thread variants: real silicon runs the SFPU op on TRISC_PACK to
+// overlap activation with the pack pipeline. Emule has no MATH/PACK split
+// so the pack variant forwards to the same body. Single definition site.
+template <bool approx = false>
+ALWI void sigmoid_tile_init_pack() {
+    sigmoid_tile_init<approx>();
+}
+
+template <VectorMode vector_mode = VectorMode::RC, bool approx = false>
+ALWI void sigmoid_tile_pack(uint32_t idst) {
+    sigmoid_tile<(int)vector_mode, approx>(idst);
+}
+
 }  // namespace ckernel

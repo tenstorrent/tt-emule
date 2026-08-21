@@ -1012,8 +1012,6 @@ files:
   - {kind: function, name: log_tile}
   - {kind: function, name: power_tile_init}
   - {kind: function, name: power_tile}
-  - {kind: function, name: sigmoid_tile_init}
-  - {kind: function, name: sigmoid_tile}
   - {kind: function, name: sign_tile_init}
   - {kind: function, name: sign_tile}
   - {kind: function, name: heaviside_tile_init}
@@ -1042,10 +1040,6 @@ files:
   - {kind: function, name: unary_min_uint32_tile}
   - {kind: function, name: alt_complex_rotate90_tile_init}
   - {kind: function, name: alt_complex_rotate90_tile}
-  - {kind: function, name: silu_tile_init}
-  - {kind: function, name: silu_tile}
-  - {kind: function, name: silu_tile_init_pack}
-  - {kind: function, name: silu_tile_pack}
   - {kind: function, name: sfpu_reduce_init}
   - {kind: function, name: sfpu_reduce}
   - {kind: namespace, name: __emule_topk}
@@ -1701,6 +1695,12 @@ files:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: gelu_tile_init}
   - {kind: function, name: gelu_tile}
+  - {kind: function, name: gelu_tile_init_pack}
+  - {kind: function, name: gelu_tile_pack}
+  - {kind: function, name: gelu_tanh_tile_init}
+  - {kind: function, name: gelu_tanh_tile}
+  - {kind: function, name: gelu_tanh_tile_init_pack}
+  - {kind: function, name: gelu_tanh_tile_pack}
   - {kind: function, name: gelu_derivative_tile_init}
   - {kind: function, name: gelu_derivative_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/hardmish.h
@@ -1928,6 +1928,8 @@ files:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: sigmoid_tile_init}
   - {kind: function, name: sigmoid_tile}
+  - {kind: function, name: sigmoid_tile_init_pack}
+  - {kind: function, name: sigmoid_tile_pack}
 - path: include/jit_hw/api/compute/eltwise_unary/silu.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `silu_tile`, `silu_tile_init` (x · sigmoid(x))'
@@ -1935,6 +1937,8 @@ files:
   - {kind: namespace, name: ckernel}
   - {kind: function, name: silu_tile_init}
   - {kind: function, name: silu_tile}
+  - {kind: function, name: silu_tile_init_pack}
+  - {kind: function, name: silu_tile_pack}
 - path: include/jit_hw/api/compute/eltwise_unary/snake_beta.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `snake_beta_tile` (+`_init`)'
@@ -1992,6 +1996,8 @@ files:
   - {kind: function, name: tan_tile}
   - {kind: function, name: tanh_tile_init}
   - {kind: function, name: tanh_tile}
+  - {kind: function, name: tanh_tile_init_pack}
+  - {kind: function, name: tanh_tile_pack}
   - {kind: function, name: asin_tile_init}
   - {kind: function, name: asin_tile}
   - {kind: function, name: acos_tile_init}

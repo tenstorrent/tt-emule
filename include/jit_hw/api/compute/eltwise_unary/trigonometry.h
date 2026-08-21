@@ -71,6 +71,16 @@ ALWI void tanh_tile(uint32_t idst) {
 #endif
 }
 
+template <bool fast_and_approx = false>
+ALWI void tanh_tile_init_pack() {
+    tanh_tile_init<fast_and_approx>();
+}
+
+template <bool fast_and_approx = false>
+ALWI void tanh_tile_pack(uint32_t idst) {
+    tanh_tile<fast_and_approx>(idst);
+}
+
 ALWI void asin_tile_init() {}
 ALWI void asin_tile(uint32_t idst) {
     __emule_dst_check(idst, "asin_tile");

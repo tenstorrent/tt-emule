@@ -17,6 +17,8 @@
 #include "jit_hw/api/compute/experimental/fill_arange.h"
 #include "api/compute/eltwise_unary/activations.h"  // abs_tile, abs_tile_int32
 #include "api/compute/eltwise_unary/trigonometry.h"  // sole definer of tanh_tile (shared via #pragma once)
+#include "api/compute/eltwise_unary/sigmoid.h"
+#include "api/compute/eltwise_unary/silu.h"
 
 #include <algorithm>
 // Minimal sfpi:: shim for SFPU kernels that use vFloat/vInt/v_if.
@@ -114,17 +116,11 @@ ALWI void power_tile(uint32_t idst, uint32_t exponent_packed = 0) {
         __emule_compute_ctx().dst[idst][i] = std::pow(__emule_compute_ctx().dst[idst][i], exponent);
 }
 
-// --- sigmoid (1 / (1 + e^-x)) ---
-template <uint32_t sigmoid_mode = 0>
-ALWI void sigmoid_tile_init() {}
-template <VectorMode vector_mode = VectorMode::RC, uint32_t sigmoid_mode = 0>
-ALWI void sigmoid_tile(uint32_t idst) {
-    __emule_dst_check(idst, "sigmoid_tile");
-    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_compute_ctx().dst[idst][i];
-        __emule_compute_ctx().dst[idst][i] = 1.0f / (1.0f + std::exp(-x));
-    }
-}
+// sigmoid_tile / sigmoid_tile_init / *_pack live in
+// api/compute/eltwise_unary/sigmoid.h (already included above) — single site.
+// The umbrella used to define its own `<VectorMode, uint32_t>` overload; that
+// collided at unqualified call sites with sigmoid.h's `<int, bool>` overload.
+// Keep one canonical site and route through it.
 
 // --- sign (-1, 0, +1) ---
 ALWI void sign_tile_init() {}
@@ -275,20 +271,8 @@ ALWI void alt_complex_rotate90_tile(uint32_t idst) {
     }
 }
 
-// --- silu (x * sigmoid(x)) ---
-ALWI void silu_tile_init() {}
-ALWI void silu_tile(uint32_t idst) {
-    __emule_dst_check(idst, "silu_tile");
-    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
-        float x = __emule_compute_ctx().dst[idst][i];
-        __emule_compute_ctx().dst[idst][i] = x / (1.0f + std::exp(-x));
-    }
-}
-// Upstream routes the same SFPU LLK on the PACK thread to overlap activation
-// with the pack pipeline (matmul fused-activation, #79). emule has no
-// MATH/PACK thread split — forward to the existing tile body.
-ALWI void silu_tile_init_pack() { silu_tile_init(); }
-ALWI void silu_tile_pack(uint32_t idst) { silu_tile(idst); }
+// silu_tile / silu_tile_init / *_pack live in
+// api/compute/eltwise_unary/silu.h (already included above) — single site.
 
 // --- sfpu_reduce — the SFPU reduce path's intra-tile collapse. Upstream
 // pre-folds cross-tile sums/maxes into DST[idst] (add_binary_tile) and calls

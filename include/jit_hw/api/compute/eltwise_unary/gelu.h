@@ -25,6 +25,36 @@ ALWI void gelu_tile(uint32_t idst) {
     }
 }
 
+template <bool fast_and_approx = true>
+ALWI void gelu_tile_init_pack() {
+    gelu_tile_init<fast_and_approx>();
+}
+
+template <bool fast_and_approx = true>
+ALWI void gelu_tile_pack(uint32_t idst) {
+    gelu_tile<fast_and_approx>(idst);
+}
+
+ALWI void gelu_tanh_tile_init() {}
+
+ALWI void gelu_tanh_tile(uint32_t idst) {
+    __emule_dst_check(idst, "gelu_tanh_tile");
+    constexpr float kSqrt2OverPi = 0.7978845608028654f;
+    for (uint32_t i = 0; i < __EMULE_TILE_ELEMS; i++) {
+        float x = __emule_compute_ctx().dst[idst][i];
+        float cubic = x * x * x;
+        __emule_compute_ctx().dst[idst][i] = 0.5f * x * (1.0f + std::tanh(kSqrt2OverPi * (x + 0.044715f * cubic)));
+    }
+}
+
+ALWI void gelu_tanh_tile_init_pack() {
+    gelu_tanh_tile_init();
+}
+
+ALWI void gelu_tanh_tile_pack(uint32_t idst) {
+    gelu_tanh_tile(idst);
+}
+
 // gelu'(x) = Phi(x) + x*phi(x), exact (matches gelu_tile's erf form).
 // phi(x) = exp(-x^2/2)/sqrt(2*pi); kInvSqrt2Pi = 1/sqrt(2*pi).
 template <bool fast_and_approx = false>
