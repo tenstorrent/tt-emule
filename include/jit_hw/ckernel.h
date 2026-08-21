@@ -35,7 +35,14 @@ constexpr uint32_t UNPACK_MATH_DONE = 3;
 constexpr uint32_t MATH_DONE = 4;
 constexpr uint32_t MATH_PACK = 5;
 constexpr uint32_t PACK_DONE = 6;  // SDPA streaming PACK/UNPACK sync
+inline uint32_t t6_sem(uint32_t sem_id) { return sem_id; }
 }  // namespace semaphore
+
+constexpr uint32_t DEST_TARGET_REG_CFG_MATH_Offset_ADDR32 = 0;
+
+namespace packer {
+inline uint32_t get_packer_dest_offset() { return 0; }
+}  // namespace packer
 
 // Note: deepseek_compute_kernel_hw_startup.h already defines
 // `constexpr uint32_t SFPU_FPU = semaphore::UNPACK_MATH_DONE;` inside

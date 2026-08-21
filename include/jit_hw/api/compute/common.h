@@ -89,11 +89,13 @@ inline constexpr ckernel::EltwiseBinaryType ELWADD = ckernel::EltwiseBinaryType:
 inline constexpr ckernel::EltwiseBinaryType ELWSUB = ckernel::EltwiseBinaryType::ELWSUB;
 inline constexpr ckernel::EltwiseBinaryType ELWMUL = ckernel::EltwiseBinaryType::ELWMUL;
 
-// Note: MathFidelity may also be defined in llk_defs.h — guard against redefinition.
-// Values must match tt-metal's enum: LoFi=0, HiFi2=2, HiFi3=3, HiFi4=4.
-#ifndef __EMULE_MATH_FIDELITY_DEFINED
-#define __EMULE_MATH_FIDELITY_DEFINED
-enum class MathFidelity : uint8_t { LoFi = 0, HiFi2 = 2, HiFi3 = 3, HiFi4 = 4 };
+// Upstream LLK helpers expect MATH_FIDELITY as a compile-time default. The
+// canonical MathFidelity enum is ckernel::MathFidelity from llk_types.h; do not
+// redeclare a global enum here, because helper code also uses `using namespace
+// ckernel` and a second global type makes bare MathFidelity references
+// ambiguous.
+#ifndef MATH_FIDELITY
+#define MATH_FIDELITY ckernel::MathFidelity::HiFi4
 #endif
 
 enum class ReluType : uint8_t { NO_RELU, ZERO_RELU, MIN_THRESHOLD_RELU, MAX_THRESHOLD_RELU };
@@ -1016,14 +1018,14 @@ template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
 ALWI void reconfig_data_format_srcb(uint32_t) {}
 template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
 ALWI void reconfig_data_format_srcb(uint32_t, uint32_t) {}
-ALWI void pack_reconfig_data_format(uint32_t) {}
-ALWI void pack_reconfig_data_format(uint32_t, uint32_t) {}
+ALWI void pack_reconfig_data_format(uint32_t) { __emule_reset_pack_subrect(); }
+ALWI void pack_reconfig_data_format(uint32_t, uint32_t) { __emule_reset_pack_subrect(); }
 template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
-ALWI void pack_reconfig_data_format() {}
+ALWI void pack_reconfig_data_format() { __emule_reset_pack_subrect(); }
 template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
-ALWI void pack_reconfig_data_format(uint32_t) {}
+ALWI void pack_reconfig_data_format(uint32_t) { __emule_reset_pack_subrect(); }
 template <bool to_from_int8 = false, bool is_tile_dim_reconfig_en = false>
-ALWI void pack_reconfig_data_format(uint32_t, uint32_t) {}
+ALWI void pack_reconfig_data_format(uint32_t, uint32_t) { __emule_reset_pack_subrect(); }
 
 // ---- Pack-fused ReLU configuration ----
 // Silicon STACC_RELU is a single packer CFG reg that clamps PACK output

@@ -84,6 +84,19 @@ inline __attribute__((always_inline)) void noc_clear_outstanding_req_cnt(uint32_
 inline constexpr uint32_t read_cmd_buf = 0;
 inline constexpr uint32_t write_cmd_buf = 0;
 inline constexpr uint32_t write_reg_cmd_buf = 0;
+inline constexpr uint32_t NCRISC_AT_CMD_BUF = 3;
+
+template <uint8_t noc_mode_value, bool posted = false>
+inline __attribute__((always_inline)) void noc_fast_atomic_increment(
+    uint32_t /*noc*/,
+    uint32_t /*cmd_buf*/,
+    uint64_t /*addr*/,
+    uint32_t /*vc*/,
+    uint32_t /*increment*/,
+    uint32_t /*wrap*/,
+    bool /*linked*/,
+    bool /*flush*/,
+    uint32_t /*atomic_ret_addr*/) {}
 
 // Atomic-return-value scratch address (silicon: per-NOC L1 location for
 // the result of NOC-issued atomics). Emule's NOC atomics are scalar host

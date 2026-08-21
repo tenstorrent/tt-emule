@@ -205,9 +205,15 @@ inline void llk_pack_dest_section_done() {
 // LLK pack init — silicon configures pack output format here. Numerically a no-op,
 // but it re-establishes single-tile pack width (the packer MOP default) for this CB.
 template <bool Untilize, bool IsTilize, bool DiagonalEn>
-inline void llk_pack_init(uint32_t ocb) { __emule_compute_ctx().pack_width[ocb] = 1; }
+inline void llk_pack_init(uint32_t ocb) {
+    __emule_compute_ctx().pack_width[ocb] = 1;
+    __emule_reset_pack_subrect();
+}
 template <bool Untilize, bool IsTilize>
-inline void llk_pack_init(uint32_t ocb) { __emule_compute_ctx().pack_width[ocb] = 1; }
+inline void llk_pack_init(uint32_t ocb) {
+    __emule_compute_ctx().pack_width[ocb] = 1;
+    __emule_reset_pack_subrect();
+}
 
 // PackMode-based pack init (SDPA streaming configure_pack_width). The flags
 // (zero_output / skip_addrmod_config / skip_packer_strides) are packer reconfig
@@ -219,7 +225,10 @@ template <ckernel::PackMode pack_mode = ckernel::PackMode::Default,
           bool zero_output = false,
           bool skip_addrmod_config = false,
           bool skip_packer_strides = false>
-inline void llk_pack_init(uint32_t ocb, uint32_t pack_width = 1) { __emule_compute_ctx().pack_width[ocb] = pack_width; }
+inline void llk_pack_init(uint32_t ocb, uint32_t pack_width = 1) {
+    __emule_compute_ctx().pack_width[ocb] = pack_width;
+    __emule_reset_pack_subrect();
+}
 
 // Pack-side dest sync stubs.
 // llk_packer_wait_for_math_done lives in llk_sync_stubs.h.

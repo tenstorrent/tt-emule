@@ -25,6 +25,76 @@ set_target_properties(tt_emule_headers PROPERTIES
     TT_EMULE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 
+option(TT_EMULE_BUILD_TESTS "Build tt-emule focused tests" OFF)
+
+if(TT_EMULE_BUILD_TESTS)
+    enable_testing()
+
+    set(TT_METAL_DIR "$ENV{TT_METAL_DIR}" CACHE PATH "Path to tt-metal checkout for upstream JIT headers")
+    if(NOT TT_METAL_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../tt-metal")
+        set(TT_METAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tt-metal")
+    endif()
+    if(NOT EXISTS "${TT_METAL_DIR}/tt_metal/hostdevcommon/api/hostdevcommon/kernel_structs.h")
+        message(FATAL_ERROR "TT_EMULE_BUILD_TESTS requires TT_METAL_DIR with tt-metal upstream headers")
+    endif()
+
+    add_executable(test_masked_reduction_nan
+        tests/jit_hw/test_masked_reduction_nan.cpp
+    )
+    target_link_libraries(test_masked_reduction_nan PRIVATE tt-emule::headers)
+    target_include_directories(test_masked_reduction_nan PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/jit_hw
+        ${TT_METAL_DIR}/tt_metal/api
+        ${TT_METAL_DIR}/tt_metal/hostdevcommon/api
+    )
+    add_test(NAME test_masked_reduction_nan COMMAND test_masked_reduction_nan)
+
+    add_executable(test_tilize_pack_offset
+        tests/jit_hw/test_tilize_pack_offset.cpp
+    )
+    target_link_libraries(test_tilize_pack_offset PRIVATE tt-emule::headers)
+    target_include_directories(test_tilize_pack_offset PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/jit_hw
+        ${TT_METAL_DIR}/tt_metal/api
+        ${TT_METAL_DIR}/tt_metal/hostdevcommon/api
+    )
+    add_test(NAME test_tilize_pack_offset COMMAND test_tilize_pack_offset)
+
+    add_executable(test_ziveli_compat
+        tests/jit_hw/test_ziveli_compat.cpp
+    )
+    target_link_libraries(test_ziveli_compat PRIVATE tt-emule::headers)
+    target_compile_definitions(test_ziveli_compat PRIVATE
+        ARCH_WORMHOLE=1
+        EMULE_SEM_BASE=0
+    )
+    target_include_directories(test_ziveli_compat PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/jit_hw
+        ${TT_METAL_DIR}
+        ${TT_METAL_DIR}/tt_metal/hw/inc
+        ${TT_METAL_DIR}/tt_metal/api
+        ${TT_METAL_DIR}/tt_metal/hostdevcommon/api
+    )
+    add_test(NAME test_ziveli_compat COMMAND test_ziveli_compat)
+
+    add_executable(test_ziveli_conv_chain
+        tests/jit_hw/test_ziveli_conv_chain.cpp
+    )
+    target_link_libraries(test_ziveli_conv_chain PRIVATE tt-emule::headers)
+    target_compile_definitions(test_ziveli_conv_chain PRIVATE
+        ARCH_WORMHOLE=1
+        EMULE_SEM_BASE=0
+    )
+    target_include_directories(test_ziveli_conv_chain PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/jit_hw
+        ${TT_METAL_DIR}
+        ${TT_METAL_DIR}/tt_metal/hw/inc
+        ${TT_METAL_DIR}/tt_metal/api
+        ${TT_METAL_DIR}/tt_metal/hostdevcommon/api
+    )
+    add_test(NAME test_ziveli_conv_chain COMMAND test_ziveli_conv_chain)
+endif()
+
 # ---- Install rules ----
 include(GNUInstallDirs)
 

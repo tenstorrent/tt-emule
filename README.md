@@ -82,7 +82,7 @@ tt-emule/
 │       │   ├── dfb_api.h               # DFB ops (Quasar)
 │       │   ├── dataflow/dataflow_api.h # NOC ops, noc_async_*, noc_inline_dw_write
 │       │   ├── compute/                # Full LLK-based compute API
-│       │   └── tensor/tensor_accessor.h
+│       │   └── tensor/noc_traits.h      # Emule glue for upstream TensorAccessor
 │       ├── experimental/               # Quasar experimental APIs (NOC, semaphore, tensor)
 │       └── internal/                   # risc_attribs, firmware_common, mod_div_lib
 ├── src/
@@ -228,7 +228,7 @@ tt-metal kernel API down to tt-emule's thread-local emulation state.
 | `api/dfb_api.h` | DFB push/pop ops (Quasar) |
 | `api/dataflow/dataflow_api.h` | `noc_async_read/write`, `noc_inline_dw_write`, multicast |
 | `api/compute/` | Full LLK-based compute API (add, matmul, reduce, unary SFPU, pack, tilize, ...) |
-| `api/tensor/tensor_accessor.h` | Tensor accessor stubs |
+| `api/tensor/noc_traits.h` | Host-pointer resolution glue for tt-metal's upstream `TensorAccessor` |
 | `experimental/` | Quasar: `experimental::Noc`, semaphore, lock, tensor |
 | `internal/risc_attribs.h` | `tt_l1_ptr` (no-op), `FORCE_INLINE` |
 | `api/compile_time_args.h` | `get_compile_time_arg_val(N)` |

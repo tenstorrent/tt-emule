@@ -30,6 +30,20 @@ extern "C" uintptr_t __emule_wall_clock_hi_addr();
 #define RISCV_DEBUG_REG_WALL_CLOCK_L __emule_wall_clock_lo_addr()
 #define RISCV_DEBUG_REG_WALL_CLOCK_H __emule_wall_clock_hi_addr()
 
+#ifndef DEBUG_SANITIZE_ETH
+#define DEBUG_SANITIZE_ETH(...) ((void)0)
+#endif
+
+#ifndef __EMULE_RISC_HOST_STUBS
+#define __EMULE_RISC_HOST_STUBS
+inline uint32_t reg_read(uintptr_t /*addr*/) { return 0; }
+inline void risc_context_switch(bool /*skip_sync*/ = false) {}
+namespace internal_ {
+inline void risc_context_switch(bool /*skip_sync*/ = false) {}
+inline void risc_context_switch_without_noc_sync() {}
+}  // namespace internal_
+#endif
+
 // L2 cache flush primitives. On Quasar RISC-V cores these MMIO-write the address
 // to L2_FLUSH_ADDR to push dirty L1 cache lines out to TL1. The inline-asm bodies
 // in upstream's risc_common.h are RISC-V-specific (`fence` mnemonic, mmio register

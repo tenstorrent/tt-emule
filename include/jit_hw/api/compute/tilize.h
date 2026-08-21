@@ -66,6 +66,10 @@ inline void tilize_uninit_with_dt(uint32_t /*old_icb*/ = 0, uint32_t /*new_icb*/
 // elsewhere — backward compatible.
 inline void tilize_block(uint32_t icb, uint32_t ntiles, uint32_t ocb) {
     constexpr uint32_t TILE_DIM = 32;
+    // tilize_block writes into the currently reserved output block. Helper-library
+    // DFB push advances the CB write window without going through cb_push_back(),
+    // so reset the pack auto-offset per block here.
+    __emule_compute_ctx().pack_offset[ocb] = 0;
     const bool icb_is_32bit = __emule_compute::cb_is_32bit_format(icb);
     const bool ocb_is_32bit = __emule_compute::cb_is_32bit_format(ocb);
     // FP8 E4M3 input (tilize/to_layout fp8 support, #48046): 1 byte/element, decoded to f32.

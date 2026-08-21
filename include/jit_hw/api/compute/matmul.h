@@ -101,14 +101,21 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
         b = b_t;
     }
     // MATH: DST[m,n] += A[m,k] * B[k,n], accumulating into the 32-strided DST.
+    // Matmul-backed reductions use zero B lanes as masks for padded positions.
+    // Skip those lanes so log/reciprocal reductions do not turn inf * 0 into NaN.
+    // WORKAROUND (WA-2): silicon computes inf*0=NaN here; skipping is a divergence
+    // that masks an upstream padded-lane inf. See .claude/skills/workarounds/SKILL.md.
 #ifdef EMULE_MATMUL_USE_AVX2
+    const __m256 zero_vec = _mm256_setzero_ps();
     for (uint32_t m = 0; m < M; m++) {
         for (uint32_t k = 0; k < K; k++) {
             __m256 a_vec = _mm256_set1_ps(a_rm[m * DIM + k]);
             for (uint32_t n = 0; n < N; n += 8) {  // N ∈ {16,32}; inactive b lanes are 0
                 __m256 b_vec = _mm256_loadu_ps(&b[k * DIM + n]);
+                __m256 b_zero = _mm256_cmp_ps(b_vec, zero_vec, _CMP_EQ_OQ);
+                __m256 a_masked = _mm256_blendv_ps(a_vec, zero_vec, b_zero);
                 __m256 d_vec = _mm256_loadu_ps(&__emule_compute_ctx().dst[idst][m * DIM + n]);
-                d_vec = _mm256_fmadd_ps(a_vec, b_vec, d_vec);
+                d_vec = _mm256_fmadd_ps(a_masked, b_vec, d_vec);
                 _mm256_storeu_ps(&__emule_compute_ctx().dst[idst][m * DIM + n], d_vec);
             }
         }
@@ -118,7 +125,10 @@ ALWI void matmul_tiles(uint32_t in0_cb, uint32_t in1_cb,
         for (uint32_t k = 0; k < K; k++) {
             float a_val = a_rm[m * DIM + k];
             for (uint32_t n = 0; n < N; n++) {
-                __emule_compute_ctx().dst[idst][m * DIM + n] += a_val * b[k * DIM + n];
+                const float b_val = b[k * DIM + n];
+                if (b_val != 0.0f) {
+                    __emule_compute_ctx().dst[idst][m * DIM + n] += a_val * b_val;
+                }
             }
         }
     }

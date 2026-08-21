@@ -83,6 +83,12 @@ files:
   - {kind: using, name: UnicastScatterWriteUpdateMask}
   - {kind: using, name: UnicastAtomicIncUpdateMask}
   - {kind: using, name: PACKET_HEADER_TYPE}
+  - {kind: struct, name: StreamId}
+  - {kind: function, name: get_ptr_val}
+  - {kind: function, name: increment_local_update_ptr_val}
+  - {kind: function, name: init_ptr_val}
+  - {kind: function, name: set_l1_data_cache}
+  - {kind: function, name: zero_l1_buf}
   - {kind: function, name: get_noc_address_components}
   - {kind: using, name: WorkerToFabricEdmSender}
   - {kind: using, name: WorkerToFabricMuxSender}
@@ -116,6 +122,10 @@ files:
   - {kind: global, name: MATH_DONE}
   - {kind: global, name: MATH_PACK}
   - {kind: global, name: PACK_DONE}
+  - {kind: function, name: t6_sem}
+  - {kind: global, name: DEST_TARGET_REG_CFG_MATH_Offset_ADDR32}
+  - {kind: namespace, name: packer}
+  - {kind: function, name: get_packer_dest_offset}
   - {kind: function, name: t6_semaphore_init}
   - {kind: function, name: t6_semaphore_get}
   - {kind: function, name: t6_semaphore_post}
@@ -331,6 +341,7 @@ files:
   summary: empty shim (pragma-once only)
   symbols:
   - {kind: function, name: llk_math_eltwise_binary_init}
+  - {kind: function, name: llk_math_eltwise_binary}
 - path: include/jit_hw/llk_math_eltwise_unary_datacopy.h
   section: include/jit_hw/
   summary: '`enum class DataCopyType`; `copy_tile` datacopy helper'
@@ -462,6 +473,8 @@ files:
   - {kind: global, name: read_cmd_buf}
   - {kind: global, name: write_cmd_buf}
   - {kind: global, name: write_reg_cmd_buf}
+  - {kind: global, name: NCRISC_AT_CMD_BUF}
+  - {kind: function, name: noc_fast_atomic_increment}
   - {kind: global, name: MEM_NOC_ATOMIC_RET_VAL_ADDR}
   - {kind: macro, name: NOC_CMD_BUF_WRITE_REG}
   - {kind: macro, name: NOC_CMD_BUF_READ_REG}
@@ -693,6 +706,11 @@ files:
   symbols:
   - {kind: function, name: get_num_threads}
   - {kind: function, name: get_my_thread_id}
+- path: include/jit_hw/api/lock.h
+  section: include/jit_hw/api/
+  summary: '`Lock<ReleaseFunc>` RAII helper that invokes a release callback on scope exit'
+  symbols:
+  - {kind: class, name: Lock}
 - path: include/jit_hw/api/rt_arg.h
   section: include/jit_hw/api/
   summary: '`namespace rt_args`: `enum class Dispatch`, `struct Arg`/`ArrayArg`, `get<>()` template'
@@ -899,8 +917,7 @@ files:
   - {kind: global, name: ELWADD}
   - {kind: global, name: ELWSUB}
   - {kind: global, name: ELWMUL}
-  - {kind: macro, name: __EMULE_MATH_FIDELITY_DEFINED}
-  - {kind: enum, name: MathFidelity}
+  - {kind: macro, name: MATH_FIDELITY}
   - {kind: enum, name: ReluType}
   - {kind: struct, name: ReluConfig}
   - {kind: enum, name: p_dim_stride_target}
@@ -1227,11 +1244,6 @@ files:
   summary: '`ckernel::` `custom_mm_block_init`/`custom_mm_block_init_short`; `namespace packer`/`semaphore`; `TTI_SEMWAIT`/`TTI_STALLWAIT`/`TT_SETC16` no-op macros (MatmulFusedAct kernel-body shim)'
   symbols:
   - {kind: namespace, name: ckernel}
-  - {kind: global, name: DEST_TARGET_REG_CFG_MATH_Offset_ADDR32}
-  - {kind: namespace, name: packer}
-  - {kind: function, name: get_packer_dest_offset}
-  - {kind: namespace, name: semaphore}
-  - {kind: function, name: t6_sem}
   - {kind: function, name: custom_mm_block_init_short}
   - {kind: global, name: dense_packing}
   - {kind: function, name: custom_mm_block_init}
@@ -1430,6 +1442,13 @@ files:
   - {kind: function, name: transpose_wh_init}
   - {kind: function, name: transpose_wh_init_short}
   - {kind: function, name: transpose_wh_tile}
+- path: include/jit_hw/api/compute/transpose_wh_dest.h
+  section: include/jit_hw/api/compute/
+  summary: '`ckernel::transpose_wh_dest_init_short`, `transpose_wh_dest` full-tile DST transpose helpers'
+  symbols:
+  - {kind: namespace, name: ckernel}
+  - {kind: function, name: transpose_wh_dest_init_short}
+  - {kind: function, name: transpose_wh_dest}
 - path: include/jit_hw/api/compute/untilize.h
   section: include/jit_hw/api/compute/
   summary: '`untilize_block`, `untilize_init`, `untilize_init_short`, `untilize_uninit`, `copy_tile`'
@@ -1877,6 +1896,7 @@ files:
   - {kind: function, name: ceil_tile}
   - {kind: function, name: floor_tile}
   - {kind: function, name: frac_tile}
+  - {kind: function, name: stochastic_round_tile}
 - path: include/jit_hw/api/compute/eltwise_unary/rpow.h
   section: include/jit_hw/api/compute/eltwise_unary/
   summary: '`ckernel::` `rpow_tile` (+`_init`)'
@@ -2084,6 +2104,8 @@ files:
   summary: '`class CircularBuffer`, `struct CircularBufferView`; `enum class AddrSelector`; `noc_traits_t<CircularBuffer>` + `noc_traits_t<CircularBufferView>` specializations'
   symbols:
   - {kind: class, name: CircularBuffer}
+  - {kind: namespace, name: experimental}
+  - {kind: using, name: CircularBuffer}
   - {kind: struct, name: noc_traits_t}
   - {kind: struct, name: CircularBufferView}
   - {kind: function, name: use}
@@ -2412,6 +2434,8 @@ files:
   - {kind: function, name: get_output_narrow_tile}
   - {kind: function, name: get_output_face_r_dim}
   - {kind: function, name: get_output_num_faces}
+  - {kind: function, name: get_operand_src_format}
+  - {kind: function, name: get_operand_dst_format}
 - path: include/jit_hw/internal/mod_div_lib.h
   section: include/jit_hw/internal/
   summary: '`mulsi3`; `fast_udiv_<N>` for N = 7, 12, 20, 48, 56, 63, 70, 72, 80, 94, 108, 110, 117, 120, 124, 126, 130, 140'
@@ -2450,6 +2474,12 @@ files:
   - {kind: extern_c, name: __emule_wall_clock_hi_addr}
   - {kind: macro, name: RISCV_DEBUG_REG_WALL_CLOCK_L}
   - {kind: macro, name: RISCV_DEBUG_REG_WALL_CLOCK_H}
+  - {kind: macro, name: DEBUG_SANITIZE_ETH}
+  - {kind: macro, name: __EMULE_RISC_HOST_STUBS}
+  - {kind: function, name: reg_read}
+  - {kind: function, name: risc_context_switch}
+  - {kind: namespace, name: internal_}
+  - {kind: function, name: risc_context_switch_without_noc_sync}
   - {kind: function, name: flush_l2_cache_line}
   - {kind: function, name: flush_l2_cache_range}
 - path: include/jit_hw/internal/dataflow/dataflow_api_addrgen.h
