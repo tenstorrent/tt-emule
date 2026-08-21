@@ -13,6 +13,10 @@
 #include <cstdint>
 #include "jit_hw/asan/emule_asan.h"   // __emule_asan_enabled / __emule_asan_panic
 
+// Resolved at dlopen from the runner (emulated_program_runner.cpp), whose core
+// map is the authoritative source for endpoint memory roles.
+extern "C" bool __emule_noc_addr_is_dram(uint64_t noc_addr);
+
 // Each endpoint is checked against its OWN memory-type alignment, not a relative
 // "low bits must match" rule: L1 = 16B; DRAM read = 32B (WH) / 64B (BH); DRAM
 // write = 16B. A DRAM read from a 32B-aligned source into a 16B- (but not 32B-)

@@ -2102,7 +2102,7 @@ files:
   - {kind: macro, name: NOC_UNICAST_ADDR_Y}
   - {kind: extern_c, name: __emule_resolve_noc_addr}
   - {kind: extern_c, name: __emule_multicast_write}
-  - {kind: function, name: __emule_noc_addr_is_dram}
+  - {kind: extern_c, name: __emule_noc_addr_is_dram}
   - {kind: function, name: __emule_debug_multicast}
   - {kind: function, name: __emule_addr_to_offset}
   - {kind: global, name: worker_logical_col_to_virtual_col}
@@ -2684,6 +2684,7 @@ files:
   summary: NOC Transfer Alignment sanitizer (`__emule_check_noc_read_alignment` / `__emule_check_noc_write_alignment`), split out of dataflow_api.h; per-side absolute alignment (L1 16B, DRAM read 32/64B,
     DRAM write 16B). Gated by TT_METAL_EMULE_ASAN. See docs/ASAN.md §10.
   symbols:
+  - {kind: extern_c, name: __emule_noc_addr_is_dram}
   - {kind: function, name: __emule_check_noc_read_alignment}
   - {kind: function, name: __emule_check_noc_write_alignment}
 - path: include/jit_hw/asan/asan_cb.h
@@ -2725,8 +2726,6 @@ files:
   - {kind: global, name: __emule_cb_reserved_pages}
   - {kind: global, name: __emule_cb_waited_pages}
   - {kind: global, name: __emule_cb_boundary_strict}
-  - {kind: function, name: __emule_worker_l1_slot_mask}
-  - {kind: function, name: __emule_worker_l1_slot_size}
   - {kind: function, name: __emule_l1_translate}
   - {kind: function, name: __emule_asan_check_semaphore}
   - {kind: function, name: __emule_asan_cb_resolve}
