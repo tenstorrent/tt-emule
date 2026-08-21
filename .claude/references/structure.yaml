@@ -2323,6 +2323,12 @@ files:
   - {kind: namespace, name: __emule_deep}
   - {kind: global, name: kTileIterations}
   - {kind: function, name: run_unary_sfpu}
+- path: include/jit_hw/internal/emule_cb_constants.h
+  section: include/jit_hw/internal/
+  summary: Shared maximum emulated CB capacity (`EMULE_MAX_CBS`) and compatibility alias for external runner code
+  symbols:
+  - {kind: global, name: EMULE_MAX_CBS}
+  - {kind: global, name: __EMULE_CTX_MAX_CBS}
 - path: include/jit_hw/internal/emule_cb_ptr.h
   section: include/jit_hw/internal/
   summary: 'Per-RISC circular-buffer read/write pointers — the single source of truth (issue #139). `struct LocalCBInterface` + thread_local `__emule_local_cb[NUM_CIRCULAR_BUFFERS]` (mirrors silicon''s
@@ -2378,7 +2384,6 @@ files:
   - {kind: fwd, name: EmuleDFBInterface}
   - {kind: fwd, name: TileCounterArray}
   - {kind: struct, name: LocalCBInterface}
-  - {kind: global, name: __EMULE_CTX_MAX_CBS}
   - {kind: global, name: __EMULE_SAN_RESOLVED_CAP}
   - {kind: struct, name: __emule_dw_state}
   - {kind: struct, name: __emule_uk_state}

@@ -58,7 +58,7 @@ inline void __emule_asan_check_semaphore(uint32_t l1_addr) {
 // memory isn't in LiveL1Ranges and would otherwise look out-of-bounds.
 inline bool __emule_asan_cb_resolve(uint32_t l1_addr, uint8_t*& out) {
     if (__emule_self->cbs == nullptr) return false;
-    for (uint32_t cb_id = 0; cb_id < 32; ++cb_id) {
+    for (uint32_t cb_id = 0; cb_id < EMULE_MAX_CBS; ++cb_id) {
         auto& cb = __emule_self->cbs[cb_id];
         if (cb.num_pages == 0) continue;
         // Offset model: l1_addr is a 0-based offset; cb.base is a host pointer,

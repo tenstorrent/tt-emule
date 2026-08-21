@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <random>  // std::mt19937 (per-fiber rand engine, #243)
 #include <unordered_map>
+#include "jit_hw/internal/emule_cb_constants.h"  // EMULE_MAX_CBS
 // CoreState (per-core) lives in its own minimal header so device.hpp/umd can embed
 // it without parsing the kernel-only ThreadCommonCtx/ComputeThreadCtx below (whose
 // members reference kernel-only types such as sfpi).
@@ -65,13 +66,6 @@ struct LocalCBInterface {
     };
     uint32_t fifo_wr_tile_ptr;
 };
-
-// local_cb array size: the max CB count across emule arches (BH=64, WH=32).
-// Hardcoded rather than NUM_CIRCULAR_BUFFERS because this header is also pulled by
-// the umd TU (via device.hpp), which lacks tt-metalium/ on its -I. A consistent
-// size across all TUs also keeps the ctx layout/ABI identical; cb_id is always
-// < the arch's NUM_CIRCULAR_BUFFERS ≤ this bound.
-static constexpr uint32_t __EMULE_CTX_MAX_CBS = 64;
 
 // Object-Intent (ASAN) resolved-range log capacity, per fiber. Ample — kernels resolve
 // pointers into <10 distinct buffers; overflow drops the excess (see ThreadCommonCtx).
@@ -146,14 +140,14 @@ struct EmuleSanitizerState {
 
     // CB-Boundary window counters + Dirty-CB dangling flags / call sites (per CB).
     bool cb_boundary_strict = false;
-    uint32_t cb_reserved_pages[__EMULE_CTX_MAX_CBS] = {};
-    uint32_t cb_waited_pages[__EMULE_CTX_MAX_CBS] = {};
-    bool cb_reserve_dangling[__EMULE_CTX_MAX_CBS] = {};
-    bool cb_wait_dangling[__EMULE_CTX_MAX_CBS] = {};
-    const char* cb_reserve_file[__EMULE_CTX_MAX_CBS] = {};
-    uint32_t cb_reserve_line[__EMULE_CTX_MAX_CBS] = {};
-    const char* cb_wait_file[__EMULE_CTX_MAX_CBS] = {};
-    uint32_t cb_wait_line[__EMULE_CTX_MAX_CBS] = {};
+    uint32_t cb_reserved_pages[EMULE_MAX_CBS] = {};
+    uint32_t cb_waited_pages[EMULE_MAX_CBS] = {};
+    bool cb_reserve_dangling[EMULE_MAX_CBS] = {};
+    bool cb_wait_dangling[EMULE_MAX_CBS] = {};
+    const char* cb_reserve_file[EMULE_MAX_CBS] = {};
+    uint32_t cb_reserve_line[EMULE_MAX_CBS] = {};
+    const char* cb_wait_file[EMULE_MAX_CBS] = {};
+    uint32_t cb_wait_line[EMULE_MAX_CBS] = {};
 
     // NoC-read-pending race counter (bumped by noc_async_read, cleared by barrier).
     uint32_t pending_noc_reads = 0;
@@ -191,9 +185,10 @@ struct ThreadCommonCtx {
     uint32_t my_thread_id = 0;   // get_my_thread_id() (was __emule_my_thread_id)
 
     // Cross-role CB state (shared base — a CB producer/consumer may be either role).
-    uint32_t cb_self_consume_mask = 0;            // was __emule_cb_self_consume_mask
-    uint32_t cb_self_produce_mask = 0;            // was __emule_cb_self_produce_mask
-    LocalCBInterface local_cb[__EMULE_CTX_MAX_CBS]{};  // per-RISC CB ring ptrs (was __emule_local_cb)
+    // 64-bit so bit cb_id is valid for Blackhole's 64 CBs (1ull << cb_id, cb_id up to 63).
+    uint64_t cb_self_consume_mask = 0;            // was __emule_cb_self_consume_mask
+    uint64_t cb_self_produce_mask = 0;            // was __emule_cb_self_produce_mask
+    LocalCBInterface local_cb[EMULE_MAX_CBS]{};  // per-RISC CB ring ptrs (was __emule_local_cb)
 
     // Per-fiber ASAN sanitizer state (see EmuleSanitizerState above): the
     // semaphore/OOB/padding/host + DRAM range views, the CB-Boundary window counters +
@@ -256,8 +251,8 @@ struct ComputeThreadCtx : ThreadCommonCtx {
     uint32_t pack_face_r_dim = 16;       // was __emule_pack_face_r_dim
     uint32_t pack_num_faces = 4;         // was __emule_pack_num_faces
     uint32_t pack_num_tiles = 1;         // was __emule_pack_num_tiles
-    uint32_t pack_offset[__EMULE_CTX_MAX_CBS] = {};  // was __emule_pack_offset[NUM_CIRCULAR_BUFFERS]
-    uint32_t pack_width[__EMULE_CTX_MAX_CBS] = {};   // llk_pack_init blocked-width per CB (0 ⇒ width 1)
+    uint32_t pack_offset[EMULE_MAX_CBS] = {};  // was __emule_pack_offset[NUM_CIRCULAR_BUFFERS]
+    uint32_t pack_width[EMULE_MAX_CBS] = {};   // llk_pack_init blocked-width per CB (0 ⇒ width 1)
 
     // Op accumulators.
     float    welford_mean[32] = {};          // was __emule_welford_mean

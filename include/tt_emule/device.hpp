@@ -7,6 +7,7 @@
 #include "dfb_sync_state.hpp"
 #include "tile_counter.hpp"
 #include "wall_clock.hpp"  // __emule_wall_clock_lo_addr/_hi_addr (RISCV_DEBUG_REG_WALL_CLOCK_* backing)
+#include "jit_hw/internal/emule_cb_constants.h"  // EMULE_MAX_CBS
 #include "jit_hw/internal/emule_core_state.h"  // tt_emule::CoreState (per-core coords)
 #include "worker_l1_mmap.hpp"                  // __emule_mmap_worker_l1 (worker L1 backing)
 #include <cstdio>
@@ -31,7 +32,8 @@ struct CoreCoord {
 class Core {
 public:
     static constexpr size_t L1_SIZE = 1024 * 1024; // 1 MB
-    static constexpr size_t MAX_CBS = 32;
+    // Public compatibility alias; storage derives from the shared emule limit.
+    static constexpr size_t MAX_CBS = EMULE_MAX_CBS;
 
     // Default constructor: WORKER role, 1 MB L1.
     explicit Core(CoreCoord coord) : coord_(coord) {
