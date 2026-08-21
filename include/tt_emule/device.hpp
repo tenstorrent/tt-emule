@@ -5,6 +5,7 @@
 #pragma once
 #include "cb_sync_state.hpp"
 #include "dfb_sync_state.hpp"
+#include "l1_ptr_hints.hpp"
 #include "tile_counter.hpp"
 #include "jit_hw/internal/emule_core_state.h"  // tt_emule::CoreState (per-core coords)
 #include "low4g_mmap.hpp"                      // __emule_mmap_low4g (worker L1 in low 4 GB)
@@ -17,60 +18,6 @@
 #include <sys/mman.h>
 
 namespace tt_emule {
-
-// Optional caller-context hints that Core::l1_ptr will include in the OOB
-// message before aborting. Each hint defaults to a distinct "unset" sentinel
-// (UINT64_MAX for the NOC address, UINT32_MAX for coordinates, nullptr for
-// the tag) so that valid values like `self=(0,0)` — which is a real caller
-// coord in single-core / one-worker tests — are not suppressed. When a hint
-// equals its sentinel it is omitted from the message; otherwise it appears.
-//
-// Intended use: a caller that has richer context than Core::l1_ptr sees (a
-// full NOC address, the calling core's coord, a symbolic tag like a kernel
-// name or a page_id) sets these thread_locals before dispatching L1 accesses,
-// so a bounds-check abort points back to WHO made the request instead of only
-// WHERE it landed. Set them through the `L1PtrHintScope` RAII guard below so
-// they are always restored to their sentinels on scope exit — including on an
-// early return or exception — and never leak stale context into an unrelated
-// later L1 access on the same fiber:
-//
-//     tt_emule::L1PtrHintScope hint(noc_addr, my_x, my_y, "my_tag");
-//     uint8_t* p = target_core->l1_ptr(offset);
-//
-// Motivation: on a matmul mcast_in1 OOB, the original message told us the
-// target coord + offset but not the source coord or the raw NOC address. That
-// forced hand-instrumentation of __emule_resolve_noc_addr / TensorAccessor to
-// identify the offending write. Making these hints a first-class part of the
-// abort output keeps the next debug session to minutes instead of an hour.
-inline constexpr uint64_t L1_PTR_HINT_NOC_ADDR_UNSET = UINT64_MAX;
-inline constexpr uint32_t L1_PTR_HINT_COORD_UNSET    = UINT32_MAX;
-inline thread_local uint64_t l1_ptr_hint_noc_addr = L1_PTR_HINT_NOC_ADDR_UNSET;
-inline thread_local uint32_t l1_ptr_hint_self_x   = L1_PTR_HINT_COORD_UNSET;
-inline thread_local uint32_t l1_ptr_hint_self_y   = L1_PTR_HINT_COORD_UNSET;
-inline thread_local const char* l1_ptr_hint_tag   = nullptr;
-
-// RAII guard for the l1_ptr_hint_* thread_locals: sets them on construction and
-// restores each to its "unset" sentinel on destruction (NOT to 0 — 0 is a valid
-// noc_addr/coord and would masquerade as real context in a later OOB). This is
-// the single, safe way to populate the hints; callers should always scope them
-// rather than assign the thread_locals directly. Non-copyable/non-movable so a
-// scope maps 1:1 to a lifetime.
-struct L1PtrHintScope {
-    L1PtrHintScope(uint64_t noc_addr, uint32_t self_x, uint32_t self_y, const char* tag) {
-        l1_ptr_hint_noc_addr = noc_addr;
-        l1_ptr_hint_self_x   = self_x;
-        l1_ptr_hint_self_y   = self_y;
-        l1_ptr_hint_tag      = tag;
-    }
-    ~L1PtrHintScope() {
-        l1_ptr_hint_noc_addr = L1_PTR_HINT_NOC_ADDR_UNSET;
-        l1_ptr_hint_self_x   = L1_PTR_HINT_COORD_UNSET;
-        l1_ptr_hint_self_y   = L1_PTR_HINT_COORD_UNSET;
-        l1_ptr_hint_tag      = nullptr;
-    }
-    L1PtrHintScope(const L1PtrHintScope&) = delete;
-    L1PtrHintScope& operator=(const L1PtrHintScope&) = delete;
-};
 
 // Role of a Core — determines how its mmap'd region is used.
 enum class CoreRole { WORKER, DRAM };
@@ -129,24 +76,7 @@ public:
                 coord_.x, coord_.y,
                 static_cast<unsigned long long>(offset),
                 l1_size_);
-            // Emit caller-context hints if any have been populated. Each hint
-            // is checked independently against its own sentinel so partial
-            // context still prints and legitimately-zero coords / noc_addrs
-            // are not suppressed.
-            if (l1_ptr_hint_noc_addr != L1_PTR_HINT_NOC_ADDR_UNSET) {
-                std::fprintf(stderr,
-                    " noc_addr=0x%llx",
-                    static_cast<unsigned long long>(l1_ptr_hint_noc_addr));
-            }
-            if (l1_ptr_hint_self_x != L1_PTR_HINT_COORD_UNSET ||
-                l1_ptr_hint_self_y != L1_PTR_HINT_COORD_UNSET) {
-                std::fprintf(stderr,
-                    " self=(%u,%u)",
-                    l1_ptr_hint_self_x, l1_ptr_hint_self_y);
-            }
-            if (l1_ptr_hint_tag != nullptr) {
-                std::fprintf(stderr, " tag=%s", l1_ptr_hint_tag);
-            }
+            format_l1_ptr_hints(stderr);
             std::fprintf(stderr, "\n");
             std::abort();
         }

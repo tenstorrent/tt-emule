@@ -12,13 +12,6 @@ files:
   summary: '`class Core` (per-core L1/DRAM mmap, `CBSyncState[]`, DFB/tile-counter state); `enum class CoreRole`; `struct CoreCoord`'
   symbols:
   - {kind: namespace, name: tt_emule}
-  - {kind: global, name: L1_PTR_HINT_NOC_ADDR_UNSET}
-  - {kind: global, name: L1_PTR_HINT_COORD_UNSET}
-  - {kind: global, name: l1_ptr_hint_noc_addr}
-  - {kind: global, name: l1_ptr_hint_self_x}
-  - {kind: global, name: l1_ptr_hint_self_y}
-  - {kind: global, name: l1_ptr_hint_tag}
-  - {kind: struct, name: L1PtrHintScope}
   - {kind: enum, name: CoreRole}
   - {kind: struct, name: CoreCoord}
   - {kind: class, name: Core}
@@ -38,6 +31,19 @@ files:
   symbols:
   - {kind: namespace, name: tt_emule}
   - {kind: class, name: L1Pool}
+- path: include/tt_emule/l1_ptr_hints.hpp
+  section: include/tt_emule/
+  summary: Thread-local `Core::l1_ptr` diagnostic context, `format_l1_ptr_hints`, and nesting-safe `L1PtrHintScope`
+  symbols:
+  - {kind: namespace, name: tt_emule}
+  - {kind: global, name: L1_PTR_HINT_NOC_ADDR_UNSET}
+  - {kind: global, name: L1_PTR_HINT_COORD_UNSET}
+  - {kind: global, name: l1_ptr_hint_noc_addr}
+  - {kind: global, name: l1_ptr_hint_self_x}
+  - {kind: global, name: l1_ptr_hint_self_y}
+  - {kind: global, name: l1_ptr_hint_tag}
+  - {kind: function, name: format_l1_ptr_hints}
+  - {kind: class, name: L1PtrHintScope}
 - path: include/tt_emule/low4g_mmap.hpp
   section: include/tt_emule/
   summary: '`__emule_mmap_low4g(size)` — maps worker L1 in the low 4 GB (uint32-addressable aliasing window): MAP_32BIT first, then a /proc/self/maps-found [2 GB,4 GB) gap via MAP_FIXED. Lets ~16 BH chips

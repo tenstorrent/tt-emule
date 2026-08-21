@@ -40,3 +40,11 @@ install(EXPORT tt-emule-targets
     NAMESPACE tt-emule::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/tt-emule
 )
+
+# ---- Header contract tests ----
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(tt_emule_l1_ptr_hints_test tests/unit/test_l1_ptr_hints.cpp)
+    target_link_libraries(tt_emule_l1_ptr_hints_test PRIVATE tt-emule::headers)
+    add_test(NAME tt_emule_l1_ptr_hints COMMAND tt_emule_l1_ptr_hints_test)
+endif()
