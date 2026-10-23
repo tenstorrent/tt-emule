@@ -2575,7 +2575,7 @@ files:
   - {kind: global, name: CIRCULAR_BUFFER_COMPUTE_ADDR_SHIFT}
 - path: include/jit_hw/tt-metalium/constants.hpp
   section: include/jit_hw/tt-metalium/
-  summary: '`tt::constants::` `TILE_HEIGHT`/`TILE_WIDTH`/`TILE_HW`/`FACE_*`'
+  summary: '#error shim: host-only header (tt-metal#61991); kernels use `api/tile_constants.h`'
 - path: include/jit_hw/tt-metalium/tt_backend_api_types.hpp
   section: include/jit_hw/tt-metalium/
   summary: '`tt::` `enum class DataFormat`'

@@ -2,18 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Minimal stub for JIT compilation — tile/face dimension constants
+// Mirrors tenstorrent/tt-metal#61991: tt-metalium/constants.hpp is host-only and #errors in kernel and
+// firmware builds. Kernels take the same tt::constants values from api/tile_constants.h, which resolves to
+// tt_metal/hw/inc on the JIT -I path. This shim exists so a kernel that still includes the host header
+// fails here with the same message as on silicon, instead of compiling against an emule-only copy.
 #pragma once
-#include <cstdint>
 
-namespace tt::constants {
-using std::uint32_t;
-constexpr uint32_t TILE_HEIGHT = 32;
-constexpr uint32_t TILE_WIDTH = 32;
-constexpr uint32_t TILE_HW = TILE_WIDTH * TILE_HEIGHT;
-constexpr uint32_t FACE_HEIGHT = 16;
-constexpr uint32_t FACE_WIDTH = 16;
-constexpr uint32_t FACE_HW = FACE_WIDTH * FACE_HEIGHT;
-constexpr uint32_t BFLOAT8_B_TILE_HW = TILE_HW + 64;
-constexpr uint32_t BFLOAT4_B_TILE_HW = (TILE_HW / 2) + 64;
-}  // namespace tt::constants
+#if defined(KERNEL_BUILD) || defined(FW_BUILD)
+#error "tt-metalium/constants.hpp is host-only; include \"api/tile_constants.h\" in device code"
+#endif
