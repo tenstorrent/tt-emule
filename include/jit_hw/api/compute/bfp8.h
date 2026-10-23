@@ -13,7 +13,7 @@
 //   bytes [0   .. 63]   — 64 face-row exponents (4 faces × 16 face rows)
 //   bytes [64  .. 1087] — 1024 mantissa bytes, one per element, in face-major
 //                         (nfaces) order: face0_row0_col0..15, face0_row1_..., ...
-//   total = 1088 bytes (matches tt-metalium/constants.hpp::BFLOAT8_B_TILE_HW + 64).
+//   total = 1088 bytes (TILE_HW + 64).
 //
 // Each face-row of 16 elements shares one exponent byte.
 //
